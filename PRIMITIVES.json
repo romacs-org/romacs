@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "aa6e048ee13ed56a3defc10eef776c1f903cbf37369600bec17b9aa6448ff27c",
+  "source_fingerprint": "7af10684f570569b5ffe9669b11ebb7bb9d89b3e488735cbc75c9af10a66aad4",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 572,
-  "parsed_vm2_only": 572
+  "parsed_total": 575,
+  "parsed_vm2_only": 575
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -270,12 +270,12 @@
   "bobp": {
    "name": "bobp",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/point_predicates.rs:16"
+   "registered_at": "crates/romacs-vm/src/prims/point_predicates.rs:19"
   },
   "bolp": {
    "name": "bolp",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/point_predicates.rs:4"
+   "registered_at": "crates/romacs-vm/src/prims/point_predicates.rs:7"
   },
   "bool-vector": {
    "name": "bool-vector",
@@ -881,12 +881,12 @@
   "eobp": {
    "name": "eobp",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/point_predicates.rs:22"
+   "registered_at": "crates/romacs-vm/src/prims/point_predicates.rs:25"
   },
   "eolp": {
    "name": "eolp",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/point_predicates.rs:10"
+   "registered_at": "crates/romacs-vm/src/prims/point_predicates.rs:13"
   },
   "eq": {
    "name": "eq",
@@ -1071,6 +1071,11 @@
    "name": "fmakunbound",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/fmakunbound.rs:4"
+  },
+  "following-char": {
+   "name": "following-char",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/point_predicates.rs:4"
   },
   "force-mode-line-update": {
    "name": "force-mode-line-update",
@@ -2556,6 +2561,16 @@
    "name": "single-key-description",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/key_description.rs:128"
+  },
+  "skip-chars-backward": {
+   "name": "skip-chars-backward",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/skip_chars.rs:9"
+  },
+  "skip-chars-forward": {
+   "name": "skip-chars-forward",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/skip_chars.rs:4"
   },
   "sort": {
    "name": "sort",

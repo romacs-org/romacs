@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "e639e1bb30b8c8d64d16d07dd3977d57e8ee71ebdbcf316546fc774775c9cd06",
+  "input_hash": "3185cc2a9dfc4c7b0e64f019ec5efb7dd129b50890b5c80a9fc31f1cce3f7300",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -12,8 +12,8 @@
   "note": "Derived from the prose ledgers. Do not edit; edit those and regenerate."
  },
  "counts": {
-  "rows": 241,
-  "symbols": 440,
+  "rows": 242,
+  "symbols": 443,
   "rows_without_symbols": 16
  },
  "by_symbol": {
@@ -40,6 +40,9 @@
   ],
   "=": [
    65
+  ],
+  "[:class:]": [
+   241
   ],
   "abort-minibuffers": [
    60
@@ -1318,6 +1321,12 @@
   ],
   "signal-hook-function": [
    87
+  ],
+  "skip-chars-backward": [
+   241
+  ],
+  "skip-chars-forward": [
+   241
   ],
   "sort": [
    17
@@ -5610,6 +5619,23 @@
    "symbols": [
     "downcase_char_code_emacs_compat",
     "emacs_downcase_compat"
+   ],
+   "symbols_derived": true
+  },
+  {
+   "id": "ROMACS-SKIP-CLASSES",
+   "source": "crates/romacs-vm/GNU-DIVERGENCES.md",
+   "section": "Observable by a package — Character-set motion",
+   "observable": true,
+   "planned": false,
+   "mechanism": "`skip-chars-forward` / `skip-chars-backward` named classes",
+   "gnu": "Accepts `[:class:]` sets",
+   "romacs": "Signals an explicit error before moving point; literal/range/escape/complement sets are supported",
+   "why": "",
+   "symbols": [
+    "skip-chars-forward",
+    "skip-chars-backward",
+    "[:class:]"
    ],
    "symbols_derived": true
   }
