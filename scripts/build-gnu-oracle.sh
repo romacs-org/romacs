@@ -14,7 +14,7 @@
 set -euo pipefail
 repo=$(cd "$(dirname "$0")/.." && pwd)
 PIN=$(sed -n 's/^mirror_commit = "\(.*\)"$/\1/p' "$repo/parity-reference.toml")
-REF=${GNU_REF:-https://git.savannah.gnu.org/git/emacs.git}
+REF=${GNU_REF:-https://github.com/emacs-mirror/emacs.git}
 ROOT=${GNU_ORACLE_ROOT:-${XDG_CACHE_HOME:-$HOME/.cache}/gnu-emacs-pin}
 mkdir -p "$ROOT"
 PREFIX=$ROOT/$PIN
