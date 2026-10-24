@@ -1358,6 +1358,7 @@ mod leaf {
     mod printing;
     mod bool_vector;
     mod search;
+    mod skip_chars;
     mod face;
 }
 pub(crate) use leaf::{Leaf, Kind};

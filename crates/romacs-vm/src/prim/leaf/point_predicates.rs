@@ -3,6 +3,22 @@ use super::*;
 use crate::coordinates::CharOffset;
 
 impl Leaf<'_> {
+    pub fn following_character(&mut self) -> std::result::Result<Value, Fault> {
+        let index = self.vm.buffer_index().map_err(Fault::Error)?;
+        let code = match &self.vm.objects[index] {
+            data::Object::Buffer(buffer) => {
+                if buffer.point >= buffer.accessible().end { 0 }
+                else { buffer.character_at(buffer.point).map_err(Fault::Error)?.unwrap_or(0) }
+            }
+            data::Object::ByteBuffer(buffer) => {
+                if buffer.point >= buffer.restriction.end { 0 }
+                else { i64::from(buffer.bytes[buffer.point.0]) }
+            }
+            _ => return Err(Fault::Error("buffer required".into())),
+        };
+        Value::integer(code).map_err(Fault::Error)
+    }
+
     pub fn character_before(&mut self, position: Value) -> std::result::Result<Value, Fault> {
         use crate::coordinates::ByteOffset;
         let index = self.vm.buffer_index().map_err(Fault::Error)?;

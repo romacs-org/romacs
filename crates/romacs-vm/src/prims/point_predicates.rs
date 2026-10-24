@@ -1,6 +1,9 @@
 //! GNU editfns.c point predicates. Accessible bounds do not rebase point.
 use super::*;
 
+defsubr! { name = "following-char", gnu = "editfns.c:967", effect = Reads,
+fn following_char(cx) { cx.following_character() }}
+
 defsubr! { name = "bolp", gnu = "editfns.c:1019", effect = Reads,
 fn bolp(cx) {
     let (beginning, _, previous_newline, _) = cx.point_boundaries()?;
