@@ -12,6 +12,7 @@ pub fn translate(event: InputEvent) -> Option<CommandEvent> {
     let mut code = match key {
         FrontendKey::Character(c) => Some(c as i64),
         FrontendKey::Keysym(k) => match k {
+            0xff08 if modifiers & ROMACS_CTRL_MASK != 0 => None,
             0xff08 => Some(127), 0xff09 => Some(9), 0xff0d => Some(10), 0xff1b => Some(27),
             0..=0x7f | 0xa0..=0xff => Some(k as i64),
             0x01000000..=0x0110ffff => char::from_u32(k & 0xffffff).map(|c| c as i64),
@@ -31,6 +32,7 @@ pub fn translate(event: InputEvent) -> Option<CommandEvent> {
     }
     let FrontendKey::Keysym(k) = key else { return None; };
     let name = match k {
+        0xff08 => "backspace".into(),
         0xff50 => "home".into(), 0xff51 => "left".into(), 0xff52 => "up".into(),
         0xff53 => "right".into(), 0xff54 => "down".into(), 0xff55 => "prior".into(),
         0xff56 => "next".into(), 0xff57 => "end".into(), 0xffff => "delete".into(),
@@ -50,6 +52,13 @@ mod tests {
     fn key(key: FrontendKey, modifiers: u32, pressed: bool) -> InputEvent {
         InputEvent::Key { key, modifiers, pressed, emacs_frame_id: 0 }
     }
+    #[test]
+    fn control_backspace_keeps_its_word_delete_identity() {
+        use romacs_display_runtime::backend::wgpu::*;
+        assert_eq!(translate(key(FrontendKey::Keysym(0xff08), ROMACS_CTRL_MASK, true)), Some(CommandEvent::Named("C-backspace".into())));
+        assert_eq!(translate(key(FrontendKey::Keysym(0xff08), ROMACS_META_MASK, true)), Some(CommandEvent::Character((1 << 27) | 127)));
+    }
+
     #[test]
     fn native_unicode_modifiers_named_keys_and_releases() {
         use romacs_display_runtime::backend::wgpu::*;

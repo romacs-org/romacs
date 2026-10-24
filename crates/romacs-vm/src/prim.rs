@@ -1343,6 +1343,7 @@ mod leaf {
     mod file_attributes;
     mod terminal;
     mod process_jobs;
+    mod clipboard;
     mod filesave;
     mod charset;
     mod coding;
@@ -1359,6 +1360,7 @@ mod leaf {
     mod bool_vector;
     mod search;
     mod skip_chars;
+    mod word_motion;
     mod face;
 }
 pub(crate) use leaf::{Leaf, Kind};

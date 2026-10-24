@@ -8,14 +8,14 @@
   "provenance": {
     "generated_by": "romacs-introspect-live",
     "generated_on": "linux-x86_64",
-    "input_hash": "a3ab048241b31b5fd6dcb06f934b5796113f15671bc6a06998615713f7297013",
+    "input_hash": "6720f3da03f1fdb605e63e53e6186e9c6cd6177664cb44e783ed187ec1b96d05",
     "source_only_at_generation": [],
     "vm2_probe_panics": [],
-    "vm2_universe": 2376
+    "vm2_universe": 2384
   },
   "schema": 2,
   "vm2": {
-    "count": 583,
+    "count": 587,
     "entries": [
       "#:vm2-closure-document",
       "#:vm2-closure-metadata",
@@ -220,6 +220,7 @@
       "format-time-string",
       "forward-char",
       "forward-line",
+      "forward-word",
       "frame-bottom-divider-width",
       "frame-char-height",
       "frame-char-width",
@@ -362,6 +363,7 @@
       "minibuffer-depth",
       "minibuffer-window",
       "minibufferp",
+      "mod",
       "modify-syntax-entry",
       "move-overlay",
       "multibyte-char-to-unibyte",
@@ -431,6 +433,8 @@
       "require",
       "restore-buffer-modified-p",
       "reverse",
+      "romacs--clipboard-set",
+      "romacs--clipboard-text",
       "romacs--kill-buffer-finish",
       "romacs--process-forget",
       "romacs--process-ready",

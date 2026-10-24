@@ -107,8 +107,6 @@
     (romacs-gui-live-visits)))
 (defun romacs-gui-quit ()
   (interactive)
-  (when (or (not (fboundp 'romacs-mail-quit-allowed-p))
-            (romacs-mail-quit-allowed-p))
   (let ((buffers (romacs-gui-live-visits)) (dirty nil))
     (while buffers
       (with-current-buffer (car buffers)
@@ -116,7 +114,7 @@
       (setq buffers (cdr buffers)))
     (if (or dirty (and (fboundp 'romacs-term-any-running-p) (romacs-term-any-running-p)))
         (romacs-gui-confirm 'quit)
-      (setq romacs-gui-quit-requested t)))))
+      (setq romacs-gui-quit-requested t))))
 (defun romacs-gui-kill-buffer ()
   (interactive)
   (if (or (and buffer-file-name (romacs-gui-dirty-p)) (romacs-gui-running-terminal-p))

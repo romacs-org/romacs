@@ -36,7 +36,7 @@ pub enum HostEvent {
     Background,
 }
 
-/// The embedder's keyboard and screen, used only while Lisp waits for a key.
+/// The embedder's keyboard, screen, and optional native clipboard.
 pub trait HostInput {
     /// True when an event is already queued. GNU's `read_char' does not
     /// redisplay while input is pending (keyboard.c, `detect_input_pending').
@@ -46,6 +46,17 @@ pub trait HostInput {
     fn redisplay(&mut self, frame: HostFrame) -> std::result::Result<Vec<(u64, usize)>, String>;
     /// Block until the next event.
     fn next_event(&mut self) -> std::result::Result<HostEvent, String>;
+
+    /// Read CLIPBOARD text with a bounded wait and without running Lisp.
+    /// No text (`None`) is distinct from an unavailable host or backend error.
+    fn clipboard_text(&mut self) -> std::result::Result<Option<String>, String> {
+        Err("native clipboard is unavailable".into())
+    }
+
+    /// Publish CLIPBOARD text with a bounded wait and without running Lisp.
+    fn set_clipboard_text(&mut self, _text: &str) -> std::result::Result<(), String> {
+        Err("native clipboard is unavailable".into())
+    }
 }
 
 /// The Lisp variable that tells the minibuffer a host keyboard exists.

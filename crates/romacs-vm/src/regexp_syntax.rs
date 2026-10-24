@@ -4,6 +4,13 @@ use crate::char_table::CharTable;
 use regex::{SyntaxClass, SyntaxLookup};
 use std::collections::BTreeMap;
 
+// Reuse the maintained GNU-exported word/symbol membership ranges. The
+// accompanying case mappings are unused here; no second Unicode data copy.
+#[allow(dead_code)]
+mod unicode_membership {
+    include!("prims/capitalize-tables.in");
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -174,6 +181,26 @@ impl SyntaxLookup for VmSyntax {
     }
 }
 impl Vm {
+    pub(crate) fn word_motion_syntax(
+        &mut self,
+    ) -> std::result::Result<impl SyntaxLookup + use<>, crate::prim::Fault> {
+        self.regexp_syntax(None).map_err(|fault| match fault {
+            Fault::Wrong(predicate, value) => crate::prim::Fault::Wrong(predicate, value),
+            Fault::Internal(text) => crate::prim::Fault::Error(text),
+            Fault::Text(name, text) => {
+                let condition = self.intern(name);
+                let text = self.allocate_object(Object::String(Box::new(data::LispString::new(&text))));
+                let data = self.list_value(&[text]);
+                crate::prim::Fault::Signal(condition, data)
+            }
+            Fault::Signal(name, values) => {
+                let condition = self.intern(name);
+                let data = self.list_value(&values);
+                crate::prim::Fault::Signal(condition, data)
+            }
+        })
+    }
+
     fn regexp_standard_syntax(&mut self) -> Value {
         let slot = self.names["#:vm2-standard-syntax"];
         if self.slots[slot].value == Value::NIL {
@@ -192,9 +219,25 @@ impl Vm {
             let whitespace = self.regexp_syntax_entry(SyntaxClass::Whitespace.code(), Value::NIL);
             table.initialize(0, whitespace).expect("no extra slots");
             let word = self.regexp_syntax_entry(SyntaxClass::Word.code(), Value::NIL);
-            table
-                .set_range(128, CharTable::LEN - 1, word)
-                .expect("valid range");
+            let symbol = self.regexp_syntax_entry(SyntaxClass::Symbol.code(), Value::NIL);
+            let punctuation = self.regexp_syntax_entry(SyntaxClass::Punctuation.code(), Value::NIL);
+            // Populate the ordinary mutable table, not a lookup-time Unicode
+            // override. Word/symbol membership is exact for the exported GNU
+            // defaults; nonword Unicode classes are conservatively punctuation.
+            // Full Unicode delimiter/whitespace syntax remains a separate port.
+            for &(from, to, membership) in unicode_membership::WORD_RANGES {
+                if to < 128 {
+                    continue;
+                }
+                let entry = match membership {
+                    1 => word,
+                    2 => symbol,
+                    _ => punctuation,
+                };
+                table
+                    .set_range(from.max(128) as usize, to as usize, entry)
+                    .expect("valid Unicode membership range");
+            }
             for code in 0..128 {
                 let matching = match code {
                     40 => 41,
@@ -289,6 +332,7 @@ impl Vm {
             boundaries(&t.root, &mut points);
             current = t.parent;
         }
+        let mut previous = None;
         Ok(points
             .into_iter()
             .map(|code| {
@@ -298,6 +342,7 @@ impl Vm {
                         .unwrap_or(SyntaxClass::Whitespace),
                 )
             })
+            .filter(|(_, class)| previous.replace(*class) != Some(*class))
             .collect())
     }
     fn regexp_property_class(&self, value: Value, code: u32) -> Option<SyntaxClass> {

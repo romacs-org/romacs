@@ -287,17 +287,37 @@ pub fn initialize(vm: &mut Vm) -> Result<Started, String> {
 
 /// [`initialize`] visiting FILES (`romacs FILE...`) instead of the queue.
 pub fn initialize_files(vm: &mut Vm, files: &[std::path::PathBuf]) -> Result<Started, String> {
-    vm.eval_source(include_str!("../../../rlisp/romacs-startup.el"))?;
-    vm.eval_source(include_str!("../../../rlisp/romacs-find-file.el"))?;
-    vm.eval_source(include_str!("../../../rlisp/romacs-buffer-switch.el"))?;
-    vm.eval_source(include_str!("../../../rlisp/romacs-extended-command.el"))?;
-    initialize_editing(vm)?;
-    vm.eval_source(include_str!("../../../rlisp/romacs-dired.el"))?;
-    vm.eval_source(include_str!("../../../rlisp/romacs-term.el"))?;
-    vm.eval_source(include_str!("../../../rlisp/vm/process.el"))?;
-    vm.eval_source(include_str!("../../../rlisp/romacs-mail.el"))?;
-    vm.eval_source(include_str!("../../../rlisp/romacs-notmuch.el"))?;
-    vm.eval_source(include_str!("../../../rlisp/romacs-install-command.el"))?;
+    initialize_files_with_sources(vm, files, None)
+}
+
+/// Initialize the editor from editable Lisp sources without rebuilding the host.
+pub fn initialize_files_from_sources(vm: &mut Vm, files: &[std::path::PathBuf], root: &std::path::Path) -> Result<Started, String> {
+    initialize_files_with_sources(vm, files, Some(root))
+}
+
+fn policy(vm: &mut Vm, root: Option<&std::path::Path>, name: &str, embedded: &str) -> Result<(), String> {
+    if let Some(root) = root {
+        let path = root.join(name);
+        let source = std::fs::read_to_string(&path).map_err(|error| format!("{}: {error}", path.display()))?;
+        vm.eval_source(&source).map_err(|error| format!("{}: {error}", path.display()))?;
+    } else {
+        vm.eval_source(embedded)?;
+    }
+    Ok(())
+}
+
+fn initialize_files_with_sources(vm: &mut Vm, files: &[std::path::PathBuf], root: Option<&std::path::Path>) -> Result<Started, String> {
+    policy(vm, root, "romacs-startup.el", include_str!("../../../rlisp/romacs-startup.el"))?;
+    policy(vm, root, "romacs-find-file.el", include_str!("../../../rlisp/romacs-find-file.el"))?;
+    policy(vm, root, "romacs-buffer-switch.el", include_str!("../../../rlisp/romacs-buffer-switch.el"))?;
+    policy(vm, root, "romacs-extended-command.el", include_str!("../../../rlisp/romacs-extended-command.el"))?;
+    initialize_editing_from_sources(vm, root)?;
+    policy(vm, root, "romacs-dired.el", include_str!("../../../rlisp/romacs-dired.el"))?;
+    policy(vm, root, "romacs-term.el", include_str!("../../../rlisp/romacs-term.el"))?;
+    policy(vm, root, "vm/process.el", include_str!("../../../rlisp/vm/process.el"))?;
+    policy(vm, root, "romacs-mail.el", include_str!("../../../rlisp/romacs-mail.el"))?;
+    policy(vm, root, "romacs-notmuch.el", include_str!("../../../rlisp/romacs-notmuch.el"))?;
+    policy(vm, root, "romacs-install-command.el", include_str!("../../../rlisp/romacs-install-command.el"))?;
     crate::eval_last_sexp::define(vm)?;
     let bindings = bind_journey_keys(vm, false)?;
     let started = Started { launch: Launch::Workspace, loadup: None, bindings, gnu_mode_line: false };
@@ -373,7 +393,11 @@ pub fn initialize_loadup_from(vm: &mut Vm, launch: Launch, font: Option<&str>, d
 }
 
 fn initialize_editing(vm: &mut Vm) -> Result<(), String> {
-    vm.eval_source(include_str!("../../../rlisp/romacs-editing.el"))?;
+    initialize_editing_from_sources(vm, None)
+}
+
+fn initialize_editing_from_sources(vm: &mut Vm, root: Option<&std::path::Path>) -> Result<(), String> {
+    policy(vm, root, "romacs-editing.el", include_str!("../../../rlisp/romacs-editing.el"))?;
     for (source, names) in [
         (include_str!("../../../gnu-lisp/subr.el"), &[
             "plusp", "add-to-history",
@@ -381,11 +405,13 @@ fn initialize_editing(vm: &mut Vm) -> Result<(), String> {
         (include_str!("../../../gnu-lisp/simple.el"), &[
             "mark", "set-mark", "push-mark", "pop-mark", "push-mark-command",
             "pop-to-mark-command", "set-mark-command", "beginning-of-buffer",
+            "kill-new", "current-kill", "backward-word", "kill-word", "backward-kill-word",
         ][..]),
     ] {
         let (spans, _) = crate::loadup::load_sites(source)?;
         for name in names {
-            if vm.eval_source(&format!("(fboundp '{name})"))? != romacs_vm::Fixed::NIL { continue; }
+            if !matches!(*name, "kill-new" | "current-kill")
+                && vm.eval_source(&format!("(fboundp '{name})"))? != romacs_vm::Fixed::NIL { continue; }
             let prefix = format!("(defun {name}");
             let definitions: Vec<_> = spans.iter().filter(|&&(start, end, _)| {
                 source[start..end].strip_prefix(&prefix)

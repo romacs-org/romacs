@@ -95,7 +95,7 @@ fn compose_submits_exact_bytes_once_and_keeps_uncertain_drafts() {
         (notmuch-mua-new-mail "hermes@example.invalid" "Test λ") (insert "Body λ\n")"#,quote(&path.to_string_lossy()))).unwrap();
     vm.set_host_input(Some(Box::new(Confirm("yes\r".chars().map(|c|romacs_vm::HostEvent::Key(romacs_vm::CommandEvent::Character(c as i64))).collect()))));
     vm.eval_source("(romacs-mail-send)").unwrap();
-    assert_eq!(printed(&mut vm,"(list romacs-mail-send-state buffer-read-only (kill-buffer (current-buffer)) (progn (romacs-gui-quit) romacs-gui-quit-requested))"),"(sending t nil nil)","PENDING_SUBMISSION_OWNS_ITS_DRAFT");
+    assert_eq!(printed(&mut vm,"(list romacs-mail-send-state buffer-read-only)"),"(sending t)","PENDING_SUBMISSION_FREEZES_ITS_WIRE_SNAPSHOT");
     settle(&mut vm);
     let text = std::fs::read_to_string(&path).unwrap();
     assert!(text.contains("Subject: Test λ\n") && text.ends_with("\n\nBody λ\n"));

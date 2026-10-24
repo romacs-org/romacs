@@ -4,7 +4,8 @@
 
 use crate::render_thread::{self, InitialWindowReply, InitialWindowSize};
 use crate::thread_comm::{
-    EmacsComms, FrameRef, LifecycleCommand, RenderCommand, RenderComms, ThreadComms, WindowCommand,
+    ClipboardCommand, ClipboardSelection, EmacsComms, FrameRef, LifecycleCommand, RenderCommand,
+    RenderComms, ThreadComms, WindowCommand,
 };
 use romacs_display_protocol::FrameGlyphBuffer;
 
@@ -231,6 +232,49 @@ fn latency_receipt_does_not_pair_a_discarded_native_event() {
 }
 
 impl PaintSender {
+    /// Read CLIPBOARD text through the existing display-owned worker. Only the
+    /// evaluator waits, for at most one second; native I/O never runs here or
+    /// on the render thread. Absence of text is distinct from transport errors.
+    pub fn clipboard_text(&self) -> Result<Option<String>, String> {
+        self.clipboard_request(|expires_at, reply| ClipboardCommand::GetText {
+            selection: ClipboardSelection::Clipboard,
+            expires_at,
+            reply,
+        })
+    }
+
+    /// Publish owned CLIPBOARD text through the same worker. A timeout is not
+    /// a background-command result or proof of cancellation: native work that
+    /// already started may finish later; queued expired requests are rejected.
+    pub fn set_clipboard_text(&self, text: &str) -> Result<(), String> {
+        self.clipboard_request(|expires_at, reply| ClipboardCommand::SetText {
+            selection: ClipboardSelection::Clipboard,
+            text: Some(text.to_owned()),
+            expires_at,
+            reply,
+        })
+    }
+
+    fn clipboard_request<T>(
+        &self,
+        command: impl FnOnce(
+            std::time::Instant,
+            crossbeam_channel::Sender<Result<T, String>>,
+        ) -> ClipboardCommand,
+    ) -> Result<T, String> {
+        let expires_at = std::time::Instant::now() + std::time::Duration::from_secs(1);
+        let (reply, response) = crossbeam_channel::bounded(1);
+        self.comms
+            .cmd_tx
+            .try_send(RenderCommand::Clipboard(command(expires_at, reply)))
+            .map_err(|error| format!("clipboard request could not be queued: {error}"))?;
+        self.proxy.wake_up();
+        response.recv_deadline(expires_at).map_err(|error| match error {
+            crossbeam_channel::RecvTimeoutError::Timeout => "clipboard request timed out".to_owned(),
+            crossbeam_channel::RecvTimeoutError::Disconnected => "clipboard reply channel closed".to_owned(),
+        })?
+    }
+
     /// Wait for a successfully rendered primary presentation, not merely ingress
     /// activation. Submit sequentially: this bounded snapshot retains only the
     /// latest presentation. No sample exists before the first successful render.

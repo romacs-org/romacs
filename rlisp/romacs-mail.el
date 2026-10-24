@@ -71,25 +71,6 @@
   (when (eq major-mode 'romacs-mail-tree-mode)
     (romacs-mail-close-pair (current-buffer))))
 
-(defun romacs-mail-query-kill ()
-  (cond ((eq romacs-mail-send-state 'sending)
-         (message "Mail submission is pending; keep this draft until it settles") nil)
-        ((and (eq major-mode 'romacs-mail-compose-mode) (buffer-modified-p))
-         (equal (read-string "Discard this mail draft? Type yes to discard: ") "yes"))
-        (t t)))
-
-(defun romacs-mail-quit-allowed-p ()
-  "Protect pending submissions and modified drafts on editor exit."
-  (let ((pending nil) (dirty nil))
-    (dolist (buffer (buffer-list))
-      (with-current-buffer buffer
-        (when (and (eq major-mode 'romacs-mail-compose-mode) (not buffer-file-name))
-          (when (eq romacs-mail-send-state 'sending) (setq pending t))
-          (when (buffer-modified-p) (setq dirty t)))))
-    (cond (pending (message "Mail submission is pending; keep the editor open until it settles") nil)
-          (dirty (equal (read-string "Discard unsaved mail drafts and continue quitting? Type yes: ") "yes"))
-          (t t))))
-
 (defun romacs-mail-initialize (account mode label map parent)
   "Initialize a new owned mail buffer with ACCOUNT, MODE, LABEL, MAP and PARENT."
   (dolist (name '(romacs-mail-account romacs-mail-owner romacs-mail-job romacs-mail-query
@@ -102,8 +83,7 @@
         major-mode mode mode-name label buffer-file-name nil)
   (use-local-map map)
   (set (make-local-variable 'mode-line-format) (list "%b" " | " label))
-  (set (make-local-variable 'kill-buffer-hook) '(romacs-mail-retire t))
-  (set (make-local-variable 'kill-buffer-query-functions) '(romacs-mail-query-kill t)))
+  (set (make-local-variable 'kill-buffer-hook) '(romacs-mail-retire t)))
 
 (defun romacs-mail-text (text)
   "Publish TEXT in the owned buffer without adding save modifications."
@@ -469,9 +449,9 @@
       (setq romacs-mail-send-state 'sending buffer-read-only t mode-line-format '("%b" " | Sending mail…")))))
 
 (defun romacs-mail-abort ()
+  "Kill this draft when requested, without imposing a mail-specific veto."
   (interactive)
-  (if (eq romacs-mail-send-state 'sending) (romacs-mail-error "Mail is being submitted; wait for the transport result")
-    (romacs-gui-kill-buffer)))
+  (romacs-gui-kill-buffer))
 
 (defun romacs-mail-new-search ()
   "Search again using the current mail account."

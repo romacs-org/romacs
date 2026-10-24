@@ -21,6 +21,8 @@ mod prompt;
 mod terminal_input;
 mod terminal_service;
 mod terminal_wait;
+mod batch;
+mod user_init;
 
 const SCENE: &str = include_str!("../scene.el");
 
@@ -141,6 +143,7 @@ fn run() -> Result<(), String> {
     let mut live = true;
     let mut trace_latency = false;
     let mut trace_scene = false;
+    let mut load_user_init = true;
     // Default: VM2's workspace. Running loadup.el by default was measured and
     // reverted: launch-to-ready 0.13s -> 0.95s (median of 5) with zero journey steps gained
     // and zero journey keys taken over by GNU (evidence/loadup/LOADUP.md).
@@ -150,6 +153,7 @@ fn run() -> Result<(), String> {
             "--wayland" => { socket = Some(args.next().ok_or("missing socket")?); live = false; },
             "--geometry" => geometry = Some(parse_geometry(&args.next().ok_or("missing geometry WIDTHxHEIGHT")?)?),
             "--live" => live = true,
+            "-Q" | "--no-init" => load_user_init = false,
             "--trace-latency" => trace_latency = true,
             "--trace-scene" => trace_scene = true,
             "--gc-floor" => {
@@ -166,6 +170,7 @@ fn run() -> Result<(), String> {
             "--loadup" => launch = startup::Launch::Loadup,
             "--no-gnu-lisp" => launch = startup::Launch::Workspace,
             "--loadup-report" => return loadup_report(args.collect()),
+            "--batch" => return batch::run(args.collect()),
             "--" => {
                 startup::visit_at_startup("--");
                 for file in args.by_ref() { startup::visit_at_startup(&file); }
@@ -184,7 +189,7 @@ fn run() -> Result<(), String> {
     let (result_tx, result_rx) = std::sync::mpsc::channel();
     let worker = spawn_evaluator(move || {
         let sender = std::sync::Arc::new(sender);
-        let result = evaluate(&sender, floor, force_gc, g1, live, launch, width, height);
+        let result = evaluate(&sender, floor, force_gc, g1, live, launch, width, height, load_user_init);
         if let Err(error) = &result { eprintln!("romacs: evaluator stopped: {error}"); }
         let _ = result_tx.send(result);
         drop(sender);
@@ -405,6 +410,7 @@ fn evaluate(
     launch: startup::Launch,
     mut width: u32,
     mut height: u32,
+    load_user_init: bool,
 ) -> Result<(), String> {
     let engine = std::rc::Rc::new(std::cell::RefCell::new(romacs_layout2::LayoutEngine::new()?));
     let mut vm = Vm::new();
@@ -417,6 +423,9 @@ fn evaluate(
     let (line_height, column_width) = romacs_layout2::frame_metrics(&vm.display_default_face()?)?;
     vm.set_frame_geometry(width, height, line_height, column_width)?;
     if live {
+        if launch != startup::Launch::GnuOnly {
+            vm.eval_source("(defvar interprogram-cut-function 'romacs-clipboard-select-text) (defvar interprogram-paste-function 'romacs-clipboard-selection-value)")?;
+        }
         // The launch font's face, as source: evaluated BEFORE GNU's loadup
         // (whose custom.el makes `defface' a macro VM2 cannot run yet), and
         // after the workspace's own faces otherwise, exactly as before.
@@ -437,6 +446,14 @@ fn evaluate(
         } else {
             startup::initialize_loadup(&mut vm, launch, font.as_ref().map(|(source, _)| source.as_str()))?
         };
+        if load_user_init && launch != startup::Launch::GnuOnly {
+            if let Some(path) = user_init::path() {
+                if let Err(error) = user_init::load(&mut vm, &path) {
+                    eprintln!("romacs: init failed: {error}");
+                    let _ = echo::show(&mut vm, "Error loading init.el; see stderr for details");
+                }
+            }
+        }
         eprintln!("romacs: {}", started.status());
         if let Some(loadup) = &started.loadup {
             for line in loadup.table().lines() { eprintln!("romacs-loadup: {line}"); }

@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "7af10684f570569b5ffe9669b11ebb7bb9d89b3e488735cbc75c9af10a66aad4",
+  "source_fingerprint": "a55fc8d9559e1ef129c454377666d703da46e835190298cd78f1e9dab980c372",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 575,
-  "parsed_vm2_only": 575
+  "parsed_total": 579,
+  "parsed_vm2_only": 579
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -125,7 +125,7 @@
   "/=": {
    "name": "/=",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/arith.rs:116"
+   "registered_at": "crates/romacs-vm/src/prims/arith.rs:144"
   },
   "1+": {
    "name": "1+",
@@ -148,7 +148,7 @@
   "<=": {
    "name": "<=",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/arith.rs:99"
+   "registered_at": "crates/romacs-vm/src/prims/arith.rs:127"
   },
   "=": {
    "name": "=",
@@ -159,12 +159,12 @@
   ">": {
    "name": ">",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/arith.rs:104"
+   "registered_at": "crates/romacs-vm/src/prims/arith.rs:132"
   },
   ">=": {
    "name": ">=",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/arith.rs:109"
+   "registered_at": "crates/romacs-vm/src/prims/arith.rs:137"
   },
   "abs": {
    "name": "abs",
@@ -1111,6 +1111,11 @@
    "variant": "Primitive::ForwardLine",
    "registered_at": "crates/romacs-vm/src/lib.rs:720"
   },
+  "forward-word": {
+   "name": "forward-word",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/word_motion.rs:4"
+  },
   "frame-bottom-divider-width": {
    "name": "frame-bottom-divider-width",
    "implementation": "vm2",
@@ -1864,6 +1869,11 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/minibuffer_predicate.rs:4"
   },
+  "mod": {
+   "name": "mod",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/arith.rs:92"
+  },
   "modify-syntax-entry": {
    "name": "modify-syntax-entry",
    "implementation": "vm2",
@@ -2234,6 +2244,16 @@
    "name": "reverse",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/reverse.rs:4"
+  },
+  "romacs--clipboard-set": {
+   "name": "romacs--clipboard-set",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/clipboard.rs:7"
+  },
+  "romacs--clipboard-text": {
+   "name": "romacs--clipboard-text",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/clipboard.rs:4"
   },
   "romacs--kill-buffer-finish": {
    "name": "romacs--kill-buffer-finish",

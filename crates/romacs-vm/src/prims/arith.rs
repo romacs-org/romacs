@@ -89,6 +89,34 @@ mod car_less_tests {
     }
 }
 
+defsubr! { name = "mod", gnu = "data.c:3448", effect = Reads,
+fn modulo(cx, x: Value, y: Value) {
+    match (number(cx, x)?, number(cx, y)?) {
+        (Num::Int(a), Num::Int(b)) => {
+            if b == num_bigint::BigInt::from(0) {
+                return Err(Fault::Signal(cx.intern("arith-error"), Value::NIL));
+            }
+            let mut remainder = a % &b;
+            if remainder != num_bigint::BigInt::from(0) && remainder.sign() != b.sign() {
+                remainder += b;
+            }
+            Ok(cx.bigint(remainder))
+        }
+        (a, b) => {
+            let float = |n: Num| match n {
+                Num::Float(n) => n,
+                Num::Int(n) => n.to_string().parse::<f64>().expect("decimal integer is a float"),
+            };
+            let (a, b) = (float(a), float(b));
+            let mut remainder = a % b;
+            if if b < 0.0 { remainder > 0.0 } else { remainder < 0.0 } {
+                remainder += b;
+            }
+            Ok(cx.float(remainder))
+        }
+    }
+}}
+
 fn with_first(first: Value, rest: &[Value]) -> Vec<Value> {
     let mut all = Vec::with_capacity(rest.len() + 1);
     all.push(first);

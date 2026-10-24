@@ -1,0 +1,82 @@
+#!/usr/bin/env python3
+"""Run editable Elisp tests on a prebuilt Romacs host, without invoking Cargo."""
+import argparse
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+import time
+
+ROOT = Path(__file__).resolve().parents[1]
+COMPLETE = 'ROMACS-TEST-COMPLETE'
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('files', nargs='*', type=Path)
+    parser.add_argument('--core', action='store_true', help='Use the bare VM rather than editor startup')
+    parser.add_argument('--binary', type=Path, help='Prebuilt host; also settable through ROMACS_TEST_BINARY')
+    select = parser.add_mutually_exclusive_group()
+    select.add_argument('--match', help='Select test names matching this regexp')
+    select.add_argument('--test', help='Select one exact test name')
+    parser.add_argument('--timeout', type=float, default=60)
+    args = parser.parse_args()
+    if args.timeout <= 0:
+        parser.error('--timeout must be positive')
+    files = args.files or sorted((ROOT / 'test/romacs-lisp').glob('*-test.el'))
+    if not files:
+        parser.error('No Elisp test files selected')
+    files = [p.resolve() for p in files]
+    for path in files:
+        if not path.is_file():
+            parser.error(f'Test file does not exist: {path}')
+    binary = args.binary or os.environ.get('ROMACS_TEST_BINARY')
+    if not binary:
+        target = Path(os.environ.get('CARGO_TARGET_DIR', ROOT / 'target'))
+        name = 'romacs-vm' if args.core else 'romacs-vm-gui'
+        binary = target / 'gate' / name
+    binary = Path(binary).expanduser().resolve()
+    if not binary.is_file() or not os.access(binary, os.X_OK):
+        parser.error(f'Prebuilt host not found: {binary}. Build it once with cargo build --profile gate -p romacs-vm-gui, or pass --binary.')
+    quote = lambda text: json.dumps(str(text), ensure_ascii=False)
+    selector = quote(args.match) if args.match is not None else ('(quote ' + args.test + ')' if args.test else 't')
+    if args.test and not all(c.isalnum() or c in '-_/:.' for c in args.test):
+        parser.error('--test must be a test symbol name')
+    source = f'(setq load-path (cons {quote(ROOT / "rlisp")} load-path))\n(require \'romacs-test)\n'
+    source += ''.join(f'(load {quote(path)} nil t)\n' for path in files)
+    source += f'(let ((summary (romacs-test-run {selector}))) (when (or (> (plist-get summary :failed) 0) (> (plist-get summary :errors) 0)) (error "Selected Elisp tests failed")))\n(princ "{COMPLETE}\\n")\n'
+    command = [str(binary), '--source'] if args.core else [str(binary), '--batch', str(ROOT / 'rlisp')]
+    started = time.perf_counter()
+    with tempfile.TemporaryDirectory(prefix='romacs-elisp-', dir=os.environ.get('TMPDIR')) as temp:
+        env = os.environ.copy()
+        for key in ('DISPLAY', 'WAYLAND_DISPLAY', 'NOTMUCH_CONFIG', 'NOTMUCH_DATABASE', 'MAIL', 'MAILDIR'):
+            env.pop(key, None)
+        env['HOME'] = temp
+        env['TMPDIR'] = temp
+        env['ROMACS_LISP_DIR'] = str(ROOT / 'gnu-lisp')
+        for key in ('XDG_CONFIG_HOME', 'XDG_CACHE_HOME', 'XDG_DATA_HOME', 'XDG_STATE_HOME'):
+            directory = Path(temp) / key.lower()
+            directory.mkdir()
+            env[key] = str(directory)
+        try:
+            result = subprocess.run(command, input=source, text=True, env=env, capture_output=True, timeout=args.timeout)
+        except subprocess.TimeoutExpired as error:
+            if error.stdout:
+                sys.stdout.write(error.stdout.decode() if isinstance(error.stdout, bytes) else error.stdout)
+            print(f'Elisp tests timed out after {args.timeout:g}s', file=sys.stderr)
+            return 1
+    sys.stdout.write(result.stdout)
+    sys.stderr.write(result.stderr)
+    if result.returncode:
+        return result.returncode if result.returncode > 0 else 1
+    if result.stdout.splitlines().count(COMPLETE) != 1:
+        print('Elisp host exited without completing the selected tests', file=sys.stderr)
+        return 1
+    print(f'Elisp tests finished in {time.perf_counter() - started:.3f}s (no Rust rebuild)', file=sys.stderr)
+    return 0
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

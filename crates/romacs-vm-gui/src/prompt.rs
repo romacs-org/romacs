@@ -101,6 +101,14 @@ impl GuiHost {
 }
 
 impl HostInput for GuiHost {
+    fn clipboard_text(&mut self) -> Result<Option<String>, String> {
+        self.sender.clipboard_text()
+    }
+
+    fn set_clipboard_text(&mut self, text: &str) -> Result<(), String> {
+        self.sender.set_clipboard_text(text)
+    }
+
     fn input_pending(&mut self) -> bool {
         self.drain();
         let shared = self.shared.borrow();

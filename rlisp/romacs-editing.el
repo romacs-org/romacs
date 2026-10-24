@@ -18,6 +18,30 @@
 (defvar mark-ring-max 16)
 (defvar global-mark-ring nil)
 (defvar global-mark-ring-max 16)
+(defvar interprogram-cut-function nil)
+(defvar interprogram-paste-function nil)
+(defvar save-interprogram-paste-before-kill nil)
+(defvar kill-transform-function nil)
+(defvar kill-do-not-save-duplicates nil)
+(defvar yank-pop-change-selection nil)
+(defvar romacs-clipboard-last-text nil)
+
+(defun romacs-clipboard-selection-value ()
+  "Return new desktop text, falling back to the kill ring on clipboard errors."
+  (condition-case nil
+      (let ((text (romacs--clipboard-text)))
+        (unless (equal text romacs-clipboard-last-text)
+          (setq romacs-clipboard-last-text text)
+          text))
+    (error nil)))
+
+(defun romacs-clipboard-select-text (text)
+  "Publish TEXT when available; clipboard failure must not prevent an internal kill."
+  (condition-case nil
+      (progn (romacs--clipboard-set text)
+             (setq romacs-clipboard-last-text text))
+    (error nil)))
+
 (defvar activate-mark-hook nil)
 (defvar deactivate-mark-hook nil)
 (defvar set-mark-command-repeat-pop nil)
@@ -334,6 +358,13 @@ Read-only text is copied before deletion signals its ordinary read-only error."
       (goto-char position)))
   nil)
 
+(global-set-key [134217855] 'backward-kill-word)
+(global-set-key [27 127] 'backward-kill-word)
+(global-set-key [C-backspace] 'backward-kill-word)
+(global-set-key [134217830] 'forward-word)
+(global-set-key [27 102] 'forward-word)
+(global-set-key [134217826] 'backward-word)
+(global-set-key [27 98] 'backward-word)
 (global-set-key [134217847] 'kill-ring-save)
 (global-set-key [27 119] 'kill-ring-save)
 (global-set-key [23] 'kill-region)
