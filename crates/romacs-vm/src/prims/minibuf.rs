@@ -26,7 +26,7 @@
 use super::*;
 
 /// The Lisp half, evaluated once per VM on first use.
-const LISP_HALF: &str = include_str!("minibuf.el");
+const LISP_HALF: &str = include_str!("../../../../rlisp/vm/minibuf.el");
 
 defsubr! { name = "read-from-minibuffer", gnu = "minibuf.c:1309", effect = Global,
 fn read_from_minibuffer(cx, prompt: Value; optional initial_contents: Value, keymap: Value,

@@ -42,7 +42,7 @@ def org_with_greek():
     of every 80: the owner's `α.*ω` / `α.*?ω` shape over real text -- most
     lines match neither, half the `α` lines match, and the `ω` lines without
     an `α` do not."""
-    lines = (ROOT / "lisp/org/org.el").read_text().splitlines()
+    lines = (ROOT / "gnu-lisp/org/org.el").read_text().splitlines()
     out = []
     for i, line in enumerate(lines):
         if i % 40 == 0:
@@ -54,7 +54,7 @@ def org_with_greek():
 
 
 def simple_el():
-    return (ROOT / "lisp/simple.el").read_text()
+    return (ROOT / "gnu-lisp/simple.el").read_text()
 
 
 # (name, kind, pattern, subject thunk, all matches?, iters)

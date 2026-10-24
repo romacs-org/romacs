@@ -5,18 +5,18 @@ fn current_time_unblocks_pristine_gnu_version() {
     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let mut vm = Vm::new();
     vm.install_lisp_prelude().unwrap();
-    vm.set_load_path(&[root.join("lisp"), root.join("lisp/emacs-lisp")])
+    vm.set_load_path(&[root.join("gnu-lisp"), root.join("gnu-lisp/emacs-lisp")])
         .unwrap();
     for relative in [
-        "lisp/emacs-lisp/debug-early.el",
-        "lisp/emacs-lisp/byte-run.el",
-        "lisp/emacs-lisp/backquote.el",
-        "lisp/subr.el",
-        "lisp/keymap.el",
+        "gnu-lisp/emacs-lisp/debug-early.el",
+        "gnu-lisp/emacs-lisp/byte-run.el",
+        "gnu-lisp/emacs-lisp/backquote.el",
+        "gnu-lisp/subr.el",
+        "gnu-lisp/keymap.el",
     ] {
         vm.load_file(&root.join(relative)).unwrap();
     }
-    let path = root.join("lisp/version.el");
+    let path = root.join("gnu-lisp/version.el");
     let result = vm.load_file(&path).map(drop);
     assert!(result.is_ok(), "CURRENT_TIME_VERSION_COMPLETES: {result:?}");
     let canonical = path.canonicalize().unwrap().to_string_lossy().into_owned();

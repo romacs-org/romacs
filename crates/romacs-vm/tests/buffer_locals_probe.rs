@@ -41,7 +41,7 @@ fn measure_buffer_local_target_frontiers() {
     for target in ["simple.el", "files.el"] {
         let mut vm = Vm::new();
         vm.install_lisp_prelude().unwrap();
-        vm.set_load_path(&[root.join("lisp"), root.join("lisp/emacs-lisp")])
+        vm.set_load_path(&[root.join("gnu-lisp"), root.join("gnu-lisp/emacs-lisp")])
             .unwrap();
         for file in [
             "emacs-lisp/debug-early.el",
@@ -52,9 +52,9 @@ fn measure_buffer_local_target_frontiers() {
             "emacs-lisp/pcase.el",
             "emacs-lisp/gv.el",
         ] {
-            vm.load_file(&root.join("lisp").join(file)).unwrap();
+            vm.load_file(&root.join("gnu-lisp").join(file)).unwrap();
         }
-        let outcome = vm.load_file(&root.join("lisp").join(target)).map(|_| ());
+        let outcome = vm.load_file(&root.join("gnu-lisp").join(target)).map(|_| ());
         println!("TARGET {target} {outcome:?}");
         let report = vm.load_report();
         for step in report["steps"]

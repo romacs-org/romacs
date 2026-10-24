@@ -44,7 +44,7 @@ fn measure_subrp_chain_frontier() {
     let source_only = SourceOnlyEmacsLisp::new(&root);
     let mut vm = Vm::new();
     vm.install_lisp_prelude().unwrap();
-    vm.set_load_path(&[root.join("lisp"), source_only.path().to_owned()])
+    vm.set_load_path(&[root.join("gnu-lisp"), source_only.path().to_owned()])
         .unwrap();
     for file in [
         "emacs-lisp/debug-early.el",
@@ -56,10 +56,10 @@ fn measure_subrp_chain_frontier() {
         "emacs-lisp/gv.el",
         "emacs-lisp/inline.el",
     ] {
-        vm.load_file(&root.join("lisp").join(file)).unwrap();
+        vm.load_file(&root.join("gnu-lisp").join(file)).unwrap();
     }
     let result = vm
-        .load_file(&root.join("lisp/emacs-lisp/ert.el"))
+        .load_file(&root.join("gnu-lisp/emacs-lisp/ert.el"))
         .map(|_| ());
     println!("ERT result: {result:?}");
     let report = vm.load_report();

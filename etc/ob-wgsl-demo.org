@@ -4,7 +4,7 @@
 Romacs renders =wgsl= and =glsl= org-babel blocks as *live animated GPU
 surfaces* right below the block — a literate shader document.  See
 =docs/display-engine/SHADER_SURFACES.md= for the shader contract and
-=lisp-bundled/ob-wgsl.el= for how results are displayed.
+=rlisp/ob-wgsl.el= for how results are displayed.
 
 To run this file inside the Romacs GUI:
 
@@ -56,7 +56,7 @@ mainImage(out vec4 fragColor, in vec2 fragCoord)= reading bare =iTime=,
 =iResolution=, =iMouse=, =texture(iChannel0, uv)=.  This is Shadertoy's
 default new-shader template, pasted verbatim; most Shadertoy and Ghostty
 shaders work the same way (three real Ghostty ports live in
-=lisp-bundled/romacs-shaders.el= — try =M-x romacs-shaders-ghostty-starfield=,
+=rlisp/romacs-shaders.el= — try =M-x romacs-shaders-ghostty-starfield=,
 =-ghostty-gradient=, =-ghostty-crt=, and =M-x romacs-shaders-off=).
 
 #+begin_src glsl

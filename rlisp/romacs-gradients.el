@@ -1,4 +1,9 @@
 ;;; romacs-gradients.el --- Gradient background faces for Romacs
+
+;; SPDX-License-Identifier: GPL-3.0-or-later
+
+;;; Commentary:
+
 ;;;
 ;;; This module demonstrates how to use GPU-rendered gradient backgrounds
 ;;; on Romacs faces while maintaining 100% compatibility with GNU Emacs.
@@ -7,10 +12,11 @@
 ;;; and are GPU-rendered with zero CPU overhead. GNU Emacs ignores the
 ;;; :background-gradient attribute and uses the solid :background color
 ;;; as a fallback.
-
 ;;; Basic examples:
-
 ;; 1. Mode-line with vertical linear gradient (red to blue)
+
+;;; Code:
+
 (set-face-attribute 'mode-line nil
   :background "#1a1a1a"  ; GNU Emacs fallback
   :background-gradient '(

@@ -28,8 +28,8 @@ fn toplevel_progn_installs_macro_before_expanding_sibling() {
 fn macro_generated_progn_installs_function_before_compile_time_sibling() {
     let mut vm = Vm::new();
     vm.install_lisp_prelude().unwrap();
-    vm.load_file(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../lisp/emacs-lisp/debug-early.el")).unwrap();
-    vm.load_file(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../lisp/emacs-lisp/byte-run.el")).unwrap();
+    vm.load_file(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../gnu-lisp/emacs-lisp/debug-early.el")).unwrap();
+    vm.load_file(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../gnu-lisp/emacs-lisp/byte-run.el")).unwrap();
     vm.eval_source("(defalias 'internal-macroexpand-for-load (lambda (form _full) form))").unwrap();
     vm.eval_source("(defmacro tp-generated () '(progn (defun tp-constructor () 42) (eval-and-compile (tp-constructor))))").unwrap();
     let path = source_file("generated.el", include_str!("../evidence/toplevel-progn/generated.el"));

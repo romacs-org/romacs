@@ -23,7 +23,7 @@ for rep in range(reps):
         stdout = d / 'stdout.jsonl'
         if stdout.exists(): stdout.unlink()
         before = {c['pid'] for c in jlib.clients()}
-        envs = f'ROMACS_LISP_DIR={jlib.ROOT}/lisp ROMACS_GUI_FONT=Iosevka ROMACS_GUI_FONT_SIZE=14'
+        envs = f'ROMACS_LISP_DIR={jlib.ROOT}/gnu-lisp ROMACS_GUI_FONT=Iosevka ROMACS_GUI_FONT_SIZE=14'
         cmd = f'env -u RUST_MIN_STACK -u LD_LIBRARY_PATH {envs} {binary} {flag} >{stdout} 2>{d / "stderr.log"}'
         t0 = time.monotonic()
         jlib.hy('eval', f'hl.exec_cmd({json.dumps("sh -c " + json.dumps(cmd))}, {{workspace="2 silent"}})')

@@ -1,5 +1,7 @@
 ;;; romacs-mcp-companion.el --- Cooperative MCP tools -*- lexical-binding: t; -*-
 
+;; SPDX-License-Identifier: GPL-3.0-or-later
+
 ;;; Commentary:
 ;; Optional tool registration atop the existing companion claim and receipt
 ;; APIs.  No second ownership system, file editing, display or learner access.

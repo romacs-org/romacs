@@ -37,11 +37,11 @@ fn target_frontiers() {
     for target in ["files.el", "simple.el", "minibuffer.el", "window.el"] {
         let mut vm = Vm::new();
         vm.install_lisp_prelude().unwrap();
-        vm.set_load_path(&[root.join("lisp"), root.join("lisp/emacs-lisp")]).unwrap();
+        vm.set_load_path(&[root.join("gnu-lisp"), root.join("gnu-lisp/emacs-lisp")]).unwrap();
         for prerequisite in ["emacs-lisp/byte-run.el", "subr.el", "emacs-lisp/macroexp.el", "emacs-lisp/pcase.el", "custom.el"] {
-            vm.load_file(&root.join("lisp").join(prerequisite)).unwrap();
+            vm.load_file(&root.join("gnu-lisp").join(prerequisite)).unwrap();
         }
-        let path = root.join("lisp").join(target);
+        let path = root.join("gnu-lisp").join(target);
         let result = vm.load_file(&path).map(drop);
         let canonical = path.canonicalize().unwrap().to_string_lossy().into_owned();
         let report = vm.load_report();

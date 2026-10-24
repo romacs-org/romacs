@@ -10,7 +10,7 @@ use std::path::PathBuf;
 #[test]
 fn source_only_fixture_omits_only_cl_loaddefs_and_cleans_up() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let production = root.join("lisp/emacs-lisp");
+    let production = root.join("gnu-lisp/emacs-lisp");
     let generated = fs::read(production.join("cl-loaddefs.el")).unwrap();
     assert!(
         !generated.is_empty(),
@@ -59,7 +59,7 @@ fn ordinary_search_path_still_loads_production_generated_support() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let mut vm = Vm::new();
     vm.install_lisp_prelude().unwrap();
-    vm.set_load_path(&[root.join("lisp"), root.join("lisp/emacs-lisp")])
+    vm.set_load_path(&[root.join("gnu-lisp"), root.join("gnu-lisp/emacs-lisp")])
         .unwrap();
     for file in [
         "emacs-lisp/debug-early.el",
@@ -70,10 +70,10 @@ fn ordinary_search_path_still_loads_production_generated_support() {
         "emacs-lisp/pcase.el",
         "emacs-lisp/gv.el",
     ] {
-        vm.load_file(&root.join("lisp").join(file)).unwrap();
+        vm.load_file(&root.join("gnu-lisp").join(file)).unwrap();
     }
     let result = vm
-        .load_file(&root.join("lisp/emacs-lisp/cl-lib.el"))
+        .load_file(&root.join("gnu-lisp/emacs-lisp/cl-lib.el"))
         .map(|_| ());
     assert!(
         result.is_err(),
@@ -96,7 +96,7 @@ fn ordinary_search_path_still_loads_production_generated_support() {
             .canonicalize()
             .unwrap()
             == root
-                .join("lisp/emacs-lisp/cl-loaddefs.el")
+                .join("gnu-lisp/emacs-lisp/cl-loaddefs.el")
                 .canonicalize()
                 .unwrap()
     }));

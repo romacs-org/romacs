@@ -1,7 +1,12 @@
 ;;; romacs-term.el --- Native Alacritty terminal for Romacs -*- lexical-binding: t -*-
 
-;; Copyright (C) 2026 Neomacs Contributors
-;; License: GPL-3.0-or-later
+;; SPDX-License-Identifier: GPL-3.0-or-later
+
+;;; Commentary:
+
+;; Native Alacritty terminal for Romacs.
+
+;;; Code:
 
 (defvar romacs-term-shell nil
   "Shell override; nil uses the native host's configured user shell ($SHELL).")

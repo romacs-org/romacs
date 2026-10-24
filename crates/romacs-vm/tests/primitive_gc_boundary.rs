@@ -3,7 +3,7 @@
 //! T1: a leaf body cannot reach the running VM (compile-fail probe below).
 //! T2: a callback primitive's saved Values live in a traced continuation frame
 //!     and are forwarded by collections that run inside the callback.
-//! T3: a loop that calls Lisp is Lisp (`src/prims/prelude.el`), so its state
+//! T3: a loop that calls Lisp is Lisp (`../../rlisp/vm/prelude.el`), so its state
 //!     is registers of ordinary traced frames.
 use romacs_vm::Vm;
 use std::path::Path;
@@ -29,9 +29,9 @@ const GARBAGE: &str = "(let ((i 0)) (while (< i 3000) (setq i (1+ i)) (cons i i)
 fn t3_prelude_loops_call_lisp_and_survive_collections() {
     let mut vm = collecting_vm();
     // Read at run time, so a missing prelude is a failed assertion below.
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/prims/prelude.el");
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../rlisp/vm/prelude.el");
     let prelude = std::fs::read_to_string(path).unwrap_or_default();
-    assert!(prelude.contains("(defun mapcar "), "src/prims/prelude.el must define mapcar");
+    assert!(prelude.contains("(defun mapcar "), "../../rlisp/vm/prelude.el must define mapcar");
     vm.eval_source(&prelude).expect("prelude evaluates");
     let before = vm.heap_stats().collections;
     let source = format!("{GARBAGE} (mapcar (lambda (x) {CHURN} (cons x (list x))) (list 1 2 3))");

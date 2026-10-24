@@ -30,7 +30,7 @@ fn main() {
     let out = PathBuf::from(std::env::var("OUT_DIR").unwrap());
 
     // Inputs. Directories are scanned recursively by Cargo for modification.
-    for p in ["crates", "test", "lisp", "DIVERGENCES.md"] {
+    for p in ["crates", "test", "gnu-lisp", "DIVERGENCES.md"] {
         println!("cargo:rerun-if-changed={}", root.join(p).display());
     }
     println!(
@@ -139,7 +139,7 @@ fn build_provenance(root: &Path) -> serde_json::Value {
             "DIVERGENCES.md",
             "crates/*/GNU-DIVERGENCES.md",
             "test",
-            "lisp",
+            "gnu-lisp",
         ],
     );
     let dirty: Vec<String> = status

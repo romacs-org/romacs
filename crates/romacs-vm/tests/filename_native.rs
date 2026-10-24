@@ -32,7 +32,7 @@ fn filename_native_recorded_gnu_cases() {
     for row in evidence["cases"].as_array().unwrap() {
         let mut vm = Vm::new();
         if row["real_helper"].as_bool() == Some(true) {
-            let env = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../lisp/env.el");
+            let env = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../gnu-lisp/env.el");
             vm.load_file(&env).expect("load real GNU env.el");
         }
         let source = row["source"]
@@ -122,7 +122,7 @@ fn filename_native_helper_gc() {
 #[test]
 fn filename_native_real_lisp_helper() {
     let mut vm = Vm::new();
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../lisp/env.el");
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../gnu-lisp/env.el");
     assert_eq!(
         Sha256::digest(std::fs::read(&root).unwrap())
             .iter()

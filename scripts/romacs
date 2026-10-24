@@ -60,7 +60,7 @@ if [ -z "${ROMACS_GUI_FONT:-}" ] && command -v fc-list >/dev/null \
 fi
 
 # GNU's Lisp from this checkout; the GUI loads loadup.el's preload chain.
-export ROMACS_LISP_DIR="$root/lisp"
+export ROMACS_LISP_DIR="$root/gnu-lisp"
 # A lane's RUST_MIN_STACK must not hide the evaluator's own 64 MiB reservation.
 unset RUST_MIN_STACK
 

@@ -52,7 +52,7 @@ fn kill_buffer(cx; optional arg: Value) -> Step {
     let buffer = if arg == Value::NIL { cx.decode_buffer(arg)? }
         else { cx.lifecycle_buffer(arg, false, false)?.0 };
     if !cx.lifecycle_killable(buffer) { return Ok(Step::Done(Value::NIL)); }
-    let source = cx.string(include_str!("buffer_lifecycle.el"));
+    let source = cx.string(include_str!("../../../../rlisp/vm/buffer_lifecycle.el"));
     let parsed = cx.read_from_string(source, Value::NIL, Value::NIL)?;
     let form = cx.pair(parsed).expect("reader result").0;
     let f = cx.intern("eval");

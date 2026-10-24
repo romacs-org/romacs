@@ -1,4 +1,12 @@
-;;; -*- lexical-binding: t -*-
+;;; romacs-extended-command.el --- Extended command selection -*- lexical-binding: t -*-
+
+;; SPDX-License-Identifier: GPL-3.0-or-later
+
+;;; Commentary:
+
+;; Extended command selection for Romacs.
+
+;;; Code:
 (defvar extended-command-history nil)
 
 (defun romacs-command-p (command)

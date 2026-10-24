@@ -1,6 +1,6 @@
 ;;; romacs-effects.el --- Customization for Romacs visual effects  -*- lexical-binding: t; -*-
 
-;; This file is part of Romacs.
+;; SPDX-License-Identifier: GPL-3.0-or-later
 
 ;;; Commentary:
 

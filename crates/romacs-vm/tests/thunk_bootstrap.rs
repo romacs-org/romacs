@@ -45,7 +45,7 @@ fn real_thunk_bootstrap_completes_without_custom_or_failed_prefix_reuse() {
     // Pin the ordinary CLI-sized stack rather than hiding dispatch retention
     // behind a larger test-thread stack. Stack/depth limits remain unchanged.
     std::thread::Builder::new().stack_size(8 * 1024 * 1024).spawn(|| {
-        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../lisp");
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../gnu-lisp");
         let mut vm = Vm::new();
         vm.install_lisp_prelude().unwrap();
         vm.set_load_path(&[root.clone(), root.join("emacs-lisp")]).unwrap();

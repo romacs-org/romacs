@@ -10,14 +10,14 @@ fn prepared(source_only: Option<&SourceOnlyEmacsLisp>) -> (Vm, PathBuf) {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let mut vm = Vm::new();
     vm.install_lisp_prelude().unwrap();
-    let emacs_lisp = source_only.map_or_else(|| root.join("lisp/emacs-lisp"), |f| f.path().to_owned());
-    vm.set_load_path(&[root.join("lisp"), emacs_lisp]).unwrap();
+    let emacs_lisp = source_only.map_or_else(|| root.join("gnu-lisp/emacs-lisp"), |f| f.path().to_owned());
+    vm.set_load_path(&[root.join("gnu-lisp"), emacs_lisp]).unwrap();
     for file in [
         "emacs-lisp/debug-early.el", "emacs-lisp/byte-run.el",
         "emacs-lisp/backquote.el", "subr.el", "keymap.el",
         "emacs-lisp/pcase.el",
     ] {
-        vm.load_file(&root.join("lisp").join(file)).unwrap();
+        vm.load_file(&root.join("gnu-lisp").join(file)).unwrap();
     }
     (vm, root)
 }
@@ -25,7 +25,7 @@ fn prepared(source_only: Option<&SourceOnlyEmacsLisp>) -> (Vm, PathBuf) {
 #[test]
 fn real_pcase_allows_real_gv_to_load_completely() {
     let (mut vm, root) = prepared(None);
-    let result = vm.load_file(&root.join("lisp/emacs-lisp/gv.el")).map(|_| ());
+    let result = vm.load_file(&root.join("gnu-lisp/emacs-lisp/gv.el")).map(|_| ());
     assert!(result.is_ok(), "GNU gv.el must load after GNU pcase.el: {result:?}");
     assert_eq!(vm.eval_source("(list (featurep 'pcase) (featurep 'gv) (car (symbol-function 'gv-define-expander)) (car (symbol-function 'pcase-defmacro)))").unwrap().display().unwrap(), "(t t macro macro)");
     let report = vm.load_report();
@@ -64,8 +64,8 @@ fn real_identity_moves_nested_cl_macs_to_define_inline() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let source_only = SourceOnlyEmacsLisp::new(&root);
     let (mut vm, root) = prepared(Some(&source_only));
-    vm.load_file(&root.join("lisp/emacs-lisp/gv.el")).unwrap();
-    let result = vm.load_file(&root.join("lisp/emacs-lisp/cl-lib.el")).map(|_| ());
+    vm.load_file(&root.join("gnu-lisp/emacs-lisp/gv.el")).unwrap();
+    let result = vm.load_file(&root.join("gnu-lisp/emacs-lisp/cl-lib.el")).map(|_| ());
     assert!(result.is_err(), "remeasure cl-lib if the frontier advances");
     assert_identity_frontier(&mut vm);
 }
@@ -75,8 +75,8 @@ fn real_ert_frontier_after_identity() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let source_only = SourceOnlyEmacsLisp::new(&root);
     let (mut vm, root) = prepared(Some(&source_only));
-    vm.load_file(&root.join("lisp/emacs-lisp/gv.el")).unwrap();
-    let result = vm.load_file(&root.join("lisp/emacs-lisp/ert.el")).map(|_| ());
+    vm.load_file(&root.join("gnu-lisp/emacs-lisp/gv.el")).unwrap();
+    let result = vm.load_file(&root.join("gnu-lisp/emacs-lisp/ert.el")).map(|_| ());
     assert!(result.is_err(), "remeasure ert if the frontier advances");
     assert_identity_frontier(&mut vm);
     let report = vm.load_report();
@@ -93,8 +93,8 @@ fn real_ert_frontier_after_identity() {
 #[test]
 fn real_pcase_and_gv_allow_real_rx_to_load_completely() {
     let (mut vm, root) = prepared(None);
-    vm.load_file(&root.join("lisp/emacs-lisp/gv.el")).unwrap();
-    vm.load_file(&root.join("lisp/emacs-lisp/rx.el")).unwrap();
+    vm.load_file(&root.join("gnu-lisp/emacs-lisp/gv.el")).unwrap();
+    vm.load_file(&root.join("gnu-lisp/emacs-lisp/rx.el")).unwrap();
     assert_eq!(vm.eval_source("(featurep 'rx)").unwrap().display().unwrap(), "t");
     let report = vm.load_report();
     assert_eq!(report["steps"].as_array().unwrap().iter()

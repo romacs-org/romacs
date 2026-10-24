@@ -274,7 +274,7 @@ def census_population(root: pathlib.Path) -> tuple[set[str], set[str]]:
         raise Refusal(EXIT_NOT_MEASURED, f'cannot validate census population: {error}') from error
     if problems:
         raise Refusal(EXIT_NOT_MEASURED, 'invalid generated census support:\n  ' + '\n  '.join(problems))
-    return {p for p in pinned if p.endswith('.el')}, set(support)
+    return {oracle.local_path(p) for p in pinned if p.endswith('.el')}, set(support)
 
 
 def measure_census(root: pathlib.Path, mode: str, binary: str, workers: int, timeout: float = CENSUS_TIMEOUT) -> dict:
@@ -291,7 +291,7 @@ def measure_census(root: pathlib.Path, mode: str, binary: str, workers: int, tim
     gnu, support = census_population(root)
     files = [root / rel for rel in sorted(gnu | support)]
     if not files:
-        raise Refusal(EXIT_NOT_MEASURED, f'no Lisp files under {root / "lisp"}')
+        raise Refusal(EXIT_NOT_MEASURED, f'no Lisp files under {root / "gnu-lisp"}')
     started = time.monotonic()
     with tempfile.TemporaryDirectory(prefix='parity-census-') as tmp:
         manifest = pathlib.Path(tmp) / 'manifest.json'
@@ -307,7 +307,7 @@ def measure_census(root: pathlib.Path, mode: str, binary: str, workers: int, tim
         copy = pathlib.Path(tmp) / 'romacs-vm-census'
         shutil.copy2(binary, copy)
         digest = hashlib.sha256(copy.read_bytes()).hexdigest()
-        load_paths = [root / 'lisp'] + sorted(p for p in (root / 'lisp').rglob('*') if p.is_dir())
+        load_paths = [root / 'gnu-lisp'] + sorted(p for p in (root / 'gnu-lisp').rglob('*') if p.is_dir())
         preload = lc.bootstrap_chain(root) if mode == 'warm' else ()
         with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
             rows = list(pool.map(lambda pair: lc.run_file(pair[0], pair[1], copy, load_paths, timeout, preload),
@@ -331,7 +331,9 @@ def measure_census(root: pathlib.Path, mode: str, binary: str, workers: int, tim
     reported = sum(1 for r in rows if r['forms_evaluated'] is not None and r['file'] in gnu)
     if reported == 0:
         raise Refusal(EXIT_NOT_MEASURED, f'the census binary reported on none of {len(gnu)} pristine GNU files')
-    loaded = sorted(r['file'] for r in rows if r['loaded'] and r['file'] in gnu)
+    # Floor members retain their GNU source identities across checkout moves.
+    loaded = sorted('lisp' + r['file'][len('gnu-lisp'):]
+                    for r in rows if r['loaded'] and r['file'] in gnu)
 
     def why(r):
         f = r.get('first_failure') or {}
@@ -346,7 +348,8 @@ def measure_census(root: pathlib.Path, mode: str, binary: str, workers: int, tim
             'unreported': sorted(r['file'] for r in rows if r['forms_evaluated'] is None and r['file'] in gnu),
             'gnu_target_total': len(gnu), 'shared_total': len(gnu),
             'members': {f'census-{mode}': loaded},
-            'verdicts': {r['file']: ('loaded' if r['loaded'] else why(r)) for r in rows},
+            'verdicts': {('lisp' + r['file'][len('gnu-lisp'):] if r['file'] in gnu else r['file']):
+                         ('loaded' if r['loaded'] else why(r)) for r in rows},
             'chain': chain, 'binary_sha256': digest, 'seconds': round(time.monotonic() - started, 1)}
 
 
@@ -883,7 +886,7 @@ def measure_unit(root: pathlib.Path, unit: str, gnu_ert: str | None, census: str
 UNCONFIRMED_WINDOW_DAYS = 14
 UNCONFIRMED_ALLOWED = 1   # per member per window; the next forgiveness FAILS
 LEDGER_NAME = 'parity-ratchet-unconfirmed.jsonl'
-FINGERPRINTED = ('lisp', 'gnu-tests/test', 'gnu-tests/harness', 'gnu-tests/tools', 'gnu-tests/baseline',
+FINGERPRINTED = ('gnu-lisp', 'rlisp', 'vendor-lisp', 'gnu-tests/test', 'gnu-tests/harness', 'gnu-tests/tools', 'gnu-tests/baseline',
                  'gnu-tests/run.py', 'gnu-tests/PIN.json', 'gnu-tests/EXCLUSIONS.toml', 'scripts/lisp-census.py',
                  'scripts/lisp-census-oracle.el', 'tools/parity_ratchet.py', 'gnu-tests/member-evidence-policy.json',
                  'parity-reference.toml',
@@ -1147,10 +1150,10 @@ def git(root: pathlib.Path, *args: str) -> str:
 
 def contamination(root: pathlib.Path, measured_only: bool = False) -> list[str]:
     """Anything that would make a measurement describe something other than HEAD."""
-    measured = ['lisp', 'gnu-tests', 'scripts', 'tools/parity_ratchet.py', 'parity-reference.toml']
+    measured = ['gnu-lisp', 'rlisp', 'vendor-lisp', 'gnu-tests', 'scripts', 'tools/parity_ratchet.py', 'parity-reference.toml']
     dirty = [line for line in git(root, 'status', '--porcelain', '--', *(measured if measured_only else [])).splitlines()
              if line[3:] != RATCHET_NAME]
-    ignored = [line for line in git(root, 'status', '--porcelain', '--ignored', '--', 'lisp', 'gnu-tests/test',
+    ignored = [line for line in git(root, 'status', '--porcelain', '--ignored', '--', 'gnu-lisp', 'rlisp', 'vendor-lisp', 'gnu-tests/test',
                                     'gnu-tests/baseline', 'gnu-tests/harness', 'gnu-tests/tools', 'scripts').splitlines()
                if line.startswith('!!') and not python_cache(line[3:])]
     return dirty + ignored
@@ -1158,7 +1161,7 @@ def contamination(root: pathlib.Path, measured_only: bool = False) -> list[str]:
 
 def python_cache(path: str) -> bool:
     """Only Python's own bytecode cache next to the scripts is harmless;
-    anything ignored under lisp/ or the GNU import can change a measurement."""
+    anything ignored under gnu-lisp/ or the GNU import can change a measurement."""
     parts = pathlib.PurePosixPath(path.rstrip('/')).parts
     return (parts[:1] == ('scripts',) and '__pycache__' in parts
             and (parts[-1] == '__pycache__' or parts[-1].endswith('.pyc')))

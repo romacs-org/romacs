@@ -4,8 +4,8 @@ B="${CENSUS_BIN:?set CENSUS_BIN to the built romacs-vm-census executable}"
 R="$(cd "$(dirname "$0")/../.." && pwd)"
 P="$R/reference/lisp-oracle/probes"
 pre=()
-for n in emacs-lisp/debug-early emacs-lisp/byte-run emacs-lisp/backquote subr keymap version widget custom emacs-lisp/map-ynp international/mule international/mule-conf env format bindings window files emacs-lisp/macroexp; do pre+=(--preload "$R/lisp/$n.el"); done
-lp=("$R/lisp" "$R/lisp/emacs-lisp")
+for n in emacs-lisp/debug-early emacs-lisp/byte-run emacs-lisp/backquote subr keymap version widget custom emacs-lisp/map-ynp international/mule international/mule-conf env format bindings window files emacs-lisp/macroexp; do pre+=(--preload "$R/gnu-lisp/$n.el"); done
+lp=("$R/gnu-lisp" "$R/gnu-lisp/emacs-lisp")
 for f in "$P"/*.el; do
   out=$(cd "$R" && timeout 30 "$B" "${pre[@]}" -- "$f" "${lp[@]}" 2>/dev/null)
   python3 - "$f" "$out" <<'PY'

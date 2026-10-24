@@ -1,5 +1,7 @@
 ;;; romacs-companion.el --- Trusted-local companion -*- lexical-binding: t; -*-
 
+;; SPDX-License-Identifier: GPL-3.0-or-later
+
 ;;; Commentary:
 ;; Support cooperative owner-controlled companion editing, not a sandbox.
 ;; All edits are headless.  No buffer/window selection, display, waits or I/O.

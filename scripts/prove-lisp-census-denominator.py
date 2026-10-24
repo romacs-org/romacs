@@ -34,7 +34,7 @@ green = run(source)
 assert green['passed'], green
 mutations = {
     'gnu-file-hashes-fabricated': ('hashlib.sha256(original).hexdigest()', "'0' * 64"),
-    'generated-files-counted-as-bundled': ("tracked = {p for p in tracked if p.endswith('.el')}", "tracked = {p for p in tracked if p.endswith('.el')} | {str(p.relative_to(ROOT)) for p in (ROOT / 'lisp').rglob('*.el')}"),
+    'generated-files-counted-as-bundled': ("tracked = {p for p in tracked if p.endswith('.el')}", "tracked = {p for p in tracked if p.endswith('.el')} | {str(p.relative_to(ROOT)) for p in (ROOT / 'gnu-lisp').rglob('*.el')}"),
     'bundle-counted-as-parity': ('len(successful & shared)', 'len(successful)'),
     'gnu-target-loses-missing': ("'gnu_target_total': len(entries)", "'gnu_target_total': len(shared)"),
     'missing-paths-erased': ("'missing_paths': missing", "'missing_paths': []"),

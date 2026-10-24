@@ -36,7 +36,7 @@
             (append
              '("-Q" "--batch")
              (mapcan (lambda (path) (list "-L" path)) dependency-paths)
-             (list "-L" (expand-file-name "lisp-bundled/jabber" jabber-test-reload--root)
+             (list "-L" (expand-file-name "vendor-lisp/jabber" jabber-test-reload--root)
                    "--eval" "(setq load-prefer-newer t)"
                    "--eval" (prin1-to-string form))))
            (status
@@ -54,7 +54,7 @@
            (and (eq (car-safe form) 'autoload)
                 (jabber-reload--quoted-symbol (cadr form))))
          (jabber-reload--read-forms
-          (expand-file-name "lisp-bundled/jabber/jabber-autoloads.el"
+          (expand-file-name "vendor-lisp/jabber/jabber-autoloads.el"
                             jabber-test-reload--root)))))
 
 (ert-deftest jabber-test-reload-clean-source-boundaries ()
@@ -91,7 +91,7 @@
   "Export public package entries without private runtime helpers."
   (skip-unless
    (file-readable-p
-    (expand-file-name "lisp-bundled/jabber/jabber-autoloads.el"
+    (expand-file-name "vendor-lisp/jabber/jabber-autoloads.el"
                       jabber-test-reload--root)))
   (let ((autoloads (jabber-test-reload--generated-autoloads)))
     (dolist (function '(jabber-muc-get-buffer
@@ -296,7 +296,7 @@
           (keymap-set map "z" #'ignore)
           (keymap-set map "h" #'ignore)
           (define-key ctl-x-map (kbd "C-j") #'ignore)
-          (load ,(expand-file-name (format "lisp-bundled/jabber/%s.el" (car case))
+          (load ,(expand-file-name (format "vendor-lisp/jabber/%s.el" (car case))
                                  jabber-test-reload--root)
               nil t t)
           (unless (and (eq map ,(cadr case))
@@ -365,7 +365,7 @@
           (keymap-set map "h" #'ignore)
           (dolist (stage '(source supported))
             (if (eq stage 'source)
-                (load ,(expand-file-name "lisp-bundled/jabber/jabber-chat-commands.el"
+                (load ,(expand-file-name "vendor-lisp/jabber/jabber-chat-commands.el"
                                          jabber-test-reload--root) nil t t)
               (jabber-reload ,jabber-test-reload--root))
             (unless (and (eq map jabber-chat-operations-menu-map)
@@ -407,7 +407,7 @@
      `(progn
         (setq jabber-db-path nil)
         (require ',(car case))
-        (load ,(expand-file-name (format "lisp-bundled/jabber/%s.el" (car case))
+        (load ,(expand-file-name (format "vendor-lisp/jabber/%s.el" (car case))
                                  jabber-test-reload--root)
               nil t t)
         (save-window-excursion
@@ -452,7 +452,7 @@
             (dolist (stage '(initial source supported))
               (pcase stage
                 ('source
-                 (load ,(expand-file-name "lisp-bundled/jabber/jabber-omemo-trust.el"
+                 (load ,(expand-file-name "vendor-lisp/jabber/jabber-omemo-trust.el"
                                           jabber-test-reload--root) nil t t))
                 ('supported (jabber-reload ,jabber-test-reload--root)))
               (unless (eq map (current-local-map))
@@ -864,7 +864,7 @@
           (dolist (stage '(source supported))
             (if (eq stage 'source)
                 (dolist (feature (delete-dups (mapcar #'cdr cases)))
-                  (load (expand-file-name (format "lisp-bundled/jabber/%s.el" feature)
+                  (load (expand-file-name (format "vendor-lisp/jabber/%s.el" feature)
                                           ,jabber-test-reload--root) nil t t))
               (jabber-reload ,jabber-test-reload--root))
             (cl-mapc
@@ -896,7 +896,7 @@
             (custom (lambda () (interactive) (insert "CUSTOM"))))
         (define-key map (kbd "RET") custom)
         (define-key map (kbd "C-c C-t") custom)
-        (load ,(expand-file-name "lisp-bundled/jabber/jabber-chat-commands.el"
+        (load ,(expand-file-name "vendor-lisp/jabber/jabber-chat-commands.el"
                                  jabber-test-reload--root) nil t t)
         (unless (and (eq map jabber-chat-mode-map)
                      (eq (lookup-key map (kbd "RET")) custom)

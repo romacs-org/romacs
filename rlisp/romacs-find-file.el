@@ -1,4 +1,12 @@
-;;; -*- lexical-binding: t -*-
+;;; romacs-find-file.el --- File visiting -*- lexical-binding: t -*-
+
+;; SPDX-License-Identifier: GPL-3.0-or-later
+
+;;; Commentary:
+
+;; File visiting for Romacs.
+
+;;; Code:
 (unless (boundp 'default-directory) (setq default-directory (expand-file-name "./")))
 (defvar file-name-history nil)
 (defvar find-file-hook nil)

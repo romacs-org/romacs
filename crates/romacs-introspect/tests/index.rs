@@ -156,7 +156,7 @@ fn a_lisp_function_is_not_found_and_says_where_the_lisp_is() {
     });
     let at = lisp.expect("a LispDefined cause");
     assert!(
-        at.file.starts_with("lisp/") && at.file.ends_with(".el"),
+        at.file.starts_with("gnu-lisp/") && at.file.ends_with(".el"),
         "{at}"
     );
 }

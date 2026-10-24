@@ -1,11 +1,17 @@
 ;;; prelude.el --- VM2 T3 tier: loops that call Lisp  -*- lexical-binding: t -*-
 
+;; SPDX-License-Identifier: GPL-3.0-or-later
+
+;;; Commentary:
+
 ;; A Rust primitive never calls Lisp from a loop (PRIMITIVE-DOCTRINE section 3).
 ;; A loop whose body calls Lisp is written here instead, as ordinary compiled
 ;; Lisp over leaf cursors (`car'/`cdr', `aref', `length'), the same shape as the
 ;; `maphash' expansion over `#:vm2-hash-next' in expand.rs.  Every value such a
 ;; loop keeps across a callback is then a register of a traced Lisp frame by
 ;; construction, and a collection inside the callback forwards it.
+
+;;; Code:
 
 (defun mapcar (function sequence)
   "Apply FUNCTION to each element of SEQUENCE, and make a list of the results.

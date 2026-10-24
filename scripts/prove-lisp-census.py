@@ -29,7 +29,7 @@ with tempfile.TemporaryDirectory(dir=str(_PortablePath(_portable_tempfile.gettem
     for name, source in [('pass', '(setq census-proof 1)\n(+ census-proof 2)\n'), ('missing_function', '(census-proof-impossible)\n(setq must-not-run t)\n'), ('missing_variable', 'census-proof-impossible-variable\n'), ('reader_parse', '(setq x 1)\n(unterminated\n')]:
         path = td / (name + '.el')
         path.write_text(source)
-        row = census.run_file(path, {'form_count': None, 'status': 'not_split'}, target / 'romacs-vm-census', [ROOT / 'lisp'], 10)
+        row = census.run_file(path, {'form_count': None, 'status': 'not_split'}, target / 'romacs-vm-census', [ROOT / 'gnu-lisp'], 10)
         mutations[name] = row
     assert mutations['pass']['loaded'] and mutations['pass']['forms_evaluated'] == 2, mutations
     assert all(not mutations[k]['loaded'] for k in ['missing_function', 'missing_variable', 'reader_parse']), mutations
@@ -40,7 +40,7 @@ with tempfile.TemporaryDirectory(dir=str(_PortablePath(_portable_tempfile.gettem
     # Actually weaken the verdict predicate and run the same real failing VM.
     original_loaded = census.loaded
     census.loaded = lambda report: True
-    mutant = census.run_file(td / 'missing_function.el', {'form_count': 2, 'status': 'ok'}, target / 'romacs-vm-census', [ROOT / 'lisp'], 10)
+    mutant = census.run_file(td / 'missing_function.el', {'form_count': 2, 'status': 'ok'}, target / 'romacs-vm-census', [ROOT / 'gnu-lisp'], 10)
     census.loaded = original_loaded
     mutant_caught = False
     try:
@@ -48,7 +48,7 @@ with tempfile.TemporaryDirectory(dir=str(_PortablePath(_portable_tempfile.gettem
     except AssertionError:
         mutant_caught = True
     assert mutant_caught, 'weakened verdict unexpectedly survived the failure assertion'
-    paths = [base / f for base in [ROOT / 'lisp', Path(str(_PortablePath(_portable_os.environ.get('ROMACS_GNU_SOURCE', _PortablePath(_portable_os.environ.get('GNU_ORACLE_ROOT', _PortablePath(_portable_os.environ.get('XDG_CACHE_HOME', _PortablePath.home() / '.cache')) / 'gnu-emacs-pin')) / 'src')) / 'lisp'))] for f in ['subr.el', 'bindings.el', 'keymap.el']]
+    paths = [base / f for base in [ROOT / 'gnu-lisp', Path(str(_PortablePath(_portable_os.environ.get('ROMACS_GNU_SOURCE', _PortablePath(_portable_os.environ.get('GNU_ORACLE_ROOT', _PortablePath(_portable_os.environ.get('XDG_CACHE_HOME', _PortablePath.home() / '.cache')) / 'gnu-emacs-pin')) / 'src')) / 'lisp'))] for f in ['subr.el', 'bindings.el', 'keymap.el']]
     manifest = td / 'manifest.json'
     manifest.write_text(json.dumps(list(map(str, paths))))
     p = subprocess.run(['emacs', '-Q', '--batch', '--script', str(ROOT / 'scripts/lisp-census-oracle.el'), '--manifest', str(manifest)], capture_output=True, text=True, check=True)
@@ -61,7 +61,7 @@ with tempfile.TemporaryDirectory(dir=str(_PortablePath(_portable_tempfile.gettem
         p = subprocess.run([str(target / 'romacs-vm'), '--eval-stream'], input=payload, capture_output=True, text=True, timeout=30)
         replies = [json.loads(line) for line in p.stdout.splitlines()]
         errors = [(i + 1, r['error']) for i, r in enumerate(replies) if 'error' in r]
-        strict = census.run_file(path, entry, target / 'romacs-vm-census', [ROOT / 'lisp'], 10)
+        strict = census.run_file(path, entry, target / 'romacs-vm-census', [ROOT / 'gnu-lisp'], 10)
         gnu = subprocess.run(['emacs', '-Q', '--batch', '--script', str(ROOT / 'scripts/lisp-census-oracle.el'), '--load-file', str(path)], capture_output=True, text=True, timeout=30)
         calibration.append({'file': os.path.relpath(path, ROOT), 'continuation_forms_accepted': sum('error' not in r for r in replies), 'total_forms': entry['form_count'], 'recorded_accepted': recorded, 'first_errors': errors[:6], 'process_exit': p.returncode, 'strict_load_forms_evaluated': strict['forms_evaluated'], 'strict_loaded': strict['loaded'], 'gnu_standalone': json.loads(gnu.stdout.splitlines()[-1])})
     aborter = td / 'abort-process.py'
@@ -76,7 +76,7 @@ with tempfile.TemporaryDirectory(dir=str(_PortablePath(_portable_tempfile.gettem
     for name, source in [('handled', "(condition-case nil (require 'cbad) (error nil))\n(setq done t)\n"), ('causal', "(progn (condition-case nil (require 'cbad) (error nil)) census-own-missing)\n"), ('replay_timeout', '(defvar census-count 0)\n(progn (setq census-count (1+ census-count)) (if (= census-count 1) census-own-missing (while t)))\n'), ('timeout', '(while t)\n')]:
         path = td / (name + '.el')
         path.write_text(source)
-        mutations[name] = census.run_file(path, {'form_count': 2, 'status': 'ok'}, target / 'romacs-vm-census', [td, ROOT / 'lisp'], 0.2)
+        mutations[name] = census.run_file(path, {'form_count': 2, 'status': 'ok'}, target / 'romacs-vm-census', [td, ROOT / 'gnu-lisp'], 0.2)
     assert mutations['handled']['loaded'] and mutations['handled']['forms_evaluated'] == 2
     assert mutations['causal']['first_failure']['classification'] == 'missing_variable'
     assert not mutations['causal']['first_failure']['transitive']

@@ -1,9 +1,17 @@
-;;; startup.el --- VM2 launchable Rum workspace -*- lexical-binding: t -*-
+;;; romacs-startup.el --- VM2 launchable Rum workspace -*- lexical-binding: t -*-
+
+;; SPDX-License-Identifier: GPL-3.0-or-later
+
+;;; Commentary:
+
 ;; Palette port from Omarchy Rum emacs.el and colors.toml; no Modus runtime dependency.
 ;; Host helpers keep VM2's own `window-child': GNU's window.el (loaded by
 ;; loadup.el) replaces it with Lisp over C primitives VM2 lacks
 ;; (`window-top-child'), and the GUI's selection and window commands must
 ;; not depend on how far window.el got.
+
+;;; Code:
+
 (fset 'romacs-gui--window-child (symbol-function 'window-child))
 (defface default '((t (:foreground "#d4c5a0" :background "#000000"))) "Rum parchment on black.")
 (defface cursor '((t (:background "#9099d9"))) "Rum indigo cursor.")

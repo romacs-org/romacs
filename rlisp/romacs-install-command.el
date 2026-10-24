@@ -1,4 +1,12 @@
-;;; -*- lexical-binding: t -*-
+;;; romacs-install-command.el --- GUI command installation -*- lexical-binding: t -*-
+
+;; SPDX-License-Identifier: GPL-3.0-or-later
+
+;;; Commentary:
+
+;; GUI command installation for Romacs.
+
+;;; Code:
 (defun romacs-gui-install-command (key definition)
   "Install a zero-argument interactive DEFINITION on an unoccupied KEY.
 DEFINITION is a quoted defun named romacs-gui- followed by a nonempty suffix.

@@ -6,10 +6,10 @@ fn main() {
     let root = PathBuf::from(&args[0]);
     let mut vm = Vm::new();
     vm.set_load_path(&[
-        root.join("lisp"),
-        root.join("lisp/emacs-lisp"),
-        root.join("lisp/progmodes"),
-        root.join("lisp/textmodes"),
+        root.join("gnu-lisp"),
+        root.join("gnu-lisp/emacs-lisp"),
+        root.join("gnu-lisp/progmodes"),
+        root.join("gnu-lisp/textmodes"),
     ])
     .unwrap();
     vm.install_lisp_prelude().unwrap();

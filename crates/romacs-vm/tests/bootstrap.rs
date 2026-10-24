@@ -4,9 +4,9 @@ use std::path::PathBuf;
 #[test]
 fn macroexp_cold_frontier_advances_past_cadr_without_preloading_subr() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let path = root.join("lisp/emacs-lisp/macroexp.el").canonicalize().unwrap();
+    let path = root.join("gnu-lisp/emacs-lisp/macroexp.el").canonicalize().unwrap();
     let mut vm = Vm::new();
-    vm.set_load_path(&[root.join("lisp"), root.join("lisp/emacs-lisp")]).unwrap();
+    vm.set_load_path(&[root.join("gnu-lisp"), root.join("gnu-lisp/emacs-lisp")]).unwrap();
     let failure = vm.load_file(&path).unwrap_err();
     let report = vm.load_report();
     let step = report["steps"].as_array().unwrap().iter()

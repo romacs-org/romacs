@@ -34,22 +34,22 @@ class CensusTests(unittest.TestCase):
         self.assertEqual(census.failure_cause([own, handled], own), own)
 
     def test_cadr_hypothesis_names_existing_source_edit(self):
-        rows = [{'file': 'lisp/example.el', 'first_failure': {'candidate_missing_function': 'cadr', 'cause_file': 'lisp/emacs-lisp/macroexp.el', 'cause_form_index': 6, 'cause_source': '(defun macroexp--all-forms (forms) nil)'}}]
+        rows = [{'file': 'gnu-lisp/example.el', 'first_failure': {'candidate_missing_function': 'cadr', 'cause_file': 'gnu-lisp/emacs-lisp/macroexp.el', 'cause_form_index': 6, 'cause_source': '(defun macroexp--all-forms (forms) nil)'}}]
         import tempfile
         from unittest.mock import patch
         with tempfile.TemporaryDirectory(dir=str(_PortablePath(_portable_tempfile.gettempdir()) / '')) as temporary:
             root = Path(temporary)
-            (root / 'lisp/emacs-lisp').mkdir(parents=True)
-            (root / 'lisp/emacs-lisp/macroexp.el').write_text('\n'.join([''] * 74 + ['(list (cadr var+list))']))
+            (root / 'gnu-lisp/emacs-lisp').mkdir(parents=True)
+            (root / 'gnu-lisp/emacs-lisp/macroexp.el').write_text('\n'.join([''] * 74 + ['(list (cadr var+list))']))
             # Form feeds separate pages, not source lines.
-            (root / 'lisp/subr.el').write_text('\n'.join(['\f'] + [''] * 725 + ['(defun cadr (x)']))
+            (root / 'gnu-lisp/subr.el').write_text('\n'.join(['\f'] + [''] * 725 + ['(defun cadr (x)']))
             with patch.object(census, 'ROOT', root):
                 result = census.recommendations(rows)[0]
             self.assertIn('(car (cdr var+list))', result['reasoning'])
             self.assertEqual(result['form_index'], 5)
 
     def test_calibration_prose_tracks_current_measurement(self):
-        base = {'file': 'lisp/subr.el', 'continuation_forms_accepted': 12, 'total_forms': 20, 'strict_load_forms_evaluated': 3, 'recorded_accepted': 440, 'recorded_total': 522, 'gnu_standalone': {'files': [{'status': 'ok'}]}}
+        base = {'file': 'gnu-lisp/subr.el', 'continuation_forms_accepted': 12, 'total_forms': 20, 'strict_load_forms_evaluated': 3, 'recorded_accepted': 440, 'recorded_total': 522, 'gnu_standalone': {'files': [{'status': 'ok'}]}}
         before = census.calibration_note([base])
         changed = dict(base, continuation_forms_accepted=19, strict_load_forms_evaluated=8)
         after = census.calibration_note([changed])

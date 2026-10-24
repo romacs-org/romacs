@@ -7,10 +7,10 @@
         by exact path, SHA-256 and pinned generator/source references. These
         are snapshots, not pristine Git blobs or a regeneration claim. No
         undeclared .el file (even ignored or without .git), or other non-ignored
-        file in a repository, may exist under lisp/. A romacs variant of a GNU file
+        file in a repository, may exist under gnu-lisp/. A romacs variant of a GNU file
         may live ONLY in lisp-overlay/, declared in lisp-overlay/MANIFEST.tsv
         and rebased on the pin blob it varies; non-GNU Lisp lives in
-        lisp-bundled/. Exit 1 on any violation.
+        rlisp/ or vendor-lisp/. Exit 1 on any violation.
 
     lisp_oracle.py populations --rev REV [--out FILE]
         Re-derive the DRIFT/EDIT split of every shared path that differs from
@@ -39,6 +39,14 @@ GNU_PIN = '45b0f7699df36b3849edc3bdef37d4cb9e75b9ea'
 PIN_FILE = 'LISP-PIN.json'
 GENERATED_FILE = 'LISP-GENERATED.json'
 GNU_SOURCE = os.environ.get('LISP_ORACLE_GNU', str(_PortablePath(_portable_os.environ.get('ROMACS_GNU_SOURCE', _PortablePath(_portable_os.environ.get('GNU_ORACLE_ROOT', _PortablePath(_portable_os.environ.get('XDG_CACHE_HOME', _PortablePath.home() / '.cache')) / 'gnu-emacs-pin')) / 'src')) / ''))
+LOCAL_LISP = 'gnu-lisp'
+
+
+def local_path(upstream_path):
+    """Map a GNU source identity to its current checkout location."""
+    return LOCAL_LISP + upstream_path[len('lisp'):]
+
+
 OVERLAY = 'lisp-overlay'
 HEADER = 'romacs-overlay:'
 # Files in lisp-overlay/ that describe it rather than vary a GNU file.
@@ -115,12 +123,13 @@ def generated_support(root, gnu, pin, pinned, required):
                 if source_path not in upstream:
                     raise ValueError(f'{name}: source {source_path} is not a GNU Git path at the pin')
         support = {}
+        pristine_local = {local_path(p) for p in pinned}
         for rel, digest, source in record['files']:
             p = pathlib.PurePosixPath(rel)
             if (str(p) != rel or p.is_absolute() or '..' in p.parts
-                    or p.parts[0] != 'lisp' or p.suffix != '.el'):
+                    or p.parts[0] != LOCAL_LISP or p.suffix != '.el'):
                 raise ValueError(f'invalid support path {rel}')
-            if rel in pinned:
+            if rel in pristine_local:
                 raise ValueError(f'{rel}: support must not override a pristine GNU Git path')
             if rel in support:
                 raise ValueError(f'duplicate support path {rel}')
@@ -141,7 +150,8 @@ def generated_support(root, gnu, pin, pinned, required):
 
 def check(root, gnu, pin):
     root = pathlib.Path(root).resolve()
-    pinned = pin_tree(gnu, pin)
+    upstream = pin_tree(gnu, pin)
+    pinned = {local_path(p): blob for p, blob in upstream.items()}
     problems = []
 
     present = [p for p in sorted(pinned) if (root / p).is_file() and not (root / p).is_symlink()]
@@ -153,7 +163,7 @@ def check(root, gnu, pin):
                         f'(restore the pin blob; a variant belongs in {OVERLAY}/)')
 
     for p in absent:
-        problems.append(f'ABSENT {p}: GNU ships it at the pin; lisp/ is GNU\'s whole tree (re-extract it)')
+        problems.append(f'ABSENT {p}: GNU ships it at the pin; gnu-lisp/ is GNU\'s whole tree (re-extract it)')
 
     # LISP-PIN.json records the pin and GNU's own tree id for lisp/; both must
     # agree with GNU's object store, so the record cannot drift from the pin.
@@ -172,21 +182,21 @@ def check(root, gnu, pin):
     declared = rec.get('generated_support')
     if declared is not None and declared != GENERATED_FILE:
         problems.append(f'{PIN_FILE}: generated_support must name {GENERATED_FILE}')
-    support, support_problems = generated_support(root, gnu, pin, pinned, declared is not None)
+    support, support_problems = generated_support(root, gnu, pin, upstream, declared is not None)
     problems.extend(support_problems)
 
     # Runtime Lisp inputs are checked even when ignored or in a .git-less
     # export. Git additionally identifies non-ignored, non-Lisp extras while
     # still allowing ignored build products such as .elc files.
-    listed = {str(p.relative_to(root)) for p in (root / 'lisp').rglob('*.el')
+    listed = {str(p.relative_to(root)) for p in (root / LOCAL_LISP).rglob('*.el')
               if not p.is_dir()}
     if (root / '.git').exists():
-        listed.update(git('ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', 'lisp', cwd=root).split('\0'))
+        listed.update(git('ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', LOCAL_LISP, cwd=root).split('\0'))
     extras = sorted(p for p in listed if p and p not in pinned and p not in support
                     and ((root / p).exists() or (root / p).is_symlink()))
     for p in extras:
         problems.append(f'EXTRA {p}: neither a GNU Git path at the pin nor declared generated support; '
-                        'non-GNU Lisp belongs in lisp-bundled/')
+                        'non-GNU Lisp belongs in rlisp/ or vendor-lisp/')
 
     manifest = {}
     for n, cols in read_tsv(root / OVERLAY / 'MANIFEST.tsv'):
@@ -207,16 +217,16 @@ def check(root, gnu, pin):
         if rel not in manifest:
             problems.append(f'UNDECLARED {OVERLAY}/{rel}: every overlay file needs a MANIFEST.tsv row')
             continue
-        if gnu_path not in pinned:
+        if gnu_path not in upstream:
             problems.append(f'{OVERLAY}/{rel}: varies no GNU file (lisp/{rel} is not in the pin); '
-                            'romacs-only Lisp belongs in lisp/ itself')
+                            'romacs-only Lisp belongs in rlisp/')
             continue
-        if manifest[rel] != pinned[gnu_path]:
-            problems.append(f'STALE {OVERLAY}/{rel}: rebased on {manifest[rel][:12]}, pin has {pinned[gnu_path][:12]}')
+        if manifest[rel] != upstream[gnu_path]:
+            problems.append(f'STALE {OVERLAY}/{rel}: rebased on {manifest[rel][:12]}, pin has {upstream[gnu_path][:12]}')
         head = (overlay_dir / rel).read_bytes()[:2048].decode(errors='replace').splitlines()[:5]
         if not any(HEADER in line for line in head):
             problems.append(f'{OVERLAY}/{rel}: no "{HEADER} <reason>" line in its first five lines')
-        if hash_files(root, [f'{OVERLAY}/{rel}'])[f'{OVERLAY}/{rel}'] == pinned[gnu_path]:
+        if hash_files(root, [f'{OVERLAY}/{rel}'])[f'{OVERLAY}/{rel}'] == upstream[gnu_path]:
             problems.append(f'{OVERLAY}/{rel}: identical to the pin; delete it')
     for rel in sorted(set(manifest) - set(files)):
         problems.append(f'{OVERLAY}/MANIFEST.tsv: {rel} declared but no such overlay file')
@@ -231,13 +241,16 @@ def check(root, gnu, pin):
         if len(problems) > 40:
             print(f'  ... and {len(problems) - 40} more', file=sys.stderr)
         return 1
-    print('lisp_oracle: ok, every shared lisp/ path is the pin blob; declared generated support bytes verified')
+    print('lisp_oracle: ok, every shared gnu-lisp/ path is the pin blob; declared generated support bytes verified')
     return 0
 
 
 def populations(root, gnu, pin, rev, out):
     pinned = pin_tree(gnu, pin)
-    ours = tree(root, rev)
+    local = tree(root, rev, prefix=LOCAL_LISP)
+    # Historical revisions predate the physical move; no runtime alias.
+    ours = ({'lisp' + p[len(LOCAL_LISP):]: blob for p, blob in local.items()}
+            if local else tree(root, rev))
     t31 = tree(gnu, 'emacs-31.1')
     shared = sorted(set(pinned) & set(ours))
     lines = ['# path\tclass\tour_blob\tpin_blob\tours_equals_emacs-31.1_same_path',
@@ -266,7 +279,7 @@ def main():
     ap.add_argument('--root', default=str(pathlib.Path(__file__).resolve().parents[1]))
     ap.add_argument('--gnu', default=GNU_SOURCE)
     ap.add_argument('--pin', default=GNU_PIN)
-    ap.add_argument('--rev', help='populations: the commit whose lisp/ is classified')
+    ap.add_argument('--rev', help='populations: the commit whose GNU Lisp is classified')
     ap.add_argument('--out')
     a = ap.parse_args()
     if a.command == 'check':

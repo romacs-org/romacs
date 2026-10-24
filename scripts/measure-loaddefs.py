@@ -36,10 +36,10 @@ def main():
     loaddefs = args.loaddefs.resolve()
     pins = {str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in [binary, loaddefs]}
     baseline = census.fingerprint()
-    files = sorted(p.resolve() for p in (ROOT / "lisp").rglob("*.el"))
-    paths = [ROOT / "lisp"] + sorted(p for p in (ROOT / "lisp").rglob("*") if p.is_dir())
+    files = sorted(p.resolve() for p in (ROOT / "gnu-lisp").rglob("*.el"))
+    paths = [ROOT / "gnu-lisp"] + sorted(p for p in (ROOT / "gnu-lisp").rglob("*") if p.is_dir())
     chain = (census.bootstrap_chain() if args.bootstrap == "gnu" else
-             [ROOT / "lisp" / (name + ".el") for name in CHAIN])
+             [ROOT / "gnu-lisp" / (name + ".el") for name in CHAIN])
     if args.after:
         chain.append(loaddefs)
     # Form denominators are the pinned GNU reader's output in the standard
@@ -48,11 +48,11 @@ def main():
     denominators = {row["file"]: row for row in baseline_rows}
     assert set(denominators) == {str(p.relative_to(ROOT)) for p in files}
     if args.targets_only:
-        targets = {"lisp/emacs-lisp/cl-lib.el", "lisp/emacs-lisp/ert.el", "lisp/files.el",
-                   "lisp/simple.el", "lisp/minibuffer.el", "lisp/window.el", "lisp/subr.el",
-                   *{f"lisp/emacs-lisp/{name}.el" for name in
+        targets = {"gnu-lisp/emacs-lisp/cl-lib.el", "gnu-lisp/emacs-lisp/ert.el", "gnu-lisp/files.el",
+                   "gnu-lisp/simple.el", "gnu-lisp/minibuffer.el", "gnu-lisp/window.el", "gnu-lisp/subr.el",
+                   *{f"gnu-lisp/emacs-lisp/{name}.el" for name in
                      ("rx", "debug", "backtrace", "ewoc", "find-func", "pp", "map")},
-                   "lisp/help-mode.el"}
+                   "gnu-lisp/help-mode.el"}
         files = [p for p in files if str(p.relative_to(ROOT)) in targets]
     rows = []
     raw = args.output.with_suffix(".jsonl")

@@ -20,7 +20,7 @@
 (require 'auth-source)
 
 (let ((root (expand-file-name "../../.." (file-name-directory (or load-file-name buffer-file-name)))))
-  (add-to-list 'load-path (expand-file-name "lisp-bundled/hermes" root)))
+  (add-to-list 'load-path (expand-file-name "vendor-lisp/hermes" root)))
 
 (eval-and-compile
   (unless (fboundp 'keymap-set)

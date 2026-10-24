@@ -4,9 +4,9 @@ fn boot() -> Vm {
     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let mut vm = Vm::new();
     vm.install_lisp_prelude().unwrap();
-    vm.set_load_path(&[root.join("lisp"), root.join("lisp/emacs-lisp")]).unwrap();
+    vm.set_load_path(&[root.join("gnu-lisp"), root.join("gnu-lisp/emacs-lisp")]).unwrap();
     for file in ["emacs-lisp/debug-early", "emacs-lisp/byte-run", "emacs-lisp/backquote", "subr"] {
-        vm.load_file(&root.join(format!("lisp/{file}.el"))).unwrap();
+        vm.load_file(&root.join(format!("gnu-lisp/{file}.el"))).unwrap();
     }
     vm
 }

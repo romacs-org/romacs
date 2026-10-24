@@ -202,8 +202,8 @@ fn gnu_real_compiler_fixtures_survive_on_two_mib() {
     if std::env::var_os("ROMACS_DEPTH_GNU_FIXTURE_CHILD").is_some() {
         std::thread::Builder::new().stack_size(2 * 1024 * 1024).spawn(|| {
             for (origin, source, line, prefix) in [
-                ("comp-common.el:71", include_str!("../../../lisp/emacs-lisp/comp-common.el"), 71, "(defconst comp-primitive-type-specifiers"),
-                ("cus-start.el:44", include_str!("../../../lisp/cus-start.el"), 44, "(let* ((quoter"),
+                ("comp-common.el:71", include_str!("../../../gnu-lisp/emacs-lisp/comp-common.el"), 71, "(defconst comp-primitive-type-specifiers"),
+                ("cus-start.el:44", include_str!("../../../gnu-lisp/cus-start.el"), 44, "(let* ((quoter"),
             ] {
                 let offset: usize = source.split_inclusive('\n').take(line - 1).map(str::len).sum();
                 let tail = &source[offset..];

@@ -9,7 +9,7 @@ use super::*;
 include!(concat!(env!("OUT_DIR"), "/prims_mods.rs"));
 
 /// T3 tier: Lisp loops that call Lisp per element, over leaf cursors.
-pub(crate) const PRELUDE: &str = include_str!("prelude.el");
+pub(crate) const PRELUDE: &str = include_str!("../../../../rlisp/vm/prelude.el");
 
 // Compile-fail probes for the T1 boundary. `tests/primitive_gc_boundary.rs`
 // checks this crate with `--cfg vm2_gc_probe="..."`, which places a fixture

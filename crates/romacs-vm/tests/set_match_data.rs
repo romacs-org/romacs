@@ -6,9 +6,9 @@ fn set_match_data_retains_buffer_across_moving_collection() {
     // The fixture calls GNU's Lisp-level buffer constructor from subr.el.
     vm.install_lisp_prelude().unwrap();
     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-    vm.set_load_path(&[root.join("lisp"), root.join("lisp/emacs-lisp")]).unwrap();
+    vm.set_load_path(&[root.join("gnu-lisp"), root.join("gnu-lisp/emacs-lisp")]).unwrap();
     for file in ["emacs-lisp/debug-early.el", "emacs-lisp/byte-run.el", "emacs-lisp/backquote.el", "subr.el"] {
-        vm.load_file(&root.join("lisp").join(file)).unwrap();
+        vm.load_file(&root.join("gnu-lisp").join(file)).unwrap();
     }
     vm.set_collection_floor(usize::MAX);
     vm.eval_source("(dotimes (i 80) (copy-sequence \"dead allocation\")) (set-buffer (generate-new-buffer \"match-retained\")) (insert \"abc\") (set-match-data (list 1 3 (current-buffer))) (set-buffer (get-buffer-create \"other\"))").unwrap();

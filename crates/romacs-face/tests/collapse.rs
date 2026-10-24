@@ -199,7 +199,7 @@ fn the_oracles_defface_specs_are_the_trees() {
     // quoted defface spec in this tree's lisp/ reads to the same datum, so the
     // parity evidence is about the specs romacs actually ships.
     let table = deffaces_table();
-    let lisp = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../lisp");
+    let lisp = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../gnu-lisp");
     let mut files = vec![lisp.clone()];
     let (mut same, mut differ, mut unreadable) = (0, Vec::new(), 0);
     while let Some(p) = files.pop() {

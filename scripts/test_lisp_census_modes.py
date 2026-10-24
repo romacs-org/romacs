@@ -146,7 +146,7 @@ class ChainDefinitionTests(unittest.TestCase):
     def test_chain_follows_gnu_loadup_order_and_every_link_exists(self):
         chain = census.bootstrap_chain()
         paths = [p for p in chain if isinstance(p, Path)]
-        names = [str(p.relative_to(census.ROOT / 'lisp')) for p in paths]
+        names = [str(p.relative_to(census.ROOT / 'gnu-lisp')) for p in paths]
         self.assertEqual(names[:4], ['emacs-lisp/debug-early.el', 'emacs-lisp/byte-run.el', 'emacs-lisp/backquote.el', 'subr.el'])
         for path in paths:
             self.assertTrue(path.is_file(), path)
@@ -156,7 +156,7 @@ class ChainDefinitionTests(unittest.TestCase):
         self.assertIn('(load "emacs-lisp/macroexp")', chain[-1])
         self.assertLess(names.index('window.el'), names.index('emacs-lisp/macroexp.el'))
         self.assertLess(names.index('files.el'), names.index('emacs-lisp/macroexp.el'))
-        loadup = (census.ROOT / 'lisp/loadup.el').read_text()
+        loadup = (census.ROOT / 'gnu-lisp/loadup.el').read_text()
         positions = [loadup.index(f'(load "{n[:-3]}")') for n in names]
         self.assertEqual(positions, sorted(positions), 'chain must keep loadup.el order')
 

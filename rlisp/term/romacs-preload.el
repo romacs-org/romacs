@@ -1,8 +1,6 @@
 ;;; romacs-preload.el --- dump-safe Romacs backend defaults  -*- lexical-binding: t -*-
 
-;; Copyright (C) 2026 Free Software Foundation, Inc.
-
-;; This file is part of GNU Emacs.
+;; SPDX-License-Identifier: GPL-3.0-or-later
 
 ;;; Commentary:
 

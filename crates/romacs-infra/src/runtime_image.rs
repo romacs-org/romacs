@@ -145,7 +145,7 @@ pub fn provision_bootstrap_image(
 
     // Only regeneration needs a bootable tree; a fresh image is reused even if
     // the checkout has since been rearranged.
-    let loadup = plan.runtime_root.join("lisp").join("loadup.el");
+    let loadup = plan.runtime_root.join("gnu-lisp").join("loadup.el");
     if !loadup.is_file() {
         return Err(format!(
             "runtime root {} does not hold lisp/loadup.el, so a runtime image \

@@ -3,7 +3,7 @@ use romacs_vm::Vm;
 // generate-new-buffer is GNU Lisp, not a native VM primitive. Load its real
 // definition before replaying the inherited marker corpus.
 fn prepared_vm() -> Vm {
-    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../lisp");
+    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../gnu-lisp");
     let mut vm = Vm::new();
     vm.set_load_path(&[root.clone(), root.join("emacs-lisp")]).unwrap();
     vm.install_lisp_prelude().unwrap();

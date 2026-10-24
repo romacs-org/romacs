@@ -84,8 +84,8 @@ fn install_command_module_activates_during_initialize() {
         return;
     }
     let root = std::env::temp_dir().join(format!("romacs-install-seam-{}", std::process::id()));
-    let modules = root.join("lisp-bundled/romacs-gui-extensions");
-    std::fs::create_dir_all(root.join("lisp")).unwrap();
+    let modules = root.join("rlisp/romacs-gui-extensions");
+    std::fs::create_dir_all(root.join("gnu-lisp")).unwrap();
     std::fs::create_dir_all(&modules).unwrap();
     std::fs::write(modules.join("10-setup.el"), "(setq romacs-gui-module-text \"module\")").unwrap();
     std::fs::write(modules.join("20-probe.el"), "(romacs-gui-install-command [24 57345] '(defun romacs-gui-module-probe () (interactive) (insert romacs-gui-module-text)))").unwrap();

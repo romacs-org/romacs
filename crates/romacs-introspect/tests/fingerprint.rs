@@ -28,7 +28,7 @@ fn fixture(root: &Path, reverse: bool) {
         ),
         ("crates/shared/src/lib.rs", "dependency source"),
         ("crates/romacs-vm/src/lib.rs", "VM source"),
-        ("crates/romacs-vm/src/startup.el", "(defun embedded () t)"),
+        ("rlisp/vm/prelude.el", "(defun embedded () t)"),
         (
             "crates/romacs-vm/src/registry.json",
             "embedded JSON, not an output",
@@ -81,7 +81,7 @@ fn identity_covers_source_bytes_paths_lisp_build_manifests_and_transitive_depend
         "Cargo.toml",
         "Cargo.lock",
         "crates/romacs-vm/src/lib.rs",
-        "crates/romacs-vm/src/startup.el",
+        "rlisp/vm/prelude.el",
         "crates/romacs-vm/src/registry.json",
         "crates/romacs-vm/build.rs",
         "crates/shared/src/lib.rs",
@@ -100,8 +100,8 @@ fn identity_covers_source_bytes_paths_lisp_build_manifests_and_transitive_depend
     fixture(dir.path(), false);
     let before = input_hash(dir.path()).unwrap();
     std::fs::rename(
-        dir.path().join("crates/romacs-vm/src/startup.el"),
-        dir.path().join("crates/romacs-vm/src/renamed.el"),
+        dir.path().join("rlisp/vm/prelude.el"),
+        dir.path().join("rlisp/vm/renamed.el"),
     )
     .unwrap();
     assert_ne!(before, input_hash(dir.path()).unwrap());

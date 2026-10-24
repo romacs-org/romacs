@@ -1,12 +1,18 @@
 (progn
 ;;; minibuf.el --- VM2: the Lisp half of read-from-minibuffer  -*- lexical-binding: t -*-
 
+;; SPDX-License-Identifier: GPL-3.0-or-later
+
+;;; Commentary:
+
 ;; Evaluated once per VM, on the first prompt, by prims/minibuf.rs. GNU's
 ;; read_minibuf (minibuf.c:573) runs a recursive command loop, which calls
 ;; Lisp per key, so that loop is Lisp here (PRIMITIVE-DOCTRINE section 3).
 ;; Every value it keeps across a command is a register of a traced frame.
-
 ;; GNU minibuf.c `minibuf_level'.
+
+;;; Code:
+
 (defvar romacs--minibuf-level 0)
 ;; simple.el:2008; read_minibuf binds it while the prompt is active.
 (defvar minibuffer-default nil)

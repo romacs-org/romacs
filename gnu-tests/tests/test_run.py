@@ -43,7 +43,7 @@ class LoadPath(unittest.TestCase):
     def test_core_owner_precedes_recursive_shadow_and_keeps_other_directories(self):
         with tempfile.TemporaryDirectory(prefix='gts-load-path-') as tmp:
             root = pathlib.Path(tmp)
-            lisp = root / 'lisp'
+            lisp = root / 'gnu-lisp'
             directories = [lisp, lisp / 'emacs-lisp', lisp / 'cedet',
                            lisp / 'cedet/semantic', lisp / 'cedet/semantic/debug',
                            lisp / 'textmodes']
@@ -51,7 +51,7 @@ class LoadPath(unittest.TestCase):
                 directory.mkdir(parents=True, exist_ok=True)
             for relative in ['emacs-lisp/debug.el', 'cedet/semantic/debug.el',
                              'textmodes/extra-owner.el']:
-                (lisp / relative).write_bytes((run.ROOT / 'lisp/emacs-lisp/debug.el').read_bytes())
+                (lisp / relative).write_bytes((run.ROOT / 'gnu-lisp/emacs-lisp/debug.el').read_bytes())
             with patch.object(run, 'ROOT', root):
                 paths = run.load_path()
             self.assertEqual(paths[:2], [str(lisp), str(lisp / 'emacs-lisp')])
@@ -66,9 +66,9 @@ class LoadPath(unittest.TestCase):
     def test_missing_core_directory_does_not_add_nonexistent_search_path(self):
         with tempfile.TemporaryDirectory(prefix='gts-load-path-') as tmp:
             root = pathlib.Path(tmp)
-            (root / 'lisp/textmodes').mkdir(parents=True)
+            (root / 'gnu-lisp/textmodes').mkdir(parents=True)
             with patch.object(run, 'ROOT', root):
-                self.assertEqual(run.load_path(), [str(root / 'lisp'), str(root / 'lisp/textmodes')])
+                self.assertEqual(run.load_path(), [str(root / 'gnu-lisp'), str(root / 'gnu-lisp/textmodes')])
 
 
 class Classification(unittest.TestCase):
@@ -564,13 +564,13 @@ class EndToEnd(unittest.TestCase):
         assert BIN is not None
         with tempfile.TemporaryDirectory(prefix='gts-owner-path-') as tmp:
             root = pathlib.Path(tmp)
-            lisp = root / 'lisp'
+            lisp = root / 'gnu-lisp'
             for relative in ['emacs-lisp/debug.el', 'cedet/semantic/debug.el',
                              'textmodes/extra-owner.el']:
                 destination = lisp / relative
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 source = 'emacs-lisp/debug.el' if relative.endswith('extra-owner.el') else relative
-                shutil.copyfile(run.ROOT / 'lisp' / source, destination)
+                shutil.copyfile(run.ROOT / 'gnu-lisp' / source, destination)
             plan = root / 'plan.json'
             plan.write_text(json.dumps({'file': 'owner-resolution', 'forms': []}))
             command = [BIN, '--harness', str(run.HARNESS), '--plan', str(plan)]

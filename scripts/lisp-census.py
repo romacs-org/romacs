@@ -102,11 +102,11 @@ def recommendations(rows):
         reason = 'Core capability/state; implement its real semantics rather than stubbing it. A Lisp implementation remains possible; cost is unmeasured.' if name in runtime else 'Existing Lisp helper/macro or absent bootstrap dependency: resolve its definition/load order before adding a Rust primitive; do not create the incidental variable named by this failure.'
         location = example.get('cause_file')
         form = example.get('cause_form_index')
-        pinned = (ROOT / 'lisp/emacs-lisp/macroexp.el').read_text().split('\n')
-        subr = (ROOT / 'lisp/subr.el').read_text().split('\n')
+        pinned = (ROOT / 'gnu-lisp/emacs-lisp/macroexp.el').read_text().split('\n')
+        subr = (ROOT / 'gnu-lisp/subr.el').read_text().split('\n')
         if name == 'cadr' and len(pinned) > 74 and '(list (cadr var+list))' in pinned[74] and len(subr) > 726 and '(defun cadr (x)' in subr[726]:
-            reason = 'Candidate call attribution points to macroexp--accumulate. cadr already exists at lisp/subr.el:727. Cheapest local bootstrap rewrite to test: (cadr var+list) -> (car (cdr var+list)) at lisp/emacs-lisp/macroexp.el:75, definition form 5; it removes this first frontier for the observed files, NOT a proof they then load. Loading the existing subr definition in a reviewed bootstrap sequence is another option. Source line text is checked before emitting this pinned recommendation.'
-            location, form = 'lisp/emacs-lisp/macroexp.el', 5
+            reason = 'Candidate call attribution points to macroexp--accumulate. cadr already exists at gnu-lisp/subr.el:727. Cheapest local bootstrap rewrite to test: (cadr var+list) -> (car (cdr var+list)) at gnu-lisp/emacs-lisp/macroexp.el:75, definition form 5; it removes this first frontier for the observed files, NOT a proof they then load. Loading the existing subr definition in a reviewed bootstrap sequence is another option. Source line text is checked before emitting this pinned recommendation.'
+            location, form = 'gnu-lisp/emacs-lisp/macroexp.el', 5
         elif head in {'declare-function', 'defgroup', 'defsubst', 'defmacro', 'defvar-keymap'}:
             reason = f'Failure arises in {head}, not evidence the named argument should become a global variable. Restore a VM2-compatible declaration/bootstrap helper once; look up the existing definitions in subr.el (declare-function), custom.el (defgroup), or emacs-lisp/byte-run.el (defsubst). Preserve semantics; no no-op runtime shim.'
         out.append({'symbol': name, 'files_blocked_at_first_frontier': len({r['file'] for r in entries}), 'attribution': 'provisional_post_verdict_replay', 'recommended_remedy': remedy, 'reasoning': reason, 'edit_or_failure_file': location, 'form_index': form, 'example_failure_head': head, 'deletion_assessment': 'No deletion recommendation: loading failure is not evidence a subsystem is outside the product. Owner scope/usage evidence is required.'})
@@ -126,10 +126,10 @@ def gnu_oracle_binary(_cache=[]):
 
 def fingerprint(root=ROOT):
     paths = subprocess.check_output(['git', 'ls-files', '-z'], cwd=root).decode().split('\0')
-    selected = {p for p in paths if p and (p.startswith(('lisp/', 'crates/romacs-vm/', 'crates/romacs-face/', 'crates/romacs-layout-input/', 'crates/romacs-regex-engine/')) or p in ['Cargo.toml', 'Cargo.lock'])}
+    selected = {p for p in paths if p and (p.startswith(('gnu-lisp/', 'rlisp/', 'vendor-lisp/', 'crates/romacs-vm/', 'crates/romacs-face/', 'crates/romacs-layout-input/', 'crates/romacs-regex-engine/')) or p in ['Cargo.toml', 'Cargo.lock'])}
     selected.update(['scripts/lisp-census.py', 'scripts/lisp-census-oracle.el', 'scripts/prove-lisp-census.py', 'scripts/regenerate-lisp-census.py', 'crates/romacs-vm/src/bin/romacs-vm-census.rs'])
     # Include new files in lisp and the tool, not merely the tracked manifest.
-    selected.update(str(p.relative_to(root)) for p in (root / 'lisp').rglob('*.el'))
+    selected.update(str(p.relative_to(root)) for p in (root / 'gnu-lisp').rglob('*.el'))
     selected.update(str(p.relative_to(root)) for p in (root / 'crates/romacs-vm').rglob('*.rs'))
     h = hashlib.sha256()
     for name in sorted(selected):
@@ -178,7 +178,7 @@ BOOTSTRAP_CHAIN = ['emacs-lisp/debug-early', 'emacs-lisp/byte-run', 'emacs-lisp/
 def macroexp_bootstrap_form(root=None):
     """Use GNU's conditional/bindings verbatim, rather than flattening its loads."""
     root = root or ROOT
-    source = (root / 'lisp/loadup.el').read_text()
+    source = (root / 'gnu-lisp/loadup.el').read_text()
     start = source.index("(if (compiled-function-p (symbol-function 'macroexpand-all))")
     end = source.index('(load "cus-face")', start)
     return source[start:end].strip()
@@ -188,7 +188,7 @@ def bootstrap_chain(root=None):
     root = root or ROOT
     chain = []
     for name in BOOTSTRAP_CHAIN:
-        chain.append(root / 'lisp' / f'{name}.el')
+        chain.append(root / 'gnu-lisp' / f'{name}.el')
         if name == 'window':
             chain.append("(setq resize-mini-windows 'grow-only)")
             chain.append("(setq load-source-file-function #'load-with-code-conversion)")
@@ -297,7 +297,7 @@ def oracle_inventory():
     if commit != GNU_PIN:
         raise RuntimeError('GNU pin must be a full immutable commit')
     archive = subprocess.check_output(['git', 'archive', commit, 'lisp'], cwd=GNU_SOURCE)
-    tracked = set(subprocess.check_output(['git', 'ls-tree', '-r', '--name-only', '-z', 'HEAD', '--', 'lisp'], cwd=ROOT).decode().split('\0'))
+    tracked = set(subprocess.check_output(['git', 'ls-tree', '-r', '--name-only', '-z', 'HEAD', '--', 'gnu-lisp', 'rlisp', 'vendor-lisp'], cwd=ROOT).decode().split('\0'))
     tracked = {p for p in tracked if p.endswith('.el')}
     entries = []
     with tarfile.open(fileobj=io.BytesIO(archive)) as tree:
@@ -305,11 +305,13 @@ def oracle_inventory():
             if not member.isfile() or not member.name.endswith('.el'):
                 continue
             original = tree.extractfile(member).read()
-            path = ROOT / member.name
-            local = path.read_bytes() if member.name in tracked and path.is_file() else None
-            entries.append({'file': member.name, 'gnu_sha256': hashlib.sha256(original).hexdigest(),
+            local_name = 'gnu-lisp' + member.name[len('lisp'):]
+            path = ROOT / local_name
+            local = path.read_bytes() if local_name in tracked and path.is_file() else None
+            entries.append({'file': local_name, 'gnu_source_path': member.name,
+                            'gnu_sha256': hashlib.sha256(original).hexdigest(),
                             'local_sha256': hashlib.sha256(local).hexdigest() if local is not None else None,
-                            'status': 'missing' if member.name not in tracked else 'pristine' if local == original else 'modified'})
+                            'status': 'missing' if local is None else 'pristine' if local == original else 'modified'})
     entries.sort(key=lambda e: e['file'])
     support = {}
     if (ROOT / 'LISP-GENERATED.json').is_file():
@@ -446,7 +448,7 @@ def main():
         return 0
     if args.check:
         artifact = json.loads(args.output.read_text())
-        scope = sorted(str(p.relative_to(ROOT)) for p in (ROOT / 'lisp').rglob('*.el'))
+        scope = sorted(str(p.relative_to(ROOT)) for p in (ROOT / 'gnu-lisp').rglob('*.el'))
         fresh = artifact.get('oracle_inventory') == inventory and artifact.get('mode', 'cold') == args.mode and artifact.get('eager_target', False) is args.eager_target and artifact['input_sha256'] == fingerprint() and artifact.get('scope') == 'whole_tree' and sorted(r['file'] for r in artifact['files']) == scope and artifact['gnu_version'] == subprocess.check_output([gnu_oracle_binary(), '--version'], text=True).splitlines()[0]
         print('fresh' if fresh else 'STALE: regenerate with python3 scripts/lisp-census.py')
         return 0 if fresh else 1
@@ -459,7 +461,7 @@ def main():
     env['TMPDIR'] = str(_PortablePath(_portable_tempfile.gettempdir()) / '')
     subprocess.run(['cargo', 'build', '--manifest-path', 'crates/romacs-vm/Cargo.toml', '--release', '--bin', 'romacs-vm-census', '--bin', 'romacs-vm'], cwd=ROOT, env=env, check=True)
     started = time.monotonic()
-    files = sorted(p.resolve() for p in (args.files or (ROOT / 'lisp').rglob('*.el')))
+    files = sorted(p.resolve() for p in (args.files or (ROOT / 'gnu-lisp').rglob('*.el')))
     with tempfile.TemporaryDirectory(prefix='lisp-census-', dir=env['TMPDIR']) as tmp:
         manifest = Path(tmp) / 'manifest.json'
         manifest.write_text(json.dumps(list(map(str, files))))
@@ -467,7 +469,7 @@ def main():
         oracle = json.loads(p.stdout.splitlines()[-1])['files']
     if len(files) != len(oracle):
         raise RuntimeError('oracle omitted files')
-    load_paths = [ROOT / 'lisp'] + sorted(p for p in (ROOT / 'lisp').rglob('*') if p.is_dir())
+    load_paths = [ROOT / 'gnu-lisp'] + sorted(p for p in (ROOT / 'gnu-lisp').rglob('*') if p.is_dir())
     binary_tmp = tempfile.TemporaryDirectory(prefix='census-binary-', dir=env['TMPDIR'])
     binary = Path(binary_tmp.name) / 'romacs-vm-census'
     shutil.copy2(target / 'release/romacs-vm-census', binary)
@@ -496,7 +498,7 @@ def main():
     # The rglob denominator includes build-generated, git-ignored .el files
     # (e.g. lisp/international/charscript.el), so it moves with build state.
     # The tracked figures are the stable, comparable denominator.
-    tracked = set(subprocess.check_output(['git', 'ls-files', '-z', '--', 'lisp'], cwd=ROOT).decode().split('\0'))
+    tracked = set(subprocess.check_output(['git', 'ls-files', '-z', '--', 'gnu-lisp'], cwd=ROOT).decode().split('\0'))
     summary = summarize(rows, tracked, args.mode, inventory)
     if args.mode == 'warm':
         summary['bootstrap_entries_planned'] = len(preload)

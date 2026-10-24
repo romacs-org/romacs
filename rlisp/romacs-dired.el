@@ -1,4 +1,12 @@
-;;; -*- lexical-binding: t -*-
+;;; romacs-dired.el --- Directory browsing -*- lexical-binding: t -*-
+
+;; SPDX-License-Identifier: GPL-3.0-or-later
+
+;;; Commentary:
+
+;; Directory browsing for Romacs.
+
+;;; Code:
 (defvar dired-directory nil)
 (defvar dired-mode-hook nil)
 (defvar romacs-dired-rows nil)

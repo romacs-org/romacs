@@ -962,7 +962,7 @@ fn subdirs_el_text(list: &str) -> String {
     fn subdirs_fixture(name: &str) -> PathBuf {
         let root = std::env::temp_dir().join(format!("romacs-subdirs-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
-        let lisp = root.join("lisp");
+        let lisp = root.join("gnu-lisp");
         for d in ["obsolete", "term", "RCS", "CVS", "Old", "=x", "x~", "a.orig", "b.rej", "foo.el", "foo.elc", ".hidden",
                   "alpha", "mh-e", "zeta", "empty", "b/c", "cedet/semantic", "leim/quail"] {
             std::fs::create_dir_all(lisp.join(d)).unwrap();
@@ -1050,11 +1050,11 @@ fn subdirs_el_text(list: &str) -> String {
     fn apply_subdirs_follows_gnus_build_through_symlinks() {
         let root = std::env::temp_dir().join(format!("romacs-subdirs-links-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
-        std::fs::create_dir_all(root.join("lisp/b/c")).unwrap();
-        std::fs::create_dir_all(root.join("lisp/cedet/semantic")).unwrap();
-        std::os::unix::fs::symlink("cedet", root.join("lisp/alias")).unwrap();
-        std::os::unix::fs::symlink("b", root.join("lisp/balias")).unwrap();
-        let lisp = root.join("lisp").canonicalize().unwrap();
+        std::fs::create_dir_all(root.join("gnu-lisp/b/c")).unwrap();
+        std::fs::create_dir_all(root.join("gnu-lisp/cedet/semantic")).unwrap();
+        std::os::unix::fs::symlink("cedet", root.join("gnu-lisp/alias")).unwrap();
+        std::os::unix::fs::symlink("b", root.join("gnu-lisp/balias")).unwrap();
+        let lisp = root.join("gnu-lisp").canonicalize().unwrap();
         let at = |rel: &str| if rel == "." { lisp.to_string_lossy().into_owned() } else { lisp.join(rel).to_string_lossy().into_owned() };
         let (path, _, _) = apply_subdirs(vec![at(".")], &lisp);
         std::fs::remove_dir_all(&root).unwrap();
@@ -1082,7 +1082,7 @@ fn subdirs_el_text(list: &str) -> String {
         ];
         let mut results = vec![];
         for (case, dirs) in cases {
-            let lisp = root.join(case).join("lisp");
+            let lisp = root.join(case).join("gnu-lisp");
             for d in dirs { std::fs::create_dir_all(lisp.join(std::ffi::OsStr::from_bytes(d))).unwrap(); }
             let lisp = lisp.canonicalize().unwrap();
             let top = lisp.to_string_lossy().into_owned();
@@ -1090,7 +1090,7 @@ fn subdirs_el_text(list: &str) -> String {
             results.push((case, path == [top.clone()], applied.is_empty(), skipped.iter().map(|(d, why)| (d == &top, why.clone())).collect::<Vec<_>>()));
         }
         // The space case's inner path, reached as a load-path entry itself.
-        let lisp = root.join("space/lisp").canonicalize().unwrap();
+        let lisp = root.join("space/gnu-lisp").canonicalize().unwrap();
         let inner = lisp.join("has space").to_string_lossy().into_owned();
         let (path, _, skipped) = apply_subdirs(vec![lisp.to_string_lossy().into_owned(), inner.clone()], &lisp);
         std::fs::remove_dir_all(&root).unwrap();

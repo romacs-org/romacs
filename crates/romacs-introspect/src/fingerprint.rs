@@ -67,6 +67,7 @@ pub fn input_roots(root: &Path) -> Result<Vec<PathBuf>, String> {
         "rust-toolchain.toml",
         "rust-toolchain",
         ".cargo",
+        "rlisp/vm",
     ] {
         let p = root.join(name);
         if p.exists() {

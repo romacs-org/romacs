@@ -1,4 +1,12 @@
-;;; editing.el --- Shared editor interaction policy -*- lexical-binding: t -*-
+;;; romacs-editing.el --- Shared editor interaction policy -*- lexical-binding: t -*-
+
+;; SPDX-License-Identifier: GPL-3.0-or-later
+
+;;; Commentary:
+
+;; Shared editor interaction policy.
+
+;;; Code:
 
 (defvar values nil)
 (defvar read-expression-history nil)

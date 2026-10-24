@@ -1,4 +1,12 @@
-;;; -*- lexical-binding: t -*-
+;;; romacs-buffer-switch.el --- Buffer selection -*- lexical-binding: t -*-
+
+;; SPDX-License-Identifier: GPL-3.0-or-later
+
+;;; Commentary:
+
+;; Buffer selection for Romacs.
+
+;;; Code:
 (defvar buffer-name-history nil)
 (defvar read-buffer-function 'romacs-read-buffer)
 (defvar romacs-buffer--previous nil)

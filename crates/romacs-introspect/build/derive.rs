@@ -588,7 +588,7 @@ pub fn lisp_defs(root: &Path) -> (Vec<String>, LispDefs) {
     let mut files = Vec::new();
     let mut defs: LispDefs = BTreeMap::new();
     let mut paths = Vec::new();
-    walk(&root.join("lisp"), &mut |p| {
+    walk(&root.join("gnu-lisp"), &mut |p| {
         if p.extension().is_some_and(|e| e == "el") {
             paths.push(p.to_path_buf());
         }

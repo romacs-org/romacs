@@ -61,7 +61,11 @@ let
         grep -Fq '${checkedPackage}/bin/.romacs-vm-gui-wrapped' \
           ${checkedPackage}/bin/romacs-vm-gui
 
-        test -d ${checkedPackage}/share/romacs/lisp
+        test -d ${checkedPackage}/share/romacs/gnu-lisp
+        test -d ${checkedPackage}/share/romacs/rlisp
+        test -d ${checkedPackage}/share/romacs/vendor-lisp
+        test ! -e ${checkedPackage}/share/romacs/lisp
+        test ! -e ${checkedPackage}/share/romacs/lisp-bundled
         test -d ${checkedPackage}/share/romacs/etc
         test -f ${checkedPackage}/share/emacs/site-lisp/site-start.el
         test -f ${checkedPackage}/share/emacs/site-lisp/subdirs.el

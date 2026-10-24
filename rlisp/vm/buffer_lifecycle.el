@@ -1,3 +1,13 @@
+;;; buffer_lifecycle.el --- Buffer lifecycle policy
+
+;; SPDX-License-Identifier: GPL-3.0-or-later
+
+;;; Commentary:
+
+;; Run buffer query and cleanup hooks on the evaluator thread.
+
+;;; Code:
+
 (progn
   (defvar kill-buffer-query-functions nil)
   (defvar kill-buffer-hook nil)

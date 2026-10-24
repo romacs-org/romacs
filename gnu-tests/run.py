@@ -568,7 +568,7 @@ def load_baseline(rel: str) -> dict:
 # romacs
 
 def load_path() -> list[str]:
-    lisp = ROOT / 'lisp'
+    lisp = ROOT / 'gnu-lisp'
     directories = sorted(str(p) for p in lisp.rglob('*') if p.is_dir())
     core = str(lisp / 'emacs-lisp')
     return [str(lisp)] + ([core] if core in directories else []) + [
@@ -602,7 +602,7 @@ def run_romacs(binary: pathlib.Path, rel: str, plan: dict, scratch: pathlib.Path
         for d in [str((RUN_TESTS / rel).parent)]:
             cmd += ['--load-path', d]
         for link in BOOTSTRAP_CHAIN:
-            cmd += ['--preload', str(ROOT / 'lisp' / f'{link}.el')]
+            cmd += ['--preload', str(ROOT / 'gnu-lisp' / f'{link}.el')]
         for name in skip:
             cmd += ['--skip-test', name]
         cmd += list(extra_args)  # the runner's own tests only
@@ -1005,7 +1005,7 @@ def cmd_scoreboard(args) -> int:
     ledger = load_ledger(LEDGER)
     engine = 'gnu' if args.harness_fidelity else args.engine
     binary = (pathlib.Path(args.bin) if args.bin else build_adapter()) if engine == 'romacs' else None
-    ert = ROOT / 'lisp' / 'emacs-lisp' / 'ert.el'
+    ert = ROOT / 'gnu-lisp' / 'emacs-lisp' / 'ert.el'
     # Never label edited source as the pin, even outside a Git source mirror.
     try:
         expected_lisp = subprocess.run(['git', '-C', str(GNU_MIRROR), 'rev-parse',
@@ -1013,7 +1013,7 @@ def cmd_scoreboard(args) -> int:
                                        check=True, capture_output=True, text=True).stdout.strip()
     except (OSError, subprocess.CalledProcessError) as error:
         raise Refusal(3, f'cannot verify pinned Lisp tree: {error}') from error
-    if git_tree_id(ROOT / 'lisp') != expected_lisp:
+    if git_tree_id(ROOT / 'gnu-lisp') != expected_lisp:
         raise Refusal(3, 'real ERT Lisp tree differs from GNU pin')
     rows, defects, reports, errors = [], [], {}, {}
     with ScratchTree(), tempfile.TemporaryDirectory(prefix='gts-real-') as tmp:
@@ -1039,7 +1039,7 @@ def cmd_scoreboard(args) -> int:
                     if getattr(args, 'bootstrap', 'standard') == 'ordered':
                         cmd += ['--measurement-regime', 'retained-bindings-prefix']
                     for link in real_bootstrap_chain(args):
-                        cmd += ['--preload', str(ROOT / 'lisp' / f'{link}.el')]
+                        cmd += ['--preload', str(ROOT / 'gnu-lisp' / f'{link}.el')]
                     proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                           text=True, errors='replace', env=gnu_env(home),
                                           timeout=args.setup_timeout, cwd=target.parent)

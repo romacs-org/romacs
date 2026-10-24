@@ -14,6 +14,11 @@ Make editor state explicit and queryable, maintain derived views incrementally,
 and let humans and agents work side by side without stealing each other's
 cursor. Fast interaction and useful machine interfaces belong in the foundation.
 
+* Source layout
+
+=rlisp/= holds Romacs Lisp, =gnu-lisp/= the pinned GNU sources, and
+=vendor-lisp/= bundled external packages.
+
 * Build and run
 
 On Linux with a Wayland session, install the Rust toolchain specified in
