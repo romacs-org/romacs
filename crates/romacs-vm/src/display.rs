@@ -376,6 +376,29 @@ impl Vm {
         self.slots[slot].value = Value::UNBOUND;
         outcome
     }
+    fn snapshot_region(&mut self, window: Value, buffer: Value, point: i64) -> Result<Option<std::ops::Range<usize>>> {
+        if window != self.selected_window_value()? { return Ok(None); }
+        let saved = self.slots[self.buffer_slot].value;
+        self.slots[self.buffer_slot].value = buffer;
+        let active = (|| -> Result<bool> {
+            let mark = self.slot("mark-active");
+            let transient = self.slot("transient-mark-mode");
+            Ok(self.variable_value(mark)? != Value::NIL && self.variable_value(transient)? != Value::NIL)
+        })();
+        self.slots[self.buffer_slot].value = saved;
+        if !active? { return Ok(None); }
+        let Some(marker) = self.buffer_mark_value(buffer) else { return Ok(None); };
+        let Some(Object::Marker(mark)) = self.object_if(marker) else { return Ok(None); };
+        if mark.buffer != buffer { return Ok(None); }
+        let Some(mark) = self.marker_position_value(marker)?.integer_value() else { return Ok(None); };
+        let Object::Buffer(b) = self.object(buffer)? else { return Ok(None); };
+        let accessible = b.accessible();
+        let mark = b.byte_of_char(crate::coordinates::CharOffset((mark - 1).max(0) as usize))?.0
+            .clamp(accessible.start.0, accessible.end.0);
+        let point = b.byte_of_char(crate::coordinates::CharOffset((point - 1).max(0) as usize))?.0
+            .clamp(accessible.start.0, accessible.end.0);
+        Ok(Some(mark.min(point)..mark.max(point)))
+    }
     fn snapshot_window_inner(
         &mut self,
         root: usize,
@@ -397,6 +420,7 @@ impl Vm {
             .integer_value()
             .unwrap_or(1);
         let point = self.window_point_value(window)?.as_integer()?;
+        let region = self.snapshot_region(window, buffer, point)?;
         let Object::Buffer(b) = self.object(buffer)? else {
             return Err("Unicode display buffer required".into());
         };
@@ -429,6 +453,8 @@ impl Vm {
         let styles = terminal.map_or(&[][..], |binding| binding.styles.as_ref());
         let mut style_index = 0;
         let mut terminal_faces = std::collections::HashMap::new();
+        let mut region_faces = std::collections::HashMap::new();
+        let region_background = names.iter().position(|name| name == "region").map(|i| faces[i].background);
         let mut face_runs: Vec<FaceRun> = vec![];
         for (at, ch) in utf8.char_indices() {
             let value = b
@@ -455,6 +481,17 @@ impl Vm {
                     faces.push(resolved);
                     handle
                 });
+            }
+            if region.as_ref().is_some_and(|range| range.contains(&at)) {
+                if let Some(background) = region_background {
+                    face = *region_faces.entry(face.0).or_insert_with(|| {
+                        let mut selected = faces[face.0 as usize].clone();
+                        selected.background = background;
+                        let handle = FaceHandle(faces.len() as u32);
+                        faces.push(selected);
+                        handle
+                    });
+                }
             }
             if let Some(last) = face_runs.last_mut()
                 && last.face == face

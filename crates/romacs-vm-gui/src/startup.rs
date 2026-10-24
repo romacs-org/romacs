@@ -35,7 +35,7 @@ pub const STAND_INS: [(&str, &str, &str); 13] = [
     ("[24 111]", "other-window", "romacs-gui-other-window"),
     ("[24 3]", "save-buffers-kill-terminal", "romacs-gui-quit"),
     ("[24 5]", "eval-last-sexp", "romacs-gui-eval-last-sexp"),
-    ("[21]", "universal-argument", "romacs-eval-insert-prefix"),
+    ("[21]", "universal-argument", "romacs-universal-argument"),
     // GNU binds C-x C-s to save-buffer in ctl-x-map (files.el:9323); GNU's
     // files.el does not load yet, so this is romacs-gui-save-buffer over the
     // C `write-region' (startup.el).
@@ -296,6 +296,7 @@ pub fn initialize_files(vm: &mut Vm, files: &[std::path::PathBuf]) -> Result<Sta
     vm.eval_source(include_str!("find-file.el"))?;
     vm.eval_source(include_str!("buffer-switch.el"))?;
     vm.eval_source(include_str!("extended-command.el"))?;
+    initialize_editing(vm)?;
     vm.eval_source(include_str!("dired.el"))?;
     vm.eval_source(include_str!("../../../lisp-bundled/romacs-term.el"))?;
     vm.eval_source(include_str!("install-command.el"))?;
@@ -360,6 +361,7 @@ pub fn initialize_loadup_from(vm: &mut Vm, launch: Launch, font: Option<&str>, d
     vm.eval_source(include_str!("find-file.el"))?;
     vm.eval_source(include_str!("buffer-switch.el"))?;
     vm.eval_source(include_str!("extended-command.el"))?;
+    initialize_editing(vm)?;
     vm.eval_source(include_str!("dired.el"))?;
     vm.eval_source(include_str!("../../../lisp-bundled/romacs-term.el"))?;
     let bindings = bind_journey_keys(vm, true)?;
@@ -368,6 +370,33 @@ pub fn initialize_loadup_from(vm: &mut Vm, launch: Launch, font: Option<&str>, d
     visit_files(vm, &files)?;
     load_gui_extensions(vm, dir)?;
     Ok(started)
+}
+
+fn initialize_editing(vm: &mut Vm) -> Result<(), String> {
+    vm.eval_source(include_str!("editing.el"))?;
+    for (source, names) in [
+        (include_str!("../../../lisp/subr.el"), &[
+            "plusp", "add-to-history",
+        ][..]),
+        (include_str!("../../../lisp/simple.el"), &[
+            "mark", "set-mark", "push-mark", "pop-mark", "push-mark-command",
+            "pop-to-mark-command", "set-mark-command", "beginning-of-buffer",
+        ][..]),
+    ] {
+        let (spans, _) = crate::loadup::load_sites(source)?;
+        for name in names {
+            if vm.eval_source(&format!("(fboundp '{name})"))? != romacs_vm::Fixed::NIL { continue; }
+            let prefix = format!("(defun {name}");
+            let definitions: Vec<_> = spans.iter().filter(|&&(start, end, _)| {
+                source[start..end].strip_prefix(&prefix)
+                    .is_some_and(|tail| tail.starts_with(char::is_whitespace))
+            }).collect();
+            if definitions.len() != 1 { return Err(format!("Expected one GNU editing definition: {name}")); }
+            let &&(start, end, _) = definitions.first().unwrap();
+            vm.eval_source(&source[start..end])?;
+        }
+    }
+    Ok(())
 }
 
 /// Evaluate sorted `.el` command modules beside GNU's runtime Lisp directory.
@@ -1136,7 +1165,7 @@ mod tests {
             ("cursor", "", "9099d9"),
             ("mode-line", "d4c5a0", "50269a"),
             ("mode-line-inactive", "756b59", "141414"),
-            ("region", "d4c5a0", "191919"),
+            ("region", "d4c5a0", "3e4451"),
             ("fringe", "000000", "000000"),
             ("highlight", "d4c5a0", "7030af"),
             ("minibuffer-prompt", "d2b580", ""),

@@ -4,20 +4,21 @@ use romacs_vm::Vm;
 /// The bridge's commands, defined with VM2's own `defun` (before GNU's
 /// byte-run.el replaces it). Its C-x C-e command is a romacs stand-in for GNU's
 /// `eval-last-sexp` (elisp-mode.el) and is NAMED as one, so a command reply
-/// can never pass it off as GNU's; C-u is an eval-only insertion prefix, not
-/// GNU's `universal-argument`. Keys are bound by `startup::STAND_INS`.
+/// can never pass it off as GNU's. C-u uses the shared command prefix carrier.
+/// Keys are bound by `startup::STAND_INS`.
 pub fn define(vm: &mut Vm) -> Result<(), String> {
     vm.eval_source(
         r#"
-        (setq romacs-eval-request nil romacs-eval-prefix nil
-              romacs-eval-buffer nil romacs-eval-point nil)
-        (defun romacs-eval-insert-prefix () (interactive)
-          (setq romacs-eval-prefix t))
-        (defun romacs-gui-eval-last-sexp () (interactive)
+        (setq romacs-eval-request nil romacs-eval-buffer nil romacs-eval-point nil)
+        (defun romacs-universal-argument (arg)
+          "Accumulate a universal prefix; repeated C-u multiplies it by four."
+          (interactive "P")
+          (setq this-command last-command real-this-command real-last-command
+                prefix-arg (list (if (consp arg) (* 4 (car arg)) 4))))
+        (defun romacs-gui-eval-last-sexp (arg) (interactive "P")
           (setq romacs-eval-buffer (current-buffer)
                 romacs-eval-point (point)
-                romacs-eval-request (if romacs-eval-prefix 2 1)
-                romacs-eval-prefix nil))
+                romacs-eval-request (if arg 2 1)))
     "#,
     )?;
     Ok(())
@@ -28,7 +29,7 @@ pub fn define(vm: &mut Vm) -> Result<(), String> {
 #[cfg(test)]
 pub fn install(vm: &mut Vm) -> Result<(), String> {
     define(vm)?;
-    vm.eval_source("(global-set-key [24 5] 'romacs-gui-eval-last-sexp) (global-set-key [21] 'romacs-eval-insert-prefix)")?;
+    vm.eval_source("(global-set-key [24 5] 'romacs-gui-eval-last-sexp) (global-set-key [21] 'romacs-universal-argument)")?;
     Ok(())
 }
 
@@ -37,12 +38,7 @@ pub fn after_command(vm: &mut Vm) -> Result<(), String> {
     // Not installed under --gnu-lisp: GNU's defun cannot make commands yet.
     let request = vm.eval_source("(and (boundp 'romacs-eval-request) romacs-eval-request)")?;
     let request = request.display()?;
-    if request == "nil" {
-        vm.eval_source(
-            "(and (boundp 'romacs-eval-prefix) (not (eq this-command 'romacs-eval-insert-prefix)) (setq romacs-eval-prefix nil))",
-        )?;
-        return Ok(());
-    }
+    if request == "nil" { return Ok(()); }
     vm.eval_source("(setq romacs-eval-request nil)")?;
     let result = (|| -> Result<String, Failure> {
         // Not with-current-buffer: after loadup that is GNU's subr.el macro over
@@ -149,12 +145,10 @@ mod tests {
             serde_json::to_string(source).unwrap()
         ))
         .unwrap();
-        if insert {
-            vm.eval_source("(call-interactively (key-binding [21]))")
-                .unwrap();
-        }
-        vm.eval_source("(call-interactively (key-binding [24 5]))")
-            .unwrap();
+        let mut commands = crate::command::Commands::default();
+        if insert { commands.dispatch(vm, romacs_vm::CommandEvent::Character(21)).unwrap(); }
+        commands.dispatch(vm, romacs_vm::CommandEvent::Character(24)).unwrap();
+        commands.dispatch(vm, romacs_vm::CommandEvent::Character(5)).unwrap();
         after_command(vm).unwrap();
     }
     fn echo(vm: &mut Vm) -> String {

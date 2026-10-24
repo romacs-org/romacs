@@ -1353,6 +1353,7 @@ mod leaf {
     mod casing;
     mod modification;
     mod buffer_lifecycle;
+    mod editor_mark;
     mod printing;
     mod bool_vector;
     mod search;

@@ -189,6 +189,9 @@ pub(crate) static C_VARIABLES: &[CVariable] = &[
     CVariable { name: "buffer-file-truename", gnu: "buffer.c:5446", kind: Kind::PerBuffer { default: Init::Nil, predicate: Some(Predicate::Stringp) } },
     CVariable { name: "buffer-read-only", gnu: "buffer.c:5458", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
     CVariable { name: "buffer-file-format", gnu: "buffer.c:5837", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
+    CVariable { name: "mark-active", gnu: "buffer.c:5795", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
+    CVariable { name: "transient-mark-mode", gnu: "buffer.c:5875", kind: Kind::Lisp(Init::Nil) },
+    CVariable { name: "mark-even-if-inactive", gnu: "callint.c:898", kind: Kind::Lisp(Init::True) },
 ];
 
 /// The runtime storage GNU keeps in C globals and `buffer_defaults`.
@@ -290,7 +293,7 @@ impl Forwarded {
 /// and a `local_flags` bit each). `None`, or an index past the end, is "not
 /// local here": the buffer sees the default.
 #[derive(Clone, Default)]
-pub(crate) struct PerBuffer(Vec<Option<Value>>, pub(crate) VisitedModtime, Option<(u64, u64)>, Option<String>);
+pub(crate) struct PerBuffer(Vec<Option<Value>>, pub(crate) VisitedModtime, Option<(u64, u64)>, Option<String>, Option<Value>);
 
 /// Native scalar state, not Lisp Values: safe through moving collection.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -308,6 +311,8 @@ pub(crate) fn file_identity(path: &str) -> Option<(u64, u64)> {
 }
 
 impl PerBuffer {
+    pub(crate) fn editor_mark(&self) -> Option<Value> { self.4 }
+    pub(crate) fn set_editor_mark(&mut self, marker: Value) { self.4 = Some(marker); }
     pub(crate) fn get(&self, i: u16) -> Option<Value> {
         self.0.get(i as usize).copied().flatten()
     }
@@ -326,6 +331,7 @@ impl PerBuffer {
         }
     }
     pub(crate) fn visit_values(&mut self, visit: &mut impl FnMut(&mut Value)) {
+        if let Some(marker) = &mut self.4 { visit(marker); }
         for v in self.0.iter_mut().flatten() {
             visit(v);
         }
@@ -465,7 +471,7 @@ impl Vm {
     /// GNU `PER_BUFFER_VALUE_P (buf, idx)`.
     pub(super) fn per_buffer_always_local(&self, i: u16) -> bool {
         matches!(C_VARIABLES[self.forwarded.buffer_vars[i as usize]].name,
-            "buffer-invisibility-spec" | "buffer-file-name" | "buffer-file-truename" | "buffer-read-only" | "buffer-file-format" | "major-mode" | "mode-name")
+            "buffer-invisibility-spec" | "buffer-file-name" | "buffer-file-truename" | "buffer-read-only" | "buffer-file-format" | "major-mode" | "mode-name" | "mark-active")
     }
     pub(super) fn clear_forwarded_local(&mut self, buffer: usize, i: u16) {
         if !self.per_buffer_always_local(i) {

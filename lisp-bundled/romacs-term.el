@@ -9,7 +9,6 @@
 (defvar romacs-term--closing nil)
 (defvar romacs-term-session nil)
 (defvar romacs-term-emacs-input nil)
-(defvar romacs-term-mark nil)
 (defvar kill-ring nil)
 
 (defun romacs-term-running-p ()
@@ -30,8 +29,7 @@
 (defun romacs-term-keyboard-quit ()
   "Quit editor interaction without sending any input to the terminal."
   (interactive)
-  (setq mark-active nil)
-  (signal 'quit nil))
+  (keyboard-quit))
 
 (defun romacs-term-interrupt ()
   "Send Ctrl-C/ETX to the PTY; its line discipline normally delivers SIGINT."
@@ -63,21 +61,12 @@
 (defun romacs-term-set-mark ()
   "Set a marker for copying terminal text without changing the application cursor."
   (interactive)
-  (if (markerp romacs-term-mark) (set-marker romacs-term-mark (point))
-    (setq romacs-term-mark (copy-marker (point))))
-  (setq mark-active t)
-  (message "Mark set"))
+  (set-mark-command nil))
 
 (defun romacs-term-copy-region ()
   "Copy logical terminal text between point and the terminal navigation mark."
   (interactive)
-  (unless (and (markerp romacs-term-mark) (marker-position romacs-term-mark))
-    (signal 'user-error '("Set the terminal mark first")))
-  (let* ((mark (marker-position romacs-term-mark))
-         (text (buffer-substring-no-properties (min mark (point)) (max mark (point)))))
-    (setq kill-ring (cons text kill-ring) mark-active nil)
-    (message "Copied terminal text")
-    text))
+  (copy-region-as-kill (region-beginning) (region-end)))
 
 (defun romacs-term-search (text)
   "Find TEXT in the protected terminal projection without writing to the PTY."
@@ -121,7 +110,6 @@ terminal input and Emacs navigation.  Terminal output is always protected."
           (with-current-buffer buffer
             (make-local-variable 'romacs-term-session)
             (make-local-variable 'romacs-term-emacs-input)
-            (make-local-variable 'romacs-term-mark)
             (make-local-variable 'default-directory)
             (make-local-variable 'mode-line-format)
             (make-local-variable 'kill-buffer-hook)
@@ -129,7 +117,7 @@ terminal input and Emacs navigation.  Terminal output is always protected."
             (setq default-directory directory
                   major-mode 'romacs-term-mode mode-name "Term Input"
                   buffer-file-name nil buffer-read-only t
-                  romacs-term-emacs-input nil romacs-term-mark nil)
+                  romacs-term-emacs-input nil)
             (use-local-map romacs-term-mode-map)
             (setq romacs-term-session (romacs--term-create (or shell romacs-term-shell "") directory columns rows))
             (setq kill-buffer-hook '(romacs-term--close)

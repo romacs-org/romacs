@@ -9,7 +9,7 @@
 (defface cursor '((t (:background "#9099d9"))) "Rum indigo cursor.")
 (defface mode-line '((t (:foreground "#d4c5a0" :background "#50269a"))) "Rum active mode line.")
 (defface mode-line-inactive '((t (:foreground "#756b59" :background "#141414"))) "Rum inactive mode line.")
-(defface region '((t (:foreground "#d4c5a0" :background "#191919"))) "Rum selection.")
+(defface region '((t (:foreground "#d4c5a0" :background "#3e4451"))) "Rum selection.")
 (defface fringe '((t (:foreground "#000000" :background "#000000"))) "Unobtrusive fringe.")
 (defface highlight '((t (:foreground "#d4c5a0" :background "#7030af"))) "Rum highlight.")
 (defface minibuffer-prompt '((t (:foreground "#d2b580"))) "Rum prompt.")

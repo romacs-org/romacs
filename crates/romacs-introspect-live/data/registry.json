@@ -8,14 +8,14 @@
   "provenance": {
     "generated_by": "romacs-introspect-live",
     "generated_on": "linux-x86_64",
-    "input_hash": "528d17a86c26a3f9ea09f8a8c6f51dd620b54f71039e06fb95b583f07766228c",
+    "input_hash": "15f0c58c80e98b2a7d3c69f4018187c1b428609ceca4dc44396f0bb66aed4530",
     "source_only_at_generation": [],
     "vm2_probe_panics": [],
-    "vm2_universe": 2334
+    "vm2_universe": 2350
   },
   "schema": 2,
   "vm2": {
-    "count": 571,
+    "count": 575,
     "entries": [
       "#:vm2-closure-document",
       "#:vm2-closure-metadata",
@@ -340,6 +340,7 @@
       "mapcan",
       "mapconcat",
       "maphash",
+      "mark-marker",
       "marker-buffer",
       "marker-insertion-type",
       "marker-position",
@@ -357,6 +358,7 @@
       "menu-bar-mode",
       "message",
       "min",
+      "minibuffer-depth",
       "minibuffer-window",
       "minibufferp",
       "modify-syntax-entry",
@@ -419,6 +421,8 @@
       "record",
       "recordp",
       "regexp-quote",
+      "region-beginning",
+      "region-end",
       "remhash",
       "remove-overlays",
       "rename-file",

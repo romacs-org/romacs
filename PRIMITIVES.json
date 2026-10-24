@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "cf62ea2d7a4a70cbcf6f8f234d2245cf36c5e4965f036921e99f8222dfe52bc9",
+  "source_fingerprint": "cb35f9bdec735866ff1f4d985538c9d83af56862ebee34595edad2738a87f159",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 563,
-  "parsed_vm2_only": 563
+  "parsed_total": 567,
+  "parsed_vm2_only": 567
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -66,7 +66,7 @@
   "#:vm2-set-interactive-form": {
    "name": "#:vm2-set-interactive-form",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/callint.rs:663"
+   "registered_at": "crates/romacs-vm/src/prims/callint.rs:699"
   },
   "#:vm2-temp-buffer": {
    "name": "#:vm2-temp-buffer",
@@ -433,7 +433,7 @@
   "call-interactively": {
    "name": "call-interactively",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/callint.rs:259"
+   "registered_at": "crates/romacs-vm/src/prims/callint.rs:260"
   },
   "capitalize": {
    "name": "capitalize",
@@ -1740,6 +1740,11 @@
    "variant": "Primitive::Maphash",
    "registered_at": "crates/romacs-vm/src/lib.rs:618"
   },
+  "mark-marker": {
+   "name": "mark-marker",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/editor_mark.rs:3"
+  },
   "marker-buffer": {
    "name": "marker-buffer",
    "implementation": "vm2",
@@ -1837,6 +1842,11 @@
    "implementation": "vm2",
    "variant": "Primitive::Min",
    "registered_at": "crates/romacs-vm/src/lib.rs:714"
+  },
+  "minibuffer-depth": {
+   "name": "minibuffer-depth",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/minibuffer_depth.rs:3"
   },
   "minibuffer-window": {
    "name": "minibuffer-window",
@@ -2171,6 +2181,16 @@
    "name": "regexp-quote",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/regexp_quote.rs:4"
+  },
+  "region-beginning": {
+   "name": "region-beginning",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/editor_mark.rs:6"
+  },
+  "region-end": {
+   "name": "region-end",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/editor_mark.rs:9"
   },
   "remhash": {
    "name": "remhash",

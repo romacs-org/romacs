@@ -67,7 +67,7 @@ keyboard.c read_key_sequence returns 0 at the end of a keyboard macro."
   (let ((event (romacs--minibuf-read-event)) keys)
     (when event
       (setq keys (vector event))
-      (while (and keys (keymapp (key-binding keys)))
+      (while (and keys (keymapp (key-binding keys t)))
         (setq event (romacs--minibuf-read-event))
         (setq keys (and event (apply #'vector (append keys (list event))))))
       keys)))
@@ -79,14 +79,15 @@ any other signal, such as `quit', leaves the minibuffer."
   (let (keys)
     (setq last-command this-command real-last-command real-this-command)
     (while (setq keys (romacs--minibuf-read-key-sequence))
-      (let ((command (key-binding keys)))
+      (let ((command (key-binding keys t)))
         (setq last-command-event (aref keys (1- (length keys))))
         (if (null command)
             (message "%S is undefined" keys)
-          (setq this-command command real-this-command command)
+          (setq this-command command real-this-command command
+                current-prefix-arg prefix-arg prefix-arg nil)
           (condition-case err
               (call-interactively command)
-            (error (message "%S" err)))
+            (error (setq prefix-arg nil) (message "%S" err)))
           (setq last-command this-command real-last-command real-this-command))))
     nil))
 
@@ -126,7 +127,8 @@ error, a function is called (minibuffer-quit-recursive-edit throws one)."
   ;; read_minibuf specbinds `minibuffer-default' and increments
   ;; minibuf_level; both are restored by the unwind below. (setq, not let:
   ;; this whole file is compiled as one form, before its defvars run.)
-  (let* ((outer-default minibuffer-default)
+  (let* ((outer-prefix current-prefix-arg)
+         (outer-default minibuffer-default)
          (outer-level romacs--minibuf-level)
          (level (1+ outer-level))
          (buffer (get-buffer-create (format " *Minibuf-%d*" level)))
@@ -180,7 +182,8 @@ error, a function is called (minibuffer-quit-recursive-edit throws one)."
       ;; reselect the caller when it is still live (a command at the prompt
       ;; may have deleted it; GNU's record_unwind_current_buffer likewise
       ;; restores the buffer only if it is live).
-      (setq minibuffer-default outer-default romacs--minibuf-level outer-level)
+      (setq current-prefix-arg outer-prefix prefix-arg nil
+            minibuffer-default outer-default romacs--minibuf-level outer-level)
       (set-buffer buffer)
       (erase-buffer)
       (set-window-buffer mini mini-buffer)

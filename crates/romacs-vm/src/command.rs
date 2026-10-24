@@ -211,6 +211,7 @@ impl Vm {
             "this-command",
             "last-command",
             "current-prefix-arg",
+            "prefix-arg",
             "#:command-keys",
         ] {
             if !self.names.contains_key(name) {
@@ -248,6 +249,7 @@ impl Vm {
         ))?;
         let binding = self.eval_form_raw(&call("key-binding", vec![Form::Vector(vec![event_form])]))?;
         if binding == Value::NIL || self.resolve_keymap(binding).is_some() {
+            self.eval_form_raw(&call("setq", vec![sym("prefix-arg"), sym("nil")]))?;
             let message = "Key is undefined".to_owned();
 
             return Ok(CommandOutcome {
@@ -270,6 +272,8 @@ impl Vm {
                 call("setq", vec![
                     sym("this-command"), quote(sym(&command)),
                     sym("real-this-command"), quote(sym(&command)),
+                    sym("current-prefix-arg"), sym("prefix-arg"),
+                    sym("prefix-arg"), sym("nil"),
                 ]),
                 call(
                     "condition-case",
@@ -284,12 +288,29 @@ impl Vm {
                         ),
                         Form::List(vec![
                             Form::List(vec![sym("error"), sym("quit")]),
+                            call("setq", vec![sym("prefix-arg"), sym("nil")]),
                             sym("#:command-error"),
                         ]),
                     ],
                 ),
             ],
         );
+        let form = call("let", vec![
+            Form::List(vec![
+                Form::List(vec![sym("#:command-buffer"), call("current-buffer", vec![])]),
+                Form::List(vec![sym("#:command-tick"), call("buffer-chars-modified-tick", vec![])]),
+            ]),
+            call("prog1", vec![form,
+                call("when", vec![
+                    call("and", vec![
+                        call("eq", vec![sym("#:command-buffer"), call("current-buffer", vec![])]),
+                        call("/=", vec![sym("#:command-tick"), call("buffer-chars-modified-tick", vec![])]),
+                        call("fboundp", vec![quote(sym("deactivate-mark"))]),
+                    ]),
+                    call("deactivate-mark", vec![sym("t")]),
+                ]),
+            ]),
+        ]);
         let outcome = self.eval_form_raw(&form)?;
         let signal = if outcome == Value::NIL {
             None

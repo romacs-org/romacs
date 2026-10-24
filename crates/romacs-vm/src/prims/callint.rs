@@ -251,7 +251,8 @@ const NEXT_EVENT: usize = 10;
 const ARGS: usize = 11; // reversed argument list
 const HISTORY: usize = 12; // reversed command-history items
 const FLAGS: usize = 13; // RECORD_THEN_FAIL | ARG_FROM_TTY
-const WIDTH: usize = 14;
+const POSITION_ARGS: usize = 14;
+const WIDTH: usize = 15;
 const RECORD_THEN_FAIL: i64 = 1;
 const ARG_FROM_TTY: i64 = 2;
 const COMMAND_VARS: [&str; 4] = ["this-command", "this-original-command", "real-this-command", "last-command"];
@@ -426,11 +427,22 @@ fn run_command(cx: &mut Leaf<'_>, saved: &[Value]) -> Next {
     let mut args = vec![saved[FUNCTION]];
     let mut tail = saved[ARGS];
     let mut reversed = Vec::new();
+    let mut positions = saved[POSITION_ARGS];
     while let Some((head, rest)) = cx.pair(tail) {
-        reversed.push(head);
+        let (position, next) = cx.pair(positions).unwrap_or((Value::NIL, Value::NIL));
+        reversed.push((head, position != Value::NIL));
+        positions = next;
         tail = rest;
     }
-    args.extend(reversed.into_iter().rev());
+    for (value, position) in reversed.into_iter().rev() {
+        let value = if position {
+            match cx.marker_position(value) {
+                Some(Some(position)) => fixnum(position),
+                _ => value,
+            }
+        } else { value };
+        args.push(value);
+    }
     let f = cx.intern("funcall-interactively");
     Ok(Step::Call { f, args, then: done, saved: vec![] })
 }
@@ -535,6 +547,13 @@ fn unsupported(what: &str) -> Fault {
 fn push(cx: &mut Leaf<'_>, saved: &mut [Value], arg: Value, history: Value) {
     saved[ARGS] = cx.cons(arg, saved[ARGS]);
     saved[HISTORY] = cx.cons(history, saved[HISTORY]);
+    saved[POSITION_ARGS] = cx.cons(Value::NIL, saved[POSITION_ARGS]);
+}
+
+fn push_position(cx: &mut Leaf<'_>, saved: &mut [Value], arg: Value, history: Value) -> std::result::Result<(), Fault> {
+    push(cx, saved, arg, history);
+    cx.setcar(saved[POSITION_ARGS], Value::TRUE)?;
+    Ok(())
 }
 
 fn call_form(cx: &mut Leaf<'_>, name: &str) -> Value {
@@ -566,10 +585,13 @@ fn arg_codes(cx: &mut Leaf<'_>, mut saved: Vec<Value>) -> Next {
                 let h = call_form(cx, "point");
                 push(cx, &mut saved, point, h);
             }
-            // check_mark: VM2 has no mark, so it is never set
-            // (callint.c:156-166).
-            b'm' => return Err(Fault::Error("The mark is not set now".into())),
-            b'r' => return Err(Fault::Error("The mark is not set now, so there is no region".into())),
+            b'm' => {
+                cx.editor_checked_mark(false)?;
+                let mark = cx.editor_mark_marker()?;
+                let h = call_form(cx, "mark");
+                push_position(cx, &mut saved, mark, h)?;
+            }
+            b'r' => push_region(cx, &mut saved, false)?,
             b'R' => {
                 saved[POS] = fixnum(pos as i64);
                 let f = cx.intern("use-region-p");
@@ -618,15 +640,29 @@ fn arg_codes(cx: &mut Leaf<'_>, mut saved: Vec<Value>) -> Next {
     finish(cx, saved)
 }
 
+fn push_region(cx: &mut Leaf<'_>, saved: &mut Vec<Value>, optional: bool) -> std::result::Result<(), Fault> {
+    let mark_position = cx.editor_checked_mark(true)?.integer_value().unwrap();
+    let mark = cx.editor_mark_marker()?;
+    let point_position = cx.point()?;
+    let point = cx.editor_point_marker()?;
+    let (begin, end) = if point_position < mark_position { (point, mark) } else { (mark, point) };
+    let h_begin = call_form(cx, if optional { "use-region-beginning" } else { "region-beginning" });
+    let h_end = call_form(cx, if optional { "use-region-end" } else { "region-end" });
+    push_position(cx, saved, begin, h_begin)?;
+    push_position(cx, saved, end, h_end)?;
+    Ok(())
+}
+
 fn region_p(cx: &mut Leaf<'_>, active: Value, saved: &[Value]) -> Next {
-    if active != Value::NIL {
-        return Err(Fault::Error("The mark is not set now, so there is no region".into()));
-    }
     let mut saved = saved.to_vec();
-    let begin = call_form(cx, "use-region-beginning");
-    let end = call_form(cx, "use-region-end");
-    push(cx, &mut saved, Value::NIL, begin);
-    push(cx, &mut saved, Value::NIL, end);
+    if active != Value::NIL {
+        push_region(cx, &mut saved, true)?;
+    } else {
+        let begin = call_form(cx, "use-region-beginning");
+        let end = call_form(cx, "use-region-end");
+        push(cx, &mut saved, Value::NIL, begin);
+        push(cx, &mut saved, Value::NIL, end);
+    }
     let spec = spec_bytes(cx, &saved)?;
     let pos = index(saved[POS]);
     let next = spec[pos + 1..].iter().position(|&b| b == b'\n').map_or(spec.len(), |i| pos + 2 + i);
