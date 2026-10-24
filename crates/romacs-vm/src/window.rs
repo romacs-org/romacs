@@ -154,6 +154,20 @@ impl Vm {
     fn window_root(&mut self, name: &str) -> Value {
         self.window_root_peek(name)
     }
+    pub(super) fn buffer_is_displayed(&self, buffer: Value) -> Result<bool> {
+        let frame = self.frame(self.frame_value_peek())?;
+        let mut pending = vec![frame.root, frame.minibuffer];
+        while let Some(value) = pending.pop() {
+            let window = self.window(value)?;
+            if window.dead { continue; }
+            if window.live() && window.buffer == buffer && window.width > 0 && window.height > 0 {
+                return Ok(true);
+            }
+            pending.extend(window.children.iter().copied());
+        }
+        Ok(false)
+    }
+
     /// The root/selected/minibuffer window, read without interning: the
     /// slot exists once `ensure_windows` has run.
     fn window_root_peek(&self, name: &str) -> Value {

@@ -307,6 +307,7 @@ impl Vm {
         let mut pending = roots.to_vec();
         pending.extend_from_slice(&self.stack);
         pending.extend_from_slice(&self.external_roots);
+        pending.extend(self.terminal_bindings.iter().map(|binding| binding.buffer));
         if let Some(escape) = &mut self.propagated_escape {
             escape.visit_values(&mut |v| pending.push(*v));
         }
@@ -626,6 +627,7 @@ impl Vm {
             .iter_mut()
             .chain(self.stack.iter_mut())
             .chain(self.external_roots.iter_mut())
+            .chain(self.terminal_bindings.iter_mut().map(|binding| &mut binding.buffer))
         {
             rewrite(v);
         }

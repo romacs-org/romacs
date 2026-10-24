@@ -9,17 +9,10 @@
 let
   inherit (pkgs) lib;
   craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
-  # Preserve the COMPLETE authenticated local provider, not only *.rs/*.toml.
-  providerSource = source + "/local-deps/rio-vt-0.5.5";
-  providerPrefix = toString providerSource;
   cargoSrc = lib.cleanSourceWith {
     src = source;
     name = "romacs-cargo-source";
-    filter = path: type:
-      let p = toString path; in
-      p == providerPrefix
-      || lib.hasPrefix (providerPrefix + "/") p
-      || craneLib.filterCargoSources path type;
+    filter = craneLib.filterCargoSources;
   };
   # VM2 has no legacy video/webview feature forwarding or dump pipeline.
   productionCapabilities = {
@@ -59,9 +52,6 @@ let
     ];
     buildInputs = runtimeLibs;
     doCheck = false;
-    preConfigure = ''
-      diff -r ${providerSource} local-deps/rio-vt-0.5.5
-    '';
   };
   cargoArtifacts = craneLib.buildDepsOnly (
     commonArgs
@@ -69,13 +59,6 @@ let
       # Keep dependency artifacts stable across commits. Let buildDepsOnly
       # synthesize its dummy source to avoid import-from-derivation.
       version = "0.0.0";
-      # Crane stubs local path crates. Restore ONLY this provider after stubbing;
-      # workspace crates stay dummy so dependency preparation remains narrow.
-      extraDummyScript = ''
-        rm -rf "$out/local-deps/rio-vt-0.5.5"
-        mkdir -p "$out/local-deps"
-        cp -r ${providerSource} "$out/local-deps/rio-vt-0.5.5"
-      '';
     }
   );
   linuxWrapArgs =

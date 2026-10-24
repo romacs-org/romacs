@@ -416,10 +416,19 @@ impl Vm {
             )
             .map(str::to_owned)
             .collect();
-        let faces = names
+        let mut faces = names
             .iter()
             .map(|n| self.snapshot_face(n))
             .collect::<Result<Vec<_>>>()?;
+        let terminal = self.terminal_bindings.iter().find(|binding| binding.buffer == buffer);
+        if let Some(binding) = terminal {
+            if let Some(color) = binding.default_colors[0] { faces[0].foreground = color; }
+            if let Some(color) = binding.default_colors[1] { faces[0].background = color; }
+        }
+        let default = faces[0].clone();
+        let styles = terminal.map_or(&[][..], |binding| binding.styles.as_ref());
+        let mut style_index = 0;
+        let mut terminal_faces = std::collections::HashMap::new();
         let mut face_runs: Vec<FaceRun> = vec![];
         for (at, ch) in utf8.char_indices() {
             let value = b
@@ -436,7 +445,17 @@ impl Vm {
                 NodeView::Symbol(s) => s,
                 _ => "default",
             };
-            let face = FaceHandle(names.iter().position(|n| n == name).unwrap_or(0) as u32);
+            let mut face = FaceHandle(names.iter().position(|n| n == name).unwrap_or(0) as u32);
+            while styles.get(style_index).is_some_and(|run| run.bytes.end <= at) { style_index += 1; }
+            if let Some(run) = styles.get(style_index).filter(|run| run.bytes.contains(&at)) {
+                face = *terminal_faces.entry(run.style).or_insert_with(|| {
+                    let resolved = run.style.face(&default);
+                    if resolved == default { return FaceHandle(0); }
+                    let handle = FaceHandle(faces.len() as u32);
+                    faces.push(resolved);
+                    handle
+                });
+            }
             if let Some(last) = face_runs.last_mut()
                 && last.face == face
             {

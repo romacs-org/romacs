@@ -18,6 +18,9 @@ mod presentation;
 mod latency;
 mod echo;
 mod prompt;
+mod terminal_input;
+mod terminal_service;
+mod terminal_wait;
 
 const SCENE: &str = include_str!("../scene.el");
 
@@ -379,7 +382,17 @@ fn paint_prompt(
         glyphs.set_window_cursor_effects(romacs_display_protocol::DisplayWindowId::new(window.snapshot.id as i64), effects.clone());
     }
     let count = glyphs.glyphs.len();
+    let observed = SCENE_DUMPS.load(std::sync::atomic::Ordering::Relaxed).then(|| {
+        glyphs.glyphs.iter().filter_map(|glyph| {
+            if let romacs_display_protocol::FrameGlyph::Char { char, row_role, x, y, clip_rect, .. } = glyph {
+                Some(json!({"char":char,"role":format!("{row_role:?}"),"x":x,"y":y,"clip":clip_rect}))
+            } else { None }
+        }).collect::<Vec<_>>()
+    });
     sender.submit(glyphs)?;
+    if let Some(observed) = observed {
+        eprintln!("{}", json!({"diagnostic":"submitted-scene","presentation":presentation,"glyphs":observed}));
+    }
     Ok((count, ends))
 }
 #[allow(clippy::too_many_arguments)] // host options, as for paint()
@@ -395,6 +408,9 @@ fn evaluate(
 ) -> Result<(), String> {
     let engine = std::rc::Rc::new(std::cell::RefCell::new(romacs_layout2::LayoutEngine::new()?));
     let mut vm = Vm::new();
+    let terminal_service = terminal_service::Service::new();
+    let terminal_ready = terminal_service.ready();
+    if live { vm.set_terminal_host(Some(Box::new(terminal_service)))?; }
     if let Some(floor) = floor {
         vm.set_collection_floor(floor);
     }
@@ -446,7 +462,7 @@ fn evaluate(
     // A live GUI has a keyboard: prompts read it mid-command (prompt.rs).
     let host = std::rc::Rc::new(std::cell::RefCell::new(prompt::Shared::default()));
     if live {
-        vm.set_host_input(Some(Box::new(prompt::GuiHost { shared: host.clone(), sender: sender.clone(), engine: engine.clone() })));
+        vm.set_host_input(Some(Box::new(prompt::GuiHost { shared: host.clone(), sender: sender.clone(), engine: engine.clone(), terminal_ready: terminal_ready.clone() })));
     }
     let initial = snapshot(&mut vm, g1, width, height)?;
     let mut pending = std::collections::VecDeque::new();
@@ -454,6 +470,7 @@ fn evaluate(
     let mut key_trace = tracing().then(latency::Trace::default);
     let mut previous = paint(&mut engine.borrow_mut(), &mut vm, sender, presentation, force_gc, floor, initial, &mut pending, true, &mut paint_timings)?;
     let mut live_presentation = presentation::Presentation::new();
+    let mut terminal_modal = false;
     reply(json!({"ready":true,"presentation":presentation}))?;
     let (input_tx, input_rx) = std::sync::mpsc::sync_channel(1);
     if !live { std::thread::spawn(move || {
@@ -464,6 +481,7 @@ fn evaluate(
         }
     }); }
     loop {
+        if live && vm.poll_terminal_output()? { live_presentation.changed(); }
         let available = sender.input().len();
         let mut batch: std::collections::VecDeque<_> = presentation::take_batch(&mut pending, sender.input().try_iter(), available).collect();
         while let Some(event) = batch.pop_front() {
@@ -471,6 +489,7 @@ fn evaluate(
                 if !live || live_presentation.window_close(&mut vm)? {
                     return sender.shutdown();
                 }
+                terminal_modal = true;
                 continue;
             }
             let received = if tracing() {
@@ -484,9 +503,28 @@ fn evaluate(
                     width = w; height = h;
                     let (lh, cw) = romacs_layout2::frame_metrics(&vm.display_default_face()?)?;
                     vm.set_frame_geometry(width, height, lh, cw)?;
+                    if let Err(error) = vm.resize_selected_terminal() { echo::show(&mut vm, &error)?; }
                     live_presentation.changed();
                 }
                 continue;
+            }
+            if live && let Some((session, input)) = vm.selected_terminal()? {
+                let mode = if input { terminal_input::Mode::Terminal } else { terminal_input::Mode::Emacs };
+                match terminal_input::route(&event, mode, commands.in_prefix() || terminal_modal) {
+                    terminal_input::Target::Terminal => {
+                        let sent = vm.terminal_input_state(session).and_then(|state| {
+                            let bytes = terminal_input::encode(&event, state.application_cursor)?;
+                            if bytes.is_empty() { Ok(()) }
+                            else if !state.running { Err("Terminal is not running".into()) }
+                            else { vm.terminal_send(session, &bytes) }
+                        });
+                        if let Err(error) = sent { echo::show(&mut vm, &error)?; }
+                        live_presentation.changed();
+                        continue;
+                    }
+                    terminal_input::Target::Ignore => continue,
+                    terminal_input::Target::Editor => {}
+                }
             }
             if let Some(event) = native::translate(event) {
                 let outcome = if live {
@@ -517,6 +555,10 @@ fn evaluate(
                 };
                 if live && vm.eval_source("romacs-gui-quit-requested")? != romacs_vm::Fixed::NIL {
                     return sender.shutdown();
+                }
+                if live {
+                    terminal_modal = vm.eval_source("(and (boundp 'romacs-gui-pending) romacs-gui-pending)")? != romacs_vm::Fixed::NIL;
+                    if let Err(error) = vm.resize_selected_terminal() { echo::show(&mut vm, &error)?; }
                 }
                 let command_ns = command_start.elapsed().as_nanos();
                 let snapshot_ns = if !live {
@@ -604,10 +646,10 @@ fn evaluate(
                 }
             }
             if pending.is_empty() {
-                match sender.input().recv_timeout(live_presentation.wait()) {
-                    Ok(event) => pending.push_back(event),
-                    Err(crossbeam_channel_error) if crossbeam_channel_error.is_disconnected() => return Ok(()),
-                    Err(_) => {},
+                match terminal_wait::wait(sender.input(), &terminal_ready, Some(live_presentation.wait())) {
+                    terminal_wait::Wake::Input(event) => pending.push_back(event),
+                    terminal_wait::Wake::Closed => return Ok(()),
+                    terminal_wait::Wake::Terminal | terminal_wait::Wake::Timeout => {},
                 }
             }
             continue;

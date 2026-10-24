@@ -34,6 +34,9 @@
 (defvar romacs-gui-pending nil)
 (defvar romacs-gui-visits nil)
 (defvar romacs-gui-preserve-mode-line nil)
+(defvar romacs-term--closing nil)
+(defun romacs-gui-running-terminal-p ()
+  (and (fboundp 'romacs-term-running-p) (romacs-term-running-p)))
 (defun romacs-gui-dirty-p ()
   (and buffer-file-name (buffer-modified-p)))
 (defun romacs-gui-echo (text)
@@ -53,7 +56,9 @@
   (romacs-gui-echo
    (if (eq action 'save)
        "File changed on disk; overwrite it? (y/n; C-g cancels)"
-     "Modified file buffers exist; discard unsaved changes? (y/n; C-g cancels)")))
+     (if (and (fboundp 'romacs-term-any-running-p) (romacs-term-any-running-p))
+         "Running terminals exist; close processes and discard changes? (y/n; C-g cancels)"
+       "Modified file buffers exist; discard unsaved changes? (y/n; C-g cancels)"))))
 (defun romacs-gui-answer-no ()
   (interactive)
   (when romacs-gui-pending
@@ -73,7 +78,8 @@
             (romacs-gui-write-visited-buffer))
         (if (eq (car pending) 'quit)
           (setq romacs-gui-quit-requested t)
-        (romacs-gui-kill-confirmed (car (cdr pending))))))))
+        (let ((romacs-term--closing t))
+          (romacs-gui-kill-confirmed (car (cdr pending)))))))))
 (defun romacs-gui-live-visits ()
   "Remove dead buffers from the GUI visit registry."
   (let ((buffers romacs-gui-visits) (live nil))
@@ -98,11 +104,12 @@
       (with-current-buffer (car buffers)
         (when (and buffer-file-name (romacs-gui-dirty-p)) (setq dirty t)))
       (setq buffers (cdr buffers)))
-    (if dirty (romacs-gui-confirm 'quit)
+    (if (or dirty (and (fboundp 'romacs-term-any-running-p) (romacs-term-any-running-p)))
+        (romacs-gui-confirm 'quit)
       (setq romacs-gui-quit-requested t))))
 (defun romacs-gui-kill-buffer ()
   (interactive)
-  (if (and buffer-file-name (romacs-gui-dirty-p))
+  (if (or (and buffer-file-name (romacs-gui-dirty-p)) (romacs-gui-running-terminal-p))
       (romacs-gui-confirm 'kill)
     (romacs-gui-kill-confirmed (current-buffer))))
 (defun romacs-gui-root ()

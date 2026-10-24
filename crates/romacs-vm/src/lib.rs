@@ -21,8 +21,10 @@ mod obarray;
 mod command;
 mod interpreted_closure;
 mod host_input;
+mod terminal_host;
 pub use command::{CommandEvent, CommandOutcome, CommandSignal};
 pub use host_input::{HostEvent, HostFrame, HostInput};
+pub use terminal_host::{TerminalColor, TerminalHost, TerminalInputState, TerminalSnapshot, TerminalStyle, TerminalStyleRun};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 mod code_image;
@@ -1039,6 +1041,8 @@ pub struct Vm {
     propagate_next: bool,
     /// The embedder's keyboard while one is attached (host_input.rs).
     host_input: Option<Box<dyn host_input::HostInput>>,
+    terminal_host: Option<Box<dyn terminal_host::TerminalHost>>,
+    terminal_bindings: Vec<terminal_host::TerminalBinding>,
     pending_specials: HashSet<String>,
     /// Names a one-argument top-level `(defvar NAME)` declared in the file
     /// being loaded: special for the rest of that file only (GNU Fdefvar,
@@ -1141,6 +1145,8 @@ impl Vm {
             propagated_escape_hooked: false,
             propagated_eval_depth: None,
             host_input: None,
+            terminal_host: None,
+            terminal_bindings: Vec::new(),
             propagate_next: false,
             pending_specials: HashSet::new(),
             file_specials: HashSet::new(),

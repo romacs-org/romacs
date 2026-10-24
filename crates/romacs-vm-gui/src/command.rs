@@ -16,6 +16,7 @@ impl Commands {
     /// True between the keys of a prefix sequence such as C-x.
     pub fn in_prefix(&self) -> bool { !self.pending.is_empty() }
     pub fn dispatch(&mut self, vm: &mut Vm, event: CommandEvent) -> Result<Option<CommandOutcome>, String> {
+        if event == CommandEvent::Character(7) { self.pending.clear(); }
         let form = match &event {
             CommandEvent::Character(code) => code.to_string(),
             CommandEvent::Named(name) => {

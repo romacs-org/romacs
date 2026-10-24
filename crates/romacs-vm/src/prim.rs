@@ -1341,6 +1341,7 @@ mod leaf {
     mod fileio;
     mod filelock;
     mod file_attributes;
+    mod terminal;
     mod filesave;
     mod charset;
     mod coding;

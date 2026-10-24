@@ -32,6 +32,8 @@ pub enum HostEvent {
     Resize { width: u32, height: u32 },
     /// The frame is gone: the read signals `quit' so every level unwinds.
     Closed,
+    /// Native background state changed.
+    Background,
 }
 
 /// The embedder's keyboard and screen, used only while Lisp waits for a key.
@@ -76,7 +78,7 @@ impl Vm {
         match outcome? {
             HostEvent::Key(CommandEvent::Character(c)) => Value::integer(c),
             HostEvent::Key(CommandEvent::Named(name)) => Ok(self.intern(&name)),
-            HostEvent::Resize { .. } => unreachable!("resizes are consumed by the wait"),
+            HostEvent::Resize { .. } | HostEvent::Background => unreachable!("background events are consumed by the wait"),
             HostEvent::Closed => {
                 let quit = self.intern("quit");
                 self.propagated_escape = Some(threaded::Escape::Signal(quit, Value::NIL));
@@ -86,20 +88,25 @@ impl Vm {
     }
 
     fn read_host_event_with(&mut self, host: &mut dyn HostInput) -> Result<HostEvent> {
+        let mut redraw = true;
         loop {
-            if !host.input_pending() {
+            redraw |= self.poll_terminal_output()?;
+            if redraw && !host.input_pending() {
                 let (width, height) = (self.window_state.width, self.window_state.height);
                 let frame = self.frame_snapshot(width, height)?;
                 let selected = self.selected_window_value()?;
                 let selected = self.window(selected)?.id;
                 let ends = host.redisplay(HostFrame { frame, selected })?;
                 self.display_apply_layout(&ends)?;
+                redraw = false;
             }
             match host.next_event()? {
                 HostEvent::Resize { width, height } => {
                     let (line, column) = (self.window_state.line, self.window_state.column);
                     self.set_frame_geometry(width, height, line, column)?;
+                    redraw = true;
                 }
+                HostEvent::Background => {}
                 event => return Ok(event),
             }
         }

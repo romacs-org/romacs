@@ -38,6 +38,7 @@ pub struct GuiHost {
     pub shared: Rc<RefCell<Shared>>,
     pub sender: Arc<PaintSender>,
     pub engine: Rc<RefCell<romacs_layout2::LayoutEngine>>,
+    pub terminal_ready: crossbeam_channel::Receiver<()>,
 }
 
 /// What one transport event means to a waiting prompt. By reference: a
@@ -94,7 +95,7 @@ impl GuiHost {
         match *event {
             HostEvent::Closed => shared.closed = true,
             HostEvent::Resize { width, height } => shared.size = Some((width, height)),
-            HostEvent::Key(_) => {}
+            HostEvent::Key(_) | HostEvent::Background => {}
         }
     }
 }
@@ -134,10 +135,18 @@ impl HostInput for GuiHost {
 
     fn next_event(&mut self) -> Result<HostEvent, String> {
         loop {
-            let event = match next_queued(&mut self.shared.borrow_mut()) {
+            let queued = next_queued(&mut self.shared.borrow_mut());
+            let event = match queued {
                 Next::Closed => return Ok(HostEvent::Closed),
                 Next::Event(event) => event,
-                Next::Wait => self.sender.input().recv().map_err(|e| format!("input closed while reading: {e}"))?,
+                Next::Wait => {
+                    match crate::terminal_wait::wait(self.sender.input(), &self.terminal_ready, None) {
+                        crate::terminal_wait::Wake::Input(event) => event,
+                        crate::terminal_wait::Wake::Terminal => return Ok(HostEvent::Background),
+                        crate::terminal_wait::Wake::Closed => return Err("input closed while reading".into()),
+                        crate::terminal_wait::Wake::Timeout => unreachable!("prompt has no timer"),
+                    }
+                },
             };
             if let Some(classified) = classify(&event) {
                 self.note(&classified);

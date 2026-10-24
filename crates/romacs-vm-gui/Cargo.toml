@@ -14,6 +14,8 @@ romacs-face.workspace = true
 romacs-renderer-wgpu.workspace = true
 romacs-display-runtime = { path = "../romacs-display-runtime", default-features = false, features = ["core-free"] }
 serde_json.workspace = true
+crossbeam-channel.workspace = true
+alacritty_terminal = { git = "https://github.com/alacritty/alacritty.git", rev = "29dc55375da817d53540f4caefbe708703c57b07", default-features = false }
 
 [dev-dependencies]
 wgpu.workspace = true
