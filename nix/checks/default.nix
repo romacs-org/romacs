@@ -63,7 +63,8 @@ let
 
         test -d ${checkedPackage}/share/romacs/gnu-lisp
         test -d ${checkedPackage}/share/romacs/rlisp
-        test -d ${checkedPackage}/share/romacs/vendor-lisp
+        test -d ${checkedPackage}/share/romacs/rlisp/deps
+        test ! -e ${checkedPackage}/share/romacs/vendor-lisp
         test ! -e ${checkedPackage}/share/romacs/lisp
         test ! -e ${checkedPackage}/share/romacs/lisp-bundled
         test -d ${checkedPackage}/share/romacs/etc

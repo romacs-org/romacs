@@ -886,7 +886,7 @@ def measure_unit(root: pathlib.Path, unit: str, gnu_ert: str | None, census: str
 UNCONFIRMED_WINDOW_DAYS = 14
 UNCONFIRMED_ALLOWED = 1   # per member per window; the next forgiveness FAILS
 LEDGER_NAME = 'parity-ratchet-unconfirmed.jsonl'
-FINGERPRINTED = ('gnu-lisp', 'rlisp', 'vendor-lisp', 'gnu-tests/test', 'gnu-tests/harness', 'gnu-tests/tools', 'gnu-tests/baseline',
+FINGERPRINTED = ('gnu-lisp', 'rlisp', 'gnu-tests/test', 'gnu-tests/harness', 'gnu-tests/tools', 'gnu-tests/baseline',
                  'gnu-tests/run.py', 'gnu-tests/PIN.json', 'gnu-tests/EXCLUSIONS.toml', 'scripts/lisp-census.py',
                  'scripts/lisp-census-oracle.el', 'tools/parity_ratchet.py', 'gnu-tests/member-evidence-policy.json',
                  'parity-reference.toml',
@@ -1150,10 +1150,10 @@ def git(root: pathlib.Path, *args: str) -> str:
 
 def contamination(root: pathlib.Path, measured_only: bool = False) -> list[str]:
     """Anything that would make a measurement describe something other than HEAD."""
-    measured = ['gnu-lisp', 'rlisp', 'vendor-lisp', 'gnu-tests', 'scripts', 'tools/parity_ratchet.py', 'parity-reference.toml']
+    measured = ['gnu-lisp', 'rlisp', 'gnu-tests', 'scripts', 'tools/parity_ratchet.py', 'parity-reference.toml']
     dirty = [line for line in git(root, 'status', '--porcelain', '--', *(measured if measured_only else [])).splitlines()
              if line[3:] != RATCHET_NAME]
-    ignored = [line for line in git(root, 'status', '--porcelain', '--ignored', '--', 'gnu-lisp', 'rlisp', 'vendor-lisp', 'gnu-tests/test',
+    ignored = [line for line in git(root, 'status', '--porcelain', '--ignored', '--', 'gnu-lisp', 'rlisp', 'gnu-tests/test',
                                     'gnu-tests/baseline', 'gnu-tests/harness', 'gnu-tests/tools', 'scripts').splitlines()
                if line.startswith('!!') and not python_cache(line[3:])]
     return dirty + ignored

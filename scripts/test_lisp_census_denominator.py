@@ -66,13 +66,13 @@ class DenominatorTests(unittest.TestCase):
                 subprocess.run(['git', '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', '-c', 'commit.gpgsign=false', 'commit', '-qm', 'fixture'], cwd=path, check=True)
                 return subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=path, text=True).strip()
             pin = repo(gnu, {'lisp/same.el': 'same', 'lisp/drift.el': 'oracle', 'lisp/missing.el': 'missing', 'lisp/failed.el': 'original'})
-            repo(root, {'gnu-lisp/same.el': 'same', 'gnu-lisp/drift.el': 'edited', 'rlisp/bundle.el': 'bundle', 'vendor-lisp/bundle-failed.el': 'bundle', 'gnu-lisp/failed.el': 'edited'})
+            repo(root, {'gnu-lisp/same.el': 'same', 'gnu-lisp/drift.el': 'edited', 'rlisp/bundle.el': 'bundle', 'rlisp/deps/bundle-failed.el': 'bundle', 'gnu-lisp/failed.el': 'edited'})
             # Neither a moving oracle HEAD/worktree nor untracked generated Lisp is authoritative.
             (gnu / 'lisp/same.el').write_text('new oracle HEAD')
             subprocess.run(['git', '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', '-c', 'commit.gpgsign=false', 'commit', '-qam', 'move oracle HEAD'], cwd=gnu, check=True)
             (gnu / 'lisp/same.el').write_text('dirty oracle')
             (root / 'gnu-lisp/generated.el').write_text('generated')
-            rows = [dict(file=('rlisp/' if name == 'bundle' else 'vendor-lisp/' if name == 'bundle-failed' else 'gnu-lisp/') + name + '.el', loaded=ok, total_forms=1,
+            rows = [dict(file=('rlisp/' if name == 'bundle' else 'rlisp/deps/' if name == 'bundle-failed' else 'gnu-lisp/') + name + '.el', loaded=ok, total_forms=1,
                          forms_evaluated=int(ok), first_failure={'classification': 'unknown'})
                     for name, ok in [('same', True), ('drift', True), ('bundle', True), ('generated', True), ('failed', False), ('bundle-failed', False)]]
             with patch.object(census, 'ROOT', root), patch.object(census, 'GNU_SOURCE', gnu, create=True), patch.object(census, 'GNU_PIN', pin, create=True):
@@ -89,7 +89,7 @@ class DenominatorTests(unittest.TestCase):
                 inventory = census.oracle_inventory()
             self.assertEqual(inventory['gnu_commit'], pin)
             self.assertEqual(len(inventory['gnu_files']), 4)
-            self.assertEqual(inventory['bundled_paths'], ['rlisp/bundle.el', 'vendor-lisp/bundle-failed.el'])
+            self.assertEqual(inventory['bundled_paths'], ['rlisp/bundle.el', 'rlisp/deps/bundle-failed.el'])
             by_path = {entry['file']: entry for entry in inventory['gnu_files']}
             import hashlib
             self.assertEqual(by_path['gnu-lisp/same.el']['gnu_sha256'], hashlib.sha256(b'same').hexdigest())

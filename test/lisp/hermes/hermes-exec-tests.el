@@ -5,7 +5,7 @@
 (require 'subr-x)
 
 (let ((root (expand-file-name "../../.." (file-name-directory (or load-file-name buffer-file-name)))))
-  (add-to-list 'load-path (expand-file-name "vendor-lisp/hermes" root)))
+  (add-to-list 'load-path (expand-file-name "rlisp/hermes" root)))
 
 (require 'hermes-dashboard-transport)
 (require 'hermes-exec)

@@ -163,7 +163,7 @@ craneLib.buildPackage (
       install -m 0755 target/release/romacs-mcp "$out/bin/romacs-mcp"
 
       mkdir -p "$out/share/romacs"
-      cp -r gnu-lisp rlisp vendor-lisp "$out/share/romacs/"
+      cp -r gnu-lisp rlisp "$out/share/romacs/"
       cp -r etc "$out/share/romacs/"
 
       # GNU Emacs installs this version-independent site-lisp root.
@@ -199,7 +199,7 @@ craneLib.buildPackage (
         ${lib.concatStringsSep " \\\n        " wrapArgs}
 
       # Refuse to produce a package whose runtime Lisp is not the source's:
-      # every gnu-lisp/, rlisp/, vendor-lisp/ and etc/ file byte-identical, and the
+      # every gnu-lisp/, rlisp/ and etc/ file byte-identical, and the
       # wrapper pointing the binary at it. This once installed 0 of 229.
       bash scripts/check-installed-runtime.sh "$out" .
     '';

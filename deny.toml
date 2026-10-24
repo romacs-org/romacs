@@ -59,8 +59,10 @@ allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 allow-git = [
   "https://github.com/eval-exec/cosmic-text",
   "https://github.com/eval-exec/freetype-sys",
-  # Pinned Wayland popup-lifetime and inner-size-hint fixes in Cargo.toml.
-  "https://github.com/eval-exec/winit",
+  # Pinned Wayland connection and window-lifetime fixes in Cargo.toml.
+  "https://github.com/thanosapollo/winit",
+  # Embedded terminal parser, grid and PTY lifecycle.
+  "https://github.com/alacritty/alacritty.git",
   # The opt-in Vulkan native-presentation timing seam (wgpu-hal).
   "https://github.com/eval-exec/wgpu",
   # The JPEG banding decoder fixes (zune-image).

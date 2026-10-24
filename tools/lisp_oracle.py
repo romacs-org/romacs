@@ -10,7 +10,7 @@
         file in a repository, may exist under gnu-lisp/. A romacs variant of a GNU file
         may live ONLY in lisp-overlay/, declared in lisp-overlay/MANIFEST.tsv
         and rebased on the pin blob it varies; non-GNU Lisp lives in
-        rlisp/ or vendor-lisp/. Exit 1 on any violation.
+        rlisp/ (external dependencies in rlisp/deps/). Exit 1 on any violation.
 
     lisp_oracle.py populations --rev REV [--out FILE]
         Re-derive the DRIFT/EDIT split of every shared path that differs from
@@ -196,7 +196,7 @@ def check(root, gnu, pin):
                     and ((root / p).exists() or (root / p).is_symlink()))
     for p in extras:
         problems.append(f'EXTRA {p}: neither a GNU Git path at the pin nor declared generated support; '
-                        'non-GNU Lisp belongs in rlisp/ or vendor-lisp/')
+                        'non-GNU Lisp belongs in rlisp/ (external dependencies in rlisp/deps/)')
 
     manifest = {}
     for n, cols in read_tsv(root / OVERLAY / 'MANIFEST.tsv'):

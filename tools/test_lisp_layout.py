@@ -14,9 +14,9 @@ GUI_MODULES = (
 
 class LispLayoutTests(unittest.TestCase):
     def test_runtime_roots_are_explicit(self):
-        for name in ('rlisp', 'gnu-lisp', 'vendor-lisp'):
+        for name in ('rlisp', 'gnu-lisp', 'rlisp/deps'):
             self.assertTrue((ROOT / name).is_dir(), f'MISSING_LISP_ROOT: {name}')
-        for name in ('lisp', 'lisp-bundled'):
+        for name in ('lisp', 'lisp-bundled', 'vendor-lisp'):
             self.assertFalse((ROOT / name).exists(), f'RETIRED_LISP_ROOT: {name}')
 
     def test_owned_modules_live_in_rlisp(self):
@@ -42,8 +42,17 @@ class LispLayoutTests(unittest.TestCase):
                     with self.subTest(file=file.relative_to(ROOT)):
                         self.assertNotRegex(file.read_text(), stale, 'STALE_GNU_SOURCE_ROOT')
 
+    def test_packages_and_temporary_dependencies_are_in_rlisp(self):
+        for relative in ('gnosis/gnosis.el', 'hermes/hermes.el', 'jabber/jabber.el',
+                         'emacs-lisp/keymap-popup.el', 'deps/fsm/fsm.el',
+                         'deps/markdown-mode/markdown-mode.el', 'deps/websocket/websocket.el',
+                         'deps/README.md'):
+            self.assertTrue((ROOT / 'rlisp' / relative).is_file(), f'RLISP_PACKAGE_MISSING: {relative}')
+
     def test_owned_lisp_has_minimal_honest_headers(self):
-        files = sorted((ROOT / 'rlisp').rglob('*.el'))
+        files = sorted((ROOT / 'rlisp').glob('*.el'))
+        files += sorted((ROOT / 'rlisp/vm').glob('*.el'))
+        files += [ROOT / 'rlisp/term/romacs-preload.el']
         self.assertTrue(files, 'NO_OWNED_LISP_SOURCES')
         for file in files:
             source = file.read_text()

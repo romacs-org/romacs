@@ -325,7 +325,7 @@ fn prepare_terminal_layer(
     }
     let mut smoke = Command::new(&plan.editor);
     smoke.args(["--batch", "-Q", "--dump-file"]).arg(image)
-        .args(["--eval", "(progn (provide 'romacs) (load \"term/romacs-win\") (unless (featurep 'romacs-win) (kill-emacs 1)))"])
+        .args(["--eval", "(provide 'romacs)", "--load"]).arg(&bytecode)
         .current_dir(&plan.runtime_root);
     apply_environment(&mut smoke, &environment);
     if let Err(error) = run_bounded(

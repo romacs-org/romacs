@@ -197,6 +197,36 @@ fn failed_terminal_compiler_cannot_leave_a_reusable_partial_leaf() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn terminal_smoke_loads_the_caller_selected_bytecode() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = tempfile::tempdir().unwrap();
+    let mut plan = plan_with_fresh_pair(root.path());
+    let source = root.path().join("custom layer.el");
+    let bytecode = source.with_extension("elc");
+    let receipt = root.path().join("loaded-path");
+    write_file(&source, "source");
+    write_file(&plan.editor, &format!(
+        "#!/bin/sh\nprevious=\nfor arg do\n  if [ \"$previous\" = batch-byte-compile ]; then printf bytecode > '{}'; exit 0; fi\n  if [ \"$previous\" = --load ]; then\n    test \"$arg\" = '{}' && test -s \"$arg\" || exit 41\n    printf '%s' \"$arg\" > '{}'; exit 0\n  fi\n  previous=$arg\ndone\nexit 42\n",
+        bytecode.display(), bytecode.display(), receipt.display()));
+    fs::set_permissions(&plan.editor, fs::Permissions::from_mode(0o755)).unwrap();
+    plan.terminal_layer = Some(BootstrapTerminalLayer {
+        source,
+        bootstrap_role_binary_name: "bootstrap-romacs".into(),
+    });
+    prepare_terminal_layer(
+        &plan,
+        &root.path().join("bootstrap-romacs.pdump"),
+        root.path(),
+    )
+    .expect("TERMINAL_SMOKE_MUST_LOAD_SELECTED_LAYER");
+    assert_eq!(
+        fs::read_to_string(receipt).unwrap(),
+        bytecode.to_string_lossy()
+    );
+}
+
 #[test]
 fn a_runtime_root_without_loadup_is_rejected_by_name() {
     let root = tempfile::tempdir().unwrap();

@@ -4,7 +4,6 @@
 ;;   ./target/release/romacs -Q -l test/romacs/cursor-effects-preview-test.el
 
 (require 'cl-lib)
-(require 'term/romacs-win nil t)
 
 (defgroup cursor-effects-preview nil
   "Preview Romacs cursor animation effects."

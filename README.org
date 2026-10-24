@@ -17,7 +17,7 @@ cursor. Fast interaction and useful machine interfaces belong in the foundation.
 * Source layout
 
 =rlisp/= holds Romacs Lisp, =gnu-lisp/= the pinned GNU sources, and
-=vendor-lisp/= bundled external packages.
+=rlisp/deps/= temporary third-party dependencies and their replacement plan.
 
 * Build and run
 

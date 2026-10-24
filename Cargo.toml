@@ -59,7 +59,7 @@ image = "ghcr.io/cross-rs/x86_64-pc-windows-gnu:edge"
 [workspace.package]
 version = "0.0.19"
 edition = "2024"
-authors = ["Eval Exec <execvy@gmail.com>"]
+authors = ["Thanos Apollo <public@thanosapollo.org>"]
 license = "GPL-3.0-or-later"
 repository = "https://git.thanosapollo.org/romacs"
 

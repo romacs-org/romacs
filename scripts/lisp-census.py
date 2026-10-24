@@ -126,7 +126,7 @@ def gnu_oracle_binary(_cache=[]):
 
 def fingerprint(root=ROOT):
     paths = subprocess.check_output(['git', 'ls-files', '-z'], cwd=root).decode().split('\0')
-    selected = {p for p in paths if p and (p.startswith(('gnu-lisp/', 'rlisp/', 'vendor-lisp/', 'crates/romacs-vm/', 'crates/romacs-face/', 'crates/romacs-layout-input/', 'crates/romacs-regex-engine/')) or p in ['Cargo.toml', 'Cargo.lock'])}
+    selected = {p for p in paths if p and (p.startswith(('gnu-lisp/', 'rlisp/', 'crates/romacs-vm/', 'crates/romacs-face/', 'crates/romacs-layout-input/', 'crates/romacs-regex-engine/')) or p in ['Cargo.toml', 'Cargo.lock'])}
     selected.update(['scripts/lisp-census.py', 'scripts/lisp-census-oracle.el', 'scripts/prove-lisp-census.py', 'scripts/regenerate-lisp-census.py', 'crates/romacs-vm/src/bin/romacs-vm-census.rs'])
     # Include new files in lisp and the tool, not merely the tracked manifest.
     selected.update(str(p.relative_to(root)) for p in (root / 'gnu-lisp').rglob('*.el'))
@@ -297,7 +297,7 @@ def oracle_inventory():
     if commit != GNU_PIN:
         raise RuntimeError('GNU pin must be a full immutable commit')
     archive = subprocess.check_output(['git', 'archive', commit, 'lisp'], cwd=GNU_SOURCE)
-    tracked = set(subprocess.check_output(['git', 'ls-tree', '-r', '--name-only', '-z', 'HEAD', '--', 'gnu-lisp', 'rlisp', 'vendor-lisp'], cwd=ROOT).decode().split('\0'))
+    tracked = set(subprocess.check_output(['git', 'ls-tree', '-r', '--name-only', '-z', 'HEAD', '--', 'gnu-lisp', 'rlisp'], cwd=ROOT).decode().split('\0'))
     tracked = {p for p in tracked if p.endswith('.el')}
     entries = []
     with tarfile.open(fileobj=io.BytesIO(archive)) as tree:
