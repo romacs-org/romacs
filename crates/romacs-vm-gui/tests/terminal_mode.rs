@@ -56,6 +56,19 @@ fn terminal_c_g_cancels_prefix_and_does_not_send_interrupt() {
     assert_eq!(printed(&mut vm,"(buffer-string)"),"\"$ \"");
 }
 #[test]
+fn terminal_selection_replacement_is_readonly_and_never_sends_input() {
+    let (mut vm,sent)=setup(); open(&mut vm);
+    vm.eval_source("(romacs-term-emacs-mode) (goto-char 3) (set-mark 1) (setq saved-term-tick (buffer-chars-modified-tick))").unwrap();
+    let mut commands=command::Commands::default();
+    for code in [127,4,88] {
+        let outcome=commands.dispatch(&mut vm,CommandEvent::Character(code)).unwrap().unwrap();
+        assert_eq!(outcome.signal.unwrap().condition,"buffer-read-only");
+        assert_eq!(printed(&mut vm,"(list (buffer-string) (point) (mark t) mark-active (= saved-term-tick (buffer-chars-modified-tick)))"),"(\"$ \" 3 1 t t)");
+    }
+    assert!(sent.borrow().is_empty(),"TERMINAL_REGION_EDIT_ATTEMPTS_SEND_NO_CHILD_INPUT");
+}
+
+#[test]
 fn terminal_close_protects_running_sessions_and_confirmed_kill_closes() {
     let (mut vm,_)=setup(); open(&mut vm);
     vm.eval_source("(romacs-gui-quit)").unwrap();

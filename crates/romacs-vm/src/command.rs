@@ -282,7 +282,19 @@ impl Vm {
                         call(
                             "progn",
                             vec![
-                                call("call-interactively", vec![quote(sym(&command))]),
+                                call(
+                                    "unless",
+                                    vec![
+                                        call(
+                                            "and",
+                                            vec![
+                                                call("fboundp", vec![quote(sym("romacs-delete-selection-before-command"))]),
+                                                call("romacs-delete-selection-before-command", vec![sym("this-command")]),
+                                            ],
+                                        ),
+                                        call("call-interactively", vec![quote(sym(&command))]),
+                                    ],
+                                ),
                                 sym("nil"),
                             ],
                         ),

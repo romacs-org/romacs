@@ -15,6 +15,31 @@
 (defvar set-mark-command-repeat-pop nil)
 (defvar use-empty-active-region nil)
 (setq transient-mark-mode t)
+(defvar delete-selection-mode t)
+
+(defun delete-selection-mode (&optional arg)
+  "Toggle replacement of active selections by ordinary typing and delete keys.
+With ARG, enable for positive values and disable otherwise."
+  (interactive "P")
+  (setq delete-selection-mode
+        (if arg (> (prefix-numeric-value arg) 0) (not delete-selection-mode))))
+
+(defun romacs-delete-selection-before-command (command)
+  "Apply COMMAND's selection policy, returning non-nil when it replaces the command.
+Plain deletion never adds text to the kill ring.  Programmatic edits are unchanged."
+  (when (and delete-selection-mode (use-region-p))
+    (let ((action (get command 'delete-selection)))
+      (when (memq action '(t supersede))
+        (let ((beg (region-beginning)) (end (region-end)))
+          (when (and (minibufferp) (get-text-property beg 'read-only))
+            (signal 'text-read-only '("Minibuffer prompt is read-only")))
+          (delete-region beg end)
+          (deactivate-mark t)
+          (and (eq action 'supersede) (/= beg end)))))))
+
+(put 'self-insert-command 'delete-selection t)
+(put 'delete-char 'delete-selection 'supersede)
+(put 'delete-backward-char 'delete-selection 'supersede)
 
 (defun region-active-p ()
   "Return non-nil when this buffer has an active transient region."

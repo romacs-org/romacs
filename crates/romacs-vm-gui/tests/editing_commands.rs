@@ -46,6 +46,80 @@ fn input(vm: &mut Vm, text: &str) {
     vm.set_host_input(Some(Box::new(Keys(text.chars().map(|c| HostEvent::Key(CommandEvent::Character(c as i64))).collect()))));
 }
 #[test]
+fn active_selection_is_deleted_or_replaced_by_ordinary_keys() {
+    for reverse in [false, true] {
+        for (event, expected, point) in [
+            (CommandEvent::Character(127), "ac", 2),
+            (CommandEvent::Character(8), "ac", 2),
+            (CommandEvent::Character(4), "ac", 2),
+            (CommandEvent::Named("backspace".into()), "ac", 2),
+            (CommandEvent::Named("delete".into()), "ac", 2),
+            (CommandEvent::Character(88), "aXc", 3),
+        ] {
+            let mut vm = setup();
+            vm.eval_source("(erase-buffer) (insert \"aλb界c\") (setq kill-ring '(\"sentinel\"))").unwrap();
+            vm.eval_source(if reverse { "(goto-char 2) (set-mark 5)" } else { "(goto-char 5) (set-mark 2)" }).unwrap();
+            let mut commands = command::Commands::default();
+            let outcome = commands.dispatch(&mut vm, event.clone()).unwrap().unwrap();
+            assert!(outcome.signal.is_none(), "SELECTION_EDIT_EXECUTES: {event:?} {outcome:?}");
+            assert_eq!(printed(&mut vm, "(buffer-string)"), serde_json::to_string(expected).unwrap(), "ACTIVE_SELECTION_REPLACED: {event:?}, reverse={reverse}");
+            assert_eq!(printed(&mut vm, "(point)"), point.to_string());
+            assert_eq!(printed(&mut vm, "(list mark-active kill-ring)"), "(nil (\"sentinel\"))", "DELETE_SELECTION_DOES_NOT_KILL");
+        }
+    }
+}
+
+#[test]
+fn selection_replacement_respects_readonly_and_inactive_marks() {
+    let mut vm = setup();
+    vm.eval_source("(erase-buffer) (insert \"abcde\") (goto-char 4) (set-mark 2) (setq buffer-read-only t saved-tick (buffer-chars-modified-tick))").unwrap();
+    let mut commands = command::Commands::default();
+    for event in [127,4,88] {
+        let out = commands.dispatch(&mut vm, CommandEvent::Character(event)).unwrap().unwrap();
+        assert_eq!(out.signal.unwrap().condition,"buffer-read-only");
+        assert_eq!(printed(&mut vm,"(list (buffer-string) (point) mark-active (= saved-tick (buffer-chars-modified-tick)))"),"(\"abcde\" 4 t t)","READONLY_SELECTION_MUST_REMAIN_INTACT");
+    }
+    vm.eval_source("(setq buffer-read-only nil) (deactivate-mark t)").unwrap();
+    commands.dispatch(&mut vm, CommandEvent::Character(4)).unwrap();
+    assert_eq!(printed(&mut vm,"(buffer-string)"),"\"abce\"","INACTIVE_MARK_DOES_NOT_SELECT_TEXT");
+}
+
+#[test]
+fn selection_replacement_preserves_prefix_narrowing_and_empty_region_semantics() {
+    let mut vm = setup();
+    let mut commands = command::Commands::default();
+    vm.eval_source("(erase-buffer) (insert \"abcdef\") (set-mark 2) (goto-char 5) (narrow-to-region 3 6)").unwrap();
+    commands.dispatch(&mut vm, CommandEvent::Character(4)).unwrap();
+    assert_eq!(printed(&mut vm,"(progn (widen) (buffer-string))"),"\"abef\"","SELECTION_DELETE_CLIPS_TO_ACCESSIBLE_REGION");
+    vm.eval_source("(set-mark 2) (goto-char 3)").unwrap();
+    commands.dispatch(&mut vm, CommandEvent::Character(21)).unwrap();
+    commands.dispatch(&mut vm, CommandEvent::Character(88)).unwrap();
+    assert_eq!(printed(&mut vm,"(buffer-string)"),"\"aXXXXef\"","PREFIX_REPLACES_SELECTION_ONCE_THEN_REPEATS_INSERTION");
+    vm.eval_source("(goto-char 2) (set-mark 2) (setq use-empty-active-region t)").unwrap();
+    commands.dispatch(&mut vm, CommandEvent::Character(4)).unwrap();
+    assert_eq!(printed(&mut vm,"(buffer-string)"),"\"aXXXef\"","EMPTY_REGION_DOES_NOT_SWALLOW_DELETE_COMMAND");
+    vm.eval_source("(delete-selection-mode -1) (goto-char 2) (set-mark 4)").unwrap();
+    commands.dispatch(&mut vm, CommandEvent::Character(90)).unwrap();
+    assert_eq!(printed(&mut vm,"(buffer-string)"),"\"aZXXXef\"","DISABLED_DELETE_SELECTION_DOES_NOT_REPLACE_TEXT");
+    vm.eval_source("(delete-selection-mode 1) (goto-char 2) (set-mark 6) (delete-char 1)").unwrap();
+    assert_eq!(printed(&mut vm,"(buffer-string)"),"\"aXXXef\"","PROGRAMMATIC_DELETION_DOES_NOT_REPLACE_SELECTION");
+}
+
+#[test]
+fn selection_replacement_also_runs_inside_recursive_prompts() {
+    let mut vm = setup();
+    input(&mut vm,"abcd\u{2}\u{2}\u{2}\u{2}\0\u{6}\u{6}Z\r");
+    assert_eq!(printed(&mut vm,"(read-string \"Choose: \")"),"\"Zcd\"","PROMPT_TYPING_REPLACES_ONLY_SELECTED_INPUT");
+    input(&mut vm,"abcd\u{2}\u{2}\u{2}\u{2}\0\u{6}\u{6}\u{7f}\r");
+    assert_eq!(printed(&mut vm,"(read-string \"Choose: \")"),"\"cd\"","PROMPT_BACKSPACE_DELETES_ONLY_SELECTED_INPUT");
+    for code in ['Z', '\u{7f}', '\u{4}'] {
+        input(&mut vm, &format!("abcd\u{1}\0\u{6}\u{6}{code}\r"));
+        assert_eq!(printed(&mut vm,"(read-string \"Choose: \")"),"\"abcd\"","SELECTION_MUST_NOT_REPLACE_READONLY_PROMPT");
+    }
+    assert_eq!(printed(&mut vm,"(list (buffer-string) (point) (minibuffer-depth))"),"(\"first λ\\nsecond\\n\" 5 0)","PROMPT_SELECTION_RESTORES_CALLER_STATE");
+}
+
+#[test]
 fn ordinary_region_copy_kill_yank_and_registers_share_state() {
     let mut vm = setup();
     assert_eq!(printed(&mut vm, "(list (fboundp 'copy-region-as-kill) (not (null (interactive-form 'kill-region))) (fboundp 'copy-to-register))"),

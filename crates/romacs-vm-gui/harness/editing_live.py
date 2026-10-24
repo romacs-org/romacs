@@ -14,11 +14,45 @@ import find_file_live as ff
 import live_oracle as live
 
 
+def exercise_selection_replacement(process, keys, control, meta, capture, original, timeout, report):
+    def save(expected, label):
+        control('x')
+        control('s')
+        fio.wait(lambda: original.read_text() == expected, timeout, label, process)
+        capture(label)
+        report['checks'].append(label)
+
+    meta('<')
+    control('space')
+    control('n')
+    capture('backspace-selection')
+    keys('-k', 'BackSpace')
+    save('Second line\n', 'NATIVE_BACKSPACE_DELETES_SELECTED_REGION_ONLY')
+    meta('<')
+    control('space')
+    control('n')
+    keys('Replacement λ')
+    save('Replacement λ', 'NATIVE_TYPING_REPLACES_SELECTED_REGION')
+    meta('>')
+    control('space')
+    meta('<')
+    capture('reverse-delete-selection')
+    control('d')
+    save('', 'NATIVE_C_D_DELETES_REVERSED_REGION_ONLY')
+    keys('Editor still usable')
+    save('Editor still usable', 'NATIVE_EDITING_CONTINUES_AFTER_SELECTION_DELETION')
+    keys('-M', 'alt', '-k', 'F4', '-m', 'alt')
+    process.wait(timeout=timeout)
+    assert process.returncode == 0
+    report.update(status='PASS', exit=0, saved_text=original.read_text())
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--binary', required=True)
     parser.add_argument('--output', required=True)
     parser.add_argument('--timeout', type=float, default=20)
+    parser.add_argument('--delete-selection', action='store_true')
     args = parser.parse_args()
     binary = Path(args.binary).resolve()
     output = Path(args.output).resolve()
@@ -98,6 +132,10 @@ def main():
                 visible('First λ line')
                 control('x')
                 keys('1')
+                if args.delete_selection:
+                    exercise_selection_replacement(process, keys, control, meta, capture,
+                                                   original, args.timeout, report)
+                    return 0
                 meta(':')
                 visible('Eval: ')
                 keys('(+ 20 22)')

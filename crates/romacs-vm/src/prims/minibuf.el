@@ -86,7 +86,9 @@ any other signal, such as `quit', leaves the minibuffer."
           (setq this-command command real-this-command command
                 current-prefix-arg prefix-arg prefix-arg nil)
           (condition-case err
-              (call-interactively command)
+              (unless (and (fboundp 'romacs-delete-selection-before-command)
+                           (romacs-delete-selection-before-command command))
+                (call-interactively command))
             (error (setq prefix-arg nil) (message "%S" err)))
           (setq last-command this-command real-last-command real-this-command))))
     nil))
@@ -147,6 +149,7 @@ error, a function is called (minibuffer-quit-recursive-edit throws one)."
           (set-window-buffer mini buffer)
           (select-window mini)
           (set-buffer buffer)
+          (setq mark-active nil)
           (erase-buffer)
           (insert prompt)
           (when (> (point) 1)
