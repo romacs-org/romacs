@@ -1,0 +1,32 @@
+;;; 03-modification.el --- Props and markers GNU oracle -*- lexical-binding: t; -*-
+(case props-modification-protocol eval
+ '(let (rows)
+    (dolist (op '((add-text-properties 1 5 (p a)) (put-text-property 1 5 p a)
+                  (set-text-properties 1 3 (p a)) (remove-text-properties 1 5 (q nil))
+                  (remove-list-of-text-properties 1 5 (q))
+                  (add-text-properties 1 5 (p b q c)) (put-text-property 1 5 p b)
+                  (set-text-properties 1 5 (q c)) (remove-text-properties 1 5 (p nil))
+                  (remove-list-of-text-properties 1 5 (p))))
+      (dolist (silent '(nil t))
+        (with-temp-buffer
+          (buffer-enable-undo) (insert "abcd") (put-text-property 1 5 'p 'a)
+          (put-text-property 3 5 'r 'split)
+          (setq buffer-undo-list nil) (set-buffer-modified-p nil)
+          (let* ((log nil) (tick (buffer-modified-tick)) (chars (buffer-chars-modified-tick))
+                 (before-change-functions (list (lambda (b e) (push (list 'before b e) log))))
+                 (after-change-functions (list (lambda (b e n) (push (list 'after b e n) log))))
+                 (result (if silent (with-silent-modifications (apply (car op) (cdr op)))
+                           (apply (car op) (cdr op)))))
+            (push (list op silent result (- (buffer-modified-tick) tick)
+                    (- (buffer-chars-modified-tick) chars) (buffer-modified-p)
+                    (nreverse log) (copy-tree buffer-undo-list)
+                    (object-intervals (current-buffer))) rows)))))
+    (vconcat (nreverse rows))))
+(case props-inhibit-hooks eval
+ '(with-temp-buffer
+    (insert "ab")
+    (let ((log nil) (inhibit-modification-hooks t)
+          (before-change-functions (list (lambda (&rest x) (push x log))))
+          (after-change-functions (list (lambda (&rest x) (push x log)))))
+      (put-text-property 1 3 'p 'a)
+      (list log (text-properties-at 1)))))

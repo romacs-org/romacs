@@ -1,0 +1,79 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "plist-put",
+ "spec_sha256": "6793bfe57fb2f7191d9962242540fe9a711cb9b2c182fe0f93b7d92edbe2817e",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "plist-put",
+    "subr",
+    3,
+    4
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "fns.c": "db81c235d7c63f312128ad84c11d55ae4665a2599099be1229dbaa329afdb3bf"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "plist-put/0000",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'plist-put '(1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr plist-put> 2))"
+  },
+  {
+   "id": "plist-put/0001",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'plist-put '(1 1 1 1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr plist-put> 5))"
+  },
+  {
+   "id": "plist-put/0002",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((p (list :a 1))) (list (eq p (plist-put p :a 2)) p))) (error (list 'sig e))))",
+   "expected": "(ok (t (:a 2)))"
+  },
+  {
+   "id": "plist-put/0003",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((p (list :a 1))) (list (eq p (plist-put p :b 2)) p))) (error (list 'sig e))))",
+   "expected": "(ok (t (:a 1 :b 2)))"
+  },
+  {
+   "id": "plist-put/0004",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (plist-put nil :a 1)) (error (list 'sig e))))",
+   "expected": "(ok (:a 1))"
+  },
+  {
+   "id": "plist-put/0005",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (plist-put '(a) :b 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument plistp (a)))"
+  },
+  {
+   "id": "plist-put/0006",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (plist-put '(a 1 . tail) :b 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument plistp (a 1 . tail)))"
+  },
+  {
+   "id": "plist-put/0007",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((p (list (list 'a) 1))) (list (eq p (plist-put p (list 'a) 2 #'equal)) p))) (error (list 'sig e))))",
+   "expected": "(ok (t ((a) 2)))"
+  }
+ ]
+}

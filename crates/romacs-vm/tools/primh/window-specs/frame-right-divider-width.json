@@ -1,0 +1,28 @@
+{
+ "name": "frame-right-divider-width",
+ "arity": [
+  0,
+  1
+ ],
+ "effect": "reads",
+ "gnu_files": [
+  "frame.c"
+ ],
+ "gnu_def": "frame.c:4531",
+ "rust": "src/prims/window.rs:197",
+ "args": [
+  "none"
+ ],
+ "extra": {
+  "0": [
+   "1",
+   "'sym",
+   "(copy-sequence \"s\")"
+  ]
+ },
+ "probes": [
+  "(frame-right-divider-width)",
+  "(frame-right-divider-width (selected-frame))",
+  "(condition-case e (frame-right-divider-width (selected-window)) (error (list (car e) (car (cdr e)) (eq (car (cdr (cdr e))) (selected-window)))))"
+ ]
+}

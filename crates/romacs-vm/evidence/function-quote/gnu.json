@@ -1,0 +1,24 @@
+{
+  "oracle": {
+    "path": "<recording-path-redacted>/emacs",
+    "resolved": "<recording-path-redacted>/emacs",
+    "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+    "version": "32.0.50",
+    "sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8"
+  },
+  "recorder_sha256": "3faffdfdcf269bc666175ec1ac387acf45d3002653d4400643b13d562a977fe6",
+  "cases": [
+    {
+      "form": "(list (function 42) (function nil) (function [1 2]) (function (a . b)) (function \"text\"))",
+      "gnu": "(42 nil [1 2] (a . b) \"text\")"
+    },
+    {
+      "form": "(let ((s (make-symbol \"function-uninterned\"))) (eq s (eval (list 'function s) t)))",
+      "gnu": "t"
+    },
+    {
+      "form": "(let ((f (let ((x 42)) (lambda () x)))) (list (eq f (eval (list 'function f) t)) (funcall (eval (list 'function f) t))))",
+      "gnu": "(t 42)"
+    }
+  ]
+}

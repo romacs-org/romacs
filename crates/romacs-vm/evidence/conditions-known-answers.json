@@ -1,0 +1,1155 @@
+{
+  "version": "32.0.50",
+  "command": "python3 tools/control_oracle.py --record --gnu-repository REPO --binary VM2",
+  "cases": [
+    {
+      "name": "runtime-parent",
+      "source": "(progn (define-error (quote s49-a) \"A\") (define-error (quote s49-b) \"B\" (quote s49-a)) (condition-case e (signal (quote s49-b) (quote nil)) (s49-a 7) (error 9)))",
+      "transport": [
+        "progn",
+        [
+          "define-error",
+          [
+            "quote",
+            "s49-a"
+          ],
+          {
+            "string": "A"
+          }
+        ],
+        [
+          "define-error",
+          [
+            "quote",
+            "s49-b"
+          ],
+          {
+            "string": "B"
+          },
+          [
+            "quote",
+            "s49-a"
+          ]
+        ],
+        [
+          "condition-case",
+          "e",
+          [
+            "signal",
+            [
+              "quote",
+              "s49-b"
+            ],
+            [
+              "quote",
+              "nil"
+            ]
+          ],
+          [
+            "s49-a",
+            7
+          ],
+          [
+            "error",
+            9
+          ]
+        ]
+      ],
+      "expected": "7"
+    },
+    {
+      "name": "hierarchy-projection",
+      "source": "(progn (define-error (quote s49-a) \"A\") (define-error (quote s49-b) \"B\" (quote s49-a)) (vector (get (quote s49-b) (quote error-conditions)) (get (quote s49-b) (quote error-message))))",
+      "transport": [
+        "progn",
+        [
+          "define-error",
+          [
+            "quote",
+            "s49-a"
+          ],
+          {
+            "string": "A"
+          }
+        ],
+        [
+          "define-error",
+          [
+            "quote",
+            "s49-b"
+          ],
+          {
+            "string": "B"
+          },
+          [
+            "quote",
+            "s49-a"
+          ]
+        ],
+        [
+          "vector",
+          [
+            "get",
+            [
+              "quote",
+              "s49-b"
+            ],
+            [
+              "quote",
+              "error-conditions"
+            ]
+          ],
+          [
+            "get",
+            [
+              "quote",
+              "s49-b"
+            ],
+            [
+              "quote",
+              "error-message"
+            ]
+          ]
+        ]
+      ],
+      "expected": "[(s49-b s49-a error) \"B\"]"
+    },
+    {
+      "name": "multiple-parents",
+      "source": "(progn (define-error (quote s49-a) \"A\") (define-error (quote s49-b) \"B\" (quote (arith-error s49-a))) (get (quote s49-b) (quote error-conditions)))",
+      "transport": [
+        "progn",
+        [
+          "define-error",
+          [
+            "quote",
+            "s49-a"
+          ],
+          {
+            "string": "A"
+          }
+        ],
+        [
+          "define-error",
+          [
+            "quote",
+            "s49-b"
+          ],
+          {
+            "string": "B"
+          },
+          [
+            "quote",
+            [
+              "arith-error",
+              "s49-a"
+            ]
+          ]
+        ],
+        [
+          "get",
+          [
+            "quote",
+            "s49-b"
+          ],
+          [
+            "quote",
+            "error-conditions"
+          ]
+        ]
+      ],
+      "expected": "(s49-b arith-error error s49-a)"
+    },
+    {
+      "name": "parent-redefinition-is-snapshot",
+      "source": "(progn (define-error (quote s49-a) \"A\") (define-error (quote s49-b) \"B\" (quote s49-a)) (define-error (quote s49-a) \"A2\" (quote arith-error)) (vector (get (quote s49-a) (quote error-conditions)) (get (quote s49-b) (quote error-conditions))))",
+      "transport": [
+        "progn",
+        [
+          "define-error",
+          [
+            "quote",
+            "s49-a"
+          ],
+          {
+            "string": "A"
+          }
+        ],
+        [
+          "define-error",
+          [
+            "quote",
+            "s49-b"
+          ],
+          {
+            "string": "B"
+          },
+          [
+            "quote",
+            "s49-a"
+          ]
+        ],
+        [
+          "define-error",
+          [
+            "quote",
+            "s49-a"
+          ],
+          {
+            "string": "A2"
+          },
+          [
+            "quote",
+            "arith-error"
+          ]
+        ],
+        [
+          "vector",
+          [
+            "get",
+            [
+              "quote",
+              "s49-a"
+            ],
+            [
+              "quote",
+              "error-conditions"
+            ]
+          ],
+          [
+            "get",
+            [
+              "quote",
+              "s49-b"
+            ],
+            [
+              "quote",
+              "error-conditions"
+            ]
+          ]
+        ]
+      ],
+      "expected": "[(s49-a arith-error error) (s49-b s49-a error)]"
+    },
+    {
+      "name": "undefined-parent-symbol",
+      "source": "(progn (define-error (quote s49-b) \"B\" (quote s49-unknown)) (condition-case e (signal (quote s49-b) (quote nil)) (error 9) (s49-unknown 7)))",
+      "transport": [
+        "progn",
+        [
+          "define-error",
+          [
+            "quote",
+            "s49-b"
+          ],
+          {
+            "string": "B"
+          },
+          [
+            "quote",
+            "s49-unknown"
+          ]
+        ],
+        [
+          "condition-case",
+          "e",
+          [
+            "signal",
+            [
+              "quote",
+              "s49-b"
+            ],
+            [
+              "quote",
+              "nil"
+            ]
+          ],
+          [
+            "error",
+            9
+          ],
+          [
+            "s49-unknown",
+            7
+          ]
+        ]
+      ],
+      "expected": "7"
+    },
+    {
+      "name": "undefined-parent-list-fails",
+      "source": "(condition-case e (define-error (quote s49-b) \"B\" (quote (s49-unknown error))) (error (car e)))",
+      "transport": [
+        "condition-case",
+        "e",
+        [
+          "define-error",
+          [
+            "quote",
+            "s49-b"
+          ],
+          {
+            "string": "B"
+          },
+          [
+            "quote",
+            [
+              "s49-unknown",
+              "error"
+            ]
+          ]
+        ],
+        [
+          "error",
+          [
+            "car",
+            "e"
+          ]
+        ]
+      ],
+      "expected": "error"
+    },
+    {
+      "name": "undefined-condition-matches-error-not-self",
+      "source": "(condition-case e (signal (quote s49-unknown) (quote nil)) (s49-unknown 7) (error 9))",
+      "transport": [
+        "condition-case",
+        "e",
+        [
+          "signal",
+          [
+            "quote",
+            "s49-unknown"
+          ],
+          [
+            "quote",
+            "nil"
+          ]
+        ],
+        [
+          "s49-unknown",
+          7
+        ],
+        [
+          "error",
+          9
+        ]
+      ],
+      "expected": "9"
+    },
+    {
+      "name": "quit-is-not-error",
+      "source": "(condition-case nil (condition-case nil (signal (quote quit) (quote nil)) (error 7)) (t 9))",
+      "transport": [
+        "condition-case",
+        "nil",
+        [
+          "condition-case",
+          "nil",
+          [
+            "signal",
+            [
+              "quote",
+              "quit"
+            ],
+            [
+              "quote",
+              "nil"
+            ]
+          ],
+          [
+            "error",
+            7
+          ]
+        ],
+        [
+          "t",
+          9
+        ]
+      ],
+      "expected": "9"
+    },
+    {
+      "name": "builtin-relationships",
+      "source": "(vector (get (quote error) (quote error-conditions)) (get (quote arith-error) (quote error-conditions)) (get (quote wrong-type-argument) (quote error-conditions)))",
+      "transport": [
+        "vector",
+        [
+          "get",
+          [
+            "quote",
+            "error"
+          ],
+          [
+            "quote",
+            "error-conditions"
+          ]
+        ],
+        [
+          "get",
+          [
+            "quote",
+            "arith-error"
+          ],
+          [
+            "quote",
+            "error-conditions"
+          ]
+        ],
+        [
+          "get",
+          [
+            "quote",
+            "wrong-type-argument"
+          ],
+          [
+            "quote",
+            "error-conditions"
+          ]
+        ]
+      ],
+      "expected": "[(error) (arith-error error) (wrong-type-argument error)]"
+    },
+    {
+      "name": "first-handler-wins",
+      "source": "(condition-case nil (signal (quote arith-error) (quote nil)) (error 7) (arith-error 9))",
+      "transport": [
+        "condition-case",
+        "nil",
+        [
+          "signal",
+          [
+            "quote",
+            "arith-error"
+          ],
+          [
+            "quote",
+            "nil"
+          ]
+        ],
+        [
+          "error",
+          7
+        ],
+        [
+          "arith-error",
+          9
+        ]
+      ],
+      "expected": "7"
+    },
+    {
+      "name": "handler-choice-list",
+      "source": "(condition-case nil (signal (quote wrong-type-argument) (quote nil)) ((arith-error wrong-type-argument) 7) (error 9))",
+      "transport": [
+        "condition-case",
+        "nil",
+        [
+          "signal",
+          [
+            "quote",
+            "wrong-type-argument"
+          ],
+          [
+            "quote",
+            "nil"
+          ]
+        ],
+        [
+          [
+            "arith-error",
+            "wrong-type-argument"
+          ],
+          7
+        ],
+        [
+          "error",
+          9
+        ]
+      ],
+      "expected": "7"
+    },
+    {
+      "name": "success-binding",
+      "source": "(condition-case e 42 (:success (+ 1 e)))",
+      "transport": [
+        "condition-case",
+        "e",
+        42,
+        [
+          ":success",
+          [
+            "+",
+            1,
+            "e"
+          ]
+        ]
+      ],
+      "expected": "43"
+    },
+    {
+      "name": "success-empty",
+      "source": "(condition-case e 42 (:success))",
+      "transport": [
+        "condition-case",
+        "e",
+        42,
+        [
+          ":success"
+        ]
+      ],
+      "expected": "nil"
+    },
+    {
+      "name": "success-outside-own-handler",
+      "source": "(condition-case e (condition-case e 42 (:success (signal (quote arith-error) (quote nil))) (error 7)) (error (car e)))",
+      "transport": [
+        "condition-case",
+        "e",
+        [
+          "condition-case",
+          "e",
+          42,
+          [
+            ":success",
+            [
+              "signal",
+              [
+                "quote",
+                "arith-error"
+              ],
+              [
+                "quote",
+                "nil"
+              ]
+            ]
+          ],
+          [
+            "error",
+            7
+          ]
+        ],
+        [
+          "error",
+          [
+            "car",
+            "e"
+          ]
+        ]
+      ],
+      "expected": "arith-error"
+    },
+    {
+      "name": "success-does-not-run-after-error",
+      "source": "(condition-case e (signal (quote arith-error) (quote nil)) (:success 7) (error 9))",
+      "transport": [
+        "condition-case",
+        "e",
+        [
+          "signal",
+          [
+            "quote",
+            "arith-error"
+          ],
+          [
+            "quote",
+            "nil"
+          ]
+        ],
+        [
+          ":success",
+          7
+        ],
+        [
+          "error",
+          9
+        ]
+      ],
+      "expected": "9"
+    },
+    {
+      "name": "put-replaces-projection",
+      "source": "(progn (define-error (quote s49-b) \"B\") (put (quote s49-b) (quote error-conditions) (quote (s49-b arith-error error))) (condition-case nil (signal (quote s49-b) (quote nil)) (arith-error 7) (error 9)))",
+      "transport": [
+        "progn",
+        [
+          "define-error",
+          [
+            "quote",
+            "s49-b"
+          ],
+          {
+            "string": "B"
+          }
+        ],
+        [
+          "put",
+          [
+            "quote",
+            "s49-b"
+          ],
+          [
+            "quote",
+            "error-conditions"
+          ],
+          [
+            "quote",
+            [
+              "s49-b",
+              "arith-error",
+              "error"
+            ]
+          ]
+        ],
+        [
+          "condition-case",
+          "nil",
+          [
+            "signal",
+            [
+              "quote",
+              "s49-b"
+            ],
+            [
+              "quote",
+              "nil"
+            ]
+          ],
+          [
+            "arith-error",
+            7
+          ],
+          [
+            "error",
+            9
+          ]
+        ]
+      ],
+      "expected": "7"
+    },
+    {
+      "name": "destructive-projection-edit-invalidates",
+      "source": "(progn (define-error (quote s49-b) \"B\") (condition-case nil (signal (quote s49-b) (quote nil)) (error 0)) (setcdr (get (quote s49-b) (quote error-conditions)) (quote (arith-error))) (condition-case nil (signal (quote s49-b) (quote nil)) (arith-error 7) (error 9)))",
+      "transport": [
+        "progn",
+        [
+          "define-error",
+          [
+            "quote",
+            "s49-b"
+          ],
+          {
+            "string": "B"
+          }
+        ],
+        [
+          "condition-case",
+          "nil",
+          [
+            "signal",
+            [
+              "quote",
+              "s49-b"
+            ],
+            [
+              "quote",
+              "nil"
+            ]
+          ],
+          [
+            "error",
+            0
+          ]
+        ],
+        [
+          "setcdr",
+          [
+            "get",
+            [
+              "quote",
+              "s49-b"
+            ],
+            [
+              "quote",
+              "error-conditions"
+            ]
+          ],
+          [
+            "quote",
+            [
+              "arith-error"
+            ]
+          ]
+        ],
+        [
+          "condition-case",
+          "nil",
+          [
+            "signal",
+            [
+              "quote",
+              "s49-b"
+            ],
+            [
+              "quote",
+              "nil"
+            ]
+          ],
+          [
+            "arith-error",
+            7
+          ],
+          [
+            "error",
+            9
+          ]
+        ]
+      ],
+      "expected": "7"
+    },
+    {
+      "name": "property-keys-and-values",
+      "source": "(let ((key (cons 1 2))) (put (quote s49-b) key (cons 3 4)) (unwind-protect 0 (dotimes (i 20) (cons i nil))) (get (quote s49-b) key))",
+      "transport": [
+        "let",
+        [
+          [
+            "key",
+            [
+              "cons",
+              1,
+              2
+            ]
+          ]
+        ],
+        [
+          "put",
+          [
+            "quote",
+            "s49-b"
+          ],
+          "key",
+          [
+            "cons",
+            3,
+            4
+          ]
+        ],
+        [
+          "unwind-protect",
+          0,
+          [
+            "dotimes",
+            [
+              "i",
+              20
+            ],
+            [
+              "cons",
+              "i",
+              "nil"
+            ]
+          ]
+        ],
+        [
+          "get",
+          [
+            "quote",
+            "s49-b"
+          ],
+          "key"
+        ]
+      ],
+      "expected": "(3 . 4)"
+    },
+    {
+      "name": "symbol-validation",
+      "source": "(condition-case e (define-error 3 \"B\") (error e))",
+      "transport": [
+        "condition-case",
+        "e",
+        [
+          "define-error",
+          3,
+          {
+            "string": "B"
+          }
+        ],
+        [
+          "error",
+          "e"
+        ]
+      ],
+      "expected": "(wrong-type-argument symbolp 3)"
+    },
+    {
+      "name": "parent-validation",
+      "source": "(condition-case e (define-error (quote s49-b) \"B\" 3) (error e))",
+      "transport": [
+        "condition-case",
+        "e",
+        [
+          "define-error",
+          [
+            "quote",
+            "s49-b"
+          ],
+          {
+            "string": "B"
+          },
+          3
+        ],
+        [
+          "error",
+          "e"
+        ]
+      ],
+      "expected": "(wrong-type-argument symbolp 3)"
+    },
+    {
+      "name": "message-0",
+      "source": "(error-message-string (quote (error \"Oops\" 3)))",
+      "transport": [
+        "error-message-string",
+        [
+          "quote",
+          [
+            "error",
+            {
+              "string": "Oops"
+            },
+            3
+          ]
+        ]
+      ],
+      "expected": "\"Oops: 3\""
+    },
+    {
+      "name": "message-1",
+      "source": "(error-message-string (quote (error 3 4)))",
+      "transport": [
+        "error-message-string",
+        [
+          "quote",
+          [
+            "error",
+            3,
+            4
+          ]
+        ]
+      ],
+      "expected": "\"peculiar error: 4\""
+    },
+    {
+      "name": "message-2",
+      "source": "(error-message-string (quote (arith-error)))",
+      "transport": [
+        "error-message-string",
+        [
+          "quote",
+          [
+            "arith-error"
+          ]
+        ]
+      ],
+      "expected": "\"Arithmetic error\""
+    },
+    {
+      "name": "message-3",
+      "source": "(error-message-string (quote (arith-error \"oops\" 3)))",
+      "transport": [
+        "error-message-string",
+        [
+          "quote",
+          [
+            "arith-error",
+            {
+              "string": "oops"
+            },
+            3
+          ]
+        ]
+      ],
+      "expected": "\"Arithmetic error: \\\"oops\\\", 3\""
+    },
+    {
+      "name": "message-4",
+      "source": "(error-message-string (quote (wrong-type-argument integerp abc)))",
+      "transport": [
+        "error-message-string",
+        [
+          "quote",
+          [
+            "wrong-type-argument",
+            "integerp",
+            "abc"
+          ]
+        ]
+      ],
+      "expected": "\"Wrong type argument: integerp, abc\""
+    },
+    {
+      "name": "message-5",
+      "source": "(error-message-string (quote (s49-unknown 3 \"oops\")))",
+      "transport": [
+        "error-message-string",
+        [
+          "quote",
+          [
+            "s49-unknown",
+            3,
+            {
+              "string": "oops"
+            }
+          ]
+        ]
+      ],
+      "expected": "\"peculiar error: 3, \\\"oops\\\"\""
+    },
+    {
+      "name": "message-6",
+      "source": "(error-message-string (quote (quit)))",
+      "transport": [
+        "error-message-string",
+        [
+          "quote",
+          [
+            "quit"
+          ]
+        ]
+      ],
+      "expected": "\"Quit\""
+    },
+    {
+      "name": "message-7",
+      "source": "(error-message-string (quote (file-error \"oops\" \"file\")))",
+      "transport": [
+        "error-message-string",
+        [
+          "quote",
+          [
+            "file-error",
+            {
+              "string": "oops"
+            },
+            {
+              "string": "file"
+            }
+          ]
+        ]
+      ],
+      "expected": "\"oops: file\""
+    },
+    {
+      "name": "message-8",
+      "source": "(error-message-string (quote (void-variable x)))",
+      "transport": [
+        "error-message-string",
+        [
+          "quote",
+          [
+            "void-variable",
+            "x"
+          ]
+        ]
+      ],
+      "expected": "\"Symbol’s value as variable is void: x\""
+    },
+    {
+      "name": "message-9",
+      "source": "(error-message-string (quote (error \"can't\")))",
+      "transport": [
+        "error-message-string",
+        [
+          "quote",
+          [
+            "error",
+            {
+              "string": "can't"
+            }
+          ]
+        ]
+      ],
+      "expected": "\"can't\""
+    },
+    {
+      "name": "primitive-boundary-0",
+      "source": "(condition-case e (apply #'get nil) (error e))",
+      "transport": [
+        "condition-case",
+        "e",
+        [
+          "apply",
+          [
+            "function",
+            "get"
+          ],
+          "nil"
+        ],
+        [
+          "error",
+          "e"
+        ]
+      ],
+      "expected": "(wrong-number-of-arguments #<subr get> 0)"
+    },
+    {
+      "name": "primitive-boundary-1",
+      "source": "(condition-case e (apply #'put '(x y)) (error e))",
+      "transport": [
+        "condition-case",
+        "e",
+        [
+          "apply",
+          [
+            "function",
+            "put"
+          ],
+          [
+            "quote",
+            [
+              "x",
+              "y"
+            ]
+          ]
+        ],
+        [
+          "error",
+          "e"
+        ]
+      ],
+      "expected": "(wrong-number-of-arguments #<subr put> 2)"
+    },
+    {
+      "name": "primitive-boundary-2",
+      "source": "(condition-case e (apply #'define-error nil) (error e))",
+      "transport": [
+        "condition-case",
+        "e",
+        [
+          "apply",
+          [
+            "function",
+            "define-error"
+          ],
+          "nil"
+        ],
+        [
+          "error",
+          "e"
+        ]
+      ],
+      "expected": "(wrong-number-of-arguments #<subr define-error> 0)"
+    },
+    {
+      "name": "primitive-boundary-3",
+      "source": "(condition-case e (apply #'error-message-string nil) (error e))",
+      "transport": [
+        "condition-case",
+        "e",
+        [
+          "apply",
+          [
+            "function",
+            "error-message-string"
+          ],
+          "nil"
+        ],
+        [
+          "error",
+          "e"
+        ]
+      ],
+      "expected": "(wrong-number-of-arguments #<subr error-message-string> 0)"
+    },
+    {
+      "name": "primitive-boundary-4",
+      "source": "(progn (define-error 'child \"Child\") (condition-case nil (signal 'child nil) (error 0)) (nconc (get 'child 'error-conditions) '(arith-error)) (condition-case nil (signal 'child nil) (arith-error 7) (error 9)))",
+      "transport": [
+        "progn",
+        [
+          "define-error",
+          [
+            "quote",
+            "child"
+          ],
+          {
+            "string": "Child"
+          }
+        ],
+        [
+          "condition-case",
+          "nil",
+          [
+            "signal",
+            [
+              "quote",
+              "child"
+            ],
+            "nil"
+          ],
+          [
+            "error",
+            0
+          ]
+        ],
+        [
+          "nconc",
+          [
+            "get",
+            [
+              "quote",
+              "child"
+            ],
+            [
+              "quote",
+              "error-conditions"
+            ]
+          ],
+          [
+            "quote",
+            [
+              "arith-error"
+            ]
+          ]
+        ],
+        [
+          "condition-case",
+          "nil",
+          [
+            "signal",
+            [
+              "quote",
+              "child"
+            ],
+            "nil"
+          ],
+          [
+            "arith-error",
+            7
+          ],
+          [
+            "error",
+            9
+          ]
+        ]
+      ],
+      "expected": "7"
+    }
+  ],
+  "regime": "GNU byte-compiled / VM2 compiled",
+  "world": "fresh GNU process and VM2 per case; no json.el preload",
+  "gc": "GNU automatic GC enabled; VM2 moving GC floor 1",
+  "gnu_revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+  "gnu_binary_sha256": "20a94ee7abc04960e3296deead030a37866d1d1e1522f3efd818838af7fffbe4",
+  "gnu_sources": {
+    "eval.c": "db894444b2edc1e7e675d5d8f97cba7e6f77f2beb0e5c3a130afc505c6f387b4",
+    "data.c": "eca7895a8043cd0a960dfe037a46028374d1a40cc6ee4d0cf6de90ac56c242ae",
+    "json.c": "5c4b12fe53b489b5152046a97204d6b70a942f029bbf8d0dcc54005f51c68790",
+    "bytecode.c": "97fb8f41758f88c02684da4f766d7694e3c3274077f4be46a3163949bb6431ab"
+  },
+  "generator_sha256": "36d15e2d454404860b0ba430eeab1a74f0990e4da27720b8fb75c46120591947",
+  "source_sha256": "e7a46117d2458d1320b153883e11a487bacbfe5bd224ef3e0c50758ac93d07f5",
+  "compiler_id": "b27dc483f7424b4f1f432ff6c859b510fe8f541c240ec91920935c979b7f261e",
+  "binary_sha256": "69ea60c139074965526327e399117de162a70f1e6c3b52db836b3e941fa4c4cd"
+}

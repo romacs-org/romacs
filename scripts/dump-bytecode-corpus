@@ -1,0 +1,104 @@
+#!/usr/bin/env python3
+"""Dump every compiled function, including nested prototypes, without loading files.
+
+Usage: dump-bytecode-corpus OUTPUT [LISP_ROOT ...]
+GNU reads .elc syntax; Rust consumes only the tab-separated numeric/hex records.
+Keep the generated corpus in scratch, not Git. Any read/fetch failure is fatal.
+"""
+import os
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+
+DRIVER = r''';; -*- lexical-binding: nil; -*-
+(require 'cl-lib)
+(defvar dump-buffer)
+(defvar dump-file)
+(defvar dump-seen)
+(defvar dump-ordinal)
+(defvar dump-functions 0)
+(defvar dump-dynamic 0)
+(defun dump-function (fun)
+  (fetch-bytecode fun)
+  (let ((args (aref fun 0)) (code (aref fun 1))
+        (constants (aref fun 2)) (max (aref fun 3)))
+    (unless (and (stringp code) (vectorp constants)
+                 (integerp max) (>= max 0)
+                 (or (integerp args) (listp args)))
+      (error "Invalid dump fields: %s #%d" dump-file dump-ordinal))
+    (setq dump-ordinal (1+ dump-ordinal) dump-functions (1+ dump-functions))
+    (unless (integerp args) (setq dump-dynamic (1+ dump-dynamic)))
+    (with-current-buffer dump-buffer
+      (insert (format "%s#%d\t%s\t%d\t%d\t%s\n"
+                      dump-file dump-ordinal
+                      (if (integerp args) args "dynamic") max (length constants)
+                      (mapconcat (lambda (b) (format "%02x" b))
+                                 (string-to-list (string-as-unibyte code)) ""))))
+    constants))
+(defun dump-walk (object)
+  (let ((todo (list object)))
+    (while todo
+      (let ((x (pop todo)))
+        (when (and (or (consp x) (vectorp x) (byte-code-function-p x)
+                       (hash-table-p x))
+                   (not (gethash x dump-seen)))
+          (puthash x t dump-seen)
+          (cond
+           ((byte-code-function-p x)
+            (dump-function x)
+            (dotimes (i (length x)) (push (aref x i) todo)))
+           ((consp x) (push (car x) todo) (push (cdr x) todo))
+           ((vectorp x) (dotimes (i (length x)) (push (aref x i) todo)))
+           ((hash-table-p x)
+            (maphash (lambda (k v) (push k todo) (push v todo)) x))))))))
+(let ((output (getenv "CORPUS_OUTPUT"))
+      (roots (split-string (getenv "CORPUS_ROOTS") "\n" t))
+      (files 0))
+  (with-temp-buffer
+    (let ((dump-buffer (current-buffer)))
+      (dolist (root roots)
+        (dolist (dump-file (sort (directory-files-recursively root "\\.elc\\'") #'string<))
+          (setq files (1+ files))
+          (let ((dump-seen (make-hash-table :test 'eq)) (dump-ordinal 0)
+                (load-file-name dump-file) (load-force-doc-strings t)
+                (load-in-progress t))
+            (with-temp-buffer
+              (insert-file-contents-literally dump-file)
+              (while (progn (skip-chars-forward " \t\r\n") (not (eobp)))
+                (if (looking-at ";") (forward-line 1)
+                  (dump-walk (read (current-buffer))))))))))
+    (goto-char (point-min))
+    (insert (format "# corpus-v1\t%d\t%d\t%d\n" files dump-functions dump-dynamic))
+    (let ((coding-system-for-write 'utf-8-unix))
+      (write-region (point-min) (point-max) output nil 'silent)))
+  (princ (format "files=%d functions=%d dynamic=%d\n"
+                 files dump-functions dump-dynamic)))
+'''
+
+
+def main():
+    if len(sys.argv) < 2:
+        raise SystemExit(__doc__)
+    output = Path(sys.argv[1]).resolve()
+    roots = [str(Path(p).resolve()) for p in sys.argv[2:]]
+    if not roots:
+        library = subprocess.check_output(
+            ['/usr/bin/emacs', '-Q', '--batch', '--eval', '(princ (locate-library "subr"))'],
+            text=True)
+        roots = [str(Path(library).parent)]
+    if any(not Path(root).is_dir() for root in roots):
+        raise SystemExit('missing corpus root')
+    output.parent.mkdir(parents=True, exist_ok=True)
+    env = dict(os.environ, CORPUS_OUTPUT=str(output), CORPUS_ROOTS='\n'.join(roots))
+    with tempfile.TemporaryDirectory(dir=os.environ['TMPDIR']) as scratch:
+        driver = Path(scratch) / 'dump.el'
+        driver.write_text(DRIVER)
+        subprocess.run(['/usr/bin/emacs', '-Q', '--batch', '-l', str(driver)],
+                       env=env, check=True)
+    if not output.is_file() or output.stat().st_size == 0:
+        raise SystemExit('empty corpus')
+
+
+if __name__ == '__main__':
+    main()

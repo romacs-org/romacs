@@ -1,0 +1,123 @@
+{
+  "protocol": "head-order-v1",
+  "oracle": {
+    "path": "<recording-path-redacted>/emacs",
+    "resolved": "<recording-path-redacted>/emacs-32.0.50",
+    "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+    "version": "32.0.50",
+    "sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8"
+  },
+  "cases_sha256": "670458e94dcc1887fe6d3efe497369da451d0ca0f9847162254f497ac724fec3",
+  "recorder_sha256": "55ad21ed698c354d2e05ef3f48f93579f0e9d34f1616f59398f61f8bff5e1ba3",
+  "cases": [
+    {
+      "id": "void-precedence",
+      "expression": "(condition-case e (he-missing he-unbound) (error e))",
+      "form": "(condition-case e (condition-case e (he-missing he-unbound) (error e)) (error e))",
+      "gnu": "(void-function he-missing)"
+    },
+    {
+      "id": "void-side-effect",
+      "expression": "(let ((x 0)) (list (condition-case e (he-missing (setq x 1)) (error e)) x))",
+      "form": "(condition-case e (let ((x 0)) (list (condition-case e (he-missing (setq x 1)) (error e)) x)) (error e))",
+      "gnu": "((void-function he-missing) 0)"
+    },
+    {
+      "id": "void-nested-invalid",
+      "expression": "(condition-case e (he-missing ((or 1 2) 3)) (error e))",
+      "form": "(condition-case e (condition-case e (he-missing ((or 1 2) 3)) (error e)) (error e))",
+      "gnu": "(void-function he-missing)"
+    },
+    {
+      "id": "invalid-cell",
+      "expression": "(progn (fset 'he-invalid 17) (let ((x 0)) (list (condition-case e (he-invalid (setq x 1)) (error e)) x)))",
+      "form": "(condition-case e (progn (fset 'he-invalid 17) (let ((x 0)) (list (condition-case e (he-invalid (setq x 1)) (error e)) x))) (error e))",
+      "gnu": "((invalid-function he-invalid) 0)"
+    },
+    {
+      "id": "alias-void",
+      "expression": "(progn (fset 'he-alias 'he-missing) (condition-case e (he-alias he-unbound) (error e)))",
+      "form": "(condition-case e (progn (fset 'he-alias 'he-missing) (condition-case e (he-alias he-unbound) (error e))) (error e))",
+      "gnu": "(void-function he-alias)"
+    },
+    {
+      "id": "alias-invalid",
+      "expression": "(progn (fset 'he-invalid 17) (fset 'he-alias 'he-invalid) (condition-case e (he-alias he-unbound) (error e)))",
+      "form": "(condition-case e (progn (fset 'he-invalid 17) (fset 'he-alias 'he-invalid) (condition-case e (he-alias he-unbound) (error e))) (error e))",
+      "gnu": "(invalid-function he-alias)"
+    },
+    {
+      "id": "snapshot-closure",
+      "expression": "(progn (fset 'he-f (lambda (x) 'old)) (list (he-f (fset 'he-f (lambda (x) 'new))) (he-f nil)))",
+      "form": "(condition-case e (progn (fset 'he-f (lambda (x) 'old)) (list (he-f (fset 'he-f (lambda (x) 'new))) (he-f nil))) (error e))",
+      "gnu": "(old new)"
+    },
+    {
+      "id": "snapshot-primitive",
+      "expression": "(progn (fset 'he-f #'car) (list (he-f (progn (fset 'he-f #'cdr) '(11 22))) (he-f '(11 22))))",
+      "form": "(condition-case e (progn (fset 'he-f #'car) (list (he-f (progn (fset 'he-f #'cdr) '(11 22))) (he-f '(11 22)))) (error e))",
+      "gnu": "(11 (22))"
+    },
+    {
+      "id": "snapshot-alias",
+      "expression": "(progn (fset 'he-f (lambda (x) 'old)) (fset 'he-alias 'he-f) (he-alias (fset 'he-f (lambda (x) 'new))))",
+      "form": "(condition-case e (progn (fset 'he-f (lambda (x) 'old)) (fset 'he-alias 'he-f) (he-alias (fset 'he-f (lambda (x) 'new)))) (error e))",
+      "gnu": "old"
+    },
+    {
+      "id": "arguments-left-to-right",
+      "expression": "(let ((x 0)) (list (list (setq x 1) (setq x (+ x 1))) x))",
+      "form": "(condition-case e (let ((x 0)) (list (list (setq x 1) (setq x (+ x 1))) x)) (error e))",
+      "gnu": "((1 2) 2)"
+    },
+    {
+      "id": "primitive-arity-before-args",
+      "expression": "(let ((x 0)) (list (condition-case e (car (setq x 1) (setq x 2)) (error e)) x))",
+      "scope": "negative-known-gap",
+      "form": "(condition-case e (let ((x 0)) (list (condition-case e (car (setq x 1) (setq x 2)) (error e)) x)) (error e))",
+      "gnu": "((wrong-number-of-arguments car 2) 0)"
+    },
+    {
+      "id": "closure-arity-after-args",
+      "expression": "(progn (fset 'he-f (lambda (x) x)) (let ((x 0)) (list (condition-case e (he-f (setq x 1) (setq x 2)) (error (car e))) x)))",
+      "form": "(condition-case e (progn (fset 'he-f (lambda (x) x)) (let ((x 0)) (list (condition-case e (he-f (setq x 1) (setq x 2)) (error (car e))) x))) (error e))",
+      "gnu": "(wrong-number-of-arguments 2)"
+    },
+    {
+      "id": "funcall-delayed-resolution",
+      "expression": "(progn (fset 'he-f (lambda (x) 'old)) (funcall 'he-f (fset 'he-f (lambda (x) 'new))))",
+      "form": "(condition-case e (progn (fset 'he-f (lambda (x) 'old)) (funcall 'he-f (fset 'he-f (lambda (x) 'new)))) (error e))",
+      "gnu": "new"
+    },
+    {
+      "id": "funcall-void-after-args",
+      "expression": "(let ((x 0)) (list (condition-case e (funcall 'he-missing (setq x 1)) (error e)) x))",
+      "form": "(condition-case e (let ((x 0)) (list (condition-case e (funcall 'he-missing (setq x 1)) (error e)) x)) (error e))",
+      "gnu": "((void-function he-missing) 1)"
+    },
+    {
+      "id": "missing-unreached",
+      "expression": "(if nil (he-missing he-unbound) 'unreached)",
+      "form": "(condition-case e (if nil (he-missing he-unbound) 'unreached) (error e))",
+      "gnu": "unreached"
+    },
+    {
+      "id": "definition-lazy",
+      "expression": "(list (defun he-delayed () (he-missing he-unbound)) (fboundp 'he-delayed) (condition-case e (he-delayed) (error e)))",
+      "form": "(condition-case e (list (defun he-delayed () (he-missing he-unbound)) (fboundp 'he-delayed) (condition-case e (he-delayed) (error e))) (error e))",
+      "gnu": "(he-delayed t (void-function he-missing))"
+    },
+    {
+      "id": "head-not-evaluated",
+      "expression": "(let ((x 0)) (list (condition-case e ((progn (setq x 1) 17) (setq x 2)) (error e)) x))",
+      "form": "(condition-case e (let ((x 0)) (list (condition-case e ((progn (setq x 1) 17) (setq x 2)) (error e)) x)) (error e))",
+      "gnu": "((invalid-function (progn (setq x 1) 17)) 0)"
+    },
+    {
+      "id": "gc-snapshot",
+      "expression": "(progn (fset 'he-f (let ((x '(old))) (lambda (arg) x))) (he-f (progn (fset 'he-f (lambda (arg) 'new)) (let ((i 0)) (while (< i 20000) (make-string 10 65) (setq i (1+ i)))) nil)))",
+      "form": "(condition-case e (progn (fset 'he-f (let ((x '(old))) (lambda (arg) x))) (he-f (progn (fset 'he-f (lambda (arg) 'new)) (let ((i 0)) (while (< i 20000) (make-string 10 65) (setq i (1+ i)))) nil))) (error e))",
+      "gnu": "(old)"
+    }
+  ]
+}

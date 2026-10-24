@@ -1,0 +1,296 @@
+{
+ "blob": "28895ec921eca03a5c5527fe459af79d7a07350f",
+ "compiled": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": true,
+  "results": {
+   "casefiddle-allflags": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "casefiddle-case-symbols-as-words": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "casefiddle-invalid-region-extract-function": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "casefiddle-tests-case-table": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "casefiddle-tests-casing": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "casefiddle-tests-casing-byte8": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "casefiddle-tests-casing-byte8-with-changes": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "casefiddle-tests-casing-character": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "casefiddle-tests-casing-word": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "casefiddle-tests-char-casing": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "casefiddle-tests-char-properties": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "casefiddle-turkish": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (member \"tr_TR.utf8\" (get-locale-names))) :form (member \"tr_TR.utf8\" (\"C\" \"C.utf8\" \"POSIX\" \"en_US.utf8\")) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   }
+  },
+  "timed_out": false
+ },
+ "file": "src/casefiddle-tests.el",
+ "gnu": {
+  "emacs": "<recording-path-redacted>/emacs-32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+  "version": "32.0.50"
+ },
+ "harness_sha256": "78c20850429a08af22faadf73b5d164c560230e83d7eb88ef60cb995670703ef",
+ "mini": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": null,
+  "results": {
+   "casefiddle-allflags": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "casefiddle-case-symbols-as-words": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "casefiddle-invalid-region-extract-function": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "casefiddle-tests-case-table": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "casefiddle-tests-casing": {
+    "as_expected": null,
+    "detail": "(void-function cl-reduce)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "casefiddle-tests-casing-byte8": {
+    "as_expected": null,
+    "detail": "(void-function cl-reduce)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "casefiddle-tests-casing-byte8-with-changes": {
+    "as_expected": null,
+    "detail": "(void-function cl-reduce)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "casefiddle-tests-casing-character": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "casefiddle-tests-casing-word": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "casefiddle-tests-char-casing": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "casefiddle-tests-char-properties": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "casefiddle-turkish": {
+    "as_expected": null,
+    "detail": "((skip-unless (member \"tr_TR.utf8\" (get-locale-names))))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   }
+  },
+  "timed_out": false
+ },
+ "read_error": null,
+ "real": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": true,
+  "results": {
+   "casefiddle-allflags": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "casefiddle-case-symbols-as-words": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "casefiddle-invalid-region-extract-function": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "casefiddle-tests-case-table": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "casefiddle-tests-casing": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "casefiddle-tests-casing-byte8": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "casefiddle-tests-casing-byte8-with-changes": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "casefiddle-tests-casing-character": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "casefiddle-tests-casing-word": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "casefiddle-tests-char-casing": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "casefiddle-tests-char-properties": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "casefiddle-turkish": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (member \"tr_TR.utf8\" (get-locale-names))) :form (member \"tr_TR.utf8\" (\"C\" \"C.utf8\" \"POSIX\" \"en_US.utf8\")) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   }
+  },
+  "timed_out": false
+ },
+ "schema": 1,
+ "toplevel_deftests": 12
+}

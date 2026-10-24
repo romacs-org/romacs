@@ -1,0 +1,27 @@
+# Every new crate by exact package name; absent workspace packages are old core.
+# Any new crate may dev-depend on romacs-gnudiff (never production/build).
+# Add romacs-display-protocol to redisplay's row when that crate exists.
+[edges]
+romacs-chars = []
+romacs-text = ["romacs-chars"]
+romacs-props = ["romacs-chars"]
+romacs-regex = ["romacs-chars"]
+romacs-mem = ["romacs-chars"]
+romacs-mem-replay = ["romacs-mem"]
+romacs-obj = ["romacs-chars", "romacs-mem"]
+romacs-read = ["romacs-chars", "romacs-mem", "romacs-obj"]
+romacs-eval = ["romacs-chars", "romacs-mem", "romacs-obj"]
+# V0 standalone tooling measures the existing evaluator until V3 replaces it.
+romacsvm-bench = ["romacs-eval", "romacs-mem", "romacs-obj"]
+romacs-buffer = ["romacs-chars", "romacs-mem", "romacs-obj", "romacs-read", "romacs-eval"]
+romacs-coding = ["romacs-chars", "romacs-mem", "romacs-obj", "romacs-read", "romacs-eval", "romacs-buffer"]
+romacs-search = ["romacs-chars", "romacs-mem", "romacs-obj", "romacs-read", "romacs-eval", "romacs-buffer"]
+romacs-files = ["romacs-chars", "romacs-mem", "romacs-obj", "romacs-read", "romacs-eval", "romacs-buffer", "romacs-coding", "romacs-search"]
+romacs-proc = ["romacs-chars", "romacs-mem", "romacs-obj", "romacs-read", "romacs-eval", "romacs-buffer", "romacs-coding"]
+romacs-window = ["romacs-chars", "romacs-mem", "romacs-obj", "romacs-read", "romacs-eval", "romacs-buffer"]
+romacs-command = ["romacs-chars", "romacs-mem", "romacs-obj", "romacs-read", "romacs-eval", "romacs-buffer", "romacs-window", "romacs-search"]
+romacs-sys = ["romacs-chars", "romacs-mem", "romacs-obj", "romacs-read", "romacs-eval", "romacs-buffer", "romacs-coding"]
+romacs-fonts = []
+romacs-faces = ["romacs-chars", "romacs-mem", "romacs-obj", "romacs-read", "romacs-eval", "romacs-buffer", "romacs-window", "romacs-fonts"]
+romacs-redisplay = ["romacs-chars", "romacs-mem", "romacs-obj", "romacs-read", "romacs-eval", "romacs-buffer", "romacs-window", "romacs-coding", "romacs-search", "romacs-fonts", "romacs-faces"]
+romacs-gnudiff = []

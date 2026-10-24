@@ -1,0 +1,254 @@
+{
+ "name": "corpus-10",
+ "frame": {
+  "width": 480,
+  "height": 168,
+  "bg": "#ffffff",
+  "fg": "#000000"
+ },
+ "font": {
+  "family": "Liberation Mono",
+  "pixel_size": 20,
+  "regular": "/usr/share/fonts/liberation/LiberationMono-Regular.ttf",
+  "bold": "/usr/share/fonts/liberation/LiberationMono-Bold.ttf",
+  "italic": "/usr/share/fonts/liberation/LiberationMono-Italic.ttf"
+ },
+ "cursor_color": "#00a000",
+ "buffer": [
+  {
+   "text": "window"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "ψυχή"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "a&b",
+   "fg": "#8b0000"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "βιβλίο",
+   "fg": "#ff8c00"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "50%",
+   "underline": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "[0-9]+"
+  },
+  {
+   "text": "\n"
+  },
+  {
+   "text": "[0-9]+",
+   "bold": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "buffer"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "βιβλίο",
+   "fg": "#1e90ff"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "R2D2",
+   "fg": "#b8860b",
+   "bold": true,
+   "bg": "#d0ffd0"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "jumps",
+   "fg": "#b8860b"
+  },
+  {
+   "text": "\n"
+  },
+  {
+   "text": "ΔΕΛΤΑ",
+   "bold": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "lazy"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "Quick"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "window",
+   "italic": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "over"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "φως"
+  },
+  {
+   "text": "\n"
+  },
+  {
+   "text": "ΣΟΦΙΑ"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "window"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "Quick"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "fox"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "cursor"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "R2D2",
+   "fg": "#ff0000"
+  },
+  {
+   "text": "\n"
+  }
+ ],
+ "point": 82,
+ "expect": {
+  "origin": [
+   0,
+   0
+  ],
+  "rows": [
+   {
+    "text": "window ψυχή a&b βιβλίο 50% [0-9]+",
+    "runs": [
+     {
+      "start": 12,
+      "end": 15,
+      "fg": "#8b0000"
+     },
+     {
+      "start": 16,
+      "end": 22,
+      "fg": "#ff8c00"
+     },
+     {
+      "start": 23,
+      "end": 26,
+      "underline": true
+     }
+    ]
+   },
+   {
+    "text": "[0-9]+ buffer βιβλίο R2D2 jumps",
+    "runs": [
+     {
+      "start": 0,
+      "end": 6,
+      "bold": true
+     },
+     {
+      "start": 14,
+      "end": 20,
+      "fg": "#1e90ff"
+     },
+     {
+      "start": 21,
+      "end": 25,
+      "fg": "#b8860b",
+      "bold": true,
+      "bg": "#d0ffd0"
+     },
+     {
+      "start": 26,
+      "end": 31,
+      "fg": "#b8860b"
+     }
+    ]
+   },
+   {
+    "text": "ΔΕΛΤΑ lazy Quick window over φως",
+    "runs": [
+     {
+      "start": 0,
+      "end": 5,
+      "bold": true
+     },
+     {
+      "start": 17,
+      "end": 23,
+      "italic": true
+     }
+    ]
+   },
+   {
+    "text": "ΣΟΦΙΑ window Quick fox cursor R2D2",
+    "runs": [
+     {
+      "start": 30,
+      "end": 34,
+      "fg": "#ff0000"
+     }
+    ]
+   }
+  ],
+  "cursor": {
+   "row": 2,
+   "col": 15
+  }
+ }
+}

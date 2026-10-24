@@ -1,0 +1,21 @@
+{
+ "name": "secure-hash-algorithms",
+ "arity": [
+  0,
+  0
+ ],
+ "effect": "pure",
+ "gnu_files": [
+  "fns.c"
+ ],
+ "gnu_def": "fns.c:6092",
+ "rust": "src/prims/frontier.rs:118",
+ "args": [],
+ "probes": [
+  "(eq (secure-hash-algorithms) (secure-hash-algorithms))",
+  "(length (secure-hash-algorithms))",
+  "(let ((l (secure-hash-algorithms))) (setcar l 'x) (car (secure-hash-algorithms)))",
+  "(memq 'sha256 (secure-hash-algorithms))",
+  "(funcall #'secure-hash-algorithms)"
+ ]
+}

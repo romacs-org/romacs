@@ -1,0 +1,27 @@
+{
+  "name": "plist-put",
+  "arity": [
+    3,
+    4
+  ],
+  "effect": "global",
+  "gnu_files": [
+    "fns.c"
+  ],
+  "gnu_def": "fns.c:2667",
+  "rust": "src/prims/plist.rs:6",
+  "args": [
+    "no-generated-domain",
+    "no-generated-domain",
+    "no-generated-domain",
+    "no-generated-domain"
+  ],
+  "probes": [
+    "(let ((p (list :a 1))) (list (eq p (plist-put p :a 2)) p))",
+    "(let ((p (list :a 1))) (list (eq p (plist-put p :b 2)) p))",
+    "(plist-put nil :a 1)",
+    "(plist-put '(a) :b 2)",
+    "(plist-put '(a 1 . tail) :b 2)",
+    "(let ((p (list (list 'a) 1))) (list (eq p (plist-put p (list 'a) 2 #'equal)) p))"
+  ]
+}

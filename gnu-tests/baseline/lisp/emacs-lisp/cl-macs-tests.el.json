@@ -1,0 +1,1682 @@
+{
+ "blob": "2d764f800ede8989417c63981b081d01df52ac35",
+ "compiled": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": true,
+  "results": {
+   "cl-&key-arguments": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-case-error": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-case-no-warning": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-case-warning": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-define-compiler-macro/edebug": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-defstruct-dynbound-label-47552": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-defstruct/builtin-type": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-defstruct/edebug": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-flet-test": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-flet/edebug": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-lib-arglist-performance": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-lib-defstruct-record": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-lib-empty-keyargs": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-lib-keyword-names-versus-values": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-lib-struct-accessors": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-lib-struct-constructors": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-lib-struct-with-accessors": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-lib-symbol-macrolet": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-lib-symbol-macrolet-2": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-lib-symbol-macrolet-hide": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-lib-test-gensym": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-lib-test-typep": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-loop-destructuring-with": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs--labels": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs--progv": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs--test-cl-block-lexbind-bug-75498": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs--test-flet-block": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-accum": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-across-ref": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-always": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-and-arrays": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-and-assignment": {
+    "as_expected": true,
+    "detail": "(ert-test-failed ((should (equal (cl-loop for numlist in '(... ... ...) for a = (cl-first numlist) and b = (cl-second numlist) and c = (cl-third numlist) collect (list c b a)) '((4.0 2 1) (8.3 6 5) (10.4 9 8)))) :form (equal ((4.0 2 1) (4.0 2 1) (8.3 6 5)) ((4.0 2 1) (8.3 6 5) (10.4 9 8))) :value nil :explanation (list-elt 1 (list-elt 0 (different-atoms 4.0 8.3)))))",
+    "expected": ":failed",
+    "outcome": "failed",
+    "tags": []
+   },
+   "cl-macs-loop-anon-collection-conditional": {
+    "as_expected": true,
+    "detail": "(ert-test-failed ((should-error (cl-loop always nil collect t)) :form (let* ((--cl-var-- nil) (--cl-flag-- t)) (while (setq --cl-flag-- nil) (setq --cl-var-- (cons t --cl-var--))) (if --cl-flag-- (progn (nreverse --cl-var--)) nil)) :value nil :fail-reason \"did not signal an error\"))",
+    "expected": ":failed",
+    "outcome": "failed",
+    "tags": []
+   },
+   "cl-macs-loop-append/nconc": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-being-buffers": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-being-elements": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-being-elements-of-ref": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-being-frames": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-being-intervals/current-buffer": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-being-intervals/new-buffer": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-being-keymap": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-being-overlays": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-being-symbols": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-being-windows": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-collect": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-conditional-step-clauses": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-count": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-destructure": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-destructure-cons": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-destructure-nil": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-do": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-finally": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-for-as-across": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-for-as-arith": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-for-as-arith-invalid": {
+    "as_expected": true,
+    "detail": "(ert-test-failed ((should-error (cl-loop for i downfrom 10 below 20 collect i)) :form (let* ((i 10) (--cl-var-- nil)) (while (> i 20) (setq --cl-var-- (cons i --cl-var--)) (setq i (- i 1))) (nreverse --cl-var--)) :value nil :fail-reason \"did not signal an error\"))",
+    "expected": ":failed",
+    "outcome": "failed",
+    "tags": []
+   },
+   "cl-macs-loop-for-as-arith-order-side-effects": {
+    "as_expected": true,
+    "detail": "(error \"Expected a cl-loop keyword, found to\")",
+    "expected": ":failed",
+    "outcome": "errored",
+    "tags": []
+   },
+   "cl-macs-loop-for-as-equals-and": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-for-as-equals-then": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-for-as-hash": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-for-as-in-list": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-for-as-on-list": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-if": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-in-ref": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-initially": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-max/min": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-named": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-never": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-repeat": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-sum": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-thereis": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-unless": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-until": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-vconcat": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-when": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-while": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-with": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-test--symbol-macrolet": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-the": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   }
+  },
+  "timed_out": false
+ },
+ "file": "lisp/emacs-lisp/cl-macs-tests.el",
+ "gnu": {
+  "emacs": "<recording-path-redacted>/emacs-32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+  "version": "32.0.50"
+ },
+ "harness_sha256": "78c20850429a08af22faadf73b5d164c560230e83d7eb88ef60cb995670703ef",
+ "mini": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": null,
+  "results": {
+   "cl-&key-arguments": {
+    "as_expected": null,
+    "detail": "(void-variable cl--test-a)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "cl-case-error": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "cl-case-no-warning": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "cl-case-warning": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "cl-define-compiler-macro/edebug": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "cl-defstruct-dynbound-label-47552": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "cl-defstruct/builtin-type": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "cl-defstruct/edebug": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "cl-flet-test": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "cl-flet/edebug": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "cl-lib-arglist-performance": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "cl-lib-defstruct-record": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "cl-lib-empty-keyargs": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "cl-lib-keyword-names-versus-values": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "cl-lib-struct-accessors": {
+    "as_expected": null,
+    "detail": "(error \"mystruct-abc is a read-only slot\")",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "cl-lib-struct-constructors": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "cl-lib-struct-with-accessors": {
+    "as_expected": null,
+    "detail": "(error \"mystruct-abc is a read-only slot\")",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "cl-lib-symbol-macrolet": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "cl-lib-symbol-macrolet-2": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "cl-lib-symbol-macrolet-hide": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "cl-lib-test-gensym": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "cl-lib-test-typep": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "cl-loop-destructuring-with": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "cl-macs--labels": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "cl-macs--progv": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "cl-macs--test-cl-block-lexbind-bug-75498": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "cl-macs--test-flet-block": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "cl-macs-loop-accum": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "cl-macs-loop-across-ref": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "cl-macs-loop-always": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "cl-macs-loop-and-arrays": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "cl-macs-loop-and-assignment": {
+    "as_expected": null,
+    "detail": "((should (equal (cl-loop for numlist in '((1 2 4.0) (5 6 8.3) (8 9 10.4)) for a = (cl-first numlist) and b = (cl-second numlist) and c = (cl-third numlist) collect (list c b a)) '((4.0 2 1) (8.3 6 5) (10.4 9 8))) :value nil))",
+    "expected": ":failed",
+    "outcome": "failed",
+    "tags": null
+   },
+   "cl-macs-loop-anon-collection-conditional": {
+    "as_expected": null,
+    "detail": "((should-error (cl-loop always nil collect t) :value nil :fail-reason \"did not signal an error\"))",
+    "expected": ":failed",
+    "outcome": "failed",
+    "tags": null
+   },
+   "cl-macs-loop-append/nconc": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "cl-macs-loop-being-buffers": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "cl-macs-loop-being-elements": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "cl-macs-loop-being-elements-of-ref": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "cl-macs-loop-being-frames": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "cl-macs-loop-being-intervals/current-buffer": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "cl-macs-loop-being-intervals/new-buffer": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "cl-macs-loop-being-keymap": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "cl-macs-loop-being-overlays": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "cl-macs-loop-being-symbols": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "cl-macs-loop-being-windows": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "cl-macs-loop-collect": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "cl-macs-loop-conditional-step-clauses": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "cl-macs-loop-count": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "cl-macs-loop-destructure": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "cl-macs-loop-destructure-cons": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "cl-macs-loop-destructure-nil": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "cl-macs-loop-do": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "cl-macs-loop-finally": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "cl-macs-loop-for-as-across": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "cl-macs-loop-for-as-arith": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "cl-macs-loop-for-as-arith-invalid": {
+    "as_expected": null,
+    "detail": "((should-error (cl-loop for i downfrom 10 below 20 collect i) :value nil :fail-reason \"did not signal an error\"))",
+    "expected": ":failed",
+    "outcome": "failed",
+    "tags": null
+   },
+   "cl-macs-loop-for-as-arith-order-side-effects": {
+    "as_expected": null,
+    "detail": "(error \"Expected a cl-loop keyword, found to\")",
+    "expected": ":failed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "cl-macs-loop-for-as-equals-and": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "cl-macs-loop-for-as-equals-then": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "cl-macs-loop-for-as-hash": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "cl-macs-loop-for-as-in-list": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "cl-macs-loop-for-as-on-list": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "cl-macs-loop-if": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "cl-macs-loop-in-ref": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "cl-macs-loop-initially": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "cl-macs-loop-max/min": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "cl-macs-loop-named": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "cl-macs-loop-never": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "cl-macs-loop-repeat": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "cl-macs-loop-sum": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "cl-macs-loop-thereis": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "cl-macs-loop-unless": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "cl-macs-loop-until": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "cl-macs-loop-vconcat": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "cl-macs-loop-when": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "cl-macs-loop-while": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "cl-macs-loop-with": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "cl-macs-test--symbol-macrolet": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "cl-the": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   }
+  },
+  "timed_out": false
+ },
+ "read_error": null,
+ "real": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": true,
+  "results": {
+   "cl-&key-arguments": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-case-error": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-case-no-warning": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-case-warning": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-define-compiler-macro/edebug": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-defstruct-dynbound-label-47552": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-defstruct/builtin-type": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-defstruct/edebug": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-flet-test": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-flet/edebug": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-lib-arglist-performance": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-lib-defstruct-record": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-lib-empty-keyargs": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-lib-keyword-names-versus-values": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-lib-struct-accessors": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-lib-struct-constructors": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-lib-struct-with-accessors": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-lib-symbol-macrolet": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-lib-symbol-macrolet-2": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-lib-symbol-macrolet-hide": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-lib-test-gensym": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-lib-test-typep": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-loop-destructuring-with": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs--labels": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs--progv": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs--test-cl-block-lexbind-bug-75498": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs--test-flet-block": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-accum": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-across-ref": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-always": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-and-arrays": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-and-assignment": {
+    "as_expected": true,
+    "detail": "(ert-test-failed ((should (equal (cl-loop for numlist in '(... ... ...) for a = (cl-first numlist) and b = (cl-second numlist) and c = (cl-third numlist) collect (list c b a)) '((4.0 2 1) (8.3 6 5) (10.4 9 8)))) :form (equal ((4.0 2 1) (4.0 2 1) (8.3 6 5)) ((4.0 2 1) (8.3 6 5) (10.4 9 8))) :value nil :explanation (list-elt 1 (list-elt 0 (different-atoms 4.0 8.3)))))",
+    "expected": ":failed",
+    "outcome": "failed",
+    "tags": []
+   },
+   "cl-macs-loop-anon-collection-conditional": {
+    "as_expected": true,
+    "detail": "(ert-test-failed ((should-error (cl-loop always nil collect t)) :form (let* ((--cl-var-- nil) (--cl-flag-- t)) (while (setq --cl-flag-- nil) (setq --cl-var-- (cons t --cl-var--))) (if --cl-flag-- (progn (nreverse --cl-var--)) nil)) :value nil :fail-reason \"did not signal an error\"))",
+    "expected": ":failed",
+    "outcome": "failed",
+    "tags": []
+   },
+   "cl-macs-loop-append/nconc": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-being-buffers": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-being-elements": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-being-elements-of-ref": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-being-frames": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-being-intervals/current-buffer": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-being-intervals/new-buffer": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-being-keymap": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-being-overlays": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-being-symbols": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-being-windows": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-collect": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-conditional-step-clauses": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-count": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-destructure": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-destructure-cons": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-destructure-nil": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-do": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-finally": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-for-as-across": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-for-as-arith": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-for-as-arith-invalid": {
+    "as_expected": true,
+    "detail": "(ert-test-failed ((should-error (cl-loop for i downfrom 10 below 20 collect i)) :form (let* ((i 10) (--cl-var-- nil)) (while (> i 20) (setq --cl-var-- (cons i --cl-var--)) (setq i (- i 1))) (nreverse --cl-var--)) :value nil :fail-reason \"did not signal an error\"))",
+    "expected": ":failed",
+    "outcome": "failed",
+    "tags": []
+   },
+   "cl-macs-loop-for-as-arith-order-side-effects": {
+    "as_expected": true,
+    "detail": "(error \"Expected a cl-loop keyword, found to\")",
+    "expected": ":failed",
+    "outcome": "errored",
+    "tags": []
+   },
+   "cl-macs-loop-for-as-equals-and": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-for-as-equals-then": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-for-as-hash": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-for-as-in-list": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-for-as-on-list": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-if": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-in-ref": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-initially": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-max/min": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-named": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-never": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-repeat": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-sum": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-thereis": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-unless": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-until": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-vconcat": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-when": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-while": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-loop-with": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-macs-test--symbol-macrolet": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "cl-the": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   }
+  },
+  "timed_out": false
+ },
+ "schema": 1,
+ "toplevel_deftests": 79
+}

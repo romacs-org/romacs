@@ -1,0 +1,15 @@
+error[E0308]: mismatched types
+ --> tests/ui/raw_remap.rs:4:23
+  |
+4 |     Remap::from_alist(&raw).unwrap();
+  |     ----------------- ^^^^ expected `&BoundedDatum`, found `&Datum`
+  |     |
+  |     arguments to this function are incorrect
+  |
+  = note: expected reference `&BoundedDatum`
+             found reference `&Datum`
+note: associated function defined here
+ --> src/remap.rs
+  |
+  |     pub fn from_alist(alist: &BoundedDatum) -> Result<Arc<Remap>, FaceError> {
+  |            ^^^^^^^^^^

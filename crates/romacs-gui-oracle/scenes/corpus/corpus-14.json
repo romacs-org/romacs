@@ -1,0 +1,290 @@
+{
+ "name": "corpus-14",
+ "frame": {
+  "width": 480,
+  "height": 168,
+  "bg": "#ffffff",
+  "fg": "#000000"
+ },
+ "font": {
+  "family": "Liberation Mono",
+  "pixel_size": 20,
+  "regular": "/usr/share/fonts/liberation/LiberationMono-Regular.ttf",
+  "bold": "/usr/share/fonts/liberation/LiberationMono-Bold.ttf",
+  "italic": "/usr/share/fonts/liberation/LiberationMono-Italic.ttf"
+ },
+ "cursor_color": "#00a000",
+ "buffer": [
+  {
+   "text": "fox",
+   "fg": "#2e8b57",
+   "bold": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "βιβλίο",
+   "fg": "#1e90ff"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "λόγος"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "a&b",
+   "fg": "#008000"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "ξένος"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "{ok}",
+   "fg": "#008000"
+  },
+  {
+   "text": "\n"
+  },
+  {
+   "text": "lazy"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "x=42;"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "θάλασσα",
+   "bold": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "φως",
+   "fg": "#b8860b"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "C:\\tmp"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "ΣΟΦΙΑ",
+   "fg": "#b8860b",
+   "bg": "#ffe4e1"
+  },
+  {
+   "text": "\n"
+  },
+  {
+   "text": "lazy",
+   "fg": "#b8860b"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "window"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "brown",
+   "bold": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "ΣΟΦΙΑ",
+   "fg": "#008000",
+   "bold": true,
+   "underline": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "@user"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "ψυχή"
+  },
+  {
+   "text": "\n"
+  },
+  {
+   "text": "{ok}",
+   "bold": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "brown",
+   "fg": "#696969",
+   "underline": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "cursor"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "ΔΕΛΤΑ"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "φως",
+   "italic": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "δέντρο",
+   "fg": "#696969"
+  },
+  {
+   "text": "\n"
+  }
+ ],
+ "point": 63,
+ "expect": {
+  "origin": [
+   0,
+   0
+  ],
+  "rows": [
+   {
+    "text": "fox βιβλίο λόγος a&b ξένος {ok}",
+    "runs": [
+     {
+      "start": 0,
+      "end": 3,
+      "fg": "#2e8b57",
+      "bold": true
+     },
+     {
+      "start": 4,
+      "end": 10,
+      "fg": "#1e90ff"
+     },
+     {
+      "start": 17,
+      "end": 20,
+      "fg": "#008000"
+     },
+     {
+      "start": 27,
+      "end": 31,
+      "fg": "#008000"
+     }
+    ]
+   },
+   {
+    "text": "lazy x=42; θάλασσα φως C:\\tmp ΣΟΦΙΑ",
+    "runs": [
+     {
+      "start": 11,
+      "end": 18,
+      "bold": true
+     },
+     {
+      "start": 19,
+      "end": 22,
+      "fg": "#b8860b"
+     },
+     {
+      "start": 30,
+      "end": 35,
+      "fg": "#b8860b",
+      "bg": "#ffe4e1"
+     }
+    ]
+   },
+   {
+    "text": "lazy window brown ΣΟΦΙΑ @user ψυχή",
+    "runs": [
+     {
+      "start": 0,
+      "end": 4,
+      "fg": "#b8860b"
+     },
+     {
+      "start": 12,
+      "end": 17,
+      "bold": true
+     },
+     {
+      "start": 18,
+      "end": 23,
+      "fg": "#008000",
+      "bold": true,
+      "underline": true
+     }
+    ]
+   },
+   {
+    "text": "{ok} brown cursor ΔΕΛΤΑ φως δέντρο",
+    "runs": [
+     {
+      "start": 0,
+      "end": 4,
+      "bold": true
+     },
+     {
+      "start": 5,
+      "end": 10,
+      "fg": "#696969",
+      "underline": true
+     },
+     {
+      "start": 24,
+      "end": 27,
+      "italic": true
+     },
+     {
+      "start": 28,
+      "end": 34,
+      "fg": "#696969"
+     }
+    ]
+   }
+  ],
+  "cursor": {
+   "row": 1,
+   "col": 30
+  }
+ }
+}

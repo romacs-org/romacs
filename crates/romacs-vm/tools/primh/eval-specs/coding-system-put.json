@@ -1,0 +1,52 @@
+{
+  "name": "coding-system-put",
+  "arity": [
+    3,
+    3
+  ],
+  "effect": "global",
+  "gnu_files": [
+    "coding.c"
+  ],
+  "gnu_def": "coding.c:11505",
+  "rust": "src/prims/coding.rs:71",
+  "args": [
+    "no-generated-domain",
+    "no-generated-domain",
+    "no-generated-domain"
+  ],
+  "probes": [
+    "(progn (define-coding-system-internal 'oracle-cod 67 'raw-text nil t nil nil nil nil nil nil '(:probe 7) nil) (let ((r (coding-system-put 'oracle-cod :mnemonic \"Zebra\"))) (list r (plist-get (coding-system-plist 'oracle-cod) :mnemonic))))",
+    "(progn (define-coding-system-internal 'oracle-cod 67 'raw-text nil t nil nil nil nil nil nil '(:probe 7) nil) (let ((r (coding-system-put 'oracle-cod :mnemonic \"\"))) (list r (plist-get (coding-system-plist 'oracle-cod) :mnemonic))))",
+    "(progn (define-coding-system-internal 'oracle-cod 67 'raw-text nil t nil nil nil nil nil nil '(:probe 7) nil) (let ((r (coding-system-put 'oracle-cod :mnemonic 90))) (list r (plist-get (coding-system-plist 'oracle-cod) :mnemonic))))",
+    "(progn (define-coding-system-internal 'oracle-cod 67 'raw-text nil t nil nil nil nil nil nil '(:probe 7) nil) (let ((r (coding-system-put 'oracle-cod :mnemonic -1))) (list r (plist-get (coding-system-plist 'oracle-cod) :mnemonic))))",
+    "(progn (define-coding-system-internal 'oracle-cod 67 'raw-text nil t nil nil nil nil nil nil '(:probe 7) nil) (let ((r (coding-system-put 'oracle-cod :mnemonic 4194304))) (list r (plist-get (coding-system-plist 'oracle-cod) :mnemonic))))",
+    "(progn (define-coding-system-internal 'oracle-cod 67 'raw-text nil t nil nil nil nil nil nil '(:probe 7) nil) (let ((r (coding-system-put 'oracle-cod :mnemonic nil))) (list r (plist-get (coding-system-plist 'oracle-cod) :mnemonic))))",
+    "(progn (define-coding-system-internal 'oracle-cod 67 'raw-text nil t nil nil nil nil nil nil '(:probe 7) nil) (let ((r (coding-system-put 'oracle-cod :default-char nil))) (list r (plist-get (coding-system-plist 'oracle-cod) :default-char))))",
+    "(progn (define-coding-system-internal 'oracle-cod 67 'raw-text nil t nil nil nil nil nil nil '(:probe 7) nil) (let ((r (coding-system-put 'oracle-cod :default-char 32))) (list r (plist-get (coding-system-plist 'oracle-cod) :default-char))))",
+    "(progn (define-coding-system-internal 'oracle-cod 67 'raw-text nil t nil nil nil nil nil nil '(:probe 7) nil) (let ((r (coding-system-put 'oracle-cod :default-char -1))) (list r (plist-get (coding-system-plist 'oracle-cod) :default-char))))",
+    "(progn (define-coding-system-internal 'oracle-cod 67 'raw-text nil t nil nil nil nil nil nil '(:probe 7) nil) (let ((r (coding-system-put 'oracle-cod :default-char 4194304))) (list r (plist-get (coding-system-plist 'oracle-cod) :default-char))))",
+    "(progn (define-coding-system-internal 'oracle-cod 67 'raw-text nil t nil nil nil nil nil nil '(:probe 7) nil) (let ((r (coding-system-put 'oracle-cod :default-char \"a\"))) (list r (plist-get (coding-system-plist 'oracle-cod) :default-char))))",
+    "(progn (define-coding-system-internal 'oracle-cod 67 'raw-text nil t nil nil nil nil nil nil '(:probe 7) nil) (let ((r (coding-system-put 'oracle-cod :decode-translation-table nil))) (list r (plist-get (coding-system-plist 'oracle-cod) :decode-translation-table))))",
+    "(progn (define-coding-system-internal 'oracle-cod 67 'raw-text nil t nil nil nil nil nil nil '(:probe 7) nil) (let ((r (coding-system-put 'oracle-cod :decode-translation-table 'table))) (list r (plist-get (coding-system-plist 'oracle-cod) :decode-translation-table))))",
+    "(progn (define-coding-system-internal 'oracle-cod 67 'raw-text nil t nil nil nil nil nil nil '(:probe 7) nil) (let ((r (coding-system-put 'oracle-cod :decode-translation-table '(x . y)))) (list r (plist-get (coding-system-plist 'oracle-cod) :decode-translation-table))))",
+    "(progn (define-coding-system-internal 'oracle-cod 67 'raw-text nil t nil nil nil nil nil nil '(:probe 7) nil) (let ((r (coding-system-put 'oracle-cod :decode-translation-table 17))) (list r (plist-get (coding-system-plist 'oracle-cod) :decode-translation-table))))",
+    "(progn (define-coding-system-internal 'oracle-cod 67 'raw-text nil t nil nil nil nil nil nil '(:probe 7) nil) (let ((r (coding-system-put 'oracle-cod :encode-translation-table nil))) (list r (plist-get (coding-system-plist 'oracle-cod) :encode-translation-table))))",
+    "(progn (define-coding-system-internal 'oracle-cod 67 'raw-text nil t nil nil nil nil nil nil '(:probe 7) nil) (let ((r (coding-system-put 'oracle-cod :encode-translation-table []))) (list r (plist-get (coding-system-plist 'oracle-cod) :encode-translation-table))))",
+    "(progn (define-coding-system-internal 'oracle-cod 67 'raw-text nil t nil nil nil nil nil nil '(:probe 7) nil) (let ((r (coding-system-put 'oracle-cod :post-read-conversion nil))) (list r (plist-get (coding-system-plist 'oracle-cod) :post-read-conversion))))",
+    "(progn (define-coding-system-internal 'oracle-cod 67 'raw-text nil t nil nil nil nil nil nil '(:probe 7) nil) (let ((r (coding-system-put 'oracle-cod :post-read-conversion 'identity))) (list r (plist-get (coding-system-plist 'oracle-cod) :post-read-conversion))))",
+    "(progn (define-coding-system-internal 'oracle-cod 67 'raw-text nil t nil nil nil nil nil nil '(:probe 7) nil) (let ((r (coding-system-put 'oracle-cod :post-read-conversion #'identity))) (list r (plist-get (coding-system-plist 'oracle-cod) :post-read-conversion))))",
+    "(progn (define-coding-system-internal 'oracle-cod 67 'raw-text nil t nil nil nil nil nil nil '(:probe 7) nil) (let ((r (coding-system-put 'oracle-cod :post-read-conversion 17))) (list r (plist-get (coding-system-plist 'oracle-cod) :post-read-conversion))))",
+    "(progn (define-coding-system-internal 'oracle-cod 67 'raw-text nil t nil nil nil nil nil nil '(:probe 7) nil) (let ((r (coding-system-put 'oracle-cod :pre-write-conversion nil))) (list r (plist-get (coding-system-plist 'oracle-cod) :pre-write-conversion))))",
+    "(progn (define-coding-system-internal 'oracle-cod 67 'raw-text nil t nil nil nil nil nil nil '(:probe 7) nil) (let ((r (coding-system-put 'oracle-cod :pre-write-conversion 17))) (list r (plist-get (coding-system-plist 'oracle-cod) :pre-write-conversion))))",
+    "(progn (define-coding-system-internal 'oracle-cod 67 'raw-text nil t nil nil nil nil nil nil '(:probe 7) nil) (let ((r (coding-system-put 'oracle-cod :ascii-compatible-p nil))) (list r (plist-get (coding-system-plist 'oracle-cod) :ascii-compatible-p))))",
+    "(progn (define-coding-system-internal 'oracle-cod 67 'raw-text nil t nil nil nil nil nil nil '(:probe 7) nil) (let ((r (coding-system-put 'oracle-cod :ascii-compatible-p 17))) (list r (plist-get (coding-system-plist 'oracle-cod) :ascii-compatible-p))))",
+    "(progn (define-coding-system-internal 'oracle-cod 67 'raw-text nil t nil nil nil nil nil nil '(:probe 7) nil) (let ((r (coding-system-put 'oracle-cod :probe 42))) (list r (plist-get (coding-system-plist 'oracle-cod) :probe))))",
+    "(progn (define-coding-system-internal 'oracle-cod 67 'raw-text nil t nil nil nil nil nil nil '(:probe 7) nil) (let ((r (coding-system-put 'oracle-cod :probe '(one two)))) (list r (plist-get (coding-system-plist 'oracle-cod) :probe))))",
+    "(coding-system-put 'oracle-missing :x 1)",
+    "(coding-system-put nil :x 1)",
+    "(progn (define-coding-system-internal 'oracle-cod 67 'raw-text nil t nil nil nil nil nil nil '(:probe 7) nil) (define-coding-system-alias 'oracle-a 'oracle-cod) (let ((v (list 9))) (list (eq v (coding-system-put 'oracle-a :object v)) (eq v (plist-get (coding-system-plist 'oracle-cod-dos) :object)))))",
+    "(progn (define-coding-system-internal 'oracle-cod 67 'raw-text nil t nil nil nil nil nil nil '(:probe 7) nil) (let ((p (coding-system-plist 'oracle-cod))) (coding-system-put 'oracle-cod :probe 99) (coding-system-put 'oracle-cod :new 3) (list (eq p (coding-system-plist 'oracle-cod)) p)))",
+    "(progn (setq oracle-count 0) (put 'oracle-lazy 'coding-system-define-form '(progn (setq oracle-count (1+ oracle-count)) (define-coding-system-internal 'oracle-lazy 67 'raw-text nil t nil nil nil nil nil nil '(:probe 7) nil))) (list (coding-system-put 'oracle-lazy :probe 8) oracle-count (coding-system-plist 'oracle-lazy)))"
+  ]
+}

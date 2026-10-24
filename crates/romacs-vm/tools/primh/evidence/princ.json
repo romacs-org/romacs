@@ -1,0 +1,429 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "princ",
+ "spec_sha256": "84dcc5ae3d9b10727e18f421d61ac780890a8201f483b28c29a0db3f8df5c433",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "princ",
+    "subr",
+    1,
+    2
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "print.c": "a4d3613dd97297cb4a9b682f0fbe5a86d3ae1ac9a1a07bddaf6da970b28f0a85"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "princ/0000",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'princ '())) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr princ> 0))"
+  },
+  {
+   "id": "princ/0001",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'princ '(1 1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr princ> 3))"
+  },
+  {
+   "id": "princ/0002",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj nil) (out nil)) (let ((r (princ obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (110 105 108)))"
+  },
+  {
+   "id": "princ/0003",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj t) (out nil)) (let ((r (princ obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (116)))"
+  },
+  {
+   "id": "princ/0004",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj 0) (out nil)) (let ((r (princ obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (48)))"
+  },
+  {
+   "id": "princ/0005",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj -42) (out nil)) (let ((r (princ obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (45 52 50)))"
+  },
+  {
+   "id": "princ/0006",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj most-positive-fixnum) (out nil)) (let ((r (princ obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (50 51 48 53 56 52 51 48 48 57 50 49 51 54 57 51 57 53 49)))"
+  },
+  {
+   "id": "princ/0007",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj most-negative-fixnum) (out nil)) (let ((r (princ obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (45 50 51 48 53 56 52 51 48 48 57 50 49 51 54 57 51 57 53 50)))"
+  },
+  {
+   "id": "princ/0008",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj 1.0) (out nil)) (let ((r (princ obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (49 46 48)))"
+  },
+  {
+   "id": "princ/0009",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj -0.0) (out nil)) (let ((r (princ obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (45 48 46 48)))"
+  },
+  {
+   "id": "princ/0010",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj 1e20) (out nil)) (let ((r (princ obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (49 101 43 50 48)))"
+  },
+  {
+   "id": "princ/0011",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj 1e-9) (out nil)) (let ((r (princ obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (49 101 45 48 57)))"
+  },
+  {
+   "id": "princ/0012",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj 1.0e+INF) (out nil)) (let ((r (princ obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (49 46 48 101 43 73 78 70)))"
+  },
+  {
+   "id": "princ/0013",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj -1.0e+INF) (out nil)) (let ((r (princ obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (45 49 46 48 101 43 73 78 70)))"
+  },
+  {
+   "id": "princ/0014",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj 0.0e+NaN) (out nil)) (let ((r (princ obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (48 46 48 101 43 78 97 78)))"
+  },
+  {
+   "id": "princ/0015",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj (string-to-number \"1.0e+NaN\")) (out nil)) (let ((r (princ obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (49 46 48 101 43 78 97 78)))"
+  },
+  {
+   "id": "princ/0016",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj 'alpha) (out nil)) (let ((r (princ obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (97 108 112 104 97)))"
+  },
+  {
+   "id": "princ/0017",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj (intern \"123\")) (out nil)) (let ((r (princ obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (49 50 51)))"
+  },
+  {
+   "id": "princ/0018",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj (intern \"a b\")) (out nil)) (let ((r (princ obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (97 32 98)))"
+  },
+  {
+   "id": "princ/0019",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj (intern \"\")) (out nil)) (let ((r (princ obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (35 35)))"
+  },
+  {
+   "id": "princ/0020",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj (make-symbol \"fresh\")) (out nil)) (let ((r (princ obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (102 114 101 115 104)))"
+  },
+  {
+   "id": "princ/0021",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj \"\") (out nil)) (let ((r (princ obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t nil))"
+  },
+  {
+   "id": "princ/0022",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj \"plain\") (out nil)) (let ((r (princ obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (112 108 97 105 110)))"
+  },
+  {
+   "id": "princ/0023",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj \"λ雪😀\") (out nil)) (let ((r (princ obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (955 38634 128512)))"
+  },
+  {
+   "id": "princ/0024",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj \"a\n\f\\\"z\") (out nil)) (let ((r (princ obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (97 10 12 34 122)))"
+  },
+  {
+   "id": "princ/0025",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj (unibyte-string 0 7 10 127 128 255)) (out nil)) (let ((r (princ obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (0 7 10 127 128 255)))"
+  },
+  {
+   "id": "princ/0026",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj (string-to-multibyte (unibyte-string 255))) (out nil)) (let ((r (princ obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (4194303)))"
+  },
+  {
+   "id": "princ/0027",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj '(a (b c) . d)) (out nil)) (let ((r (princ obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (40 97 32 40 98 32 99 41 32 46 32 100 41)))"
+  },
+  {
+   "id": "princ/0028",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj '(quote (a b))) (out nil)) (let ((r (princ obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (39 40 97 32 98 41)))"
+  },
+  {
+   "id": "princ/0029",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj [1 \"x\" [2 3]]) (out nil)) (let ((r (princ obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (91 49 32 120 32 91 50 32 51 93 93)))"
+  },
+  {
+   "id": "princ/0030",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj (make-bool-vector 3 t)) (out nil)) (let ((r (princ obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (35 38 51 34 7 34)))"
+  },
+  {
+   "id": "princ/0031",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj (make-hash-table)) (out nil)) (let ((r (princ obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (35 115 40 104 97 115 104 45 116 97 98 108 101 41)))"
+  },
+  {
+   "id": "princ/0032",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj (let ((h (make-hash-table))) (puthash 'a 7 h) h)) (out nil)) (let ((r (princ obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (35 115 40 104 97 115 104 45 116 97 98 108 101 32 100 97 116 97 32 40 97 32 55 41 41)))"
+  },
+  {
+   "id": "princ/0033",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj (current-buffer)) (out nil)) (let ((r (princ obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (42 115 99 114 97 116 99 104 42)))"
+  },
+  {
+   "id": "princ/0034",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj (point-marker)) (out nil)) (let ((r (princ obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (35 60 109 97 114 107 101 114 32 97 116 32 49 32 105 110 32 42 115 99 114 97 116 99 104 42 62)))"
+  },
+  {
+   "id": "princ/0035",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj (symbol-function 'car)) (out nil)) (let ((r (princ obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (35 60 115 117 98 114 32 99 97 114 62)))"
+  },
+  {
+   "id": "princ/0036",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj (lambda (x) x)) (out nil)) (let ((r (princ obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (35 91 50 53 55 32 135 32 91 93 32 50 32 10 10 40 102 110 32 88 41 93)))",
+   "gnu_regime_variant": "(ok (t (35 91 40 120 41 32 40 120 41 32 40 116 41 93)))"
+  },
+  {
+   "id": "princ/0037",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj (let ((x (list 'a))) (setcdr x x) x)) (out nil)) (let ((r (princ obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (40 97 32 46 32 35 48 41)))"
+  },
+  {
+   "id": "princ/0038",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj (let ((x (list 'a))) (list x x))) (out nil)) (let ((r (princ obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (40 40 97 41 32 40 97 41 41)))"
+  },
+  {
+   "id": "princ/0039",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj (let ((x (vector nil))) (aset x 0 x) x)) (out nil)) (let ((r (princ obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (91 35 48 93)))"
+  },
+  {
+   "id": "princ/0040",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((print-length nil) (out nil)) (princ '(a (b c) \"λ\\n\" (quote x)) (lambda (c) (setq out (cons c out)))) (nreverse out))) (error (list 'sig e))))",
+   "expected": "(ok (40 97 32 40 98 32 99 41 32 955 10 32 39 120 41))"
+  },
+  {
+   "id": "princ/0041",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((print-length 0) (out nil)) (princ '(a (b c) \"λ\\n\" (quote x)) (lambda (c) (setq out (cons c out)))) (nreverse out))) (error (list 'sig e))))",
+   "expected": "(ok (40 46 46 46 41))"
+  },
+  {
+   "id": "princ/0042",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((print-length 1) (out nil)) (princ '(a (b c) \"λ\\n\" (quote x)) (lambda (c) (setq out (cons c out)))) (nreverse out))) (error (list 'sig e))))",
+   "expected": "(ok (40 97 32 46 46 46 41))"
+  },
+  {
+   "id": "princ/0043",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((print-length -1) (out nil)) (princ '(a (b c) \"λ\\n\" (quote x)) (lambda (c) (setq out (cons c out)))) (nreverse out))) (error (list 'sig e))))",
+   "expected": "(ok (40 97 32 40 98 32 99 41 32 955 10 32 39 120 41))"
+  },
+  {
+   "id": "princ/0044",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((print-length t) (out nil)) (princ '(a (b c) \"λ\\n\" (quote x)) (lambda (c) (setq out (cons c out)))) (nreverse out))) (error (list 'sig e))))",
+   "expected": "(ok (40 97 32 40 98 32 99 41 32 955 10 32 39 120 41))"
+  },
+  {
+   "id": "princ/0045",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((print-level nil) (out nil)) (princ '(a (b c) \"λ\\n\" (quote x)) (lambda (c) (setq out (cons c out)))) (nreverse out))) (error (list 'sig e))))",
+   "expected": "(ok (40 97 32 40 98 32 99 41 32 955 10 32 39 120 41))"
+  },
+  {
+   "id": "princ/0046",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((print-level 0) (out nil)) (princ '(a (b c) \"λ\\n\" (quote x)) (lambda (c) (setq out (cons c out)))) (nreverse out))) (error (list 'sig e))))",
+   "expected": "(ok (46 46 46))"
+  },
+  {
+   "id": "princ/0047",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((print-level 1) (out nil)) (princ '(a (b c) \"λ\\n\" (quote x)) (lambda (c) (setq out (cons c out)))) (nreverse out))) (error (list 'sig e))))",
+   "expected": "(ok (40 97 32 46 46 46 32 955 10 32 46 46 46 41))"
+  },
+  {
+   "id": "princ/0048",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((print-level -1) (out nil)) (princ '(a (b c) \"λ\\n\" (quote x)) (lambda (c) (setq out (cons c out)))) (nreverse out))) (error (list 'sig e))))",
+   "expected": "(ok (46 46 46))"
+  },
+  {
+   "id": "princ/0049",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((print-level t) (out nil)) (princ '(a (b c) \"λ\\n\" (quote x)) (lambda (c) (setq out (cons c out)))) (nreverse out))) (error (list 'sig e))))",
+   "expected": "(ok (40 97 32 40 98 32 99 41 32 955 10 32 39 120 41))"
+  },
+  {
+   "id": "princ/0050",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((print-quoted nil) (out nil)) (princ '(a (b c) \"λ\\n\" (quote x)) (lambda (c) (setq out (cons c out)))) (nreverse out))) (error (list 'sig e))))",
+   "expected": "(ok (40 97 32 40 98 32 99 41 32 955 10 32 40 113 117 111 116 101 32 120 41 41))"
+  },
+  {
+   "id": "princ/0051",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((print-quoted t) (out nil)) (princ '(a (b c) \"λ\\n\" (quote x)) (lambda (c) (setq out (cons c out)))) (nreverse out))) (error (list 'sig e))))",
+   "expected": "(ok (40 97 32 40 98 32 99 41 32 955 10 32 39 120 41))"
+  },
+  {
+   "id": "princ/0052",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((print-circle nil) (out nil)) (princ '(a (b c) \"λ\\n\" (quote x)) (lambda (c) (setq out (cons c out)))) (nreverse out))) (error (list 'sig e))))",
+   "expected": "(ok (40 97 32 40 98 32 99 41 32 955 10 32 39 120 41))"
+  },
+  {
+   "id": "princ/0053",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((print-circle t) (out nil)) (princ '(a (b c) \"λ\\n\" (quote x)) (lambda (c) (setq out (cons c out)))) (nreverse out))) (error (list 'sig e))))",
+   "expected": "(ok (40 97 32 40 98 32 99 41 32 955 10 32 39 120 41))"
+  },
+  {
+   "id": "princ/0054",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((print-escape-newlines nil) (out nil)) (princ '(a (b c) \"λ\\n\" (quote x)) (lambda (c) (setq out (cons c out)))) (nreverse out))) (error (list 'sig e))))",
+   "expected": "(ok (40 97 32 40 98 32 99 41 32 955 10 32 39 120 41))"
+  },
+  {
+   "id": "princ/0055",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((print-escape-newlines t) (out nil)) (princ '(a (b c) \"λ\\n\" (quote x)) (lambda (c) (setq out (cons c out)))) (nreverse out))) (error (list 'sig e))))",
+   "expected": "(ok (40 97 32 40 98 32 99 41 32 955 10 32 39 120 41))"
+  },
+  {
+   "id": "princ/0056",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((print-escape-nonascii nil) (out nil)) (princ '(a (b c) \"λ\\n\" (quote x)) (lambda (c) (setq out (cons c out)))) (nreverse out))) (error (list 'sig e))))",
+   "expected": "(ok (40 97 32 40 98 32 99 41 32 955 10 32 39 120 41))"
+  },
+  {
+   "id": "princ/0057",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((print-escape-nonascii t) (out nil)) (princ '(a (b c) \"λ\\n\" (quote x)) (lambda (c) (setq out (cons c out)))) (nreverse out))) (error (list 'sig e))))",
+   "expected": "(ok (40 97 32 40 98 32 99 41 32 955 10 32 39 120 41))"
+  },
+  {
+   "id": "princ/0058",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((print-escape-multibyte nil) (out nil)) (princ '(a (b c) \"λ\\n\" (quote x)) (lambda (c) (setq out (cons c out)))) (nreverse out))) (error (list 'sig e))))",
+   "expected": "(ok (40 97 32 40 98 32 99 41 32 955 10 32 39 120 41))"
+  },
+  {
+   "id": "princ/0059",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((print-escape-multibyte t) (out nil)) (princ '(a (b c) \"λ\\n\" (quote x)) (lambda (c) (setq out (cons c out)))) (nreverse out))) (error (list 'sig e))))",
+   "expected": "(ok (40 97 32 40 98 32 99 41 32 955 10 32 39 120 41))"
+  },
+  {
+   "id": "princ/0060",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((print-escape-control-characters nil) (out nil)) (princ '(a (b c) \"λ\\n\" (quote x)) (lambda (c) (setq out (cons c out)))) (nreverse out))) (error (list 'sig e))))",
+   "expected": "(ok (40 97 32 40 98 32 99 41 32 955 10 32 39 120 41))"
+  },
+  {
+   "id": "princ/0061",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((print-escape-control-characters t) (out nil)) (princ '(a (b c) \"λ\\n\" (quote x)) (lambda (c) (setq out (cons c out)))) (nreverse out))) (error (list 'sig e))))",
+   "expected": "(ok (40 97 32 40 98 32 99 41 32 955 10 32 39 120 41))"
+  },
+  {
+   "id": "princ/0062",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((out nil) (standard-output (lambda (c) (setq out (cons c out))))) (princ \"λ\") (nreverse out))) (error (list 'sig e))))",
+   "expected": "(sig (void-variable out))"
+  },
+  {
+   "id": "princ/0063",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (princ 42 7)) (error (list 'sig e))))",
+   "expected": "(sig (invalid-function 7))"
+  },
+  {
+   "id": "princ/0064",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (princ 42 (current-buffer))) (error (list 'sig e))))",
+   "expected": "(ok 42)"
+  }
+ ],
+ "pinned": {
+  "princ/0034": "MISSING",
+  "princ/0036": "VALUE",
+  "princ/0037": "SIGNAL-VS-VALUE",
+  "princ/0039": "SIGNAL-VS-VALUE",
+  "princ/0064": "SIGNAL-VS-VALUE"
+ }
+}

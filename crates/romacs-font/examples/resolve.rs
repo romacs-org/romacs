@@ -1,0 +1,86 @@
+//! Print how a family resolves on this machine, per character.
+//!
+//! `cargo run -p romacs-font --example resolve -- Iosevka 16 'Ωμέγα Привет Hello 😀'`
+//!
+//! With `--owner-emoji` the policy carries
+//! `(set-fontset-font t 'emoji "Noto Color Emoji" nil 'prepend)`, approximated by
+//! U+1F300..U+1FAFF (the test carries GNU's exact emoji ranges). `--bold` and `--italic` change the requested style.
+
+use romacs_font::{
+    FontRequest, FontResolver, FontsetEntry, FontsetFontSpec, FontsetMode, FontsetPolicy,
+    FontsetTarget,
+};
+
+fn main() {
+    let mut args: Vec<String> = std::env::args().skip(1).collect();
+    let flag = |args: &mut Vec<String>, name: &str| {
+        let present = args.iter().any(|arg| arg == name);
+        args.retain(|arg| arg != name);
+        present
+    };
+    let owner_emoji = flag(&mut args, "--owner-emoji");
+    let bold = flag(&mut args, "--bold");
+    let italic = flag(&mut args, "--italic");
+    let family = args.first().map_or("monospace", String::as_str);
+    let size: f32 = args
+        .get(1)
+        .and_then(|size| size.parse().ok())
+        .unwrap_or(16.0);
+    let text = args.get(2).map_or("Ωμέγα Привет Hello", String::as_str);
+
+    let mut policy = FontsetPolicy::new();
+    if owner_emoji {
+        policy.set_font(
+            FontsetTarget::Range(0x1F300, 0x1FAFF),
+            FontsetEntry::Font(FontsetFontSpec::family("Noto Color Emoji")),
+            FontsetMode::Prepend,
+        );
+    }
+    let mut resolver = FontResolver::new().expect("platform font catalog");
+    let mut request = FontRequest::new(family, size);
+    if bold {
+        request = request.with_weight(700);
+    }
+    if italic {
+        request = request.with_slant(romacs_display_protocol::font::FontSlantKind::Italic);
+    }
+    match resolver.resolve_primary(&request, &policy) {
+        Ok(font) => println!(
+            "primary {family:?} -> {} | {} | w{} {:?} wc{} | asc {} desc {} space {} | {:?}",
+            font.family,
+            font.identity.stable_key,
+            font.weight,
+            font.slant,
+            font.width,
+            font.ascent_px,
+            font.descent_px,
+            font.space_advance_px,
+            font.glyph_advance
+        ),
+        Err(error) => {
+            println!("primary {family:?} -> ERROR {error}");
+            return;
+        }
+    }
+    let mut seen = Vec::new();
+    for ch in text
+        .chars()
+        .filter(|ch| !ch.is_ascii() && !ch.is_whitespace())
+    {
+        if seen.contains(&ch) {
+            continue;
+        }
+        seen.push(ch);
+        match resolver.resolve_char(&request, ch, &policy) {
+            Ok(found) => println!(
+                "U+{:04X} {ch} -> {:?} {} glyph {} adv {}",
+                u32::from(ch),
+                found.source,
+                found.font.family,
+                found.glyph.glyph_id.get(),
+                found.glyph.advance_px
+            ),
+            Err(error) => println!("U+{:04X} {ch} -> ERROR {error}", u32::from(ch)),
+        }
+    }
+}

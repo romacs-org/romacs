@@ -1,0 +1,46 @@
+{
+ "name": "symbol-with-pos-p",
+ "arity": [
+  1,
+  1
+ ],
+ "effect": "pure",
+ "gnu_files": [
+  "data.c",
+  "lisp.h",
+  "lread.c",
+  "print.c"
+ ],
+ "gnu_def": "data.c:362",
+ "rust": "src/prims/symbol.rs:17",
+ "args": [
+  "any"
+ ],
+ "probes": [
+  "(symbol-with-pos-p nil)",
+  "(symbol-with-pos-p t)",
+  "(symbol-with-pos-p 'ordinary)",
+  "(symbol-with-pos-p :keyword)",
+  "(symbol-with-pos-p (make-symbol \"fresh\"))",
+  "(symbol-with-pos-p 42)",
+  "(symbol-with-pos-p 1.5)",
+  "(symbol-with-pos-p (car (read-from-string \"#x10000000000000000000000000000\")))",
+  "(symbol-with-pos-p '(a . b))",
+  "(symbol-with-pos-p [a 1])",
+  "(symbol-with-pos-p \"text\")",
+  "(symbol-with-pos-p (unibyte-string 255))",
+  "(symbol-with-pos-p (make-hash-table))",
+  "(symbol-with-pos-p (standard-syntax-table))",
+  "(symbol-with-pos-p (make-marker))",
+  "(symbol-with-pos-p (current-buffer))",
+  "(symbol-with-pos-p (selected-window))",
+  "(symbol-with-pos-p (make-overlay 1 1))",
+  "(symbol-with-pos-p (lambda (x) x))",
+  "(symbol-with-pos-p #'car)",
+  "(funcall #'symbol-with-pos-p 'ordinary)",
+  "(let ((symbols-with-pos-enabled t)) (symbol-with-pos-p 'ordinary))",
+  "(symbol-with-pos-p (position-symbol 'x 7))",
+  "(symbol-with-pos-p (read-positioning-symbols \"x\"))",
+  "(let ((symbols-with-pos-enabled t)) (symbol-with-pos-p (position-symbol 'x 7)))"
+ ]
+}

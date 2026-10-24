@@ -1,0 +1,47 @@
+{
+ "name": "replace-match",
+ "arity": [
+  1,
+  5
+ ],
+ "effect": "global",
+ "gnu_files": [
+  "search.c"
+ ],
+ "gnu_def": "search.c:2344",
+ "rust": "src/prims/search.rs:11",
+ "args": [
+  "float",
+  "float",
+  "float",
+  "float",
+  "float"
+ ],
+ "probes": [
+  "(progn (string-match \"-mode$\" \"auto-save-visited-mode\") (replace-match \"\" nil nil \"auto-save-visited-mode\"))",
+  "(progn (string-match \"a\" \"cat\") (replace-match \"oo\" t t \"cat\"))",
+  "(progn (string-match \"é\\\\(λ\\\\)\" \"xéλz\") (list (funcall #'replace-match \"β\" t t \"xéλz\" 1) (match-data t)))",
+  "(let ((s (copy-sequence \"abc\"))) (string-match \"b\" s) (list (replace-match \"\\\\&\" t t s) s (fboundp 'replace-match) (functionp #'replace-match)))",
+  "(replace-match 1 t t \"abc\")",
+  "(replace-match \"x\" t t 1)",
+  "(progn (set-match-data '(1 9)) (list (condition-case e (replace-match \"x\" t t \"abc\") (error e)) (match-data t)))",
+  "(progn (set-match-data '(0 1)) (replace-match \"x\" t t \"abc\" -1))",
+  "(progn (set-match-data '(0 1)) (replace-match \"x\" t t \"abc\" 3))",
+  "(progn (set-match-data '(0 1)) (replace-match \"x\" t t \"abc\" 'x))",
+  "(progn (set-match-data '(0 1 nil nil)) (replace-match \"x\" t t \"abc\" 1))",
+  "(progn (set-match-data '(0 0)) (replace-match \"!\" t nil \"abc\"))",
+  "(progn (set-match-data '(3 3)) (replace-match \"!\" t nil \"abc\" 0))",
+  "(progn (set-match-data '(0 3)) (replace-match \"\" nil nil \"abc\"))",
+  "(progn (set-match-data '(1 2)) (list (multibyte-string-p (replace-match \"β\" t t \"abc\")) (replace-match \"β\" t t \"abc\")))",
+  "(progn (set-match-data '(1 2)) (replace-match \"x\" t t (string-to-multibyte \"abc\")))",
+  "(progn (set-match-data '(1 2)) (replace-match \"x\" t t (unibyte-string 97 255 99)))",
+  "(progn (erase-buffer) (insert \"abc\") (goto-char 1) (looking-at \"a\") (list (replace-match \"x\" t t) (buffer-string) (point)))",
+  "(progn (string-match \"ABC\" \"ABC\") (replace-match \"new\" nil t \"ABC\"))",
+  "(progn (string-match \"abc\" \"abc\") (replace-match \"\\\\&\" t nil \"abc\"))",
+  "(progn (string-match \"abc\" \"abc\") (replace-match \"x\" t t (propertize \"abc\" 'face 'bold)))",
+  "(progn (set-match-data '(0 1)) (replace-match (unibyte-string 255) t t (string-to-multibyte \"abc\")))",
+  "(progn (set-match-data '(1 -1)) (replace-match \"x\" t t \"abc\"))",
+  "(progn (set-match-data '(0 1)) (list (replace-match \"\" nil nil \"abc\") (match-data t)))",
+  "(progn (set-match-data '(0 1)) (replace-match \"x\" t t \"abc\" #x2000000000000000))"
+ ]
+}

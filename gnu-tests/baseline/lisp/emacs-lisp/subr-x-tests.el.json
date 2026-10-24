@@ -1,0 +1,1031 @@
+{
+ "blob": "cf9ed7d3fa24f96f8ed0e2f627d6333869dc51c5",
+ "compiled": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": true,
+  "results": {
+   "subr-clean-whitespace": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-ensure-empty-lines": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-string-chop-newline": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-string-fill": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-string-limit": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-string-limit-coding": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-string-limit-glyphs": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-string-lines": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-string-pad": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-x--hash-table-keys-and-values": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-x-and-let*-test-empty-varlist": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-x-and-let*-test-group-1": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-x-and-let*-test-group-2": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-x-and-let*-test-group-3": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-x-and-let*-test-rebind": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-x-named-let": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-x-test-add-display-text-property": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-x-test-if-let*-and-laziness-is-preserved": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-x-test-if-let*-bound-references": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-x-test-if-let*-false": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-x-test-if-let*-malformed-binding": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-x-test-if-let*-nil-related-expansion": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-x-test-if-let*-single-binding-expansion": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-x-test-if-let*-single-symbol-expansion": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-x-test-if-let*-true": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-x-test-remove-display-text-property": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-x-test-string-remove-prefix": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-x-test-string-remove-suffix": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-x-test-thread-first-examples": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-x-test-thread-first-expansion": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-x-test-thread-first-function-names-are-threaded": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-x-test-thread-first-no-forms": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-x-test-thread-last-examples": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-x-test-thread-last-expansion": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-x-test-thread-last-function-names-are-threaded": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-x-test-thread-last-no-forms": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-x-test-when-let*-and-laziness-is-preserved": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-x-test-when-let*-body-expansion": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-x-test-when-let*-bound-references": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-x-test-when-let*-false": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-x-test-when-let*-malformed-binding": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-x-test-when-let*-nil-related-expansion": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-x-test-when-let*-single-symbol-expansion": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-x-test-when-let*-true": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-x-with-work-buffer-locals-killed": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "test-string-truncate-left": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "test-with-buffer-unmodified-if-unchanged": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   }
+  },
+  "timed_out": false
+ },
+ "file": "lisp/emacs-lisp/subr-x-tests.el",
+ "gnu": {
+  "emacs": "<recording-path-redacted>/emacs-32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+  "version": "32.0.50"
+ },
+ "harness_sha256": "78c20850429a08af22faadf73b5d164c560230e83d7eb88ef60cb995670703ef",
+ "mini": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": null,
+  "results": {
+   "subr-clean-whitespace": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "subr-ensure-empty-lines": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "subr-string-chop-newline": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "subr-string-fill": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "subr-string-limit": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "subr-string-limit-coding": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "subr-string-limit-glyphs": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "subr-string-lines": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "subr-string-pad": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "subr-x--hash-table-keys-and-values": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "subr-x-and-let*-test-empty-varlist": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "subr-x-and-let*-test-group-1": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "subr-x-and-let*-test-group-2": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "subr-x-and-let*-test-group-3": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "subr-x-and-let*-test-rebind": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "subr-x-named-let": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "subr-x-test-add-display-text-property": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "subr-x-test-if-let*-and-laziness-is-preserved": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "subr-x-test-if-let*-bound-references": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "subr-x-test-if-let*-false": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "subr-x-test-if-let*-malformed-binding": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "subr-x-test-if-let*-nil-related-expansion": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "subr-x-test-if-let*-single-binding-expansion": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "subr-x-test-if-let*-single-symbol-expansion": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "subr-x-test-if-let*-true": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "subr-x-test-remove-display-text-property": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "subr-x-test-string-remove-prefix": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "subr-x-test-string-remove-suffix": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "subr-x-test-thread-first-examples": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "subr-x-test-thread-first-expansion": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "subr-x-test-thread-first-function-names-are-threaded": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "subr-x-test-thread-first-no-forms": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "subr-x-test-thread-last-examples": {
+    "as_expected": null,
+    "detail": "(void-function cl-reduce)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "subr-x-test-thread-last-expansion": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "subr-x-test-thread-last-function-names-are-threaded": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "subr-x-test-thread-last-no-forms": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "subr-x-test-when-let*-and-laziness-is-preserved": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "subr-x-test-when-let*-body-expansion": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "subr-x-test-when-let*-bound-references": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "subr-x-test-when-let*-false": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "subr-x-test-when-let*-malformed-binding": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "subr-x-test-when-let*-nil-related-expansion": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "subr-x-test-when-let*-single-symbol-expansion": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "subr-x-test-when-let*-true": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "subr-x-with-work-buffer-locals-killed": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "test-string-truncate-left": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "test-with-buffer-unmodified-if-unchanged": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   }
+  },
+  "timed_out": false
+ },
+ "read_error": null,
+ "real": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": true,
+  "results": {
+   "subr-clean-whitespace": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-ensure-empty-lines": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-string-chop-newline": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-string-fill": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-string-limit": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-string-limit-coding": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-string-limit-glyphs": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-string-lines": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-string-pad": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-x--hash-table-keys-and-values": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-x-and-let*-test-empty-varlist": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-x-and-let*-test-group-1": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-x-and-let*-test-group-2": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-x-and-let*-test-group-3": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-x-and-let*-test-rebind": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-x-named-let": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-x-test-add-display-text-property": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-x-test-if-let*-and-laziness-is-preserved": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-x-test-if-let*-bound-references": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-x-test-if-let*-false": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-x-test-if-let*-malformed-binding": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-x-test-if-let*-nil-related-expansion": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-x-test-if-let*-single-binding-expansion": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-x-test-if-let*-single-symbol-expansion": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-x-test-if-let*-true": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-x-test-remove-display-text-property": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-x-test-string-remove-prefix": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-x-test-string-remove-suffix": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-x-test-thread-first-examples": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-x-test-thread-first-expansion": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-x-test-thread-first-function-names-are-threaded": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-x-test-thread-first-no-forms": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-x-test-thread-last-examples": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-x-test-thread-last-expansion": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-x-test-thread-last-function-names-are-threaded": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-x-test-thread-last-no-forms": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-x-test-when-let*-and-laziness-is-preserved": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-x-test-when-let*-body-expansion": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-x-test-when-let*-bound-references": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-x-test-when-let*-false": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-x-test-when-let*-malformed-binding": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-x-test-when-let*-nil-related-expansion": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-x-test-when-let*-single-symbol-expansion": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-x-test-when-let*-true": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "subr-x-with-work-buffer-locals-killed": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "test-string-truncate-left": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "test-with-buffer-unmodified-if-unchanged": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   }
+  },
+  "timed_out": false
+ },
+ "schema": 1,
+ "toplevel_deftests": 47
+}

@@ -1,0 +1,68 @@
+//! GNU casefiddle.c:capitalize. Default case mappings are oracle-exported;
+//! word membership comes from the current buffer's syntax table.
+use super::*;
+use crate::lstring::{char_string, BYTE8_OFFSET};
+
+include!("capitalize-tables.in");
+
+fn mapping(code: u32) -> Option<&'static (u32, u32, &'static [u32], &'static [u32])> {
+    CASES.binary_search_by_key(&code, |row| row.0).ok().map(|i| &CASES[i])
+}
+
+fn capitalized(cx: &mut Leaf<'_>, object: Value) -> Out {
+    if let Some(n) = object.integer_value().filter(|n| *n >= 0) {
+        // casefiddle.c narrows XFIXNAT to int before checking the range.
+        let ch = n as i32;
+        if !(0..=0x0fff_ffff).contains(&ch) { return Ok(object); }
+        let flags = ch as u32 & 0x0fc0_0000;
+        let code = ch as u32 & !0x0fc0_0000;
+        let multibyte = cx.casing_multibyte()? || code >= 256;
+        let code = if !multibyte && (128..256).contains(&code) {
+            code + BYTE8_OFFSET
+        } else { code };
+        let cased = mapping(code).map_or(code, |row| row.1);
+        if cased == code { return Ok(object); }
+        let cased = if !multibyte && cased >= BYTE8_OFFSET { cased - BYTE8_OFFSET } else { cased };
+        return Ok(Value::integer(i64::from(cased | flags)).unwrap());
+    }
+    let view = cx.string_view(object).map_err(|_| Fault::Wrong("char-or-string-p", object))?;
+    if view.chars == 0 { return Ok(object); }
+    let multibyte = view.is_multibyte();
+    let chars: Vec<u32> = view.chars().map(|c| if !multibyte && c >= 128 { c + BYTE8_OFFSET } else { c }).collect();
+    let defaults: Vec<u8> = chars.iter().map(|&code| {
+        let i = WORD_RANGES.partition_point(|row| row.1 < code);
+        WORD_RANGES[i].2
+    }).collect();
+    let words = cx.casing_word_flags(&chars, &defaults)?;
+    let mut bytes = Vec::new();
+    let mut inword = false;
+    for (i, &code) in chars.iter().enumerate() {
+        let row = mapping(code);
+        let fallback = [code];
+        let mut out = if inword { row.map_or(&fallback[..], |r| r.3) }
+                      else { row.map_or(&fallback[..], |r| r.2) };
+        let sigma = [0x3c2];
+        if inword && code == 0x3a3 && !words.get(i + 1).copied().unwrap_or(false) {
+            out = &sigma;
+        }
+        for &c in out {
+            if multibyte {
+                let mut encoded = [0; 5];
+                let n = char_string(c, &mut encoded);
+                bytes.extend_from_slice(&encoded[..n]);
+            } else {
+                bytes.push(if c >= BYTE8_OFFSET { (c - BYTE8_OFFSET) as u8 } else { c as u8 });
+            }
+        }
+        inword = words[i];
+    }
+    // GNU's multibyte path allocates a property-free string; its unibyte
+    // path uses copy-sequence and retains properties.
+    Ok(if multibyte { cx.make_string(bytes, true) }
+       else { cx.buffer_name_string(object, bytes, false) })
+}
+
+defsubr! { name = "capitalize", gnu = "casefiddle.c:400", effect = Reads,
+fn capitalize(cx, object: Value) {
+    capitalized(cx, object)
+}}

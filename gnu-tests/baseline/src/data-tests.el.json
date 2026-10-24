@@ -1,0 +1,1388 @@
+{
+ "blob": "a54d46f00f79d93fb869a86189e9f4b2d42f4985",
+ "compiled": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": true,
+  "results": {
+   "binding-test-defvar-bool": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "binding-test-defvar-in-let": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "binding-test-defvar-int": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "binding-test-makunbound": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "binding-test-makunbound-built-in": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "binding-test-manual": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "binding-test-set-constant-itself": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "binding-test-set-constant-keyword": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "binding-test-set-constant-nil": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "binding-test-set-constant-t": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "binding-test-setq-default": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "binding-test-toplevel-values": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "bool-vector-change-detection": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "bool-vector-count-consecutive": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "bool-vector-count-population-1-nil": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "bool-vector-count-population-1-t": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "bool-vector-count-population-all-0-nil": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "bool-vector-count-population-all-1-t": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "bool-vector-intersection-op": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "bool-vector-not": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "bool-vector-set-difference-op": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "bool-vector-union-op": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "bool-vector-xor-op": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-aset-string": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests-%-mod": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests-+": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests--cl-type-of": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests--let-buffer-local": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests--let-buffer-local-no-unwind-other-buffers": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests--set-default-per-buffer": {
+    "as_expected": true,
+    "detail": null,
+    "expected": "t",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests-/": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests-1+": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests-1-": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests-<": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests-<=": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests-=": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests->": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests->=": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests-ash-lsh": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests-bare-symbol": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests-bignum": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests-defalias": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests-fset": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests-kill-all-local-variables": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests-kill-all-local-variables-permanent-local": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests-kill-all-local-variables-reset": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests-local-variable-watchers": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests-logand": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests-logcount": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests-logcount-2": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests-logior": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests-logxor": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests-make-local-bug65209": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests-make-local-forwarded-var": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests-make_symbol_constant": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests-max": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests-min": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests-minmax": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests-mod-0": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests-number-predicates": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests-number-to-string": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests-per-buffer-var-predicates": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests-varalias-watchers": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests-variable-watchers": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   }
+  },
+  "timed_out": false
+ },
+ "file": "src/data-tests.el",
+ "gnu": {
+  "emacs": "<recording-path-redacted>/emacs-32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+  "version": "32.0.50"
+ },
+ "harness_sha256": "78c20850429a08af22faadf73b5d164c560230e83d7eb88ef60cb995670703ef",
+ "mini": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": null,
+  "results": {
+   "binding-test-defvar-bool": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "binding-test-defvar-in-let": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "binding-test-defvar-int": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "binding-test-makunbound": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "binding-test-makunbound-built-in": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "binding-test-manual": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "binding-test-set-constant-itself": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "binding-test-set-constant-keyword": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "binding-test-set-constant-nil": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "binding-test-set-constant-t": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "binding-test-setq-default": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "binding-test-toplevel-values": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "bool-vector-change-detection": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "bool-vector-count-consecutive": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "bool-vector-count-population-1-nil": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "bool-vector-count-population-1-t": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "bool-vector-count-population-all-0-nil": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "bool-vector-count-population-all-1-t": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "bool-vector-intersection-op": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "bool-vector-not": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "bool-vector-set-difference-op": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "bool-vector-union-op": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "bool-vector-xor-op": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "data-aset-string": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "data-tests-%-mod": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "data-tests-+": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "data-tests--cl-type-of": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "data-tests--let-buffer-local": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "data-tests--let-buffer-local-no-unwind-other-buffers": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "data-tests--set-default-per-buffer": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": "t",
+    "outcome": "passed",
+    "tags": null
+   },
+   "data-tests-/": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "data-tests-1+": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "data-tests-1-": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "data-tests-<": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "data-tests-<=": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "data-tests-=": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "data-tests->": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "data-tests->=": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "data-tests-ash-lsh": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "data-tests-bare-symbol": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "data-tests-bignum": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "data-tests-defalias": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "data-tests-fset": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "data-tests-kill-all-local-variables": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "data-tests-kill-all-local-variables-permanent-local": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "data-tests-kill-all-local-variables-reset": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "data-tests-local-variable-watchers": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "data-tests-logand": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "data-tests-logcount": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "data-tests-logcount-2": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "data-tests-logior": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "data-tests-logxor": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "data-tests-make-local-bug65209": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "data-tests-make-local-forwarded-var": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "data-tests-make_symbol_constant": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "data-tests-max": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "data-tests-min": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "data-tests-minmax": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "data-tests-mod-0": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "data-tests-number-predicates": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "data-tests-number-to-string": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "data-tests-per-buffer-var-predicates": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "data-tests-varalias-watchers": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "data-tests-variable-watchers": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   }
+  },
+  "timed_out": false
+ },
+ "read_error": null,
+ "real": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": true,
+  "results": {
+   "binding-test-defvar-bool": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "binding-test-defvar-in-let": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "binding-test-defvar-int": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "binding-test-makunbound": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "binding-test-makunbound-built-in": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "binding-test-manual": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "binding-test-set-constant-itself": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "binding-test-set-constant-keyword": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "binding-test-set-constant-nil": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "binding-test-set-constant-t": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "binding-test-setq-default": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "binding-test-toplevel-values": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "bool-vector-change-detection": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "bool-vector-count-consecutive": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "bool-vector-count-population-1-nil": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "bool-vector-count-population-1-t": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "bool-vector-count-population-all-0-nil": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "bool-vector-count-population-all-1-t": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "bool-vector-intersection-op": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "bool-vector-not": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "bool-vector-set-difference-op": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "bool-vector-union-op": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "bool-vector-xor-op": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-aset-string": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests-%-mod": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests-+": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests--cl-type-of": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests--let-buffer-local": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests--let-buffer-local-no-unwind-other-buffers": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests--set-default-per-buffer": {
+    "as_expected": true,
+    "detail": null,
+    "expected": "t",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests-/": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests-1+": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests-1-": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests-<": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests-<=": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests-=": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests->": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests->=": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests-ash-lsh": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests-bare-symbol": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests-bignum": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests-defalias": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests-fset": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests-kill-all-local-variables": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests-kill-all-local-variables-permanent-local": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests-kill-all-local-variables-reset": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests-local-variable-watchers": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests-logand": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests-logcount": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests-logcount-2": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests-logior": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests-logxor": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests-make-local-bug65209": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests-make-local-forwarded-var": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests-make_symbol_constant": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests-max": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests-min": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests-minmax": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests-mod-0": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests-number-predicates": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests-number-to-string": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests-per-buffer-var-predicates": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests-varalias-watchers": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "data-tests-variable-watchers": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   }
+  },
+  "timed_out": false
+ },
+ "schema": 1,
+ "toplevel_deftests": 64
+}

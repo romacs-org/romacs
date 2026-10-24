@@ -1,0 +1,188 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "set-window-new-total",
+ "spec_sha256": "d6baad869ae7558005745aebaf351d910d43ed4ce46bc98a626e7c5712d8bb11",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "set-window-new-total",
+    "subr",
+    2,
+    3
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "window.c": "9bbd2274831c6cee89f1aff0464e0b2695f966d00ff7d1518dc9411cf64b64d8"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "set-window-new-total/0000",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-window-new-total 1 1.5 nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument window-valid-p 1))"
+  },
+  {
+   "id": "set-window-new-total/0001",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-window-new-total 1 1.5 t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument window-valid-p 1))"
+  },
+  {
+   "id": "set-window-new-total/0002",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-window-new-total 1 'x nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument window-valid-p 1))"
+  },
+  {
+   "id": "set-window-new-total/0003",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-window-new-total 1 'x t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument window-valid-p 1))"
+  },
+  {
+   "id": "set-window-new-total/0004",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'set-window-new-total '(1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr set-window-new-total> 1))"
+  },
+  {
+   "id": "set-window-new-total/0005",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'set-window-new-total '(1 1 1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr set-window-new-total> 4))"
+  },
+  {
+   "id": "set-window-new-total/0006",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 1.5) (a2 nil)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (set-window-new-total a0 a1 a2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument window-valid-p 1))"
+  },
+  {
+   "id": "set-window-new-total/0007",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 1.5) (a2 nil)) (let ((r (set-window-new-total a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument window-valid-p 1))"
+  },
+  {
+   "id": "set-window-new-total/0008",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 'x) (a2 t)) (let ((r (set-window-new-total a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument window-valid-p 1))"
+  },
+  {
+   "id": "set-window-new-total/0009",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-window-new-total nil 5)) (error (list 'sig e))))",
+   "expected": "(ok 5)"
+  },
+  {
+   "id": "set-window-new-total/0010",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set-window-new-total nil 5) (list (set-window-new-total nil 3 t) (window-new-total)))) (error (list 'sig e))))",
+   "expected": "(ok (8 8))"
+  },
+  {
+   "id": "set-window-new-total/0011",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set-window-new-total nil 5) (list (set-window-new-total nil -7 'add) (window-new-total)))) (error (list 'sig e))))",
+   "expected": "(ok (-2 -2))"
+  },
+  {
+   "id": "set-window-new-total/0012",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set-window-new-total nil 5) (list (set-window-new-total nil 2 nil) (window-new-total)))) (error (list 'sig e))))",
+   "expected": "(ok (2 2))"
+  },
+  {
+   "id": "set-window-new-total/0013",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (set-window-new-total (minibuffer-window) 9) (window-new-total (minibuffer-window)) (window-new-total))) (error (list 'sig e))))",
+   "expected": "(ok (9 9 0))"
+  },
+  {
+   "id": "set-window-new-total/0014",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (condition-case e (set-window-new-total nil 1.5) (error e))) (error (list 'sig e))))",
+   "expected": "(ok (wrong-type-argument fixnump 1.5))"
+  },
+  {
+   "id": "set-window-new-total/0015",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (condition-case e (set-window-new-total nil 'x t) (error e))) (error (list 'sig e))))",
+   "expected": "(ok (wrong-type-argument fixnump x))"
+  },
+  {
+   "id": "set-window-new-total/0016",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (condition-case e (set-window-new-total nil (1+ most-positive-fixnum)) (error (car e)))) (error (list 'sig e))))",
+   "expected": "(ok wrong-type-argument)"
+  },
+  {
+   "id": "set-window-new-total/0017",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (condition-case e (set-window-new-total 1 'x) (error e))) (error (list 'sig e))))",
+   "expected": "(ok (wrong-type-argument window-valid-p 1))"
+  },
+  {
+   "id": "set-window-new-total/0018",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (list (set-window-new-total p 11) (window-new-total p) (window-new-total a)))) (error (list 'sig e))))",
+   "expected": "(ok (11 11 0))"
+  },
+  {
+   "id": "set-window-new-total/0019",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (progn (set-window-new-pixel p h) (set-window-new-pixel a h) (delete-window-internal b) (condition-case e (set-window-new-total b 1) (error (list (car e) (car (cdr e)) (eq (car (cdr (cdr e))) b))))))) (error (list 'sig e))))",
+   "expected": "(ok (wrong-type-argument window-valid-p t))"
+  },
+  {
+   "id": "set-window-new-total/0020",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((n (set-window-new-total nil 4))) (eq n (window-new-total)))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "set-window-new-total/0021",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 'x) (error (list 'sig e))))",
+   "expected": "(ok x)"
+  },
+  {
+   "id": "set-window-new-total/0022",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1) (error (list 'sig e))))",
+   "expected": "(ok 1)"
+  },
+  {
+   "id": "set-window-new-total/0023",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1.5) (error (list 'sig e))))",
+   "expected": "(ok 1.5)"
+  },
+  {
+   "id": "set-window-new-total/0024",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok nil) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "set-window-new-total/0025",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok t) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  }
+ ],
+ "pinned": {}
+}

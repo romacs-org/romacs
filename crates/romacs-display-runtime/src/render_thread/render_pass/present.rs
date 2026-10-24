@@ -1,0 +1,302 @@
+//! Handing one drawn frame to the platform, and publishing what it says about
+//! the screen.
+//!
+//! Owns: the entry point the frame coordinator calls, the pre-present pacing
+//! notification, the `queue().present` itself, the debug surface readbacks,
+//! the child-frame lifecycle tracing around the present, and the one place the
+//! interaction projection becomes visible.
+//!
+//! Must not: draw. Everything here runs after the draw order has either
+//! produced a [`RenderedFrameSurface`] or given up with a typed failure, and
+//! the split is load-bearing: the projection is published *after submission*,
+//! never for a render attempt abandoned by an early return. Queue submission
+//! is not proof of display. Input deliberately uses the latest submitted
+//! projection without waiting for optional compositor confirmation.
+
+use super::{RenderApp, RenderedFrameSurface};
+use crate::render_thread::frame_sched::SubmissionResult;
+use crate::render_thread::{frame_stats, surface_readback};
+
+impl RenderApp {
+    /// Render and present one top-level frame window, preserving the precise
+    /// outcome for the frame coordinator.
+    ///
+    /// `compositor_only_hint` is set when the frame coordinator's plan is
+    /// compositor-only; it enables the retained-static fast path (blit the
+    /// retained scene, sample dynamic cursor/post state) when the scene is
+    /// eligible, skipping the glyph pipeline.
+    pub(in crate::render_thread) fn render_frame_window_hinted(
+        &mut self,
+        emacs_frame_id: u64,
+        plan: &crate::render_thread::frame_sched::FramePlan,
+    ) -> SubmissionResult {
+        if self.lifecycle_flags.is_shutting_down() {
+            return SubmissionResult::Skipped;
+        }
+        self.prepare_frame_state_for_render();
+        self.refresh_frame_opacity();
+        use crate::render_thread::frame_sched::RenderWork;
+        let compositor_only_hint = matches!(plan.work, RenderWork::CompositeOnly { .. });
+        let class = match plan.work {
+            RenderWork::None => "none",
+            RenderWork::CompositeOnly { .. } => "composite",
+            RenderWork::RepaintLayers { .. } => "repaint",
+            RenderWork::RebuildScene => "rebuild",
+        };
+        let presentation = self
+            .frame_windows
+            .get(emacs_frame_id)
+            .and_then(|w| w.render.compositor.current_frame.as_ref())
+            .map(|f| f.presentation_id)
+            .unwrap_or_else(|| romacs_display_protocol::PresentationId::new(0));
+        let reasons = if romacs_display_protocol::present_trace::enabled() {
+            format!("{:?}", plan.reasons)
+        } else {
+            String::new()
+        };
+        let _draw = romacs_display_protocol::present_trace::enabled().then(|| {
+            romacs_display_protocol::present_trace::DrawScope::begin(
+                emacs_frame_id,
+                presentation,
+                class,
+                reasons,
+            )
+        });
+        self.render_frame_window_impl(emacs_frame_id, compositor_only_hint)
+    }
+
+    fn render_frame_window_impl(
+        &mut self,
+        emacs_frame_id: u64,
+        compositor_only_hint: bool,
+    ) -> SubmissionResult {
+        let bg_gradient = if self.effects.bg_gradient.enabled {
+            Some((
+                self.effects.bg_gradient.top,
+                self.effects.bg_gradient.bottom,
+            ))
+        } else {
+            None
+        };
+
+        let is_primary_frame = self.frame_windows.is_primary_frame_id(emacs_frame_id);
+        // Dirty models were drawn above; this is what their textures show
+        // while this frame composites them.
+        let model_picture = self.model_picture();
+        let Some(renderer) = self.renderer.as_mut() else {
+            return SubmissionResult::Timeout;
+        };
+        let Some(window_state) = self.frame_windows.get_mut(emacs_frame_id) else {
+            return SubmissionResult::Timeout;
+        };
+        if let Some((width, height)) = window_state.synchronize_window_chrome() {
+            let (width, height) = crate::render_thread::state::emacs_pixels_from_window_size(
+                width,
+                height,
+                window_state.scale_factor(),
+            );
+            self.comms
+                .send_input(crate::thread_comm::InputEvent::WindowResize {
+                    emacs_frame_id,
+                    width,
+                    height,
+                    scale_factor: window_state.scale_factor(),
+                });
+        }
+        #[cfg(feature = "video")]
+        renderer.begin_video_surface_render();
+        window_state
+            .render
+            .compositor
+            .transitions
+            .apply_policy(self.transition_policy);
+        // The drawn set describes this window's composite only.
+        let _ = renderer.take_drawn_surfaces();
+
+        // Every pass of this frame, root and non-root, records into one
+        // queue submission, made before the readbacks and the present below.
+        renderer.begin_frame_submission();
+        let rendered = super::render_frame_window_contents_to_surface(
+            renderer,
+            window_state,
+            bg_gradient,
+            &self.child_frame_style,
+            self.scroll_indicators_enabled,
+            &self.toolbar,
+            self.extra_line_spacing,
+            self.extra_letter_spacing,
+            compositor_only_hint,
+            &self.render_policy,
+            &mut self.device_lost,
+            &model_picture,
+        );
+        renderer.finish_frame_submission();
+        let RenderedFrameSurface {
+            output,
+            frame,
+            projection,
+            models,
+            blends_older,
+        } = match rendered {
+            Ok(rendered) => {
+                romacs_display_protocol::present_trace::record(
+                    romacs_display_protocol::present_trace::Stage::Submit,
+                    emacs_frame_id,
+                    rendered.frame.presentation_id,
+                );
+                rendered
+            }
+            Err(failure) => {
+                #[cfg(feature = "video")]
+                renderer.cancel_video_surface_render();
+                let result = failure.submission_result();
+                if result == SubmissionResult::Occluded {
+                    // Not showing: it leaves every model's showing set.
+                    self.note_models_window_gone(emacs_frame_id);
+                }
+                return result;
+            }
+        };
+        if is_primary_frame {
+            let (w, h) = self
+                .frame_windows
+                .get(emacs_frame_id)
+                .map(|ws| ws.native_size())
+                .unwrap_or((0, 0));
+            surface_readback::maybe_log_first_frame_surface_readback(
+                &mut self.debug_first_frame_readback_pending,
+                &output.texture,
+                renderer,
+                &frame,
+                w,
+                h,
+            );
+            surface_readback::maybe_log_debug_surface_readback(
+                &mut self.debug_surface_readback_frames_remaining,
+                &output.texture,
+                renderer,
+                &frame,
+                w,
+                h,
+            );
+        }
+        let (child_frame_ids, removed_child_frame_ids) = self
+            .frame_windows
+            .get_mut(emacs_frame_id)
+            .map(|window_state| {
+                let child_frame_ids = window_state
+                    .render
+                    .compositor
+                    .child_frames
+                    .sorted_for_rendering()
+                    .to_vec();
+                let removed_child_frame_ids = std::mem::take(
+                    &mut window_state
+                        .render
+                        .compositor
+                        .pending_child_frame_removals_to_present,
+                );
+                (child_frame_ids, removed_child_frame_ids)
+            })
+            .unwrap_or_default();
+        if !child_frame_ids.is_empty() || !removed_child_frame_ids.is_empty() {
+            tracing::debug!(
+                parent_frame_id = emacs_frame_id,
+                child_frame_ids = ?child_frame_ids,
+                removed_child_frame_ids = ?removed_child_frame_ids,
+                "child_frame_lifecycle: present_begin"
+            );
+        }
+        // Let winit arm platform pacing (the Wayland surface frame
+        // callback) for the upcoming present; a no-op elsewhere.
+        if let Some(window_state) = self.frame_windows.get(emacs_frame_id)
+            && let Some(window) = window_state.window()
+        {
+            let (width, height) = window_state.content_size();
+            let logical_size = crate::render_thread::state::emacs_pixels_from_window_size(
+                width,
+                height,
+                window_state.scale_factor(),
+            );
+            self.presentation_observer.before_present(
+                window.as_ref(),
+                renderer.device(),
+                window_state
+                    .lifecycle
+                    .native()
+                    .expect("live window")
+                    .surface
+                    .as_ref()
+                    .expect("acquired surface remains live through present"),
+                window_state
+                    .lifecycle
+                    .native()
+                    .expect("live window")
+                    .surface_generation,
+                emacs_frame_id,
+                frame.presentation_id,
+                logical_size,
+                window_state.scale_factor(),
+                window_state.render.compositor.input_scroll.staged_tokens(),
+            );
+            window.pre_present_notify();
+        }
+        romacs_renderer_wgpu::diagnostics::gpu_done_after_submitted_work(
+            renderer.queue(),
+            emacs_frame_id,
+            frame.presentation_id,
+        );
+        {
+            use romacs_display_protocol::present_trace::{Span, Stage};
+            let _present = Span::new(
+                Stage::PresentCallStart,
+                Stage::PresentCallEnd,
+                emacs_frame_id,
+                Some(frame.presentation_id),
+            );
+            renderer.queue().present(output);
+        }
+        romacs_display_protocol::present_trace::record(
+            romacs_display_protocol::present_trace::Stage::Present,
+            emacs_frame_id,
+            frame.presentation_id,
+        );
+        // Read the actual per-window renderer atlas only after successful drawing
+        // and presentation. Missing atlas is missing evidence, never zero.
+        #[cfg(feature = "core-free")]
+        if let Some(diagnostics) = &self.comms.paint_diagnostics
+            && is_primary_frame
+            && let Some(atlas) = self
+                .frame_windows
+                .get(emacs_frame_id)
+                .and_then(|window| window.render.compositor.glyph_atlas.as_ref())
+        {
+            diagnostics.publish(crate::paint_host::PaintDiagnostic {
+                presentation: frame.presentation_id.get(),
+                unresolved_face_text_total: atlas.unresolved_face_text_total(),
+            });
+        }
+        // This projection describes the frame just handed to the compositor.
+        // Keep input publication at submission; native confirmation is separate.
+        if let Some(window_state) = self.frame_windows.get_mut(emacs_frame_id) {
+            if romacs_display_protocol::present_trace::enabled() {
+                window_state.render.trace_last_drawn = Some(frame.presentation_id);
+            }
+            window_state.render.publish_submitted_projection(projection);
+        }
+        #[cfg(feature = "video")]
+        renderer.finish_submitted_video_surface();
+        frame_stats::note_submission(romacs_display_protocol::frame_time::observe_platform_now());
+        self.note_models_frame_submitted(emacs_frame_id, &models, blends_older);
+
+        if !child_frame_ids.is_empty() || !removed_child_frame_ids.is_empty() {
+            tracing::debug!(
+                parent_frame_id = emacs_frame_id,
+                child_frame_ids = ?child_frame_ids,
+                removed_child_frame_ids = ?removed_child_frame_ids,
+                "child_frame_lifecycle: present_done"
+            );
+        }
+        SubmissionResult::Submitted
+    }
+}

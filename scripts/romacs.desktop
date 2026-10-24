@@ -1,0 +1,22 @@
+[Desktop Entry]
+Type=Application
+Name=romacs
+GenericName=Lisp machine
+Comment=Development Lisp editor; builds from the launcher checkout
+Exec=romacs %F
+Icon=text-editor
+Terminal=false
+Categories=Development;TextEditor;
+MimeType=text/plain;text/org;
+Keywords=emacs;lisp;elisp;editor;romacs;
+StartupNotify=true
+StartupWMClass=romacs
+Actions=GnuLisp;Latency;
+
+[Desktop Action GnuLisp]
+Name=romacs on GNU's own lisp/
+Exec=romacs --gnu-lisp
+
+[Desktop Action Latency]
+Name=romacs with latency tracing
+Exec=romacs --trace-latency

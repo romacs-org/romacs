@@ -1,0 +1,842 @@
+{
+ "blob": "c575f13b488c1d2712f706084a252f1abe463a06",
+ "compiled": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": true,
+  "results": {
+   "thread-buffer-disposition-nil": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "thread-buffer-disposition-silently": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "thread-buffer-disposition-t": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "thread-set-buffer-disposition": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "thread-set-buffer-disposition-main-thread": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "threads-all-threads": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "threads-basic": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "threads-condvar-mutex": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "threads-condvar-name": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "threads-condvar-name-2": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "threads-condvar-type": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "threads-condvar-wait": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "threads-condvarp": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "threads-condvarp-2": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "threads-errors": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "threads-io-switch": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "threads-is-one": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "threads-join": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "threads-join-error": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "threads-join-self": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "threads-let-binding": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "threads-live": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "threads-main-thread": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "threads-mutex-contention": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "threads-mutex-lock-unlock": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "threads-mutex-recursive": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "threads-mutex-signal": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "threads-mutex-type": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "threads-mutexp": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "threads-mutexp-2": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "threads-name": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "threads-signal-early": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "threads-signal-main-thread": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "threads-sticky-point": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "threads-test-bug33073": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "threads-test-bug48990": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "threads-threadp": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "threads-type": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   }
+  },
+  "timed_out": false
+ },
+ "file": "src/thread-tests.el",
+ "gnu": {
+  "emacs": "<recording-path-redacted>/emacs-32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+  "version": "32.0.50"
+ },
+ "harness_sha256": "78c20850429a08af22faadf73b5d164c560230e83d7eb88ef60cb995670703ef",
+ "mini": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": null,
+  "results": {
+   "thread-buffer-disposition-nil": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "thread-buffer-disposition-silently": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "thread-buffer-disposition-t": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "thread-set-buffer-disposition": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "thread-set-buffer-disposition-main-thread": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "threads-all-threads": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "threads-basic": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "threads-condvar-mutex": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "threads-condvar-name": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "threads-condvar-name-2": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "threads-condvar-type": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "threads-condvar-wait": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "threads-condvarp": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "threads-condvarp-2": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "threads-errors": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "threads-io-switch": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "threads-is-one": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "threads-join": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "threads-join-error": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "threads-join-self": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "threads-let-binding": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "threads-live": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "threads-main-thread": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "threads-mutex-contention": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "threads-mutex-lock-unlock": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "threads-mutex-recursive": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "threads-mutex-signal": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "threads-mutex-type": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "threads-mutexp": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "threads-mutexp-2": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "threads-name": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "threads-signal-early": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "threads-signal-main-thread": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "threads-sticky-point": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "threads-test-bug33073": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "threads-test-bug48990": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "threads-threadp": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "threads-type": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   }
+  },
+  "timed_out": false
+ },
+ "read_error": null,
+ "real": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": true,
+  "results": {
+   "thread-buffer-disposition-nil": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "thread-buffer-disposition-silently": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "thread-buffer-disposition-t": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "thread-set-buffer-disposition": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "thread-set-buffer-disposition-main-thread": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "threads-all-threads": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "threads-basic": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "threads-condvar-mutex": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "threads-condvar-name": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "threads-condvar-name-2": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "threads-condvar-type": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "threads-condvar-wait": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "threads-condvarp": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "threads-condvarp-2": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "threads-errors": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "threads-io-switch": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "threads-is-one": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "threads-join": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "threads-join-error": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "threads-join-self": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "threads-let-binding": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "threads-live": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "threads-main-thread": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "threads-mutex-contention": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "threads-mutex-lock-unlock": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "threads-mutex-recursive": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "threads-mutex-signal": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "threads-mutex-type": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "threads-mutexp": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "threads-mutexp-2": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "threads-name": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "threads-signal-early": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "threads-signal-main-thread": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "threads-sticky-point": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "threads-test-bug33073": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "threads-test-bug48990": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "threads-threadp": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "threads-type": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   }
+  },
+  "timed_out": false
+ },
+ "schema": 1,
+ "toplevel_deftests": 38
+}

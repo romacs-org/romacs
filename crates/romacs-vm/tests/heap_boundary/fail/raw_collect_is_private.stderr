@@ -1,0 +1,10 @@
+error[E0624]: method `collect` is private
+ --> tests/heap_boundary/fail/raw_collect_is_private.rs:5:8
+  |
+5 |     vm.collect(&mut []);
+  |        ^^^^^^^ private method
+  |
+ ::: src/handle.rs
+  |
+  |     pub(crate) fn collect(&mut self, roots: &mut [Value]) {
+  |     ----------------------------------------------------- private method defined here

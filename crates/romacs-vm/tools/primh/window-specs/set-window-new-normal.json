@@ -1,0 +1,36 @@
+{
+ "name": "set-window-new-normal",
+ "arity": [
+  1,
+  2
+ ],
+ "effect": "global",
+ "gnu_files": [
+  "window.c"
+ ],
+ "gnu_def": "window.c:4693",
+ "rust": "src/prims/window.rs:166",
+ "args": [
+  "none",
+  "none"
+ ],
+ "extra": {
+  "0": [
+   "1"
+  ],
+  "1": [
+   "nil",
+   "1.5"
+  ]
+ },
+ "probes": [
+  "(set-window-new-normal nil 0.5)",
+  "(list (set-window-new-normal nil 'anything) (window-new-normal))",
+  "(list (set-window-new-normal nil) (window-new-normal))",
+  "(let ((x (list 1 2))) (eq (progn (set-window-new-normal nil x) (window-new-normal)) x))",
+  "(list (set-window-new-normal (minibuffer-window) 2) (window-new-normal (minibuffer-window)) (window-new-normal))",
+  "(let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (list (set-window-new-normal p 0.1) (window-new-normal p)))",
+  "(let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (progn (set-window-new-pixel p h) (set-window-new-pixel a h) (delete-window-internal b) (condition-case e (set-window-new-normal b 0.5) (error (list (car e) (car (cdr e)) (eq (car (cdr (cdr e))) b))))))",
+  "(condition-case e (set-window-new-normal 'x 0.5) (error e))"
+ ]
+}

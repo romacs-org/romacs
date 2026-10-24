@@ -1,0 +1,673 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "test-completion",
+ "spec_sha256": "ea897bc64d2dc50327569b59198c57b97070a28c6513e27a8b3b5e1d5cdc5569",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "test-completion",
+    "subr",
+    2,
+    3
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "minibuf.c": "6f84a5f12e51edaaaac480e17193262d3e713499ba5d1efb463a10f8fbc36529"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "test-completion/0000",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (test-completion (copy-sequence \"\") nil nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0001",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (test-completion (copy-sequence \"\") nil t)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0002",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (test-completion (copy-sequence \"\") nil 'sym)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0003",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (test-completion (copy-sequence \"\") nil :kw)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0004",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (test-completion (copy-sequence \"\") (list 1 2 3) nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0005",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (test-completion (copy-sequence \"\") (list 1 2 3) t)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0006",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (test-completion (copy-sequence \"\") (list 1 2 3) 'sym)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0007",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (test-completion (copy-sequence \"\") (list 1 2 3) :kw)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0008",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (test-completion (copy-sequence \"\") (list 'a (list 'b)) nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0009",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (test-completion (copy-sequence \"\") (list 'a (list 'b)) t)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0010",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (test-completion (copy-sequence \"\") (list 'a (list 'b)) 'sym)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0011",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (test-completion (copy-sequence \"\") (list 'a (list 'b)) :kw)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0012",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (test-completion (copy-sequence \"abc\") nil nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0013",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (test-completion (copy-sequence \"abc\") nil t)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0014",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (test-completion (copy-sequence \"abc\") nil 'sym)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0015",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (test-completion (copy-sequence \"abc\") nil :kw)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0016",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (test-completion (copy-sequence \"abc\") (list 1 2 3) nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0017",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (test-completion (copy-sequence \"abc\") (list 1 2 3) t)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0018",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (test-completion (copy-sequence \"abc\") (list 1 2 3) 'sym)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0019",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (test-completion (copy-sequence \"abc\") (list 1 2 3) :kw)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0020",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (test-completion (copy-sequence \"abc\") (list 'a (list 'b)) nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0021",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (test-completion (copy-sequence \"abc\") (list 'a (list 'b)) t)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0022",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (test-completion (copy-sequence \"abc\") (list 'a (list 'b)) 'sym)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0023",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (test-completion (copy-sequence \"abc\") (list 'a (list 'b)) :kw)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0024",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (test-completion (copy-sequence \"λx\") nil nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0025",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (test-completion (copy-sequence \"λx\") nil t)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0026",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (test-completion (copy-sequence \"λx\") nil 'sym)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0027",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (test-completion (copy-sequence \"λx\") nil :kw)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0028",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (test-completion (copy-sequence \"λx\") (list 1 2 3) nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0029",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (test-completion (copy-sequence \"λx\") (list 1 2 3) t)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0030",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (test-completion (copy-sequence \"λx\") (list 1 2 3) 'sym)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0031",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (test-completion (copy-sequence \"λx\") (list 1 2 3) :kw)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0032",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (test-completion (copy-sequence \"λx\") (list 'a (list 'b)) nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0033",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (test-completion (copy-sequence \"λx\") (list 'a (list 'b)) t)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0034",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (test-completion (copy-sequence \"λx\") (list 'a (list 'b)) 'sym)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0035",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (test-completion (copy-sequence \"λx\") (list 'a (list 'b)) :kw)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0036",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'test-completion '(1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr test-completion> 1))"
+  },
+  {
+   "id": "test-completion/0037",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'test-completion '(1 1 1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr test-completion> 4))"
+  },
+  {
+   "id": "test-completion/0038",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\")) (a1 nil) (a2 nil)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (test-completion a0 a1 a2))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0039",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\")) (a1 nil) (a2 nil)) (let ((r (test-completion a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t t))"
+  },
+  {
+   "id": "test-completion/0040",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\")) (a1 nil) (a2 :kw)) (let ((r (test-completion a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t nil))"
+  },
+  {
+   "id": "test-completion/0041",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\")) (a1 (list 1 2 3)) (a2 'sym)) (let ((r (test-completion a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil nil))"
+  },
+  {
+   "id": "test-completion/0042",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\")) (a1 (list 'a (list 'b))) (a2 t)) (let ((r (test-completion a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil nil))"
+  },
+  {
+   "id": "test-completion/0043",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 nil) (a2 nil)) (let ((r (test-completion a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t t))"
+  },
+  {
+   "id": "test-completion/0044",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 nil) (a2 :kw)) (let ((r (test-completion a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t nil))"
+  },
+  {
+   "id": "test-completion/0045",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 (list 1 2 3)) (a2 'sym)) (let ((r (test-completion a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil nil))"
+  },
+  {
+   "id": "test-completion/0046",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 (list 'a (list 'b))) (a2 t)) (let ((r (test-completion a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil nil))"
+  },
+  {
+   "id": "test-completion/0047",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 nil) (a2 nil)) (let ((r (test-completion a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t t))"
+  },
+  {
+   "id": "test-completion/0048",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 nil) (a2 :kw)) (let ((r (test-completion a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t nil))"
+  },
+  {
+   "id": "test-completion/0049",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 (list 1 2 3)) (a2 'sym)) (let ((r (test-completion a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil nil))"
+  },
+  {
+   "id": "test-completion/0050",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 (list 'a (list 'b))) (a2 t)) (let ((r (test-completion a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil nil))"
+  },
+  {
+   "id": "test-completion/0051",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((completion-ignore-case nil)) (test-completion \"\" '(\"alpha\" \"alpine\" beta (\"albatross\" . 7) 42)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0052",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((completion-ignore-case nil)) (test-completion \"\" nil))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0053",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((completion-ignore-case nil)) (test-completion \"\" '(\"alpha\" \"alpha\")))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0054",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((completion-ignore-case t)) (test-completion \"\" '(\"alpha\" \"alpine\" beta (\"albatross\" . 7) 42)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0055",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((completion-ignore-case t)) (test-completion \"\" nil))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0056",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((completion-ignore-case t)) (test-completion \"\" '(\"alpha\" \"alpha\")))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0057",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((completion-ignore-case nil)) (test-completion \"a\" '(\"alpha\" \"alpine\" beta (\"albatross\" . 7) 42)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0058",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((completion-ignore-case nil)) (test-completion \"a\" nil))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0059",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((completion-ignore-case nil)) (test-completion \"a\" '(\"alpha\" \"alpha\")))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0060",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((completion-ignore-case t)) (test-completion \"a\" '(\"alpha\" \"alpine\" beta (\"albatross\" . 7) 42)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0061",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((completion-ignore-case t)) (test-completion \"a\" nil))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0062",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((completion-ignore-case t)) (test-completion \"a\" '(\"alpha\" \"alpha\")))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0063",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((completion-ignore-case nil)) (test-completion \"alpha\" '(\"alpha\" \"alpine\" beta (\"albatross\" . 7) 42)))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "test-completion/0064",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((completion-ignore-case nil)) (test-completion \"alpha\" nil))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0065",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((completion-ignore-case nil)) (test-completion \"alpha\" '(\"alpha\" \"alpha\")))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "test-completion/0066",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((completion-ignore-case t)) (test-completion \"alpha\" '(\"alpha\" \"alpine\" beta (\"albatross\" . 7) 42)))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "test-completion/0067",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((completion-ignore-case t)) (test-completion \"alpha\" nil))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0068",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((completion-ignore-case t)) (test-completion \"alpha\" '(\"alpha\" \"alpha\")))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "test-completion/0069",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((completion-ignore-case nil)) (test-completion \"AL\" '(\"alpha\" \"alpine\" beta (\"albatross\" . 7) 42)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0070",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((completion-ignore-case nil)) (test-completion \"AL\" nil))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0071",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((completion-ignore-case nil)) (test-completion \"AL\" '(\"alpha\" \"alpha\")))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0072",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((completion-ignore-case t)) (test-completion \"AL\" '(\"alpha\" \"alpine\" beta (\"albatross\" . 7) 42)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0073",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((completion-ignore-case t)) (test-completion \"AL\" nil))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0074",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((completion-ignore-case t)) (test-completion \"AL\" '(\"alpha\" \"alpha\")))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0075",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((completion-ignore-case nil)) (test-completion \"z\" '(\"alpha\" \"alpine\" beta (\"albatross\" . 7) 42)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0076",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((completion-ignore-case nil)) (test-completion \"z\" nil))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0077",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((completion-ignore-case nil)) (test-completion \"z\" '(\"alpha\" \"alpha\")))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0078",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((completion-ignore-case t)) (test-completion \"z\" '(\"alpha\" \"alpine\" beta (\"albatross\" . 7) 42)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0079",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((completion-ignore-case t)) (test-completion \"z\" nil))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0080",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((completion-ignore-case t)) (test-completion \"z\" '(\"alpha\" \"alpha\")))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0081",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((completion-ignore-case nil)) (test-completion \"al\" '((\"alpha\" . yes) (\"alpine\" . no)) (lambda (x) (eq (cdr x) 'yes))))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0082",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((completion-ignore-case nil) (h (make-hash-table :test 'equal))) (puthash \"alpha\" 'yes h) (puthash 'alpine 'no h) (puthash 42 'yes h) (test-completion \"al\" h))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0083",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((completion-ignore-case nil) (h (make-hash-table :test 'equal))) (puthash \"alpha\" 'yes h) (puthash 'alpine 'no h) (puthash 42 'yes h) (test-completion \"al\" h (lambda (k v) (eq v 'yes))))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0084",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((completion-ignore-case nil) (o (obarray-make))) (intern \"alpha\" o) (intern \"alpine\" o) (test-completion \"al\" o))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0085",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((completion-ignore-case nil) (o (obarray-make))) (set (intern \"alpha\" o) 'yes) (set (intern \"alpine\" o) 'no) (test-completion \"al\" o (lambda (s) (eq (symbol-value s) 'yes))))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0086",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((completion-ignore-case nil) (completion-regexp-list '(\"ph\"))) (test-completion \"al\" '(\"alpha\" \"alpine\")))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0087",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (test-completion \"x\" (lambda (s p action) (list s p action)) 'identity)) (error (list 'sig e))))",
+   "expected": "(ok (\"x\" identity lambda))"
+  },
+  {
+   "id": "test-completion/0088",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((completion-ignore-case t)) (test-completion \"al\" '((\"alpha\" . yes) (\"alpine\" . no)) (lambda (x) (eq (cdr x) 'yes))))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0089",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((completion-ignore-case t) (h (make-hash-table :test 'equal))) (puthash \"alpha\" 'yes h) (puthash 'alpine 'no h) (puthash 42 'yes h) (test-completion \"al\" h))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0090",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((completion-ignore-case t) (h (make-hash-table :test 'equal))) (puthash \"alpha\" 'yes h) (puthash 'alpine 'no h) (puthash 42 'yes h) (test-completion \"al\" h (lambda (k v) (eq v 'yes))))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0091",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((completion-ignore-case t) (o (obarray-make))) (intern \"alpha\" o) (intern \"alpine\" o) (test-completion \"al\" o))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0092",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((completion-ignore-case t) (o (obarray-make))) (set (intern \"alpha\" o) 'yes) (set (intern \"alpine\" o) 'no) (test-completion \"al\" o (lambda (s) (eq (symbol-value s) 'yes))))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0093",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((completion-ignore-case t) (completion-regexp-list '(\"ph\"))) (test-completion \"al\" '(\"alpha\" \"alpine\")))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0094",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (test-completion \"x\" (lambda (s p action) (list s p action)) 'identity)) (error (list 'sig e))))",
+   "expected": "(ok (\"x\" identity lambda))"
+  },
+  {
+   "id": "test-completion/0095",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (test-completion \"alpha\" '((\"alpha\" . first) (\"alpha\" . second)) (lambda (x) (cdr x)))) (error (list 'sig e))))",
+   "expected": "(ok first)"
+  },
+  {
+   "id": "test-completion/0096",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (test-completion \"nil\" '(nil))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0097",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (test-completion \"t\" '(t))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "test-completion/0098",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 'sym) (error (list 'sig e))))",
+   "expected": "(ok sym)"
+  },
+  {
+   "id": "test-completion/0099",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"\")) (error (list 'sig e))))",
+   "expected": "(ok \"\")"
+  },
+  {
+   "id": "test-completion/0100",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"abc\")) (error (list 'sig e))))",
+   "expected": "(ok \"abc\")"
+  },
+  {
+   "id": "test-completion/0101",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"λx\")) (error (list 'sig e))))",
+   "expected": "(ok \"λx\")"
+  },
+  {
+   "id": "test-completion/0102",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list 'a (list 'b))) (error (list 'sig e))))",
+   "expected": "(ok (a (b)))"
+  },
+  {
+   "id": "test-completion/0103",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list 1 2 3)) (error (list 'sig e))))",
+   "expected": "(ok (1 2 3))"
+  },
+  {
+   "id": "test-completion/0104",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok :kw) (error (list 'sig e))))",
+   "expected": "(ok :kw)"
+  },
+  {
+   "id": "test-completion/0105",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok nil) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "test-completion/0106",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok t) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  }
+ ]
+}

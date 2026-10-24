@@ -1,0 +1,25 @@
+{
+ "name": "nreverse",
+ "arity": [
+  1,
+  1
+ ],
+ "effect": "mutatesargs",
+ "gnu_files": [
+  "fns.c"
+ ],
+ "gnu_def": "fns.c:2268",
+ "rust": "src/prims/fns_core.rs:6",
+ "args": [],
+ "probes": [
+  "(let ((l (list 1 2 3))) (let ((r (nreverse l))) (list r l)))",
+  "(let ((v (vector 1 2 3))) (let ((r (nreverse v))) (list r v (eq r v))))",
+  "(let ((s (copy-sequence \"abc\"))) (let ((r (nreverse s))) (list r s (eq r s) (multibyte-string-p r))))",
+  "(nreverse (copy-sequence \"κόσμε\"))",
+  "(nreverse (copy-sequence \"\\377a\"))",
+  "(let ((x (list 1 2 3))) (setcdr (cdr (cdr x)) 4) (condition-case e (nreverse x) (wrong-type-argument (list e x))))",
+  "(let ((x (list 1 2 3))) (setcdr (cdr (cdr x)) x) (condition-case e (nreverse x) (circular-list (list (eq (car (cdr e)) x) (car x) (car (cdr x))))))",
+  "(let* ((tail (list 3 4 5)) (x (cons 1 (cons 2 tail)))) (setcdr (cdr (cdr tail)) tail) (condition-case e (nreverse x) (circular-list (list (eq (car (cdr e)) x) (car x)))))",
+  "(let ((s (copy-sequence \"abc\"))) (put-text-property 0 2 'face 'bold s) (text-properties-at 0 (nreverse s)))"
+ ]
+}

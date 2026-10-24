@@ -1,0 +1,1 @@
+{"name": "record", "arity": [1, "many"], "effect": "pure", "gnu_files": ["alloc.c"], "gnu_def": "alloc.c:3516", "rust": "src/prims/records.rs:4", "args": []}

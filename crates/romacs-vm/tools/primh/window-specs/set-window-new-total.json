@@ -1,0 +1,45 @@
+{
+ "name": "set-window-new-total",
+ "arity": [
+  2,
+  3
+ ],
+ "effect": "global",
+ "gnu_files": [
+  "window.c"
+ ],
+ "gnu_def": "window.c:4667",
+ "rust": "src/prims/window.rs:161",
+ "args": [
+  "none",
+  "none",
+  "none"
+ ],
+ "extra": {
+  "0": [
+   "1"
+  ],
+  "1": [
+   "1.5",
+   "'x"
+  ],
+  "2": [
+   "nil",
+   "t"
+  ]
+ },
+ "probes": [
+  "(set-window-new-total nil 5)",
+  "(progn (set-window-new-total nil 5) (list (set-window-new-total nil 3 t) (window-new-total)))",
+  "(progn (set-window-new-total nil 5) (list (set-window-new-total nil -7 'add) (window-new-total)))",
+  "(progn (set-window-new-total nil 5) (list (set-window-new-total nil 2 nil) (window-new-total)))",
+  "(list (set-window-new-total (minibuffer-window) 9) (window-new-total (minibuffer-window)) (window-new-total))",
+  "(condition-case e (set-window-new-total nil 1.5) (error e))",
+  "(condition-case e (set-window-new-total nil 'x t) (error e))",
+  "(condition-case e (set-window-new-total nil (1+ most-positive-fixnum)) (error (car e)))",
+  "(condition-case e (set-window-new-total 1 'x) (error e))",
+  "(let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (list (set-window-new-total p 11) (window-new-total p) (window-new-total a)))",
+  "(let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (progn (set-window-new-pixel p h) (set-window-new-pixel a h) (delete-window-internal b) (condition-case e (set-window-new-total b 1) (error (list (car e) (car (cdr e)) (eq (car (cdr (cdr e))) b))))))",
+  "(let ((n (set-window-new-total nil 4))) (eq n (window-new-total)))"
+ ]
+}

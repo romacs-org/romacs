@@ -1,0 +1,168 @@
+{
+ "pins": {
+  "mapcan/0018": {
+   "class": "PRINTER",
+   "row": "VM2-EV2"
+  },
+  "mapcan/0025": {
+   "class": "DATA",
+   "row": "VM2-CLOSEQ1"
+  },
+  "mapcan/0026": {
+   "class": "PRINTER",
+   "row": "VM2-EV2"
+  },
+  "mapcan/0045": {
+   "class": "PRINTER",
+   "row": "VM2-EV2"
+  },
+  "mapcan/0052": {
+   "class": "SIGNAL-VS-VALUE",
+   "row": "VM2-CLOSEQ1"
+  },
+  "mapcan/0053": {
+   "class": "PRINTER",
+   "row": "VM2-EV2"
+  },
+  "mapcan/0072": {
+   "class": "PRINTER",
+   "row": "VM2-EV2"
+  },
+  "mapcan/0079": {
+   "class": "SIGNAL-VS-VALUE",
+   "row": "VM2-CLOSEQ1"
+  },
+  "mapcan/0080": {
+   "class": "PRINTER",
+   "row": "VM2-EV2"
+  },
+  "mapcan/0099": {
+   "class": "PRINTER",
+   "row": "VM2-EV2"
+  },
+  "mapcan/0106": {
+   "class": "DATA",
+   "row": "VM2-CLOSEQ1"
+  },
+  "mapcan/0107": {
+   "class": "PRINTER",
+   "row": "VM2-EV2"
+  },
+  "mapcan/0126": {
+   "class": "PRINTER",
+   "row": "VM2-EV2"
+  },
+  "mapcan/0133": {
+   "class": "DATA",
+   "row": "VM2-CLOSEQ1"
+  },
+  "mapcan/0134": {
+   "class": "PRINTER",
+   "row": "VM2-EV2"
+  },
+  "mapcan/0153": {
+   "class": "PRINTER",
+   "row": "VM2-EV2"
+  },
+  "mapcan/0160": {
+   "class": "CONDITION",
+   "row": "VM2-CLOSEQ1"
+  },
+  "mapcan/0161": {
+   "class": "PRINTER",
+   "row": "VM2-EV2"
+  },
+  "mapcan/0180": {
+   "class": "PRINTER",
+   "row": "VM2-EV2"
+  },
+  "mapcan/0187": {
+   "class": "CONDITION",
+   "row": "VM2-CLOSEQ1"
+  },
+  "mapcan/0188": {
+   "class": "PRINTER",
+   "row": "VM2-EV2"
+  },
+  "mapcan/0207": {
+   "class": "PRINTER",
+   "row": "VM2-EV2"
+  },
+  "mapcan/0214": {
+   "class": "CONDITION",
+   "row": "VM2-CLOSEQ1"
+  },
+  "mapcan/0215": {
+   "class": "PRINTER",
+   "row": "VM2-EV2"
+  },
+  "mapcan/0234": {
+   "class": "PRINTER",
+   "row": "VM2-EV2"
+  },
+  "mapcan/0241": {
+   "class": "CONDITION",
+   "row": "VM2-CLOSEQ1"
+  },
+  "mapcan/0242": {
+   "class": "PRINTER",
+   "row": "VM2-EV2"
+  },
+  "mapcan/0258": {
+   "class": "PRINTER",
+   "row": "VM2-EV2"
+  },
+  "mapcan/0267": {
+   "class": "PRINTER",
+   "row": "VM2-EV2"
+  },
+  "mapcan/0276": {
+   "class": "PRINTER",
+   "row": "VM2-EV2"
+  },
+  "mapcan/0285": {
+   "class": "PRINTER",
+   "row": "VM2-EV2"
+  },
+  "mapcan/0294": {
+   "class": "PRINTER",
+   "row": "VM2-EV2"
+  },
+  "mapcan/0303": {
+   "class": "PRINTER",
+   "row": "VM2-EV2"
+  },
+  "mapcan/0312": {
+   "class": "PRINTER",
+   "row": "VM2-EV2"
+  },
+  "mapcan/0321": {
+   "class": "PRINTER",
+   "row": "VM2-EV2"
+  },
+  "mapcan/0330": {
+   "class": "PRINTER",
+   "row": "VM2-EV2"
+  },
+  "mapcan/0370": {
+   "class": "PRINTER",
+   "row": "VM2-EV2"
+  },
+  "mapcan/0371": {
+   "class": "PRINTER",
+   "row": "VM2-EV2"
+  },
+  "mapcan/0372": {
+   "class": "PRINTER",
+   "row": "VM2-EV2"
+  },
+  "mapcan/0373": {
+   "class": "PRINTER",
+   "row": "VM2-EV2"
+  },
+  "mapcan/0374": {
+   "class": "PRINTER",
+   "row": "VM2-EV2"
+  }
+ }
+}

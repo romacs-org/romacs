@@ -1,0 +1,217 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "bolp",
+ "spec_sha256": "715f67258618c58e47483e9fb75fd03176a55fe1980e103fadc75ad2343185ed",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "bolp",
+    "subr",
+    0,
+    0
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "editfns.c": "4ea567918bb8e3ba8bc5d144dce9ee2908bf7a108780cb63a4040daa353217c1"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "bolp/0000",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (bolp )) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "bolp/0001",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'bolp '(1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr bolp> 1))"
+  },
+  {
+   "id": "bolp/0002",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let () (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (bolp ))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "bolp/0003",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let () (let ((r (bolp ))) (list )))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "bolp/0004",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (bolp))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "bolp/0005",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (insert \"\") (goto-char 1) (bolp))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "bolp/0006",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (insert \"abc\") (goto-char 1) (bolp))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "bolp/0007",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (insert \"abc\") (goto-char 2) (bolp))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "bolp/0008",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (insert \"abc\") (goto-char 3) (bolp))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "bolp/0009",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (insert \"abc\") (goto-char 4) (bolp))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "bolp/0010",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (insert \"a\\nb\") (goto-char 1) (bolp))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "bolp/0011",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (insert \"a\\nb\") (goto-char 2) (bolp))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "bolp/0012",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (insert \"a\\nb\") (goto-char 3) (bolp))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "bolp/0013",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (insert \"a\\nb\") (goto-char 4) (bolp))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "bolp/0014",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (insert \"é🙂a\\nЖb\") (goto-char 1) (bolp))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "bolp/0015",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (insert \"é🙂a\\nЖb\") (goto-char 2) (bolp))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "bolp/0016",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (insert \"é🙂a\\nЖb\") (goto-char 3) (bolp))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "bolp/0017",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (insert \"é🙂a\\nЖb\") (goto-char 4) (bolp))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "bolp/0018",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (insert \"é🙂a\\nЖb\") (goto-char 5) (bolp))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "bolp/0019",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (insert \"é🙂a\\nЖb\") (goto-char 6) (bolp))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "bolp/0020",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (insert \"é🙂a\\nЖb\") (goto-char 7) (bolp))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "bolp/0021",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (insert \"é🙂a\\nЖb\") (narrow-to-region 3 6) (goto-char 3) (bolp))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "bolp/0022",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (insert \"é🙂a\\nЖb\") (narrow-to-region 3 6) (goto-char 4) (bolp))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "bolp/0023",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (insert \"é🙂a\\nЖb\") (narrow-to-region 2 3) (goto-char 3) (bolp))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "bolp/0024",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (insert \"é🙂a\\nЖb\") (narrow-to-region 3 3) (goto-char 3) (bolp))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "bolp/0025",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (insert \"é🙂a\\nЖb\") (narrow-to-region 2 6) (goto-char 5) (bolp))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "bolp/0026",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (set-buffer-multibyte nil) (insert (unibyte-string 255 10 254)) (goto-char 1) (bolp))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "bolp/0027",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (set-buffer-multibyte nil) (insert (unibyte-string 255 10 254)) (goto-char 2) (bolp))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "bolp/0028",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (set-buffer-multibyte nil) (insert (unibyte-string 255 10 254)) (goto-char 3) (bolp))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "bolp/0029",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (set-buffer-multibyte nil) (insert (unibyte-string 255 10 254)) (goto-char 4) (bolp))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "bolp/0030",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (fboundp 'bolp) (functionp #'bolp) (funcall #'bolp))) (error (list 'sig e))))",
+   "expected": "(ok (t t t))"
+  }
+ ]
+}

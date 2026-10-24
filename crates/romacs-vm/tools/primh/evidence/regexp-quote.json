@@ -1,0 +1,1591 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "regexp-quote",
+ "spec_sha256": "cdda831e9ed391d1553e2f3868e13a57dfefc957b6e45b57f18d25cd789456e6",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "regexp-quote",
+    "subr",
+    1,
+    1
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "search.c": "3b9dda9f663ba44c64823daac395c38b46cc3cf47b72b370af864be075ef8375"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "regexp-quote/0000",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \" \")) (error (list 'sig e))))",
+   "expected": "(ok \" \")"
+  },
+  {
+   "id": "regexp-quote/0001",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"!\")) (error (list 'sig e))))",
+   "expected": "(ok \"!\")"
+  },
+  {
+   "id": "regexp-quote/0002",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"\\\"\")) (error (list 'sig e))))",
+   "expected": "(ok \"\\\"\")"
+  },
+  {
+   "id": "regexp-quote/0003",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"#\")) (error (list 'sig e))))",
+   "expected": "(ok \"#\")"
+  },
+  {
+   "id": "regexp-quote/0004",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"$\")) (error (list 'sig e))))",
+   "expected": "(ok \"\\\\$\")"
+  },
+  {
+   "id": "regexp-quote/0005",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"%\")) (error (list 'sig e))))",
+   "expected": "(ok \"%\")"
+  },
+  {
+   "id": "regexp-quote/0006",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"&\")) (error (list 'sig e))))",
+   "expected": "(ok \"&\")"
+  },
+  {
+   "id": "regexp-quote/0007",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"'\")) (error (list 'sig e))))",
+   "expected": "(ok \"'\")"
+  },
+  {
+   "id": "regexp-quote/0008",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"(\")) (error (list 'sig e))))",
+   "expected": "(ok \"(\")"
+  },
+  {
+   "id": "regexp-quote/0009",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \")\")) (error (list 'sig e))))",
+   "expected": "(ok \")\")"
+  },
+  {
+   "id": "regexp-quote/0010",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"*\")) (error (list 'sig e))))",
+   "expected": "(ok \"\\\\*\")"
+  },
+  {
+   "id": "regexp-quote/0011",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"+\")) (error (list 'sig e))))",
+   "expected": "(ok \"\\\\+\")"
+  },
+  {
+   "id": "regexp-quote/0012",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \",\")) (error (list 'sig e))))",
+   "expected": "(ok \",\")"
+  },
+  {
+   "id": "regexp-quote/0013",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"-\")) (error (list 'sig e))))",
+   "expected": "(ok \"-\")"
+  },
+  {
+   "id": "regexp-quote/0014",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \".\")) (error (list 'sig e))))",
+   "expected": "(ok \"\\\\.\")"
+  },
+  {
+   "id": "regexp-quote/0015",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"/\")) (error (list 'sig e))))",
+   "expected": "(ok \"/\")"
+  },
+  {
+   "id": "regexp-quote/0016",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"0\")) (error (list 'sig e))))",
+   "expected": "(ok \"0\")"
+  },
+  {
+   "id": "regexp-quote/0017",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"1\")) (error (list 'sig e))))",
+   "expected": "(ok \"1\")"
+  },
+  {
+   "id": "regexp-quote/0018",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"2\")) (error (list 'sig e))))",
+   "expected": "(ok \"2\")"
+  },
+  {
+   "id": "regexp-quote/0019",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"3\")) (error (list 'sig e))))",
+   "expected": "(ok \"3\")"
+  },
+  {
+   "id": "regexp-quote/0020",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"4\")) (error (list 'sig e))))",
+   "expected": "(ok \"4\")"
+  },
+  {
+   "id": "regexp-quote/0021",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"5\")) (error (list 'sig e))))",
+   "expected": "(ok \"5\")"
+  },
+  {
+   "id": "regexp-quote/0022",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"6\")) (error (list 'sig e))))",
+   "expected": "(ok \"6\")"
+  },
+  {
+   "id": "regexp-quote/0023",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"7\")) (error (list 'sig e))))",
+   "expected": "(ok \"7\")"
+  },
+  {
+   "id": "regexp-quote/0024",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"8\")) (error (list 'sig e))))",
+   "expected": "(ok \"8\")"
+  },
+  {
+   "id": "regexp-quote/0025",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"9\")) (error (list 'sig e))))",
+   "expected": "(ok \"9\")"
+  },
+  {
+   "id": "regexp-quote/0026",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \":\")) (error (list 'sig e))))",
+   "expected": "(ok \":\")"
+  },
+  {
+   "id": "regexp-quote/0027",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \";\")) (error (list 'sig e))))",
+   "expected": "(ok \";\")"
+  },
+  {
+   "id": "regexp-quote/0028",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"<\")) (error (list 'sig e))))",
+   "expected": "(ok \"<\")"
+  },
+  {
+   "id": "regexp-quote/0029",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"=\")) (error (list 'sig e))))",
+   "expected": "(ok \"=\")"
+  },
+  {
+   "id": "regexp-quote/0030",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \">\")) (error (list 'sig e))))",
+   "expected": "(ok \">\")"
+  },
+  {
+   "id": "regexp-quote/0031",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"?\")) (error (list 'sig e))))",
+   "expected": "(ok \"\\\\?\")"
+  },
+  {
+   "id": "regexp-quote/0032",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"@\")) (error (list 'sig e))))",
+   "expected": "(ok \"@\")"
+  },
+  {
+   "id": "regexp-quote/0033",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"A\")) (error (list 'sig e))))",
+   "expected": "(ok \"A\")"
+  },
+  {
+   "id": "regexp-quote/0034",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"B\")) (error (list 'sig e))))",
+   "expected": "(ok \"B\")"
+  },
+  {
+   "id": "regexp-quote/0035",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"C\")) (error (list 'sig e))))",
+   "expected": "(ok \"C\")"
+  },
+  {
+   "id": "regexp-quote/0036",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"D\")) (error (list 'sig e))))",
+   "expected": "(ok \"D\")"
+  },
+  {
+   "id": "regexp-quote/0037",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"E\")) (error (list 'sig e))))",
+   "expected": "(ok \"E\")"
+  },
+  {
+   "id": "regexp-quote/0038",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"F\")) (error (list 'sig e))))",
+   "expected": "(ok \"F\")"
+  },
+  {
+   "id": "regexp-quote/0039",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"G\")) (error (list 'sig e))))",
+   "expected": "(ok \"G\")"
+  },
+  {
+   "id": "regexp-quote/0040",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"H\")) (error (list 'sig e))))",
+   "expected": "(ok \"H\")"
+  },
+  {
+   "id": "regexp-quote/0041",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"I\")) (error (list 'sig e))))",
+   "expected": "(ok \"I\")"
+  },
+  {
+   "id": "regexp-quote/0042",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"J\")) (error (list 'sig e))))",
+   "expected": "(ok \"J\")"
+  },
+  {
+   "id": "regexp-quote/0043",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"K\")) (error (list 'sig e))))",
+   "expected": "(ok \"K\")"
+  },
+  {
+   "id": "regexp-quote/0044",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"L\")) (error (list 'sig e))))",
+   "expected": "(ok \"L\")"
+  },
+  {
+   "id": "regexp-quote/0045",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"M\")) (error (list 'sig e))))",
+   "expected": "(ok \"M\")"
+  },
+  {
+   "id": "regexp-quote/0046",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"N\")) (error (list 'sig e))))",
+   "expected": "(ok \"N\")"
+  },
+  {
+   "id": "regexp-quote/0047",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"O\")) (error (list 'sig e))))",
+   "expected": "(ok \"O\")"
+  },
+  {
+   "id": "regexp-quote/0048",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"P\")) (error (list 'sig e))))",
+   "expected": "(ok \"P\")"
+  },
+  {
+   "id": "regexp-quote/0049",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"Q\")) (error (list 'sig e))))",
+   "expected": "(ok \"Q\")"
+  },
+  {
+   "id": "regexp-quote/0050",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"R\")) (error (list 'sig e))))",
+   "expected": "(ok \"R\")"
+  },
+  {
+   "id": "regexp-quote/0051",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"S\")) (error (list 'sig e))))",
+   "expected": "(ok \"S\")"
+  },
+  {
+   "id": "regexp-quote/0052",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"T\")) (error (list 'sig e))))",
+   "expected": "(ok \"T\")"
+  },
+  {
+   "id": "regexp-quote/0053",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"U\")) (error (list 'sig e))))",
+   "expected": "(ok \"U\")"
+  },
+  {
+   "id": "regexp-quote/0054",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"V\")) (error (list 'sig e))))",
+   "expected": "(ok \"V\")"
+  },
+  {
+   "id": "regexp-quote/0055",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"W\")) (error (list 'sig e))))",
+   "expected": "(ok \"W\")"
+  },
+  {
+   "id": "regexp-quote/0056",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"X\")) (error (list 'sig e))))",
+   "expected": "(ok \"X\")"
+  },
+  {
+   "id": "regexp-quote/0057",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"Y\")) (error (list 'sig e))))",
+   "expected": "(ok \"Y\")"
+  },
+  {
+   "id": "regexp-quote/0058",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"Z\")) (error (list 'sig e))))",
+   "expected": "(ok \"Z\")"
+  },
+  {
+   "id": "regexp-quote/0059",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"[\")) (error (list 'sig e))))",
+   "expected": "(ok \"\\\\[\")"
+  },
+  {
+   "id": "regexp-quote/0060",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"\\\\\")) (error (list 'sig e))))",
+   "expected": "(ok \"\\\\\\\\\")"
+  },
+  {
+   "id": "regexp-quote/0061",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"]\")) (error (list 'sig e))))",
+   "expected": "(ok \"]\")"
+  },
+  {
+   "id": "regexp-quote/0062",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"^\")) (error (list 'sig e))))",
+   "expected": "(ok \"\\\\^\")"
+  },
+  {
+   "id": "regexp-quote/0063",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"_\")) (error (list 'sig e))))",
+   "expected": "(ok \"_\")"
+  },
+  {
+   "id": "regexp-quote/0064",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"`\")) (error (list 'sig e))))",
+   "expected": "(ok \"`\")"
+  },
+  {
+   "id": "regexp-quote/0065",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"a\")) (error (list 'sig e))))",
+   "expected": "(ok \"a\")"
+  },
+  {
+   "id": "regexp-quote/0066",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"b\")) (error (list 'sig e))))",
+   "expected": "(ok \"b\")"
+  },
+  {
+   "id": "regexp-quote/0067",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"c\")) (error (list 'sig e))))",
+   "expected": "(ok \"c\")"
+  },
+  {
+   "id": "regexp-quote/0068",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"d\")) (error (list 'sig e))))",
+   "expected": "(ok \"d\")"
+  },
+  {
+   "id": "regexp-quote/0069",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"e\")) (error (list 'sig e))))",
+   "expected": "(ok \"e\")"
+  },
+  {
+   "id": "regexp-quote/0070",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"f\")) (error (list 'sig e))))",
+   "expected": "(ok \"f\")"
+  },
+  {
+   "id": "regexp-quote/0071",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"g\")) (error (list 'sig e))))",
+   "expected": "(ok \"g\")"
+  },
+  {
+   "id": "regexp-quote/0072",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"h\")) (error (list 'sig e))))",
+   "expected": "(ok \"h\")"
+  },
+  {
+   "id": "regexp-quote/0073",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"i\")) (error (list 'sig e))))",
+   "expected": "(ok \"i\")"
+  },
+  {
+   "id": "regexp-quote/0074",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"j\")) (error (list 'sig e))))",
+   "expected": "(ok \"j\")"
+  },
+  {
+   "id": "regexp-quote/0075",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"k\")) (error (list 'sig e))))",
+   "expected": "(ok \"k\")"
+  },
+  {
+   "id": "regexp-quote/0076",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"l\")) (error (list 'sig e))))",
+   "expected": "(ok \"l\")"
+  },
+  {
+   "id": "regexp-quote/0077",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"m\")) (error (list 'sig e))))",
+   "expected": "(ok \"m\")"
+  },
+  {
+   "id": "regexp-quote/0078",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"n\")) (error (list 'sig e))))",
+   "expected": "(ok \"n\")"
+  },
+  {
+   "id": "regexp-quote/0079",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"o\")) (error (list 'sig e))))",
+   "expected": "(ok \"o\")"
+  },
+  {
+   "id": "regexp-quote/0080",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"p\")) (error (list 'sig e))))",
+   "expected": "(ok \"p\")"
+  },
+  {
+   "id": "regexp-quote/0081",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"q\")) (error (list 'sig e))))",
+   "expected": "(ok \"q\")"
+  },
+  {
+   "id": "regexp-quote/0082",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"r\")) (error (list 'sig e))))",
+   "expected": "(ok \"r\")"
+  },
+  {
+   "id": "regexp-quote/0083",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"s\")) (error (list 'sig e))))",
+   "expected": "(ok \"s\")"
+  },
+  {
+   "id": "regexp-quote/0084",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"t\")) (error (list 'sig e))))",
+   "expected": "(ok \"t\")"
+  },
+  {
+   "id": "regexp-quote/0085",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"u\")) (error (list 'sig e))))",
+   "expected": "(ok \"u\")"
+  },
+  {
+   "id": "regexp-quote/0086",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"v\")) (error (list 'sig e))))",
+   "expected": "(ok \"v\")"
+  },
+  {
+   "id": "regexp-quote/0087",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"w\")) (error (list 'sig e))))",
+   "expected": "(ok \"w\")"
+  },
+  {
+   "id": "regexp-quote/0088",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"x\")) (error (list 'sig e))))",
+   "expected": "(ok \"x\")"
+  },
+  {
+   "id": "regexp-quote/0089",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"y\")) (error (list 'sig e))))",
+   "expected": "(ok \"y\")"
+  },
+  {
+   "id": "regexp-quote/0090",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"z\")) (error (list 'sig e))))",
+   "expected": "(ok \"z\")"
+  },
+  {
+   "id": "regexp-quote/0091",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"{\")) (error (list 'sig e))))",
+   "expected": "(ok \"{\")"
+  },
+  {
+   "id": "regexp-quote/0092",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"|\")) (error (list 'sig e))))",
+   "expected": "(ok \"|\")"
+  },
+  {
+   "id": "regexp-quote/0093",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"}\")) (error (list 'sig e))))",
+   "expected": "(ok \"}\")"
+  },
+  {
+   "id": "regexp-quote/0094",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"~\")) (error (list 'sig e))))",
+   "expected": "(ok \"~\")"
+  },
+  {
+   "id": "regexp-quote/0095",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "regexp-quote/0096",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp t))"
+  },
+  {
+   "id": "regexp-quote/0097",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 0))"
+  },
+  {
+   "id": "regexp-quote/0098",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 1.5))"
+  },
+  {
+   "id": "regexp-quote/0099",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote '(a))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp (a)))"
+  },
+  {
+   "id": "regexp-quote/0100",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote [])) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp []))"
+  },
+  {
+   "id": "regexp-quote/0101",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"\")) (error (list 'sig e))))",
+   "expected": "(ok \"\")"
+  },
+  {
+   "id": "regexp-quote/0102",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"é🙂λz\")) (error (list 'sig e))))",
+   "expected": "(ok \"é🙂λz\")"
+  },
+  {
+   "id": "regexp-quote/0103",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote \"[λ]\\\\雪.*\")) (error (list 'sig e))))",
+   "expected": "(ok \"\\\\[λ]\\\\\\\\雪\\\\.\\\\*\")"
+  },
+  {
+   "id": "regexp-quote/0104",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote (unibyte-string 255 91 0 92))) (error (list 'sig e))))",
+   "expected": "(ok \"\\377\\\\[\u0000\\\\\\\\\")"
+  },
+  {
+   "id": "regexp-quote/0105",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (regexp-quote (string-to-multibyte \"a*λ\"))) (error (list 'sig e))))",
+   "expected": "(ok \"a\\\\*λ\")"
+  },
+  {
+   "id": "regexp-quote/0106",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'regexp-quote '())) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr regexp-quote> 0))"
+  },
+  {
+   "id": "regexp-quote/0107",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'regexp-quote '(1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr regexp-quote> 2))"
+  },
+  {
+   "id": "regexp-quote/0108",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 \" \")) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (regexp-quote a0))) (error (list 'sig e))))",
+   "expected": "(ok \" \")"
+  },
+  {
+   "id": "regexp-quote/0109",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 \"E\")) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (regexp-quote a0))) (error (list 'sig e))))",
+   "expected": "(ok \"E\")"
+  },
+  {
+   "id": "regexp-quote/0110",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 \"j\")) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (regexp-quote a0))) (error (list 'sig e))))",
+   "expected": "(ok \"j\")"
+  },
+  {
+   "id": "regexp-quote/0111",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 \" \")) (let ((r (regexp-quote a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (t))"
+  },
+  {
+   "id": "regexp-quote/0112",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 \"#\")) (let ((r (regexp-quote a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (t))"
+  },
+  {
+   "id": "regexp-quote/0113",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 \"&\")) (let ((r (regexp-quote a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (t))"
+  },
+  {
+   "id": "regexp-quote/0114",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 \")\")) (let ((r (regexp-quote a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (t))"
+  },
+  {
+   "id": "regexp-quote/0115",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 \",\")) (let ((r (regexp-quote a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (t))"
+  },
+  {
+   "id": "regexp-quote/0116",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 \"/\")) (let ((r (regexp-quote a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (t))"
+  },
+  {
+   "id": "regexp-quote/0117",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 \"2\")) (let ((r (regexp-quote a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (t))"
+  },
+  {
+   "id": "regexp-quote/0118",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 \"5\")) (let ((r (regexp-quote a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (t))"
+  },
+  {
+   "id": "regexp-quote/0119",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 \"8\")) (let ((r (regexp-quote a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (t))"
+  },
+  {
+   "id": "regexp-quote/0120",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 \";\")) (let ((r (regexp-quote a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (t))"
+  },
+  {
+   "id": "regexp-quote/0121",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 \">\")) (let ((r (regexp-quote a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (t))"
+  },
+  {
+   "id": "regexp-quote/0122",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 \"A\")) (let ((r (regexp-quote a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (t))"
+  },
+  {
+   "id": "regexp-quote/0123",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 \"D\")) (let ((r (regexp-quote a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (t))"
+  },
+  {
+   "id": "regexp-quote/0124",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 \"G\")) (let ((r (regexp-quote a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (t))"
+  },
+  {
+   "id": "regexp-quote/0125",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 \"J\")) (let ((r (regexp-quote a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (t))"
+  },
+  {
+   "id": "regexp-quote/0126",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 \"M\")) (let ((r (regexp-quote a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (t))"
+  },
+  {
+   "id": "regexp-quote/0127",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 \"P\")) (let ((r (regexp-quote a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (t))"
+  },
+  {
+   "id": "regexp-quote/0128",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 \"S\")) (let ((r (regexp-quote a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (t))"
+  },
+  {
+   "id": "regexp-quote/0129",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 \"V\")) (let ((r (regexp-quote a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (t))"
+  },
+  {
+   "id": "regexp-quote/0130",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 \"Y\")) (let ((r (regexp-quote a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (t))"
+  },
+  {
+   "id": "regexp-quote/0131",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 \"\\\\\")) (let ((r (regexp-quote a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "regexp-quote/0132",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 \"_\")) (let ((r (regexp-quote a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (t))"
+  },
+  {
+   "id": "regexp-quote/0133",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 \"b\")) (let ((r (regexp-quote a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (t))"
+  },
+  {
+   "id": "regexp-quote/0134",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 \"e\")) (let ((r (regexp-quote a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (t))"
+  },
+  {
+   "id": "regexp-quote/0135",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 \"h\")) (let ((r (regexp-quote a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (t))"
+  },
+  {
+   "id": "regexp-quote/0136",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 \"k\")) (let ((r (regexp-quote a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (t))"
+  },
+  {
+   "id": "regexp-quote/0137",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 \"n\")) (let ((r (regexp-quote a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (t))"
+  },
+  {
+   "id": "regexp-quote/0138",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 \"q\")) (let ((r (regexp-quote a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (t))"
+  },
+  {
+   "id": "regexp-quote/0139",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 \"t\")) (let ((r (regexp-quote a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (t))"
+  },
+  {
+   "id": "regexp-quote/0140",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 \"w\")) (let ((r (regexp-quote a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (t))"
+  },
+  {
+   "id": "regexp-quote/0141",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 \"z\")) (let ((r (regexp-quote a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (t))"
+  },
+  {
+   "id": "regexp-quote/0142",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 \"}\")) (let ((r (regexp-quote a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (t))"
+  },
+  {
+   "id": "regexp-quote/0143",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t)) (let ((r (regexp-quote a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp t))"
+  },
+  {
+   "id": "regexp-quote/0144",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 '(a))) (let ((r (regexp-quote a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp (a)))"
+  },
+  {
+   "id": "regexp-quote/0145",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 \"é🙂λz\")) (let ((r (regexp-quote a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (t))"
+  },
+  {
+   "id": "regexp-quote/0146",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (string-to-multibyte \"a*λ\"))) (let ((r (regexp-quote a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "regexp-quote/0147",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((s (copy-sequence \"abcλ]{}()|-\"))) (eq s (regexp-quote s)))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "regexp-quote/0148",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((s (copy-sequence \"a*\"))) (eq s (regexp-quote s)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "regexp-quote/0149",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((s (copy-sequence \"abc\"))) (put-text-property 0 1 'face 'bold s) (text-properties-at 0 (regexp-quote s)))) (error (list 'sig e))))",
+   "expected": "(ok (face bold))"
+  },
+  {
+   "id": "regexp-quote/0150",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((s (copy-sequence \"a*\"))) (put-text-property 0 1 'face 'bold s) (text-properties-at 0 (regexp-quote s)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "regexp-quote/0151",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (multibyte-string-p (regexp-quote (string-to-multibyte \"a*\")))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "regexp-quote/0152",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (multibyte-string-p (regexp-quote (unibyte-string 97 42 255)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "regexp-quote/0153",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (funcall #'regexp-quote \"[λ]\")) (error (list 'sig e))))",
+   "expected": "(ok \"\\\\[λ]\")"
+  },
+  {
+   "id": "regexp-quote/0154",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \" \") (error (list 'sig e))))",
+   "expected": "(ok \" \")"
+  },
+  {
+   "id": "regexp-quote/0155",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"!\") (error (list 'sig e))))",
+   "expected": "(ok \"!\")"
+  },
+  {
+   "id": "regexp-quote/0156",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"\") (error (list 'sig e))))",
+   "expected": "(ok \"\")"
+  },
+  {
+   "id": "regexp-quote/0157",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"#\") (error (list 'sig e))))",
+   "expected": "(ok \"#\")"
+  },
+  {
+   "id": "regexp-quote/0158",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"$\") (error (list 'sig e))))",
+   "expected": "(ok \"$\")"
+  },
+  {
+   "id": "regexp-quote/0159",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"%\") (error (list 'sig e))))",
+   "expected": "(ok \"%\")"
+  },
+  {
+   "id": "regexp-quote/0160",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"&\") (error (list 'sig e))))",
+   "expected": "(ok \"&\")"
+  },
+  {
+   "id": "regexp-quote/0161",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"'\") (error (list 'sig e))))",
+   "expected": "(ok \"'\")"
+  },
+  {
+   "id": "regexp-quote/0162",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"(\") (error (list 'sig e))))",
+   "expected": "(ok \"(\")"
+  },
+  {
+   "id": "regexp-quote/0163",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \")\") (error (list 'sig e))))",
+   "expected": "(ok \")\")"
+  },
+  {
+   "id": "regexp-quote/0164",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"*\") (error (list 'sig e))))",
+   "expected": "(ok \"*\")"
+  },
+  {
+   "id": "regexp-quote/0165",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"+\") (error (list 'sig e))))",
+   "expected": "(ok \"+\")"
+  },
+  {
+   "id": "regexp-quote/0166",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \",\") (error (list 'sig e))))",
+   "expected": "(ok \",\")"
+  },
+  {
+   "id": "regexp-quote/0167",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"-\") (error (list 'sig e))))",
+   "expected": "(ok \"-\")"
+  },
+  {
+   "id": "regexp-quote/0168",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \".\") (error (list 'sig e))))",
+   "expected": "(ok \".\")"
+  },
+  {
+   "id": "regexp-quote/0169",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"/\") (error (list 'sig e))))",
+   "expected": "(ok \"/\")"
+  },
+  {
+   "id": "regexp-quote/0170",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"0\") (error (list 'sig e))))",
+   "expected": "(ok \"0\")"
+  },
+  {
+   "id": "regexp-quote/0171",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"1\") (error (list 'sig e))))",
+   "expected": "(ok \"1\")"
+  },
+  {
+   "id": "regexp-quote/0172",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"2\") (error (list 'sig e))))",
+   "expected": "(ok \"2\")"
+  },
+  {
+   "id": "regexp-quote/0173",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"3\") (error (list 'sig e))))",
+   "expected": "(ok \"3\")"
+  },
+  {
+   "id": "regexp-quote/0174",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"4\") (error (list 'sig e))))",
+   "expected": "(ok \"4\")"
+  },
+  {
+   "id": "regexp-quote/0175",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"5\") (error (list 'sig e))))",
+   "expected": "(ok \"5\")"
+  },
+  {
+   "id": "regexp-quote/0176",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"6\") (error (list 'sig e))))",
+   "expected": "(ok \"6\")"
+  },
+  {
+   "id": "regexp-quote/0177",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"7\") (error (list 'sig e))))",
+   "expected": "(ok \"7\")"
+  },
+  {
+   "id": "regexp-quote/0178",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"8\") (error (list 'sig e))))",
+   "expected": "(ok \"8\")"
+  },
+  {
+   "id": "regexp-quote/0179",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"9\") (error (list 'sig e))))",
+   "expected": "(ok \"9\")"
+  },
+  {
+   "id": "regexp-quote/0180",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \":\") (error (list 'sig e))))",
+   "expected": "(ok \":\")"
+  },
+  {
+   "id": "regexp-quote/0181",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \";\") (error (list 'sig e))))",
+   "expected": "(ok \";\")"
+  },
+  {
+   "id": "regexp-quote/0182",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"<\") (error (list 'sig e))))",
+   "expected": "(ok \"<\")"
+  },
+  {
+   "id": "regexp-quote/0183",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"=\") (error (list 'sig e))))",
+   "expected": "(ok \"=\")"
+  },
+  {
+   "id": "regexp-quote/0184",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \">\") (error (list 'sig e))))",
+   "expected": "(ok \">\")"
+  },
+  {
+   "id": "regexp-quote/0185",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"?\") (error (list 'sig e))))",
+   "expected": "(ok \"?\")"
+  },
+  {
+   "id": "regexp-quote/0186",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"@\") (error (list 'sig e))))",
+   "expected": "(ok \"@\")"
+  },
+  {
+   "id": "regexp-quote/0187",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"A\") (error (list 'sig e))))",
+   "expected": "(ok \"A\")"
+  },
+  {
+   "id": "regexp-quote/0188",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"B\") (error (list 'sig e))))",
+   "expected": "(ok \"B\")"
+  },
+  {
+   "id": "regexp-quote/0189",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"C\") (error (list 'sig e))))",
+   "expected": "(ok \"C\")"
+  },
+  {
+   "id": "regexp-quote/0190",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"D\") (error (list 'sig e))))",
+   "expected": "(ok \"D\")"
+  },
+  {
+   "id": "regexp-quote/0191",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"E\") (error (list 'sig e))))",
+   "expected": "(ok \"E\")"
+  },
+  {
+   "id": "regexp-quote/0192",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"F\") (error (list 'sig e))))",
+   "expected": "(ok \"F\")"
+  },
+  {
+   "id": "regexp-quote/0193",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"G\") (error (list 'sig e))))",
+   "expected": "(ok \"G\")"
+  },
+  {
+   "id": "regexp-quote/0194",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"H\") (error (list 'sig e))))",
+   "expected": "(ok \"H\")"
+  },
+  {
+   "id": "regexp-quote/0195",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"I\") (error (list 'sig e))))",
+   "expected": "(ok \"I\")"
+  },
+  {
+   "id": "regexp-quote/0196",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"J\") (error (list 'sig e))))",
+   "expected": "(ok \"J\")"
+  },
+  {
+   "id": "regexp-quote/0197",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"K\") (error (list 'sig e))))",
+   "expected": "(ok \"K\")"
+  },
+  {
+   "id": "regexp-quote/0198",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"L\") (error (list 'sig e))))",
+   "expected": "(ok \"L\")"
+  },
+  {
+   "id": "regexp-quote/0199",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"M\") (error (list 'sig e))))",
+   "expected": "(ok \"M\")"
+  },
+  {
+   "id": "regexp-quote/0200",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"N\") (error (list 'sig e))))",
+   "expected": "(ok \"N\")"
+  },
+  {
+   "id": "regexp-quote/0201",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"O\") (error (list 'sig e))))",
+   "expected": "(ok \"O\")"
+  },
+  {
+   "id": "regexp-quote/0202",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"P\") (error (list 'sig e))))",
+   "expected": "(ok \"P\")"
+  },
+  {
+   "id": "regexp-quote/0203",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"Q\") (error (list 'sig e))))",
+   "expected": "(ok \"Q\")"
+  },
+  {
+   "id": "regexp-quote/0204",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"R\") (error (list 'sig e))))",
+   "expected": "(ok \"R\")"
+  },
+  {
+   "id": "regexp-quote/0205",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"S\") (error (list 'sig e))))",
+   "expected": "(ok \"S\")"
+  },
+  {
+   "id": "regexp-quote/0206",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"T\") (error (list 'sig e))))",
+   "expected": "(ok \"T\")"
+  },
+  {
+   "id": "regexp-quote/0207",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"U\") (error (list 'sig e))))",
+   "expected": "(ok \"U\")"
+  },
+  {
+   "id": "regexp-quote/0208",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"V\") (error (list 'sig e))))",
+   "expected": "(ok \"V\")"
+  },
+  {
+   "id": "regexp-quote/0209",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"W\") (error (list 'sig e))))",
+   "expected": "(ok \"W\")"
+  },
+  {
+   "id": "regexp-quote/0210",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"X\") (error (list 'sig e))))",
+   "expected": "(ok \"X\")"
+  },
+  {
+   "id": "regexp-quote/0211",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"Y\") (error (list 'sig e))))",
+   "expected": "(ok \"Y\")"
+  },
+  {
+   "id": "regexp-quote/0212",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"Z\") (error (list 'sig e))))",
+   "expected": "(ok \"Z\")"
+  },
+  {
+   "id": "regexp-quote/0213",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"[\") (error (list 'sig e))))",
+   "expected": "(ok \"[\")"
+  },
+  {
+   "id": "regexp-quote/0214",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"[λ]\\\\雪.*\") (error (list 'sig e))))",
+   "expected": "(ok \"[λ]\\\\雪.*\")"
+  },
+  {
+   "id": "regexp-quote/0215",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"\\\"\") (error (list 'sig e))))",
+   "expected": "(ok \"\\\"\")"
+  },
+  {
+   "id": "regexp-quote/0216",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"\\\\\") (error (list 'sig e))))",
+   "expected": "(ok \"\\\\\")"
+  },
+  {
+   "id": "regexp-quote/0217",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"]\") (error (list 'sig e))))",
+   "expected": "(ok \"]\")"
+  },
+  {
+   "id": "regexp-quote/0218",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"^\") (error (list 'sig e))))",
+   "expected": "(ok \"^\")"
+  },
+  {
+   "id": "regexp-quote/0219",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"_\") (error (list 'sig e))))",
+   "expected": "(ok \"_\")"
+  },
+  {
+   "id": "regexp-quote/0220",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"`\") (error (list 'sig e))))",
+   "expected": "(ok \"`\")"
+  },
+  {
+   "id": "regexp-quote/0221",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"a\") (error (list 'sig e))))",
+   "expected": "(ok \"a\")"
+  },
+  {
+   "id": "regexp-quote/0222",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"b\") (error (list 'sig e))))",
+   "expected": "(ok \"b\")"
+  },
+  {
+   "id": "regexp-quote/0223",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"c\") (error (list 'sig e))))",
+   "expected": "(ok \"c\")"
+  },
+  {
+   "id": "regexp-quote/0224",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"d\") (error (list 'sig e))))",
+   "expected": "(ok \"d\")"
+  },
+  {
+   "id": "regexp-quote/0225",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"e\") (error (list 'sig e))))",
+   "expected": "(ok \"e\")"
+  },
+  {
+   "id": "regexp-quote/0226",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"f\") (error (list 'sig e))))",
+   "expected": "(ok \"f\")"
+  },
+  {
+   "id": "regexp-quote/0227",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"g\") (error (list 'sig e))))",
+   "expected": "(ok \"g\")"
+  },
+  {
+   "id": "regexp-quote/0228",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"h\") (error (list 'sig e))))",
+   "expected": "(ok \"h\")"
+  },
+  {
+   "id": "regexp-quote/0229",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"i\") (error (list 'sig e))))",
+   "expected": "(ok \"i\")"
+  },
+  {
+   "id": "regexp-quote/0230",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"j\") (error (list 'sig e))))",
+   "expected": "(ok \"j\")"
+  },
+  {
+   "id": "regexp-quote/0231",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"k\") (error (list 'sig e))))",
+   "expected": "(ok \"k\")"
+  },
+  {
+   "id": "regexp-quote/0232",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"l\") (error (list 'sig e))))",
+   "expected": "(ok \"l\")"
+  },
+  {
+   "id": "regexp-quote/0233",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"m\") (error (list 'sig e))))",
+   "expected": "(ok \"m\")"
+  },
+  {
+   "id": "regexp-quote/0234",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"n\") (error (list 'sig e))))",
+   "expected": "(ok \"n\")"
+  },
+  {
+   "id": "regexp-quote/0235",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"o\") (error (list 'sig e))))",
+   "expected": "(ok \"o\")"
+  },
+  {
+   "id": "regexp-quote/0236",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"p\") (error (list 'sig e))))",
+   "expected": "(ok \"p\")"
+  },
+  {
+   "id": "regexp-quote/0237",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"q\") (error (list 'sig e))))",
+   "expected": "(ok \"q\")"
+  },
+  {
+   "id": "regexp-quote/0238",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"r\") (error (list 'sig e))))",
+   "expected": "(ok \"r\")"
+  },
+  {
+   "id": "regexp-quote/0239",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"s\") (error (list 'sig e))))",
+   "expected": "(ok \"s\")"
+  },
+  {
+   "id": "regexp-quote/0240",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"t\") (error (list 'sig e))))",
+   "expected": "(ok \"t\")"
+  },
+  {
+   "id": "regexp-quote/0241",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"u\") (error (list 'sig e))))",
+   "expected": "(ok \"u\")"
+  },
+  {
+   "id": "regexp-quote/0242",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"v\") (error (list 'sig e))))",
+   "expected": "(ok \"v\")"
+  },
+  {
+   "id": "regexp-quote/0243",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"w\") (error (list 'sig e))))",
+   "expected": "(ok \"w\")"
+  },
+  {
+   "id": "regexp-quote/0244",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"x\") (error (list 'sig e))))",
+   "expected": "(ok \"x\")"
+  },
+  {
+   "id": "regexp-quote/0245",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"y\") (error (list 'sig e))))",
+   "expected": "(ok \"y\")"
+  },
+  {
+   "id": "regexp-quote/0246",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"z\") (error (list 'sig e))))",
+   "expected": "(ok \"z\")"
+  },
+  {
+   "id": "regexp-quote/0247",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"{\") (error (list 'sig e))))",
+   "expected": "(ok \"{\")"
+  },
+  {
+   "id": "regexp-quote/0248",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"|\") (error (list 'sig e))))",
+   "expected": "(ok \"|\")"
+  },
+  {
+   "id": "regexp-quote/0249",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"}\") (error (list 'sig e))))",
+   "expected": "(ok \"}\")"
+  },
+  {
+   "id": "regexp-quote/0250",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"~\") (error (list 'sig e))))",
+   "expected": "(ok \"~\")"
+  },
+  {
+   "id": "regexp-quote/0251",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"é🙂λz\") (error (list 'sig e))))",
+   "expected": "(ok \"é🙂λz\")"
+  },
+  {
+   "id": "regexp-quote/0252",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok '(a)) (error (list 'sig e))))",
+   "expected": "(ok (a))"
+  },
+  {
+   "id": "regexp-quote/0253",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-to-multibyte \"a*λ\")) (error (list 'sig e))))",
+   "expected": "(ok \"a*λ\")"
+  },
+  {
+   "id": "regexp-quote/0254",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (unibyte-string 255 91 0 92)) (error (list 'sig e))))",
+   "expected": "(ok \"\\377[\u0000\\\\\")"
+  },
+  {
+   "id": "regexp-quote/0255",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 0) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "regexp-quote/0256",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1.5) (error (list 'sig e))))",
+   "expected": "(ok 1.5)"
+  },
+  {
+   "id": "regexp-quote/0257",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok []) (error (list 'sig e))))",
+   "expected": "(ok [])"
+  },
+  {
+   "id": "regexp-quote/0258",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok nil) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "regexp-quote/0259",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok t) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  }
+ ]
+}

@@ -1,0 +1,1145 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "read-from-string",
+ "spec_sha256": "be86b8298a4aeb04ede3e2359defedc13ef786ae91b9a02a6fdd358dc46b395c",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "read-from-string",
+    "subr",
+    1,
+    3
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "lread.c": "f343ea2619bd35d4a0a41c15d3143045acd0cecc06ea0e449c65141b4f146c53"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "read-from-string/0000",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"\") 0 0)) (error (list 'sig e))))",
+   "expected": "(sig (end-of-file))"
+  },
+  {
+   "id": "read-from-string/0001",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"\") 0 1)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"\" 0 1))"
+  },
+  {
+   "id": "read-from-string/0002",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"\") 0 2)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"\" 0 2))"
+  },
+  {
+   "id": "read-from-string/0003",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"\") 0 -1)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"\" 0 -1))"
+  },
+  {
+   "id": "read-from-string/0004",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"\") 0 most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"\" 0 2305843009213693951))"
+  },
+  {
+   "id": "read-from-string/0005",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"\") 0 nil)) (error (list 'sig e))))",
+   "expected": "(sig (end-of-file))"
+  },
+  {
+   "id": "read-from-string/0006",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"\") 1 0)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"\" 1 0))"
+  },
+  {
+   "id": "read-from-string/0007",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"\") 1 1)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"\" 1 1))"
+  },
+  {
+   "id": "read-from-string/0008",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"\") 1 2)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"\" 1 2))"
+  },
+  {
+   "id": "read-from-string/0009",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"\") 1 -1)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"\" 1 -1))"
+  },
+  {
+   "id": "read-from-string/0010",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"\") 1 most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"\" 1 2305843009213693951))"
+  },
+  {
+   "id": "read-from-string/0011",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"\") 1 nil)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"\" 1 nil))"
+  },
+  {
+   "id": "read-from-string/0012",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"\") 2 0)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"\" 2 0))"
+  },
+  {
+   "id": "read-from-string/0013",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"\") 2 1)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"\" 2 1))"
+  },
+  {
+   "id": "read-from-string/0014",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"\") 2 2)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"\" 2 2))"
+  },
+  {
+   "id": "read-from-string/0015",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"\") 2 -1)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"\" 2 -1))"
+  },
+  {
+   "id": "read-from-string/0016",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"\") 2 most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"\" 2 2305843009213693951))"
+  },
+  {
+   "id": "read-from-string/0017",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"\") 2 nil)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"\" 2 nil))"
+  },
+  {
+   "id": "read-from-string/0018",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"\") -1 0)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"\" -1 0))"
+  },
+  {
+   "id": "read-from-string/0019",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"\") -1 1)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"\" -1 1))"
+  },
+  {
+   "id": "read-from-string/0020",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"\") -1 2)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"\" -1 2))"
+  },
+  {
+   "id": "read-from-string/0021",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"\") -1 -1)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"\" -1 -1))"
+  },
+  {
+   "id": "read-from-string/0022",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"\") -1 most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"\" -1 2305843009213693951))"
+  },
+  {
+   "id": "read-from-string/0023",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"\") -1 nil)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"\" -1 nil))"
+  },
+  {
+   "id": "read-from-string/0024",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"\") most-positive-fixnum 0)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"\" 2305843009213693951 0))"
+  },
+  {
+   "id": "read-from-string/0025",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"\") most-positive-fixnum 1)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"\" 2305843009213693951 1))"
+  },
+  {
+   "id": "read-from-string/0026",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"\") most-positive-fixnum 2)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"\" 2305843009213693951 2))"
+  },
+  {
+   "id": "read-from-string/0027",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"\") most-positive-fixnum -1)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"\" 2305843009213693951 -1))"
+  },
+  {
+   "id": "read-from-string/0028",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"\") most-positive-fixnum most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"\" 2305843009213693951 2305843009213693951))"
+  },
+  {
+   "id": "read-from-string/0029",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"\") most-positive-fixnum nil)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"\" 2305843009213693951 nil))"
+  },
+  {
+   "id": "read-from-string/0030",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"\") nil 0)) (error (list 'sig e))))",
+   "expected": "(sig (end-of-file))"
+  },
+  {
+   "id": "read-from-string/0031",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"\") nil 1)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"\" nil 1))"
+  },
+  {
+   "id": "read-from-string/0032",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"\") nil 2)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"\" nil 2))"
+  },
+  {
+   "id": "read-from-string/0033",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"\") nil -1)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"\" nil -1))"
+  },
+  {
+   "id": "read-from-string/0034",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"\") nil most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"\" nil 2305843009213693951))"
+  },
+  {
+   "id": "read-from-string/0035",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"\") nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (end-of-file))"
+  },
+  {
+   "id": "read-from-string/0036",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"abc\") 0 0)) (error (list 'sig e))))",
+   "expected": "(sig (end-of-file))"
+  },
+  {
+   "id": "read-from-string/0037",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"abc\") 0 1)) (error (list 'sig e))))",
+   "expected": "(ok (a . 1))"
+  },
+  {
+   "id": "read-from-string/0038",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"abc\") 0 2)) (error (list 'sig e))))",
+   "expected": "(ok (ab . 2))"
+  },
+  {
+   "id": "read-from-string/0039",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"abc\") 0 -1)) (error (list 'sig e))))",
+   "expected": "(ok (ab . 2))"
+  },
+  {
+   "id": "read-from-string/0040",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"abc\") 0 most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"abc\" 0 2305843009213693951))"
+  },
+  {
+   "id": "read-from-string/0041",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"abc\") 0 nil)) (error (list 'sig e))))",
+   "expected": "(ok (abc . 3))"
+  },
+  {
+   "id": "read-from-string/0042",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"abc\") 1 0)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"abc\" 1 0))"
+  },
+  {
+   "id": "read-from-string/0043",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"abc\") 1 1)) (error (list 'sig e))))",
+   "expected": "(sig (end-of-file))"
+  },
+  {
+   "id": "read-from-string/0044",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"abc\") 1 2)) (error (list 'sig e))))",
+   "expected": "(ok (b . 2))"
+  },
+  {
+   "id": "read-from-string/0045",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"abc\") 1 -1)) (error (list 'sig e))))",
+   "expected": "(ok (b . 2))"
+  },
+  {
+   "id": "read-from-string/0046",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"abc\") 1 most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"abc\" 1 2305843009213693951))"
+  },
+  {
+   "id": "read-from-string/0047",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"abc\") 1 nil)) (error (list 'sig e))))",
+   "expected": "(ok (bc . 3))"
+  },
+  {
+   "id": "read-from-string/0048",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"abc\") 2 0)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"abc\" 2 0))"
+  },
+  {
+   "id": "read-from-string/0049",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"abc\") 2 1)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"abc\" 2 1))"
+  },
+  {
+   "id": "read-from-string/0050",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"abc\") 2 2)) (error (list 'sig e))))",
+   "expected": "(sig (end-of-file))"
+  },
+  {
+   "id": "read-from-string/0051",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"abc\") 2 -1)) (error (list 'sig e))))",
+   "expected": "(sig (end-of-file))"
+  },
+  {
+   "id": "read-from-string/0052",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"abc\") 2 most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"abc\" 2 2305843009213693951))"
+  },
+  {
+   "id": "read-from-string/0053",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"abc\") 2 nil)) (error (list 'sig e))))",
+   "expected": "(ok (c . 3))"
+  },
+  {
+   "id": "read-from-string/0054",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"abc\") -1 0)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"abc\" -1 0))"
+  },
+  {
+   "id": "read-from-string/0055",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"abc\") -1 1)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"abc\" -1 1))"
+  },
+  {
+   "id": "read-from-string/0056",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"abc\") -1 2)) (error (list 'sig e))))",
+   "expected": "(sig (end-of-file))"
+  },
+  {
+   "id": "read-from-string/0057",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"abc\") -1 -1)) (error (list 'sig e))))",
+   "expected": "(sig (end-of-file))"
+  },
+  {
+   "id": "read-from-string/0058",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"abc\") -1 most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"abc\" -1 2305843009213693951))"
+  },
+  {
+   "id": "read-from-string/0059",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"abc\") -1 nil)) (error (list 'sig e))))",
+   "expected": "(ok (c . 3))"
+  },
+  {
+   "id": "read-from-string/0060",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"abc\") most-positive-fixnum 0)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"abc\" 2305843009213693951 0))"
+  },
+  {
+   "id": "read-from-string/0061",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"abc\") most-positive-fixnum 1)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"abc\" 2305843009213693951 1))"
+  },
+  {
+   "id": "read-from-string/0062",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"abc\") most-positive-fixnum 2)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"abc\" 2305843009213693951 2))"
+  },
+  {
+   "id": "read-from-string/0063",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"abc\") most-positive-fixnum -1)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"abc\" 2305843009213693951 -1))"
+  },
+  {
+   "id": "read-from-string/0064",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"abc\") most-positive-fixnum most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"abc\" 2305843009213693951 2305843009213693951))"
+  },
+  {
+   "id": "read-from-string/0065",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"abc\") most-positive-fixnum nil)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"abc\" 2305843009213693951 nil))"
+  },
+  {
+   "id": "read-from-string/0066",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"abc\") nil 0)) (error (list 'sig e))))",
+   "expected": "(sig (end-of-file))"
+  },
+  {
+   "id": "read-from-string/0067",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"abc\") nil 1)) (error (list 'sig e))))",
+   "expected": "(ok (a . 1))"
+  },
+  {
+   "id": "read-from-string/0068",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"abc\") nil 2)) (error (list 'sig e))))",
+   "expected": "(ok (ab . 2))"
+  },
+  {
+   "id": "read-from-string/0069",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"abc\") nil -1)) (error (list 'sig e))))",
+   "expected": "(ok (ab . 2))"
+  },
+  {
+   "id": "read-from-string/0070",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"abc\") nil most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"abc\" nil 2305843009213693951))"
+  },
+  {
+   "id": "read-from-string/0071",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"abc\") nil nil)) (error (list 'sig e))))",
+   "expected": "(ok (abc . 3))"
+  },
+  {
+   "id": "read-from-string/0072",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"λx\") 0 0)) (error (list 'sig e))))",
+   "expected": "(sig (end-of-file))"
+  },
+  {
+   "id": "read-from-string/0073",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"λx\") 0 1)) (error (list 'sig e))))",
+   "expected": "(ok (λ . 1))"
+  },
+  {
+   "id": "read-from-string/0074",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"λx\") 0 2)) (error (list 'sig e))))",
+   "expected": "(ok (λx . 2))"
+  },
+  {
+   "id": "read-from-string/0075",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"λx\") 0 -1)) (error (list 'sig e))))",
+   "expected": "(ok (λ . 1))"
+  },
+  {
+   "id": "read-from-string/0076",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"λx\") 0 most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"λx\" 0 2305843009213693951))"
+  },
+  {
+   "id": "read-from-string/0077",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"λx\") 0 nil)) (error (list 'sig e))))",
+   "expected": "(ok (λx . 2))"
+  },
+  {
+   "id": "read-from-string/0078",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"λx\") 1 0)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"λx\" 1 0))"
+  },
+  {
+   "id": "read-from-string/0079",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"λx\") 1 1)) (error (list 'sig e))))",
+   "expected": "(sig (end-of-file))"
+  },
+  {
+   "id": "read-from-string/0080",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"λx\") 1 2)) (error (list 'sig e))))",
+   "expected": "(ok (x . 2))"
+  },
+  {
+   "id": "read-from-string/0081",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"λx\") 1 -1)) (error (list 'sig e))))",
+   "expected": "(sig (end-of-file))"
+  },
+  {
+   "id": "read-from-string/0082",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"λx\") 1 most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"λx\" 1 2305843009213693951))"
+  },
+  {
+   "id": "read-from-string/0083",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"λx\") 1 nil)) (error (list 'sig e))))",
+   "expected": "(ok (x . 2))"
+  },
+  {
+   "id": "read-from-string/0084",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"λx\") 2 0)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"λx\" 2 0))"
+  },
+  {
+   "id": "read-from-string/0085",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"λx\") 2 1)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"λx\" 2 1))"
+  },
+  {
+   "id": "read-from-string/0086",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"λx\") 2 2)) (error (list 'sig e))))",
+   "expected": "(sig (end-of-file))"
+  },
+  {
+   "id": "read-from-string/0087",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"λx\") 2 -1)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"λx\" 2 -1))"
+  },
+  {
+   "id": "read-from-string/0088",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"λx\") 2 most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"λx\" 2 2305843009213693951))"
+  },
+  {
+   "id": "read-from-string/0089",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"λx\") 2 nil)) (error (list 'sig e))))",
+   "expected": "(sig (end-of-file))"
+  },
+  {
+   "id": "read-from-string/0090",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"λx\") -1 0)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"λx\" -1 0))"
+  },
+  {
+   "id": "read-from-string/0091",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"λx\") -1 1)) (error (list 'sig e))))",
+   "expected": "(sig (end-of-file))"
+  },
+  {
+   "id": "read-from-string/0092",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"λx\") -1 2)) (error (list 'sig e))))",
+   "expected": "(ok (x . 2))"
+  },
+  {
+   "id": "read-from-string/0093",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"λx\") -1 -1)) (error (list 'sig e))))",
+   "expected": "(sig (end-of-file))"
+  },
+  {
+   "id": "read-from-string/0094",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"λx\") -1 most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"λx\" -1 2305843009213693951))"
+  },
+  {
+   "id": "read-from-string/0095",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"λx\") -1 nil)) (error (list 'sig e))))",
+   "expected": "(ok (x . 2))"
+  },
+  {
+   "id": "read-from-string/0096",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"λx\") most-positive-fixnum 0)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"λx\" 2305843009213693951 0))"
+  },
+  {
+   "id": "read-from-string/0097",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"λx\") most-positive-fixnum 1)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"λx\" 2305843009213693951 1))"
+  },
+  {
+   "id": "read-from-string/0098",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"λx\") most-positive-fixnum 2)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"λx\" 2305843009213693951 2))"
+  },
+  {
+   "id": "read-from-string/0099",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"λx\") most-positive-fixnum -1)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"λx\" 2305843009213693951 -1))"
+  },
+  {
+   "id": "read-from-string/0100",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"λx\") most-positive-fixnum most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"λx\" 2305843009213693951 2305843009213693951))"
+  },
+  {
+   "id": "read-from-string/0101",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"λx\") most-positive-fixnum nil)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"λx\" 2305843009213693951 nil))"
+  },
+  {
+   "id": "read-from-string/0102",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"λx\") nil 0)) (error (list 'sig e))))",
+   "expected": "(sig (end-of-file))"
+  },
+  {
+   "id": "read-from-string/0103",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"λx\") nil 1)) (error (list 'sig e))))",
+   "expected": "(ok (λ . 1))"
+  },
+  {
+   "id": "read-from-string/0104",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"λx\") nil 2)) (error (list 'sig e))))",
+   "expected": "(ok (λx . 2))"
+  },
+  {
+   "id": "read-from-string/0105",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"λx\") nil -1)) (error (list 'sig e))))",
+   "expected": "(ok (λ . 1))"
+  },
+  {
+   "id": "read-from-string/0106",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"λx\") nil most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"λx\" nil 2305843009213693951))"
+  },
+  {
+   "id": "read-from-string/0107",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string (copy-sequence \"λx\") nil nil)) (error (list 'sig e))))",
+   "expected": "(ok (λx . 2))"
+  },
+  {
+   "id": "read-from-string/0108",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'read-from-string '())) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr read-from-string> 0))"
+  },
+  {
+   "id": "read-from-string/0109",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'read-from-string '(1 1 1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr read-from-string> 4))"
+  },
+  {
+   "id": "read-from-string/0110",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\")) (a1 0) (a2 0)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (read-from-string a0 a1 a2))) (error (list 'sig e))))",
+   "expected": "(sig (end-of-file))"
+  },
+  {
+   "id": "read-from-string/0111",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 0) (a2 1)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (read-from-string a0 a1 a2))) (error (list 'sig e))))",
+   "expected": "(ok (a . 1))"
+  },
+  {
+   "id": "read-from-string/0112",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 0) (a2 2)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (read-from-string a0 a1 a2))) (error (list 'sig e))))",
+   "expected": "(ok (λx . 2))"
+  },
+  {
+   "id": "read-from-string/0113",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\")) (a1 0) (a2 0)) (let ((r (read-from-string a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (end-of-file))"
+  },
+  {
+   "id": "read-from-string/0114",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\")) (a1 0) (a2 -1)) (let ((r (read-from-string a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"\" 0 -1))"
+  },
+  {
+   "id": "read-from-string/0115",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\")) (a1 1) (a2 0)) (let ((r (read-from-string a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"\" 1 0))"
+  },
+  {
+   "id": "read-from-string/0116",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\")) (a1 1) (a2 -1)) (let ((r (read-from-string a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"\" 1 -1))"
+  },
+  {
+   "id": "read-from-string/0117",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\")) (a1 2) (a2 0)) (let ((r (read-from-string a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"\" 2 0))"
+  },
+  {
+   "id": "read-from-string/0118",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\")) (a1 2) (a2 -1)) (let ((r (read-from-string a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"\" 2 -1))"
+  },
+  {
+   "id": "read-from-string/0119",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\")) (a1 -1) (a2 0)) (let ((r (read-from-string a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"\" -1 0))"
+  },
+  {
+   "id": "read-from-string/0120",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\")) (a1 -1) (a2 -1)) (let ((r (read-from-string a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"\" -1 -1))"
+  },
+  {
+   "id": "read-from-string/0121",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\")) (a1 most-positive-fixnum) (a2 0)) (let ((r (read-from-string a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"\" 2305843009213693951 0))"
+  },
+  {
+   "id": "read-from-string/0122",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\")) (a1 most-positive-fixnum) (a2 -1)) (let ((r (read-from-string a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"\" 2305843009213693951 -1))"
+  },
+  {
+   "id": "read-from-string/0123",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\")) (a1 nil) (a2 0)) (let ((r (read-from-string a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (end-of-file))"
+  },
+  {
+   "id": "read-from-string/0124",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\")) (a1 nil) (a2 -1)) (let ((r (read-from-string a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"\" nil -1))"
+  },
+  {
+   "id": "read-from-string/0125",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 0) (a2 0)) (let ((r (read-from-string a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (end-of-file))"
+  },
+  {
+   "id": "read-from-string/0126",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 0) (a2 -1)) (let ((r (read-from-string a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil nil))"
+  },
+  {
+   "id": "read-from-string/0127",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 1) (a2 0)) (let ((r (read-from-string a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"abc\" 1 0))"
+  },
+  {
+   "id": "read-from-string/0128",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 1) (a2 -1)) (let ((r (read-from-string a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil nil))"
+  },
+  {
+   "id": "read-from-string/0129",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 2) (a2 0)) (let ((r (read-from-string a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"abc\" 2 0))"
+  },
+  {
+   "id": "read-from-string/0130",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 2) (a2 -1)) (let ((r (read-from-string a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (end-of-file))"
+  },
+  {
+   "id": "read-from-string/0131",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 -1) (a2 0)) (let ((r (read-from-string a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"abc\" -1 0))"
+  },
+  {
+   "id": "read-from-string/0132",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 -1) (a2 -1)) (let ((r (read-from-string a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (end-of-file))"
+  },
+  {
+   "id": "read-from-string/0133",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 most-positive-fixnum) (a2 0)) (let ((r (read-from-string a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"abc\" 2305843009213693951 0))"
+  },
+  {
+   "id": "read-from-string/0134",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 most-positive-fixnum) (a2 -1)) (let ((r (read-from-string a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"abc\" 2305843009213693951 -1))"
+  },
+  {
+   "id": "read-from-string/0135",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 nil) (a2 0)) (let ((r (read-from-string a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (end-of-file))"
+  },
+  {
+   "id": "read-from-string/0136",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 nil) (a2 -1)) (let ((r (read-from-string a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil nil))"
+  },
+  {
+   "id": "read-from-string/0137",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 0) (a2 0)) (let ((r (read-from-string a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (end-of-file))"
+  },
+  {
+   "id": "read-from-string/0138",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 0) (a2 -1)) (let ((r (read-from-string a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil nil))"
+  },
+  {
+   "id": "read-from-string/0139",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 1) (a2 0)) (let ((r (read-from-string a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"λx\" 1 0))"
+  },
+  {
+   "id": "read-from-string/0140",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 1) (a2 -1)) (let ((r (read-from-string a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (end-of-file))"
+  },
+  {
+   "id": "read-from-string/0141",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 2) (a2 0)) (let ((r (read-from-string a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"λx\" 2 0))"
+  },
+  {
+   "id": "read-from-string/0142",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 2) (a2 -1)) (let ((r (read-from-string a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"λx\" 2 -1))"
+  },
+  {
+   "id": "read-from-string/0143",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 -1) (a2 0)) (let ((r (read-from-string a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"λx\" -1 0))"
+  },
+  {
+   "id": "read-from-string/0144",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 -1) (a2 -1)) (let ((r (read-from-string a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (end-of-file))"
+  },
+  {
+   "id": "read-from-string/0145",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 most-positive-fixnum) (a2 0)) (let ((r (read-from-string a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"λx\" 2305843009213693951 0))"
+  },
+  {
+   "id": "read-from-string/0146",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 most-positive-fixnum) (a2 -1)) (let ((r (read-from-string a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"λx\" 2305843009213693951 -1))"
+  },
+  {
+   "id": "read-from-string/0147",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 nil) (a2 0)) (let ((r (read-from-string a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (end-of-file))"
+  },
+  {
+   "id": "read-from-string/0148",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 nil) (a2 -1)) (let ((r (read-from-string a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil nil))"
+  },
+  {
+   "id": "read-from-string/0149",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string \"  42 tail\")) (error (list 'sig e))))",
+   "expected": "(ok (42 . 4))"
+  },
+  {
+   "id": "read-from-string/0150",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string \"λ abc\" 2)) (error (list 'sig e))))",
+   "expected": "(ok (abc . 5))"
+  },
+  {
+   "id": "read-from-string/0151",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string \"foo\" -1)) (error (list 'sig e))))",
+   "expected": "(ok (o . 3))"
+  },
+  {
+   "id": "read-from-string/0152",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string \"foo\" 0 8)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"foo\" 0 8))"
+  },
+  {
+   "id": "read-from-string/0153",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string \"foo\" 2 1)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"foo\" 2 1))"
+  },
+  {
+   "id": "read-from-string/0154",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string \"foo\" 4)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range \"foo\" 4 nil))"
+  },
+  {
+   "id": "read-from-string/0155",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string \"foo\" t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp t))"
+  },
+  {
+   "id": "read-from-string/0156",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string \"\")) (error (list 'sig e))))",
+   "expected": "(sig (end-of-file))"
+  },
+  {
+   "id": "read-from-string/0157",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string \"(\")) (error (list 'sig e))))",
+   "expected": "(sig (end-of-file))"
+  },
+  {
+   "id": "read-from-string/0158",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string \")\")) (error (list 'sig e))))",
+   "expected": "(sig (invalid-read-syntax \")\"))"
+  },
+  {
+   "id": "read-from-string/0159",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string \"[1 (a . b) \\\"λ\\\"] rest\")) (error (list 'sig e))))",
+   "expected": "(ok ([1 (a . b) \"λ\"] . 15))"
+  },
+  {
+   "id": "read-from-string/0160",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string 42)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 42))"
+  },
+  {
+   "id": "read-from-string/0161",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "read-from-string/0162",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string \"foo\" nil nil)) (error (list 'sig e))))",
+   "expected": "(ok (foo . 3))"
+  },
+  {
+   "id": "read-from-string/0163",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string \"a#b\")) (error (list 'sig e))))",
+   "expected": "(ok (a . 1))"
+  },
+  {
+   "id": "read-from-string/0164",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((r (read-from-string (concat \"a\" (string 160) \"b\")))) (list (symbol-name (car r)) (cdr r)))) (error (list 'sig e))))",
+   "expected": "(ok (\"a\" 1))"
+  },
+  {
+   "id": "read-from-string/0165",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((r (read-from-string (concat \"a\" (string 11) \"b\")))) (list (symbol-name (car r)) (cdr r)))) (error (list 'sig e))))",
+   "expected": "(ok (\"a\" 1))"
+  },
+  {
+   "id": "read-from-string/0166",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string \"2.25e+INF\")) (error (list 'sig e))))",
+   "expected": "(ok (1.0e+INF . 9))"
+  },
+  {
+   "id": "read-from-string/0167",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string \"-3.75e+INF\")) (error (list 'sig e))))",
+   "expected": "(ok (-1.0e+INF . 10))"
+  },
+  {
+   "id": "read-from-string/0168",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string \"2305843009213693952\")) (error (list 'sig e))))",
+   "expected": "(ok (2305843009213693952 . 19))"
+  },
+  {
+   "id": "read-from-string/0169",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((i 0) (s \"0\")) (while (< i 257) (setq s (concat \"(\" s \")\")) (setq i (1+ i))) (let ((r (read-from-string s))) (cdr r)))) (error (list 'sig e))))",
+   "expected": "(ok 515)"
+  },
+  {
+   "id": "read-from-string/0170",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string \"(a . b c)\")) (error (list 'sig e))))",
+   "expected": "(sig (invalid-read-syntax \"expected )\"))"
+  },
+  {
+   "id": "read-from-string/0171",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string \"#s(hash-table)\")) (error (list 'sig e))))",
+   "expected": "(ok (#s(hash-table) . 14))"
+  },
+  {
+   "id": "read-from-string/0172",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (read-from-string \"a#b\" 0 1)) (error (list 'sig e))))",
+   "expected": "(ok (a . 1))"
+  },
+  {
+   "id": "read-from-string/0173",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((i 0) (s \"0\")) (while (< i 256) (setq s (concat \"(\" s \")\")) (setq i (1+ i))) (cdr (read-from-string s)))) (error (list 'sig e))))",
+   "expected": "(ok 513)"
+  },
+  {
+   "id": "read-from-string/0174",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (numberp (car (read-from-string \"2.25e+INF\"))) (numberp (car (read-from-string \"-3.75e+INF\"))))) (error (list 'sig e))))",
+   "expected": "(ok (t t))"
+  },
+  {
+   "id": "read-from-string/0175",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"\")) (error (list 'sig e))))",
+   "expected": "(ok \"\")"
+  },
+  {
+   "id": "read-from-string/0176",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"abc\")) (error (list 'sig e))))",
+   "expected": "(ok \"abc\")"
+  },
+  {
+   "id": "read-from-string/0177",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"λx\")) (error (list 'sig e))))",
+   "expected": "(ok \"λx\")"
+  },
+  {
+   "id": "read-from-string/0178",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok -1) (error (list 'sig e))))",
+   "expected": "(ok -1)"
+  },
+  {
+   "id": "read-from-string/0179",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 0) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "read-from-string/0180",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1) (error (list 'sig e))))",
+   "expected": "(ok 1)"
+  },
+  {
+   "id": "read-from-string/0181",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 2) (error (list 'sig e))))",
+   "expected": "(ok 2)"
+  },
+  {
+   "id": "read-from-string/0182",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok most-positive-fixnum) (error (list 'sig e))))",
+   "expected": "(ok 2305843009213693951)"
+  },
+  {
+   "id": "read-from-string/0183",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok nil) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  }
+ ],
+ "pinned": {
+  "read-from-string/0163": "VALUE",
+  "read-from-string/0164": "VALUE",
+  "read-from-string/0166": "VALUE",
+  "read-from-string/0167": "VALUE",
+  "read-from-string/0168": "SIGNAL-VS-VALUE",
+  "read-from-string/0169": "SIGNAL-VS-VALUE",
+  "read-from-string/0170": "DATA",
+  "read-from-string/0174": "VALUE"
+ }
+}

@@ -1,0 +1,19 @@
+nextest-version = "0.9.137"
+experimental = ["wrapper-scripts"]
+
+# Memory-limited wrapper: each test process gets an 8GB virtual address space limit.
+# Uses prlimit (RLIMIT_AS) so allocation failures produce a Rust abort with
+# backtrace instead of a silent SIGKILL from cgroup OOM killer.
+[scripts.wrapper.memory-limit]
+command = 'prlimit --as=8589934592 --'
+
+[profile.default]
+test-threads = 24
+
+# Bound surviving tests without the retired legacy oracle's package overrides.
+slow-timeout = { period = "600s", terminate-after = 1, grace-period = "0s" }
+
+[[profile.default.scripts]]
+filter = 'all()'
+platform = { host = "cfg(target_os = \"linux\")" }
+run-wrapper = 'memory-limit'

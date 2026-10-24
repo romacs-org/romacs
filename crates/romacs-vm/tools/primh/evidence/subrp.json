@@ -1,0 +1,423 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "subrp",
+ "pinned": {"subrp/0035": "VALUE", "subrp/0036": "VALUE", "subrp/0037": "MISSING", "subrp/0052": "PRINTER"},
+ "spec_sha256": "118f1e95637cb30770011cd40d71bf39593b57127f48d0c48d61d6ff33dcbee7",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "subrp",
+    "subr",
+    1,
+    1
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "data.c": "eca7895a8043cd0a960dfe037a46028374d1a40cc6ee4d0cf6de90ac56c242ae",
+  "lisp.h": "7b1349a09486ec6e5637abfb1467005b1ce7db603cfa39c611ab6076a6245166"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "subrp/0000",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (subrp nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "subrp/0001",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (subrp t)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "subrp/0002",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (subrp 0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "subrp/0003",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (subrp 1)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "subrp/0004",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (subrp 2)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "subrp/0005",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (subrp -1)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "subrp/0006",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (subrp most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "subrp/0007",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (subrp 1.5)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "subrp/0008",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (subrp 'sym)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "subrp/0009",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (subrp :kw)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "subrp/0010",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (subrp (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "subrp/0011",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (subrp (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "subrp/0012",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (subrp (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "subrp/0013",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (subrp (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "subrp/0014",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (subrp (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "subrp/0015",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (subrp (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "subrp/0016",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (subrp (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "subrp/0017",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (subrp (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "subrp/0018",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (subrp (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "subrp/0019",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'subrp '())) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr subrp> 0))"
+  },
+  {
+   "id": "subrp/0020",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'subrp '(1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr subrp> 2))"
+  },
+  {
+   "id": "subrp/0021",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (subrp a0))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "subrp/0022",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil)) (let ((r (subrp a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (t))"
+  },
+  {
+   "id": "subrp/0023",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1)) (let ((r (subrp a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "subrp/0024",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-positive-fixnum)) (let ((r (subrp a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "subrp/0025",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :kw)) (let ((r (subrp a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "subrp/0026",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\"))) (let ((r (subrp a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "subrp/0027",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 2))) (let ((r (subrp a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "subrp/0028",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (subrp a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "subrp/0029",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (subrp (symbol-function 'car))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "subrp/0030",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (subrp (symbol-function 'subrp))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "subrp/0031",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (funcall 'subrp (symbol-function 'car))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "subrp/0032",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (subrp 'car)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "subrp/0033",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (subrp (lambda (x) x))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "subrp/0034",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (subrp '(lambda (x) x))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "subrp/0035",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (subrp (symbol-function 'if))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "subrp/0036",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (subrp (symbol-function 'get-upcase-table))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "subrp/0037",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (subrp (byte-compile '(lambda (x) x)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "subrp/0038",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (subrp (make-hash-table))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "subrp/0039",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (subrp (standard-syntax-table))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "subrp/0040",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (subrp (make-marker))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "subrp/0041",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (subrp (current-buffer))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "subrp/0042",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (subrp (selected-window))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "subrp/0043",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (subrp (make-overlay 1 1))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "subrp/0044",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (subrp (car (read-from-string \"#x10000000000000000000000000000\")))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "subrp/0045",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (subrp (unibyte-string 255))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "subrp/0046",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 'sym) (error (list 'sig e))))",
+   "expected": "(ok sym)"
+  },
+  {
+   "id": "subrp/0047",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (cons 1 (cons 2 3))) (error (list 'sig e))))",
+   "expected": "(ok (1 2 . 3))"
+  },
+  {
+   "id": "subrp/0048",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (cons 1 2)) (error (list 'sig e))))",
+   "expected": "(ok (1 . 2))"
+  },
+  {
+   "id": "subrp/0049",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"\")) (error (list 'sig e))))",
+   "expected": "(ok \"\")"
+  },
+  {
+   "id": "subrp/0050",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"abc\")) (error (list 'sig e))))",
+   "expected": "(ok \"abc\")"
+  },
+  {
+   "id": "subrp/0051",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"λx\")) (error (list 'sig e))))",
+   "expected": "(ok \"λx\")"
+  },
+  {
+   "id": "subrp/0052",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (error (list 'sig e))))",
+   "expected": "(ok (1 2 1 2 . #2))"
+  },
+  {
+   "id": "subrp/0053",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list 'a (list 'b))) (error (list 'sig e))))",
+   "expected": "(ok (a (b)))"
+  },
+  {
+   "id": "subrp/0054",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list 1 2 3)) (error (list 'sig e))))",
+   "expected": "(ok (1 2 3))"
+  },
+  {
+   "id": "subrp/0055",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vector 1 2)) (error (list 'sig e))))",
+   "expected": "(ok [1 2])"
+  },
+  {
+   "id": "subrp/0056",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok -1) (error (list 'sig e))))",
+   "expected": "(ok -1)"
+  },
+  {
+   "id": "subrp/0057",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 0) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "subrp/0058",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1) (error (list 'sig e))))",
+   "expected": "(ok 1)"
+  },
+  {
+   "id": "subrp/0059",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1.5) (error (list 'sig e))))",
+   "expected": "(ok 1.5)"
+  },
+  {
+   "id": "subrp/0060",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 2) (error (list 'sig e))))",
+   "expected": "(ok 2)"
+  },
+  {
+   "id": "subrp/0061",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok :kw) (error (list 'sig e))))",
+   "expected": "(ok :kw)"
+  },
+  {
+   "id": "subrp/0062",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok most-positive-fixnum) (error (list 'sig e))))",
+   "expected": "(ok 2305843009213693951)"
+  },
+  {
+   "id": "subrp/0063",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok nil) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "subrp/0064",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok t) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  }
+ ]
+}

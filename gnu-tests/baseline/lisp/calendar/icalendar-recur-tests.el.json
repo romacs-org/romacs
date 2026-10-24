@@ -1,0 +1,1705 @@
+{
+ "blob": "41cbaaa6ece356976991f3218688681721d3f235",
+ "compiled": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": true,
+  "results": {
+   "icalendar-test-date-time-add": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "icalendar-test-recur-bysetpos-filter": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "icalendar-test-recur-date-time-occurs-twice-p": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "icalendar-test-recur-find-daily-interval-w/date": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "icalendar-test-recur-find-daily-interval-w/date-time": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "icalendar-test-recur-find-hourly-interval": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "icalendar-test-recur-find-minutely-interval": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "icalendar-test-recur-find-monthly-interval": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "icalendar-test-recur-find-secondly-interval": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "icalendar-test-recur-find-weekly-interval-w/date": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "icalendar-test-recur-find-weekly-interval-w/date-time": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "icalendar-test-recur-find-yearly-interval": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "icalendar-test-recur-nonexistent-date-time-p": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "icalendar-test-recur-refine-byday": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "icalendar-test-recur-refine-byhour": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "icalendar-test-recur-refine-byminute": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "icalendar-test-recur-refine-bymonth": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "icalendar-test-recur-refine-bymonthday": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "icalendar-test-recur-refine-bysecond": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "icalendar-test-recur-refine-byyearday": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "icalendar-test-recur-subintervals-to-date-times": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "icalendar-test-recur-subintervals-to-dates": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "icalendar-test-recur-tz-observance-on": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "icalendar-test-recur-tz-observance-on/nonexistent": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "icalendar-test-recur-tz-observance-on/occurs-twice": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "icalendar-test-recur-yearday-number": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-leap-day/1": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-leap-day/2": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-monthly/interval": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.3.10/1": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.3.10/2": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.3.10/3": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.6.1/3": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.6.5/1": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.6.5/3.1": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/1": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/10": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/11": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/12": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/13": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/14": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/15": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/16": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/17": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/18": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/19": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/2": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/20": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/21": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/22": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/23": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/24": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/25": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/26": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/27": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/28": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/29": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/3": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/30": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/31": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/32": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/33": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/34": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/35": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/36": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/37": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/38": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/39": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/4": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/40": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/41": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/42": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/5": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/6": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/7": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/8": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/9": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   }
+  },
+  "timed_out": false
+ },
+ "file": "lisp/calendar/icalendar-recur-tests.el",
+ "gnu": {
+  "emacs": "<recording-path-redacted>/emacs-32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+  "version": "32.0.50"
+ },
+ "harness_sha256": "78c20850429a08af22faadf73b5d164c560230e83d7eb88ef60cb995670703ef",
+ "mini": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": null,
+  "results": {
+   "ict:date-time-add": {
+    "as_expected": null,
+    "detail": "(void-function ical:make-date-time)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:recur-bysetpos-filter": {
+    "as_expected": null,
+    "detail": "(void-function icr:bysetpos-filter)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:recur-date-time-occurs-twice-p": {
+    "as_expected": null,
+    "detail": "(void-function ical:make-date-time)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:recur-find-daily-interval-w/date": {
+    "as_expected": null,
+    "detail": "(void-function icr:make-interval)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:recur-find-daily-interval-w/date-time": {
+    "as_expected": null,
+    "detail": "(void-function ical:make-date-time)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:recur-find-hourly-interval": {
+    "as_expected": null,
+    "detail": "(void-function ical:make-date-time)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:recur-find-minutely-interval": {
+    "as_expected": null,
+    "detail": "(void-function ical:make-date-time)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:recur-find-monthly-interval": {
+    "as_expected": null,
+    "detail": "(void-function icr:make-interval)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:recur-find-secondly-interval": {
+    "as_expected": null,
+    "detail": "(void-function ical:make-date-time)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:recur-find-weekly-interval-w/date": {
+    "as_expected": null,
+    "detail": "(void-function icr:make-interval)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:recur-find-weekly-interval-w/date-time": {
+    "as_expected": null,
+    "detail": "(void-function ical:make-date-time)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:recur-find-yearly-interval": {
+    "as_expected": null,
+    "detail": "(void-function icr:make-interval)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:recur-nonexistent-date-time-p": {
+    "as_expected": null,
+    "detail": "(void-function ical:make-date-time)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:recur-refine-byday": {
+    "as_expected": null,
+    "detail": "(void-function ical:make-date-time)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:recur-refine-byhour": {
+    "as_expected": null,
+    "detail": "(void-function ical:make-date-time)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:recur-refine-byminute": {
+    "as_expected": null,
+    "detail": "(void-function ical:make-date-time)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:recur-refine-bymonth": {
+    "as_expected": null,
+    "detail": "(void-function ical:make-date-time)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:recur-refine-bymonthday": {
+    "as_expected": null,
+    "detail": "(void-function ical:make-date-time)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:recur-refine-bysecond": {
+    "as_expected": null,
+    "detail": "(void-function ical:make-date-time)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:recur-refine-byyearday": {
+    "as_expected": null,
+    "detail": "(void-function ical:make-date-time)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:recur-subintervals-to-date-times": {
+    "as_expected": null,
+    "detail": "(void-function ical:make-date-time)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:recur-subintervals-to-dates": {
+    "as_expected": null,
+    "detail": "(void-function ical:make-date-time)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:recur-tz-observance-on": {
+    "as_expected": null,
+    "detail": "(void-function ical:make-date-time)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:recur-tz-observance-on/nonexistent": {
+    "as_expected": null,
+    "detail": "(void-function ical:make-date-time)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:recur-tz-observance-on/occurs-twice": {
+    "as_expected": null,
+    "detail": "(void-function ical:make-date-time)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:recur-yearday-number": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "ict:rrule-test-leap-day/1": {
+    "as_expected": null,
+    "detail": "(void-function ical:parse-from-string)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:rrule-test-leap-day/2": {
+    "as_expected": null,
+    "detail": "(void-function ical:parse-from-string)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:rrule-test-monthly/interval": {
+    "as_expected": null,
+    "detail": "(void-function ical:parse-from-string)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:rrule-test-rfc5545-sec3.3.10/1": {
+    "as_expected": null,
+    "detail": "(void-function ical:parse-from-string)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:rrule-test-rfc5545-sec3.3.10/2": {
+    "as_expected": null,
+    "detail": "(void-function ical:parse-from-string)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:rrule-test-rfc5545-sec3.3.10/3": {
+    "as_expected": null,
+    "detail": "(void-function ical:parse-from-string)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:rrule-test-rfc5545-sec3.6.1/3": {
+    "as_expected": null,
+    "detail": "(void-function ical:parse-from-string)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:rrule-test-rfc5545-sec3.6.5/1": {
+    "as_expected": null,
+    "detail": "(void-function ical:parse-from-string)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:rrule-test-rfc5545-sec3.6.5/3.1": {
+    "as_expected": null,
+    "detail": "(void-function ical:parse-from-string)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/1": {
+    "as_expected": null,
+    "detail": "(void-function ical:parse-from-string)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/10": {
+    "as_expected": null,
+    "detail": "(void-function ical:parse-from-string)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/11": {
+    "as_expected": null,
+    "detail": "(void-function ical:parse-from-string)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/12": {
+    "as_expected": null,
+    "detail": "(void-function ical:parse-from-string)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/13": {
+    "as_expected": null,
+    "detail": "(void-function ical:parse-from-string)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/14": {
+    "as_expected": null,
+    "detail": "(void-function ical:parse-from-string)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/15": {
+    "as_expected": null,
+    "detail": "(void-function ical:parse-from-string)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/16": {
+    "as_expected": null,
+    "detail": "(void-function ical:parse-from-string)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/17": {
+    "as_expected": null,
+    "detail": "(void-function ical:parse-from-string)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/18": {
+    "as_expected": null,
+    "detail": "(void-function ical:parse-from-string)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/19": {
+    "as_expected": null,
+    "detail": "(void-function ical:parse-from-string)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/2": {
+    "as_expected": null,
+    "detail": "(void-function ical:parse-from-string)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/20": {
+    "as_expected": null,
+    "detail": "(void-function ical:parse-from-string)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/21": {
+    "as_expected": null,
+    "detail": "(void-function ical:parse-from-string)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/22": {
+    "as_expected": null,
+    "detail": "(void-function ical:parse-from-string)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/23": {
+    "as_expected": null,
+    "detail": "(void-function ical:parse-from-string)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/24": {
+    "as_expected": null,
+    "detail": "(void-function ical:parse-from-string)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/25": {
+    "as_expected": null,
+    "detail": "(void-function ical:parse-from-string)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/26": {
+    "as_expected": null,
+    "detail": "(void-function ical:parse-from-string)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/27": {
+    "as_expected": null,
+    "detail": "(void-function ical:parse-from-string)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/28": {
+    "as_expected": null,
+    "detail": "(void-function ical:parse-from-string)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/29": {
+    "as_expected": null,
+    "detail": "(void-function ical:parse-from-string)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/3": {
+    "as_expected": null,
+    "detail": "(void-function ical:parse-from-string)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/30": {
+    "as_expected": null,
+    "detail": "(void-function ical:parse-from-string)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/31": {
+    "as_expected": null,
+    "detail": "(void-function ical:parse-from-string)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/32": {
+    "as_expected": null,
+    "detail": "(void-function ical:parse-from-string)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/33": {
+    "as_expected": null,
+    "detail": "(void-function ical:parse-from-string)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/34": {
+    "as_expected": null,
+    "detail": "(void-function ical:parse-from-string)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/35": {
+    "as_expected": null,
+    "detail": "(void-function ical:parse-from-string)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/36": {
+    "as_expected": null,
+    "detail": "(void-function ical:parse-from-string)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/37": {
+    "as_expected": null,
+    "detail": "(void-function ical:parse-from-string)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/38": {
+    "as_expected": null,
+    "detail": "(void-function ical:parse-from-string)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/39": {
+    "as_expected": null,
+    "detail": "(void-function ical:parse-from-string)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/4": {
+    "as_expected": null,
+    "detail": "(void-function ical:parse-from-string)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/40": {
+    "as_expected": null,
+    "detail": "(void-function ical:parse-from-string)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/41": {
+    "as_expected": null,
+    "detail": "(void-function ical:parse-from-string)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/42": {
+    "as_expected": null,
+    "detail": "(void-function ical:parse-from-string)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/5": {
+    "as_expected": null,
+    "detail": "(void-function ical:parse-from-string)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/6": {
+    "as_expected": null,
+    "detail": "(void-function ical:parse-from-string)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/7": {
+    "as_expected": null,
+    "detail": "(void-function ical:parse-from-string)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/8": {
+    "as_expected": null,
+    "detail": "(void-function ical:parse-from-string)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/9": {
+    "as_expected": null,
+    "detail": "(void-function ical:parse-from-string)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   }
+  },
+  "timed_out": false
+ },
+ "read_error": null,
+ "real": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": true,
+  "results": {
+   "icalendar-test-date-time-add": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "icalendar-test-recur-bysetpos-filter": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "icalendar-test-recur-date-time-occurs-twice-p": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "icalendar-test-recur-find-daily-interval-w/date": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "icalendar-test-recur-find-daily-interval-w/date-time": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "icalendar-test-recur-find-hourly-interval": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "icalendar-test-recur-find-minutely-interval": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "icalendar-test-recur-find-monthly-interval": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "icalendar-test-recur-find-secondly-interval": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "icalendar-test-recur-find-weekly-interval-w/date": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "icalendar-test-recur-find-weekly-interval-w/date-time": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "icalendar-test-recur-find-yearly-interval": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "icalendar-test-recur-nonexistent-date-time-p": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "icalendar-test-recur-refine-byday": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "icalendar-test-recur-refine-byhour": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "icalendar-test-recur-refine-byminute": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "icalendar-test-recur-refine-bymonth": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "icalendar-test-recur-refine-bymonthday": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "icalendar-test-recur-refine-bysecond": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "icalendar-test-recur-refine-byyearday": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "icalendar-test-recur-subintervals-to-date-times": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "icalendar-test-recur-subintervals-to-dates": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "icalendar-test-recur-tz-observance-on": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "icalendar-test-recur-tz-observance-on/nonexistent": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "icalendar-test-recur-tz-observance-on/occurs-twice": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "icalendar-test-recur-yearday-number": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-leap-day/1": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-leap-day/2": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-monthly/interval": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.3.10/1": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.3.10/2": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.3.10/3": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.6.1/3": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.6.5/1": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.6.5/3.1": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/1": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/10": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/11": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/12": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/13": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/14": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/15": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/16": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/17": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/18": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/19": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/2": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/20": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/21": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/22": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/23": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/24": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/25": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/26": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/27": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/28": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/29": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/3": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/30": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/31": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/32": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/33": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/34": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/35": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/36": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/37": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/38": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/39": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/4": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/40": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/41": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/42": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/5": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/6": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/7": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/8": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ict:rrule-test-rfc5545-sec3.8.5.3/9": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   }
+  },
+  "timed_out": false
+ },
+ "schema": 1,
+ "toplevel_deftests": 26
+}

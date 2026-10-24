@@ -1,0 +1,134 @@
+;;; jabber-notifications.el --- emacs-jabber interface to notifications.el  -*- lexical-binding: t; -*-
+
+;; Copyright (C) 2014 - Adam Sjøgren - asjo@koldfront.dk
+;; Copyright (C) 2010 - Kirill A. Korinskiy - catap@catap.ru
+;; Copyright (C) 2007 - Rodrigo Lazo - rlazo.paz@gmail.com
+;; Copyright (C) 2026  Thanos Apollo
+
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
+
+;; This program is free software; you can redistribute it and/or modify
+;; it under the terms of the GNU General Public License as published by
+;; the Free Software Foundation; either version 2 of the License, or
+;; (at your option) any later version.
+
+;; This program is distributed in the hope that it will be useful,
+;; but WITHOUT ANY WARRANTY; without even the implied warranty of
+;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+;; GNU General Public License for more details.
+
+;; You should have received a copy of the GNU General Public License
+;; along with this program; if not, write to the Free Software
+;; Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+
+;;; Commentary:
+;;
+;; Built on jabber-libnotify.el.
+
+;;; Code:
+
+(eval-when-compile (require 'jabber-alert))
+
+(require 'notifications)
+(require 'jabber-avatar)
+(require 'jabber-muc-nick-completion)
+(require 'jabber-xml)
+(require 'jabber-util)
+
+(defcustom jabber-notifications-icon "emacs"
+  "Icon to be used on the notification pop-up.
+The default \"emacs\" is resolved by the system icon theme."
+  :type 'string
+  :group 'jabber-alerts)
+
+(defcustom jabber-notifications-timeout nil
+  "Timeout of the pop up window in milliseconds."
+  :type 'integer
+  :group 'jabber-alerts)
+
+(defcustom jabber-notifications-app "Emacs Jabber"
+  "Defines the app of the pop up."
+  :type 'string
+  :group 'jabber-alerts)
+
+(defcustom jabber-notifications-muc 'mentions
+  "When to show desktop notifications for MUC messages.
+`all' shows a notification for every MUC message, `mentions'
+only when the message looks like it is addressed to you, and
+nil disables MUC notifications entirely."
+  :type '(choice (const :tag "All messages" all)
+                 (const :tag "Mentions only" mentions)
+                 (const :tag "Disabled" nil))
+  :group 'jabber-alerts)
+
+(defun jabber-notifications--remove-action-callback (callback)
+  "Remove CALLBACK from the pending notification actions."
+  (setq notifications-on-action-map
+        (cl-delete callback notifications-on-action-map
+                   :key #'cadr :test #'eq))
+  (when (and (null notifications-on-action-map)
+             notifications-on-action-object)
+    (dbus-unregister-object notifications-on-action-object)
+    (setq notifications-on-action-object nil)))
+
+(defun jabber-message-notifications (from buffer text title)
+  "Show a message from FROM through the notifications.el interface.
+BUFFER is the associated chat buffer, TEXT is the message body, and
+TITLE is the notification title; nil suppresses the notification."
+  (when title
+    (letrec ((body (or (jabber-escape-xml text) " "))
+             (avatar-hash
+              (when-let* (((buffer-live-p buffer))
+                          (jc (buffer-local-value 'jabber-buffer-connection buffer)))
+                (get (jabber-jid-symbol from jc) 'avatar-hash)))
+             (action-callback
+              (lambda (&rest _)
+                (when (buffer-live-p buffer)
+                  (pop-to-buffer buffer))))
+             (close-callback
+              (lambda (&rest _)
+                (jabber-notifications--remove-action-callback
+                 action-callback))))
+      (condition-case err
+          (notifications-notify
+           :title title
+           :body body
+           :app-icon (or (and avatar-hash (jabber-avatar-find-cached avatar-hash))
+                         jabber-notifications-icon)
+           :app-name jabber-notifications-app
+           :category "jabber.message"
+           :actions '("default" "Switch to buffer")
+           :on-action action-callback
+           :on-close close-callback
+           :timeout jabber-notifications-timeout)
+        (dbus-error
+         (message "jabber-notifications: D-Bus error: %s" (error-message-string err)))))))
+
+(defun jabber-muc-notifications (nick group buffer text title)
+  "Show MUC message from NICK in GROUP through the notifications.el interface.
+BUFFER, TEXT and TITLE are passed through to the underlying
+notification call.  Controlled by `jabber-notifications-muc':
+notify for all messages, mentions only, or not at all."
+  (when (pcase jabber-notifications-muc
+          ('all t)
+          ('mentions (jabber-muc-looks-like-personal-p text group))
+          (_ nil))
+    (jabber-message-notifications
+     group buffer (if nick (format "%s: %s" nick text) text) title)))
+
+;; jabber-*-notifications* requires "from" argument, so we cant use
+;; define-jabber-alert/define-jabber-personal-alert here and do the
+;; work by hand:
+
+(cl-pushnew 'jabber-message-notifications (get 'jabber-alert-message-hooks 'custom-options))
+(cl-pushnew 'jabber-muc-notifications (get 'jabber-alert-muc-hooks 'custom-options))
+
+(define-obsolete-function-alias 'jabber-muc-notifications-personal
+  #'jabber-muc-notifications "0.10.0")
+
+(add-hook 'jabber-alert-message-hooks #'jabber-message-notifications)
+(add-hook 'jabber-alert-muc-hooks #'jabber-muc-notifications)
+
+(provide 'jabber-notifications)
+
+;;; jabber-notifications.el ends here

@@ -1,0 +1,12 @@
+[package]
+name = "romacs-regex"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+memchr.workspace = true
+romacs-chars = { path = "../romacs-chars" }
+
+[lints.rust]
+unsafe_code = "forbid"

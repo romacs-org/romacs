@@ -1,0 +1,481 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "default-value",
+ "spec_sha256": "1e257b132205913f1805d9b76dbe98f896900faf9aeebd8581420b3d2c4cf7ca",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "default-value",
+    "subr",
+    1,
+    1
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "data.c": "eca7895a8043cd0a960dfe037a46028374d1a40cc6ee4d0cf6de90ac56c242ae"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "default-value/0000",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (default-value nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "default-value/0001",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (default-value t)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "default-value/0002",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (default-value 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 0))"
+  },
+  {
+   "id": "default-value/0003",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (default-value 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1))"
+  },
+  {
+   "id": "default-value/0004",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (default-value 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 2))"
+  },
+  {
+   "id": "default-value/0005",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (default-value -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp -1))"
+  },
+  {
+   "id": "default-value/0006",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (default-value most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 2305843009213693951))"
+  },
+  {
+   "id": "default-value/0007",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (default-value 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1.5))"
+  },
+  {
+   "id": "default-value/0008",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (default-value 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (void-variable sym))"
+  },
+  {
+   "id": "default-value/0009",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (default-value :kw)) (error (list 'sig e))))",
+   "expected": "(ok :kw)"
+  },
+  {
+   "id": "default-value/0010",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (default-value (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"\"))"
+  },
+  {
+   "id": "default-value/0011",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (default-value (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"abc\"))"
+  },
+  {
+   "id": "default-value/0012",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (default-value (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"λx\"))"
+  },
+  {
+   "id": "default-value/0013",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (default-value (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 3)))"
+  },
+  {
+   "id": "default-value/0014",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (default-value (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (a (b))))"
+  },
+  {
+   "id": "default-value/0015",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (default-value (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 . 2)))"
+  },
+  {
+   "id": "default-value/0016",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (default-value (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 . 3)))"
+  },
+  {
+   "id": "default-value/0017",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (default-value (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp [1 2]))"
+  },
+  {
+   "id": "default-value/0018",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (default-value (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "default-value/0019",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (default-value 'most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(ok 2305843009213693951)"
+  },
+  {
+   "id": "default-value/0020",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (default-value (make-symbol \":primh-u\"))) (error (list 'sig e))))",
+   "expected": "(sig (void-variable :primh-u))"
+  },
+  {
+   "id": "default-value/0021",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'default-value '())) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr default-value> 0))"
+  },
+  {
+   "id": "default-value/0022",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'default-value '(1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr default-value> 2))"
+  },
+  {
+   "id": "default-value/0023",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (default-value a0))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "default-value/0024",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil)) (let ((r (default-value a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (t))"
+  },
+  {
+   "id": "default-value/0025",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1)) (let ((r (default-value a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1))"
+  },
+  {
+   "id": "default-value/0026",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-positive-fixnum)) (let ((r (default-value a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 2305843009213693951))"
+  },
+  {
+   "id": "default-value/0027",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :kw)) (let ((r (default-value a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (t))"
+  },
+  {
+   "id": "default-value/0028",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\"))) (let ((r (default-value a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"λx\"))"
+  },
+  {
+   "id": "default-value/0029",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 2))) (let ((r (default-value a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 . 2)))"
+  },
+  {
+   "id": "default-value/0030",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (default-value a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "default-value/0031",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defvar primh-dv1 5) (default-value 'primh-dv1))) (error (list 'sig e))))",
+   "expected": "(ok 5)"
+  },
+  {
+   "id": "default-value/0032",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (default-value 'primh-dv2)) (error (list 'sig e))))",
+   "expected": "(sig (void-variable primh-dv2))"
+  },
+  {
+   "id": "default-value/0033",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defvar primh-dv3 1) (with-temp-buffer (make-local-variable 'primh-dv3) (set 'primh-dv3 2) (list (default-value 'primh-dv3) primh-dv3)))) (error (list 'sig e))))",
+   "expected": "(ok (1 2))"
+  },
+  {
+   "id": "default-value/0034",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defvar primh-dv4 1) (list (eval '(let ((primh-dv4 2)) (default-value 'primh-dv4)) t) (default-value 'primh-dv4)))) (error (list 'sig e))))",
+   "expected": "(ok (2 1))"
+  },
+  {
+   "id": "default-value/0035",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defvar primh-dv5 1) (make-variable-buffer-local 'primh-dv5) (with-temp-buffer (set 'primh-dv5 3) (eval '(let ((primh-dv5 4)) (list (default-value 'primh-dv5) primh-dv5)) t)))) (error (list 'sig e))))",
+   "expected": "(ok (1 4))"
+  },
+  {
+   "id": "default-value/0036",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defvar primh-dv6 1) (make-variable-buffer-local 'primh-dv6) (with-temp-buffer (eval '(let ((primh-dv6 4)) (list (default-value 'primh-dv6) primh-dv6)) t)))) (error (list 'sig e))))",
+   "expected": "(ok (4 4))"
+  },
+  {
+   "id": "default-value/0037",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defvar primh-dv7-b 7) (defvaralias 'primh-dv7-a 'primh-dv7-b) (default-value 'primh-dv7-a))) (error (list 'sig e))))",
+   "expected": "(ok 7)"
+  },
+  {
+   "id": "default-value/0038",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defvaralias 'primh-dv8-a 'primh-dv8-b) (condition-case e (default-value 'primh-dv8-a) (error e)))) (error (list 'sig e))))",
+   "expected": "(ok (void-variable primh-dv8-a))"
+  },
+  {
+   "id": "default-value/0039",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (default-value nil) (default-value t) (default-value :primh-dv-kw))) (error (list 'sig e))))",
+   "expected": "(ok (nil t :primh-dv-kw))"
+  },
+  {
+   "id": "default-value/0040",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (default-value (make-symbol \":primh-dv-u\"))) (error (list 'sig e))))",
+   "expected": "(sig (void-variable :primh-dv-u))"
+  },
+  {
+   "id": "default-value/0041",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defvar primh-dv9 1) (makunbound 'primh-dv9) (default-value 'primh-dv9))) (error (list 'sig e))))",
+   "expected": "(sig (void-variable primh-dv9))"
+  },
+  {
+   "id": "default-value/0042",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defvar primh-dv10 (list 1 2)) (eq primh-dv10 (default-value 'primh-dv10)))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "default-value/0043",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defvar primh-dv11 (list 1 (copy-sequence \"s\"))) (let ((i 0)) (while (< i 5000) (list i i) (setq i (1+ i)))) (default-value 'primh-dv11))) (error (list 'sig e))))",
+   "expected": "(ok (1 \"s\"))"
+  },
+  {
+   "id": "default-value/0044",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (default-value 'most-positive-fixnum) (listp (default-value 'load-path)) (default-value 'case-fold-search))) (error (list 'sig e))))",
+   "expected": "(ok (2305843009213693951 t t))"
+  },
+  {
+   "id": "default-value/0045",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((s (make-symbol \"primh-dv-v\"))) (set s 3) (default-value s))) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "default-value/0046",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defvar primh-dv12 1) (with-temp-buffer (make-local-variable 'primh-dv12) (makunbound 'primh-dv12) (default-value 'primh-dv12)))) (error (list 'sig e))))",
+   "expected": "(ok 1)"
+  },
+  {
+   "id": "default-value/0047",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defvaralias 'primh-dv13 :primh-dv-kw2) (default-value 'primh-dv13))) (error (list 'sig e))))",
+   "expected": "(ok :primh-dv-kw2)",
+   "gnu_regime_variant": "(sig (error \"Cannot make a constant an alias: primh-dv13\"))"
+  },
+  {
+   "id": "default-value/0048",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (condition-case e (default-value \"primh-dv\") (error e))) (error (list 'sig e))))",
+   "expected": "(ok (wrong-type-argument symbolp \"primh-dv\"))"
+  },
+  {
+   "id": "default-value/0049",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (funcall #'default-value nil) (apply #'default-value '(t)) (funcall 'default-value :primh-dv-kw3))) (error (list 'sig e))))",
+   "expected": "(ok (nil t :primh-dv-kw3))"
+  },
+  {
+   "id": "default-value/0050",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defvar primh-dv14 1) (make-variable-buffer-local 'primh-dv14) (with-temp-buffer (set 'primh-dv14 5) (with-temp-buffer (list (default-value 'primh-dv14) primh-dv14))))) (error (list 'sig e))))",
+   "expected": "(ok (1 1))"
+  },
+  {
+   "id": "default-value/0051",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defvar primh-dv15 nil) (makunbound 'primh-dv15) (with-temp-buffer (make-local-variable 'primh-dv15) (set 'primh-dv15 1) (condition-case e (default-value 'primh-dv15) (error e))))) (error (list 'sig e))))",
+   "expected": "(ok (void-variable primh-dv15))"
+  },
+  {
+   "id": "default-value/0052",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defvar primh-dv16-b 1) (defvaralias 'primh-dv16-a 'primh-dv16-b) (eval '(let ((primh-dv16-a 9)) (default-value 'primh-dv16-b)) t))) (error (list 'sig e))))",
+   "expected": "(ok 9)"
+  },
+  {
+   "id": "default-value/0053",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 'most-positive-fixnum) (error (list 'sig e))))",
+   "expected": "(ok most-positive-fixnum)"
+  },
+  {
+   "id": "default-value/0054",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 'sym) (error (list 'sig e))))",
+   "expected": "(ok sym)"
+  },
+  {
+   "id": "default-value/0055",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (cons 1 (cons 2 3))) (error (list 'sig e))))",
+   "expected": "(ok (1 2 . 3))"
+  },
+  {
+   "id": "default-value/0056",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (cons 1 2)) (error (list 'sig e))))",
+   "expected": "(ok (1 . 2))"
+  },
+  {
+   "id": "default-value/0057",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"\")) (error (list 'sig e))))",
+   "expected": "(ok \"\")"
+  },
+  {
+   "id": "default-value/0058",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"abc\")) (error (list 'sig e))))",
+   "expected": "(ok \"abc\")"
+  },
+  {
+   "id": "default-value/0059",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"λx\")) (error (list 'sig e))))",
+   "expected": "(ok \"λx\")"
+  },
+  {
+   "id": "default-value/0060",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (error (list 'sig e))))",
+   "expected": "(ok (1 2 1 2 . #2))"
+  },
+  {
+   "id": "default-value/0061",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list 'a (list 'b))) (error (list 'sig e))))",
+   "expected": "(ok (a (b)))"
+  },
+  {
+   "id": "default-value/0062",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list 1 2 3)) (error (list 'sig e))))",
+   "expected": "(ok (1 2 3))"
+  },
+  {
+   "id": "default-value/0063",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (make-symbol \":primh-u\")) (error (list 'sig e))))",
+   "expected": "(ok :primh-u)"
+  },
+  {
+   "id": "default-value/0064",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vector 1 2)) (error (list 'sig e))))",
+   "expected": "(ok [1 2])"
+  },
+  {
+   "id": "default-value/0065",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok -1) (error (list 'sig e))))",
+   "expected": "(ok -1)"
+  },
+  {
+   "id": "default-value/0066",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 0) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "default-value/0067",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1) (error (list 'sig e))))",
+   "expected": "(ok 1)"
+  },
+  {
+   "id": "default-value/0068",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1.5) (error (list 'sig e))))",
+   "expected": "(ok 1.5)"
+  },
+  {
+   "id": "default-value/0069",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 2) (error (list 'sig e))))",
+   "expected": "(ok 2)"
+  },
+  {
+   "id": "default-value/0070",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok :kw) (error (list 'sig e))))",
+   "expected": "(ok :kw)"
+  },
+  {
+   "id": "default-value/0071",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok most-positive-fixnum) (error (list 'sig e))))",
+   "expected": "(ok 2305843009213693951)"
+  },
+  {
+   "id": "default-value/0072",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok nil) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "default-value/0073",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok t) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  }
+ ],
+ "pinned": {
+  "default-value/0018": "PRINTER",
+  "default-value/0030": "PRINTER",
+  "default-value/0060": "PRINTER"
+ }
+}

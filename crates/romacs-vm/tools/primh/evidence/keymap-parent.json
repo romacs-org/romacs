@@ -1,0 +1,498 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "keymap-parent",
+ "spec_sha256": "416358b896828d157d1ce90c470e5ea8d5b612e3dbf6769429c3cce4b4a387dd",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "keymap-parent",
+    "subr",
+    1,
+    1
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "keymap.c": "b7bf7e9e3df8a2dc5f82f05f44dcba7abfdd4cc9be370357ce8829b83bfe94fb"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "keymap-parent/0000",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (keymap-parent nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument keymapp nil))"
+  },
+  {
+   "id": "keymap-parent/0001",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (keymap-parent t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument keymapp t))"
+  },
+  {
+   "id": "keymap-parent/0002",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (keymap-parent 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument keymapp 0))"
+  },
+  {
+   "id": "keymap-parent/0003",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (keymap-parent 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument keymapp 1))"
+  },
+  {
+   "id": "keymap-parent/0004",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (keymap-parent 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument keymapp 2))"
+  },
+  {
+   "id": "keymap-parent/0005",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (keymap-parent -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument keymapp -1))"
+  },
+  {
+   "id": "keymap-parent/0006",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (keymap-parent most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument keymapp 2305843009213693951))"
+  },
+  {
+   "id": "keymap-parent/0007",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (keymap-parent 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument keymapp 1.5))"
+  },
+  {
+   "id": "keymap-parent/0008",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (keymap-parent 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument keymapp sym))"
+  },
+  {
+   "id": "keymap-parent/0009",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (keymap-parent :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument keymapp :kw))"
+  },
+  {
+   "id": "keymap-parent/0010",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (keymap-parent (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument keymapp \"\"))"
+  },
+  {
+   "id": "keymap-parent/0011",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (keymap-parent (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument keymapp \"abc\"))"
+  },
+  {
+   "id": "keymap-parent/0012",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (keymap-parent (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument keymapp \"λx\"))"
+  },
+  {
+   "id": "keymap-parent/0013",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (keymap-parent (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument keymapp (1 2 3)))"
+  },
+  {
+   "id": "keymap-parent/0014",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (keymap-parent (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument keymapp (a (b))))"
+  },
+  {
+   "id": "keymap-parent/0015",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (keymap-parent (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument keymapp (1 . 2)))"
+  },
+  {
+   "id": "keymap-parent/0016",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (keymap-parent (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument keymapp (1 2 . 3)))"
+  },
+  {
+   "id": "keymap-parent/0017",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (keymap-parent (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument keymapp [1 2]))"
+  },
+  {
+   "id": "keymap-parent/0018",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (keymap-parent (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument keymapp (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "keymap-parent/0019",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (keymap-parent (make-sparse-keymap))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "keymap-parent/0020",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (keymap-parent (make-sparse-keymap \"P\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "keymap-parent/0021",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (keymap-parent (list 'keymap (cons 97 'primh-a)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "keymap-parent/0022",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (keymap-parent (let ((m (make-sparse-keymap)) (p (list 'keymap (cons 98 'primh-b)))) (setcdr m p) m))) (error (list 'sig e))))",
+   "expected": "(ok (keymap (98 . primh-b)))"
+  },
+  {
+   "id": "keymap-parent/0023",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (keymap-parent (list 'keymap))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "keymap-parent/0024",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (keymap-parent (progn (fset 'primh-km (list 'keymap (cons 99 'primh-c))) 'primh-km))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "keymap-parent/0025",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (keymap-parent (list 'notkeymap 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument keymapp (notkeymap 1)))"
+  },
+  {
+   "id": "keymap-parent/0026",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'keymap-parent '())) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr keymap-parent> 0))"
+  },
+  {
+   "id": "keymap-parent/0027",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'keymap-parent '(1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr keymap-parent> 2))"
+  },
+  {
+   "id": "keymap-parent/0028",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (keymap-parent a0))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument keymapp nil))"
+  },
+  {
+   "id": "keymap-parent/0029",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil)) (let ((r (keymap-parent a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument keymapp nil))"
+  },
+  {
+   "id": "keymap-parent/0030",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1)) (let ((r (keymap-parent a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument keymapp 1))"
+  },
+  {
+   "id": "keymap-parent/0031",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-positive-fixnum)) (let ((r (keymap-parent a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument keymapp 2305843009213693951))"
+  },
+  {
+   "id": "keymap-parent/0032",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :kw)) (let ((r (keymap-parent a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument keymapp :kw))"
+  },
+  {
+   "id": "keymap-parent/0033",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\"))) (let ((r (keymap-parent a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument keymapp \"λx\"))"
+  },
+  {
+   "id": "keymap-parent/0034",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 2))) (let ((r (keymap-parent a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument keymapp (1 . 2)))"
+  },
+  {
+   "id": "keymap-parent/0035",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (keymap-parent a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument keymapp (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "keymap-parent/0036",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 'keymap (cons 97 'primh-a)))) (let ((r (keymap-parent a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "keymap-parent/0037",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (progn (fset 'primh-km (list 'keymap (cons 99 'primh-c))) 'primh-km))) (let ((r (keymap-parent a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "keymap-parent/0038",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((m (make-sparse-keymap)) (p (make-sparse-keymap))) (set-keymap-parent m p) (eq (keymap-parent m) p))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "keymap-parent/0039",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((m (list 'keymap (cons 97 'x))) (p (list 'keymap (cons 98 'y)))) (set-keymap-parent m p) (keymap-parent m))) (error (list 'sig e))))",
+   "expected": "(ok (keymap (98 . y)))"
+  },
+  {
+   "id": "keymap-parent/0040",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((m (make-sparse-keymap \"P\")) (p (make-sparse-keymap))) (set-keymap-parent m p) (list m (eq (keymap-parent m) p)))) (error (list 'sig e))))",
+   "expected": "(ok ((keymap \"P\" keymap) t))"
+  },
+  {
+   "id": "keymap-parent/0041",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (fset 'primh-kp1 (list 'keymap (cons 97 'x) 'keymap)) (keymap-parent 'primh-kp1))) (error (list 'sig e))))",
+   "expected": "(ok (keymap))"
+  },
+  {
+   "id": "keymap-parent/0042",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (fset 'primh-kp2 (list 'keymap)) (keymap-parent (list 'keymap (cons 1 2) 'primh-kp2 3)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "keymap-parent/0043",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (keymap-parent (cons 'keymap (cons (cons 1 2) 'primh-kp-missing)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "keymap-parent/0044",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (fset 'primh-kp3 (make-sparse-keymap)) (keymap-parent (cons 'keymap 'primh-kp3)))) (error (list 'sig e))))",
+   "expected": "(ok (keymap))"
+  },
+  {
+   "id": "keymap-parent/0045",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (fset 'primh-kp4 'primh-kp5) (fset 'primh-kp5 (list 'keymap)) (keymap-parent (cons 'keymap 'primh-kp4)))) (error (list 'sig e))))",
+   "expected": "(ok (keymap))"
+  },
+  {
+   "id": "keymap-parent/0046",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (keymap-parent (cons 'keymap 7))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "keymap-parent/0047",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a (make-sparse-keymap)) (b (make-sparse-keymap)) (c (make-sparse-keymap))) (set-keymap-parent a b) (set-keymap-parent b c) (list (eq (keymap-parent a) b) (eq (keymap-parent (keymap-parent a)) c) (keymap-parent c)))) (error (list 'sig e))))",
+   "expected": "(ok (t t nil))"
+  },
+  {
+   "id": "keymap-parent/0048",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((m (make-sparse-keymap)) (p (list 'keymap (copy-sequence \"s\")))) (set-keymap-parent m p) (let ((i 0)) (while (< i 5000) (list i i) (setq i (1+ i)))) (list (eq (keymap-parent m) p) (keymap-parent m)))) (error (list 'sig e))))",
+   "expected": "(ok (t (keymap \"s\")))"
+  },
+  {
+   "id": "keymap-parent/0049",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (condition-case e (keymap-parent 'primh-kp-unbound) (error e))) (error (list 'sig e))))",
+   "expected": "(ok (wrong-type-argument keymapp primh-kp-unbound))"
+  },
+  {
+   "id": "keymap-parent/0050",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (funcall #'keymap-parent (list 'keymap 'keymap)) (apply #'keymap-parent (list (list 'keymap))))) (error (list 'sig e))))",
+   "expected": "(ok ((keymap) nil))"
+  },
+  {
+   "id": "keymap-parent/0051",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 'sym) (error (list 'sig e))))",
+   "expected": "(ok sym)"
+  },
+  {
+   "id": "keymap-parent/0052",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (cons 1 (cons 2 3))) (error (list 'sig e))))",
+   "expected": "(ok (1 2 . 3))"
+  },
+  {
+   "id": "keymap-parent/0053",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (cons 1 2)) (error (list 'sig e))))",
+   "expected": "(ok (1 . 2))"
+  },
+  {
+   "id": "keymap-parent/0054",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"\")) (error (list 'sig e))))",
+   "expected": "(ok \"\")"
+  },
+  {
+   "id": "keymap-parent/0055",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"abc\")) (error (list 'sig e))))",
+   "expected": "(ok \"abc\")"
+  },
+  {
+   "id": "keymap-parent/0056",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"λx\")) (error (list 'sig e))))",
+   "expected": "(ok \"λx\")"
+  },
+  {
+   "id": "keymap-parent/0057",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((m (make-sparse-keymap)) (p (list 'keymap (cons 98 'primh-b)))) (setcdr m p) m)) (error (list 'sig e))))",
+   "expected": "(ok (keymap keymap (98 . primh-b)))"
+  },
+  {
+   "id": "keymap-parent/0058",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (error (list 'sig e))))",
+   "expected": "(ok (1 2 1 2 . #2))"
+  },
+  {
+   "id": "keymap-parent/0059",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list 'a (list 'b))) (error (list 'sig e))))",
+   "expected": "(ok (a (b)))"
+  },
+  {
+   "id": "keymap-parent/0060",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list 'keymap (cons 97 'primh-a))) (error (list 'sig e))))",
+   "expected": "(ok (keymap (97 . primh-a)))"
+  },
+  {
+   "id": "keymap-parent/0061",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list 'keymap)) (error (list 'sig e))))",
+   "expected": "(ok (keymap))"
+  },
+  {
+   "id": "keymap-parent/0062",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list 'notkeymap 1)) (error (list 'sig e))))",
+   "expected": "(ok (notkeymap 1))"
+  },
+  {
+   "id": "keymap-parent/0063",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list 1 2 3)) (error (list 'sig e))))",
+   "expected": "(ok (1 2 3))"
+  },
+  {
+   "id": "keymap-parent/0064",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (make-sparse-keymap \"P\")) (error (list 'sig e))))",
+   "expected": "(ok (keymap \"P\"))"
+  },
+  {
+   "id": "keymap-parent/0065",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (make-sparse-keymap)) (error (list 'sig e))))",
+   "expected": "(ok (keymap))"
+  },
+  {
+   "id": "keymap-parent/0066",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (fset 'primh-km (list 'keymap (cons 99 'primh-c))) 'primh-km)) (error (list 'sig e))))",
+   "expected": "(ok primh-km)"
+  },
+  {
+   "id": "keymap-parent/0067",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vector 1 2)) (error (list 'sig e))))",
+   "expected": "(ok [1 2])"
+  },
+  {
+   "id": "keymap-parent/0068",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok -1) (error (list 'sig e))))",
+   "expected": "(ok -1)"
+  },
+  {
+   "id": "keymap-parent/0069",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 0) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "keymap-parent/0070",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1) (error (list 'sig e))))",
+   "expected": "(ok 1)"
+  },
+  {
+   "id": "keymap-parent/0071",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1.5) (error (list 'sig e))))",
+   "expected": "(ok 1.5)"
+  },
+  {
+   "id": "keymap-parent/0072",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 2) (error (list 'sig e))))",
+   "expected": "(ok 2)"
+  },
+  {
+   "id": "keymap-parent/0073",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok :kw) (error (list 'sig e))))",
+   "expected": "(ok :kw)"
+  },
+  {
+   "id": "keymap-parent/0074",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok most-positive-fixnum) (error (list 'sig e))))",
+   "expected": "(ok 2305843009213693951)"
+  },
+  {
+   "id": "keymap-parent/0075",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok nil) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "keymap-parent/0076",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok t) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  }
+ ],
+ "pinned": {
+  "keymap-parent/0018": "PRINTER",
+  "keymap-parent/0035": "PRINTER",
+  "keymap-parent/0058": "PRINTER"
+ }
+}

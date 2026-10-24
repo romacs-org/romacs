@@ -1,0 +1,68 @@
+{
+ "name": "char-or-string-p",
+ "arity": [
+  1,
+  1
+ ],
+ "effect": "pure",
+ "gnu_files": [
+  "data.c"
+ ],
+ "gnu_def": "data.c:559",
+ "rust": "src/prims/char_or_string_p.rs:5",
+ "args": [
+  "data-predicate-curated"
+ ],
+ "extra": {
+  "0": [
+   "nil",
+   "t",
+   "'x",
+   ":key",
+   "0",
+   "1",
+   "-1",
+   "4194303",
+   "4194304",
+   "1152921504606846975",
+   "1152921504606846976",
+   "2305843009213693951",
+   "-2305843009213693952",
+   "#x2000000000000000",
+   "#x-2000000000000001",
+   "#xffffffffffffffffffffffffffffffff",
+   "#x-ffffffffffffffffffffffffffffffff",
+   "0.0",
+   "-0.0",
+   "1.5",
+   "-1.5",
+   "1.0e+INF",
+   "-1.0e+INF",
+   "0.0e+NaN",
+   "\"\"",
+   "\"x\"",
+   "\"\u03bb\"",
+   "'(1 . 2)",
+   "[1]"
+  ]
+ },
+ "probes": [
+  "(char-or-string-p (make-marker))",
+  "(char-or-string-p (set-marker (make-marker) 1))",
+  "(char-or-string-p (current-buffer))",
+  "(char-or-string-p (symbol-function 'car))",
+  "(char-or-string-p (lambda (x) x))",
+  "(char-or-string-p (make-symbol \"x\"))",
+  "(char-or-string-p (make-hash-table))",
+  "(char-or-string-p (make-char-table 'data-predicate))",
+  "(char-or-string-p (standard-syntax-table))",
+  "(char-or-string-p (obarray-make 3))",
+  "(char-or-string-p (make-overlay 1 1))",
+  "(char-or-string-p (selected-window))",
+  "(char-or-string-p (selected-frame))",
+  "(char-or-string-p (frame-terminal))",
+  "(char-or-string-p (unibyte-string 255))",
+  "(funcall #'char-or-string-p 0)",
+  "(funcall #'char-or-string-p (symbol-function 'car))"
+ ]
+}

@@ -1,0 +1,924 @@
+;;; jabber-test-receipts.el --- Tests for jabber-receipts  -*- lexical-binding: t; -*-
+
+;;; Commentary:
+
+;; XEP-0184 Delivery Receipts and XEP-0333 Chat Markers.
+
+;;; Code:
+
+(require 'ert)
+(require 'jabber-receipts)
+(require 'jabber-db)
+
+;;; Group 1: Send hook
+
+(ert-deftest jabber-test-receipts-send-hook-adds-elements ()
+  "Send hook appends request and markable elements."
+  (let ((result (jabber-receipts--send-hook "hello" "msg-001")))
+    (should (assq 'request result))
+    (should (assq 'markable result))))
+
+(ert-deftest jabber-test-receipts-send-hook-correct-xmlns ()
+  "Send hook elements have correct xmlns attributes."
+  (let* ((result (jabber-receipts--send-hook "test" "id-1"))
+         (request (assq 'request result))
+         (markable (assq 'markable result)))
+    (should (string= "urn:xmpp:receipts"
+                     (cdr (assq 'xmlns (cadr request)))))
+    (should (string= "urn:xmpp:chat-markers:0"
+                     (cdr (assq 'xmlns (cadr markable)))))))
+
+;;; Group 2: Incoming receipt handling
+
+(ert-deftest jabber-test-receipts-handle-xep0184-received ()
+  "Incoming XEP-0184 received stanza updates delivered_at in DB."
+  (let ((updated-id nil)
+        (updated-col nil))
+    (cl-letf (((symbol-function 'jabber-db-update-receipt)
+               (lambda (_acct _peer id col _ts)
+                 (setq updated-id id updated-col col)))
+              ((symbol-function 'jabber-connection-bare-jid)
+               (lambda (_j) "me@example.com"))
+              ((symbol-function 'jabber-chat-get-buffer)
+               (lambda (_from &optional _jc) "*test-chat*")))
+      (jabber-receipts--handle-message
+       'fake-jc
+       '(message ((from . "them@example.com") (type . "chat"))
+                 (received ((xmlns . "urn:xmpp:receipts")
+                            (id . "msg-001"))))))
+    (should (equal updated-id "msg-001"))
+    (should (equal updated-col "delivered_at"))))
+
+(ert-deftest jabber-test-receipts-handle-xep0333-displayed ()
+  "Incoming XEP-0333 displayed stanza updates displayed_at in DB."
+  (let ((updated-id nil)
+        (updated-col nil))
+    (cl-letf (((symbol-function 'jabber-db-update-receipt)
+               (lambda (_acct _peer id col _ts)
+                 (setq updated-id id updated-col col)))
+              ((symbol-function 'jabber-connection-bare-jid)
+               (lambda (_j) "me@example.com"))
+              ((symbol-function 'jabber-chat-get-buffer)
+               (lambda (_from &optional _jc) "*test-chat*")))
+      (jabber-receipts--handle-message
+       'fake-jc
+       '(message ((from . "them@example.com") (type . "chat"))
+                 (displayed ((xmlns . "urn:xmpp:chat-markers:0")
+                             (id . "msg-002"))))))
+    (should (equal updated-id "msg-002"))
+    (should (equal updated-col "displayed_at"))))
+
+(ert-deftest jabber-test-receipts-handle-ignores-non-receipt ()
+  "Messages without receipt elements are ignored."
+  (let ((updated nil))
+    (cl-letf (((symbol-function 'jabber-db-update-receipt)
+               (lambda (&rest _args) (setq updated t)))
+              ((symbol-function 'jabber-connection-bare-jid)
+               (lambda (_j) "me@example.com")))
+      (jabber-receipts--handle-message
+       'fake-jc
+       '(message ((from . "them@example.com") (type . "chat"))
+                 (body nil "hello"))))
+    (should-not updated)))
+
+;;; Group 3: Sending receipts back
+
+(ert-deftest jabber-test-receipts-no-received-for-unauthorized-sender ()
+  "Receipt requests do not reveal presence to unauthorized senders."
+  (let ((sent-sexp nil))
+    (cl-letf (((symbol-function 'jabber-send-sexp-if-connected)
+               (lambda (_jc sexp) (setq sent-sexp sexp)))
+              ((symbol-function 'fsm-get-state-data)
+               (lambda (_jc) '(:roster nil))))
+      (jabber-receipts--maybe-send-receipt
+       'fake-jc
+       '(message ((from . "stranger@example.com")
+                  (id . "msg-stranger")
+                  (type . "chat"))
+                 (body nil "hello")
+                 (request ((xmlns . "urn:xmpp:receipts"))))
+       "stranger@example.com" nil))
+    (should-not sent-sexp)))
+
+(ert-deftest jabber-test-receipts-no-displayed-for-unauthorized-sender ()
+  "Displayed markers do not reveal presence to unauthorized senders."
+  (cl-letf (((symbol-function 'fsm-get-state-data)
+             (lambda (_jc) '(:roster nil)))
+            ((symbol-function 'jabber-chat-get-buffer)
+             (lambda (_from &optional _jc) (buffer-name))))
+    (with-temp-buffer
+      (setq-local jabber-receipts--pending-displayed-id nil)
+      (jabber-receipts--track-displayed
+       'fake-jc
+       `(message ((from . "stranger@example.com")
+                  (id . "msg-stranger")
+                  (type . "chat"))
+                 (body nil "hello")
+                 (markable ((xmlns . ,jabber-chat-markers-xmlns))))
+       "stranger@example.com" nil)
+      (should-not jabber-receipts--pending-displayed-id))))
+
+(ert-deftest jabber-test-receipts-does-not-flush-marker-after-authorization-loss ()
+  "A queued marker is not sent after its sender loses authorization."
+  (let ((sent-sexp nil))
+    (cl-letf (((symbol-function 'fsm-get-state-data)
+               (lambda (_jc) '(:roster nil)))
+              ((symbol-function 'derived-mode-p) (lambda (&rest _) t))
+              ((symbol-function 'get-buffer-window) (lambda (&rest _) t))
+              ((symbol-function 'jabber-send-sexp-if-connected)
+               (lambda (_jc sexp) (setq sent-sexp sexp))))
+      (with-temp-buffer
+        (setq-local jabber-chat-send-receipts t)
+        (setq-local jabber-receipts--pending-displayed-id "msg-stranger")
+        (setq-local jabber-chatting-with "stranger@example.com")
+        (setq-local jabber-buffer-connection 'fake-jc)
+        (jabber-receipts--on-window-change)
+        (should-not sent-sexp)))))
+
+(ert-deftest jabber-test-receipts-send-received-on-request ()
+  "Incoming message with <request/> triggers <received/> response."
+  (let ((sent-sexp nil)
+        (contact (jabber-jid-symbol "them@example.com" 'fake-jc)))
+    (unwind-protect
+        (progn
+          (put contact 'subscription "from")
+          (cl-letf (((symbol-function 'jabber-send-sexp-if-connected)
+                     (lambda (_jc sexp) (setq sent-sexp sexp)))
+                    ((symbol-function 'fsm-get-state-data)
+                     (lambda (_jc) `(:roster (,contact))))
+                    ((symbol-function 'jabber-db-update-receipt) #'ignore)
+                    ((symbol-function 'jabber-connection-bare-jid)
+                     (lambda (_j) "me@example.com"))
+                    ((symbol-function 'jabber-chat-get-buffer)
+                     (lambda (_from &optional _jc) "*test-chat*")))
+            (let ((jabber-chat-send-receipts t))
+              (jabber-receipts--handle-message
+               'fake-jc
+               '(message ((from . "them@example.com")
+                          (id . "msg-100")
+                          (type . "chat"))
+                         (body nil "hello")
+                         (request ((xmlns . "urn:xmpp:receipts")))))))
+          (should sent-sexp)
+          (should (eq 'message (car sent-sexp)))
+          (should (assq 'received (cddr sent-sexp))))
+      (put contact 'subscription nil))))
+
+(ert-deftest jabber-test-receipts-no-received-when-disabled ()
+  "No <received/> sent when jabber-chat-send-receipts is nil."
+  (let ((sent-sexp nil))
+    (cl-letf (((symbol-function 'jabber-send-sexp-if-connected)
+               (lambda (_jc sexp) (setq sent-sexp sexp)))
+              ((symbol-function 'jabber-db-update-receipt) #'ignore)
+              ((symbol-function 'jabber-connection-bare-jid)
+               (lambda (_j) "me@example.com"))
+              ((symbol-function 'jabber-chat-get-buffer)
+               (lambda (_from &optional _jc) "*test-chat*")))
+      (let ((jabber-chat-send-receipts nil))
+        (jabber-receipts--handle-message
+         'fake-jc
+         '(message ((from . "them@example.com") (id . "msg-100") (type . "chat"))
+                   (body nil "hello")
+                   (request ((xmlns . "urn:xmpp:receipts")))))))
+    (should-not sent-sexp)))
+
+(ert-deftest jabber-test-receipts-no-received-without-request ()
+  "No <received/> sent for messages without <request/> element."
+  (let ((sent-sexp nil))
+    (cl-letf (((symbol-function 'jabber-send-sexp-if-connected)
+               (lambda (_jc sexp) (setq sent-sexp sexp)))
+              ((symbol-function 'jabber-db-update-receipt) #'ignore)
+              ((symbol-function 'jabber-connection-bare-jid)
+               (lambda (_j) "me@example.com"))
+              ((symbol-function 'jabber-chat-get-buffer)
+               (lambda (_from &optional _jc) "*test-chat*")))
+      (let ((jabber-chat-send-receipts t))
+        (jabber-receipts--handle-message
+         'fake-jc
+         '(message ((from . "them@example.com") (id . "msg-100") (type . "chat"))
+                   (body nil "hello")))))
+    (should-not sent-sexp)))
+
+(ert-deftest jabber-test-receipts-no-received-for-markable-only ()
+  "No <received/> sent for messages with only <markable/> but no <request/>."
+  (let ((sent-sexp nil))
+    (cl-letf (((symbol-function 'jabber-send-sexp-if-connected)
+               (lambda (_jc sexp) (setq sent-sexp sexp)))
+              ((symbol-function 'jabber-db-update-receipt) #'ignore)
+              ((symbol-function 'jabber-connection-bare-jid)
+               (lambda (_j) "me@example.com"))
+              ((symbol-function 'jabber-chat-get-buffer)
+               (lambda (_from &optional _jc) "*test-chat*")))
+      (let ((jabber-chat-send-receipts t))
+        (jabber-receipts--handle-message
+         'fake-jc
+         `(message ((from . "them@example.com") (id . "msg-100") (type . "chat"))
+                   (body nil "hello")
+                   (markable ((xmlns . ,jabber-chat-markers-xmlns)))))))
+    (should-not sent-sexp)))
+
+(ert-deftest jabber-test-receipts-markable-sets-pending-id ()
+  "Incoming markable message sets pending displayed ID."
+  (cl-letf (((symbol-function 'jabber-db-update-receipt) #'ignore)
+            ((symbol-function 'jabber-send-sexp-if-connected) #'ignore)
+            ((symbol-function 'jabber-receipts--sender-authorized-p)
+             (lambda (_jc _from) t))
+            ((symbol-function 'jabber-connection-bare-jid)
+             (lambda (_j) "me@example.com"))
+            ((symbol-function 'jabber-chat-get-buffer)
+             (lambda (_from &optional _jc) (buffer-name))))
+    (with-temp-buffer
+      (setq-local jabber-receipts--pending-displayed-id nil)
+      (let ((jabber-chat-send-receipts t))
+        (jabber-receipts--handle-message
+         'fake-jc
+         `(message ((from . "them@example.com") (id . "msg-200") (type . "chat"))
+                   (body nil "hello")
+                   (markable ((xmlns . ,jabber-chat-markers-xmlns))))))
+      (should (equal "msg-200" jabber-receipts--pending-displayed-id)))))
+
+(ert-deftest jabber-test-receipts-closed-thread-does-not-display ()
+  "A closed dedicated thread cannot acknowledge an unseen reply."
+  (let ((parent (generate-new-buffer " *jabber-receipts-parent*"))
+        sent)
+    (unwind-protect
+        (cl-letf (((symbol-function 'jabber-receipts--sender-authorized-p)
+                   (lambda (&rest _) t))
+                  ((symbol-function 'jabber-receipts--find-buffer)
+                   (lambda (&rest _) parent))
+                  ((symbol-function 'jabber-message-thread-display-target)
+                   (lambda (&rest _) nil))
+                  ((symbol-function 'get-buffer-window)
+                   (lambda (buffer &rest _) (eq buffer parent)))
+                  ((symbol-function 'jabber-send-sexp-if-connected)
+                   (lambda (&rest _) (setq sent t))))
+          (jabber-receipts--track-displayed
+           'jc
+           `(message ((from . "alice@example.com")
+                      (id . "reply-1") (type . "chat"))
+                     (body () "reply")
+                     (thread () "thread-1")
+                     (markable ((xmlns . ,jabber-chat-markers-xmlns))))
+           "alice@example.com" nil)
+          (should-not sent)
+          (with-current-buffer parent
+            (should-not jabber-receipts--pending-displayed-id)))
+      (kill-buffer parent))))
+
+(ert-deftest jabber-test-receipts-open-thread-owns-pending-marker ()
+  "An open dedicated thread owns its reply's pending marker."
+  (let ((parent (generate-new-buffer " *jabber-receipts-parent*"))
+        (thread (generate-new-buffer " *jabber-receipts-thread*")))
+    (unwind-protect
+        (cl-letf (((symbol-function 'jabber-receipts--sender-authorized-p)
+                   (lambda (&rest _) t))
+                  ((symbol-function 'jabber-receipts--find-buffer)
+                   (lambda (&rest _) parent))
+                  ((symbol-function 'jabber-message-thread-display-target)
+                   (lambda (&rest _) thread))
+                  ((symbol-function 'get-buffer-window) #'ignore))
+          (jabber-receipts--track-displayed
+           'jc
+           `(message ((from . "alice@example.com")
+                      (id . "reply-1") (type . "chat"))
+                     (body () "reply")
+                     (thread () "thread-1")
+                     (markable ((xmlns . ,jabber-chat-markers-xmlns))))
+           "alice@example.com" nil)
+          (with-current-buffer parent
+            (should-not jabber-receipts--pending-displayed-id))
+          (with-current-buffer thread
+            (should (equal "reply-1"
+                           jabber-receipts--pending-displayed-id))))
+      (kill-buffer parent)
+      (kill-buffer thread))))
+
+(ert-deftest jabber-test-receipts-disabled-threads-use-parent ()
+  "Disabling dedicated buffers restores parent marker ownership."
+  (let ((parent (generate-new-buffer " *jabber-receipts-parent*")))
+    (unwind-protect
+        (let ((jabber-message-thread-use-buffers nil))
+          (cl-letf (((symbol-function 'jabber-receipts--sender-authorized-p)
+                     (lambda (&rest _) t))
+                    ((symbol-function 'jabber-receipts--find-buffer)
+                     (lambda (&rest _) parent))
+                    ((symbol-function 'jabber-message-thread-display-target)
+                     (lambda (&rest _) 'parent))
+                    ((symbol-function 'get-buffer-window) #'ignore))
+            (jabber-receipts--track-displayed
+             'jc
+             `(message ((from . "alice@example.com")
+                        (id . "reply-1") (type . "chat"))
+                       (body () "reply")
+                       (thread () "thread-1")
+                       (markable ((xmlns . ,jabber-chat-markers-xmlns))))
+             "alice@example.com" nil)
+            (with-current-buffer parent
+              (should (equal "reply-1"
+                             jabber-receipts--pending-displayed-id)))))
+      (kill-buffer parent))))
+
+(ert-deftest jabber-test-receipts-muc-private-thread-uses-parent ()
+  "MUC-private thread metadata keeps parent marker ownership."
+  (let ((parent (generate-new-buffer " *jabber-receipts-private*")))
+    (unwind-protect
+        (cl-letf (((symbol-function 'jabber-receipts--sender-authorized-p)
+                   (lambda (&rest _) t))
+                  ((symbol-function 'jabber-receipts--find-buffer)
+                   (lambda (&rest _) parent))
+                  ((symbol-function 'jabber-muc-joined-p)
+                   (lambda (&rest _) t))
+                  ((symbol-function 'jabber-message-thread-display-target)
+                   (lambda (&rest _)
+                     (ert-fail "Routed a MUC-private marker to a thread")))
+                  ((symbol-function 'get-buffer-window) #'ignore))
+          (jabber-receipts--track-displayed
+           'jc
+           `(message ((from . "room@example.com/Alice")
+                      (id . "reply-1") (type . "chat"))
+                     (body () "reply")
+                     (thread () "thread-1")
+                     (markable ((xmlns . ,jabber-chat-markers-xmlns))))
+           "room@example.com/Alice" nil)
+          (with-current-buffer parent
+            (should (equal "reply-1"
+                           jabber-receipts--pending-displayed-id))))
+      (kill-buffer parent))))
+
+(ert-deftest jabber-test-receipts-displayed-does-not-set-pending-id ()
+  "Incoming displayed marker does not queue another displayed marker."
+  (cl-letf (((symbol-function 'jabber-db-update-receipt) #'ignore)
+            ((symbol-function 'jabber-connection-bare-jid)
+             (lambda (_j) "me@example.com"))
+            ((symbol-function 'jabber-chat-get-buffer)
+             (lambda (_from &optional _jc) (buffer-name))))
+    (with-temp-buffer
+      (setq-local jabber-receipts--pending-displayed-id nil)
+      (let ((jabber-chat-send-receipts t))
+        (jabber-receipts--handle-message
+         'fake-jc
+         `(message ((from . "them@example.com") (id . "marker-1") (type . "chat"))
+                   (body nil "fallback")
+                   (displayed ((xmlns . ,jabber-chat-markers-xmlns)
+                               (id . "msg-200"))))))
+      (should-not jabber-receipts--pending-displayed-id))))
+
+;;; Group 4: Header-line update
+
+(ert-deftest jabber-test-receipts-header-line-delivered ()
+  "Header-line shows delivered with correct face."
+  (with-temp-buffer
+    (setq-local jabber-chat-receipt-message "")
+    (jabber-receipts--update-header-line "delivered_at" 1700000000)
+    (should (string-match-p "delivered" jabber-chat-receipt-message))
+    (should (eq 'jabber-chat-delivered
+                (get-text-property 0 'face jabber-chat-receipt-message)))))
+
+(ert-deftest jabber-test-receipts-header-line-seen ()
+  "Header-line shows seen with correct face."
+  (with-temp-buffer
+    (setq-local jabber-chat-receipt-message "")
+    (jabber-receipts--update-header-line "displayed_at" 1700000000)
+    (should (string-match-p "seen" jabber-chat-receipt-message))
+    (should (eq 'jabber-chat-seen
+                (get-text-property 0 'face jabber-chat-receipt-message)))))
+
+(ert-deftest jabber-test-receipts-header-line-no-downgrade ()
+  "Header-line does not downgrade from seen to delivered."
+  (with-temp-buffer
+    (setq-local jabber-chat-receipt-message "")
+    (jabber-receipts--update-header-line "displayed_at" 1700000000)
+    (should (string-match-p "seen" jabber-chat-receipt-message))
+    ;; Now try to downgrade to delivered
+    (jabber-receipts--update-header-line "delivered_at" 1700000001)
+    (should (string-match-p "seen" jabber-chat-receipt-message))
+    (should-not (string-match-p "delivered" jabber-chat-receipt-message))))
+
+(ert-deftest jabber-test-receipts-header-line-follows-latest-message ()
+  "An older displayed marker does not mark a later message as seen."
+  (with-temp-buffer
+    (let* ((jabber-chat-ewoc (ewoc-create #'ignore))
+           (jabber-chat--msg-nodes (make-hash-table :test #'equal))
+           (jabber-chat-receipt-message "")
+           (older (list :id "older" :status :delivered
+                        :timestamp (encode-time 0 0 10 1 1 2026)))
+           (latest (list :id "latest" :status :sent
+                         :timestamp (encode-time 0 1 10 1 1 2026)))
+           (older-node (jabber-chat-ewoc-enter (list :local older))))
+      (jabber-chat-ewoc-enter (list :local latest))
+      (jabber-receipts--update-buffer-status
+       (current-buffer) "latest" "delivered_at" 1700000000 :delivered)
+      (should (string-match-p "delivered" jabber-chat-receipt-message))
+      (jabber-receipts--update-buffer-status
+       (current-buffer) "older" "displayed_at" 1700000001 :displayed)
+      (should (eq :displayed (plist-get (cadr (ewoc-data older-node)) :status)))
+      (should (string-match-p "delivered" jabber-chat-receipt-message))
+      (should-not (string-match-p "seen" jabber-chat-receipt-message)))))
+
+(ert-deftest jabber-test-receipts-local-message-clears-stale-header ()
+  "A new outgoing message clears the previous message's receipt status."
+  (with-temp-buffer
+    (setq-local jabber-chat-receipt-message " seen 10:00")
+    (setq-local jabber-chat-ewoc (ewoc-create #'ignore))
+    (setq-local jabber-chat--msg-nodes (make-hash-table :test #'equal))
+    (let ((jabber-chat-printers (list (lambda (&rest _) t)))
+          (jabber-chat-local-message-functions
+           '(jabber-receipts--local-message-inserted)))
+      (cl-letf (((symbol-function 'jabber-chat--local-message-buffer)
+                 (lambda (&rest _) (current-buffer))))
+        (jabber-chat--display-local-message
+         'fake-jc
+         (list :id "new-id" :body "new" :status :sent
+               :timestamp (current-time)))))
+    (should (equal "" jabber-chat-receipt-message))))
+
+(ert-deftest jabber-test-receipts-thread-send-clears-only-thread-header ()
+  "A thread reply clears stale status only in its owning thread buffer."
+  (let ((parent (generate-new-buffer " *jabber-receipts-parent*"))
+        (thread (generate-new-buffer " *jabber-receipts-thread*")))
+    (unwind-protect
+        (progn
+          (dolist (buffer (list parent thread))
+            (with-current-buffer buffer
+              (setq-local jabber-chat-ewoc (ewoc-create #'ignore))
+              (setq-local jabber-chat--msg-nodes
+                          (make-hash-table :test #'equal))))
+          (with-current-buffer parent
+            (setq-local jabber-chat-receipt-message " seen parent")
+            (let ((jabber-chat-printers (list (lambda (&rest _) t)))
+                  (jabber-chat-local-message-functions
+                   '(jabber-receipts--local-message-inserted)))
+              (cl-letf (((symbol-function 'jabber-chat--local-message-buffer)
+                         (lambda (&rest _) thread)))
+                (with-current-buffer thread
+                  (setq-local jabber-chat-receipt-message " seen thread"))
+                (jabber-chat--display-local-message
+                 'fake-jc
+                 (list :id "reply-id" :body "reply" :status :sent
+                       :timestamp (current-time))))))
+          (should (equal " seen parent"
+                         (buffer-local-value
+                          'jabber-chat-receipt-message parent)))
+          (should (equal ""
+                         (buffer-local-value
+                          'jabber-chat-receipt-message thread))))
+      (kill-buffer parent)
+      (kill-buffer thread))))
+
+;;; Group 5: EWOC cascade
+
+(ert-deftest jabber-test-receipts-ewoc-cascade-promotes-delivered ()
+  "Cascade promotes all prior :delivered nodes to :displayed."
+  (with-temp-buffer
+    (let* ((jabber-chat-ewoc (ewoc-create #'ignore))
+           (m1 (list :local (list :id "m1" :status :delivered :timestamp (encode-time 0 0 10 1 1 2026))))
+           (m2 (list :local (list :id "m2" :status :delivered :timestamp (encode-time 0 1 10 1 1 2026))))
+           (m3 (list :local (list :id "m3" :status :displayed :timestamp (encode-time 0 2 10 1 1 2026))))
+           (_n1 (ewoc-enter-last jabber-chat-ewoc m1))
+           (_n2 (ewoc-enter-last jabber-chat-ewoc m2))
+           (n3 (ewoc-enter-last jabber-chat-ewoc m3)))
+      (let ((inhibit-read-only t))
+        (jabber-receipts--cascade-displayed n3))
+      (should (eq :displayed (plist-get (cadr m1) :status)))
+      (should (eq :displayed (plist-get (cadr m2) :status))))))
+
+(ert-deftest jabber-test-receipts-ewoc-cascade-stops-at-displayed ()
+  "Cascade stops walking when it hits an already-displayed node."
+  (with-temp-buffer
+    (let* ((jabber-chat-ewoc (ewoc-create #'ignore))
+           (m1 (list :local (list :id "m1" :status :delivered :timestamp (encode-time 0 0 10 1 1 2026))))
+           (m2 (list :local (list :id "m2" :status :displayed :timestamp (encode-time 0 1 10 1 1 2026))))
+           (m3 (list :local (list :id "m3" :status :delivered :timestamp (encode-time 0 2 10 1 1 2026))))
+           (m4 (list :local (list :id "m4" :status :displayed :timestamp (encode-time 0 3 10 1 1 2026))))
+           (_n1 (ewoc-enter-last jabber-chat-ewoc m1))
+           (_n2 (ewoc-enter-last jabber-chat-ewoc m2))
+           (_n3 (ewoc-enter-last jabber-chat-ewoc m3))
+           (n4 (ewoc-enter-last jabber-chat-ewoc m4)))
+      (let ((inhibit-read-only t))
+        (jabber-receipts--cascade-displayed n4))
+      ;; m3 promoted
+      (should (eq :displayed (plist-get (cadr m3) :status)))
+      ;; m2 was already displayed, stops there
+      (should (eq :displayed (plist-get (cadr m2) :status)))
+      ;; m1 NOT promoted (before the already-displayed m2)
+      (should (eq :delivered (plist-get (cadr m1) :status))))))
+
+(ert-deftest jabber-test-receipts-ewoc-cascade-skips-foreign ()
+  "Cascade skips :foreign nodes and only promotes :local ones."
+  (with-temp-buffer
+    (let* ((jabber-chat-ewoc (ewoc-create #'ignore))
+           (m1 (list :local (list :id "m1" :status :delivered :timestamp (encode-time 0 0 10 1 1 2026))))
+           (m2 (list :foreign (list :id "m2" :timestamp (encode-time 0 1 10 1 1 2026))))
+           (m3 (list :local (list :id "m3" :status :displayed :timestamp (encode-time 0 2 10 1 1 2026))))
+           (_n1 (ewoc-enter-last jabber-chat-ewoc m1))
+           (_n2 (ewoc-enter-last jabber-chat-ewoc m2))
+           (n3 (ewoc-enter-last jabber-chat-ewoc m3)))
+      (let ((inhibit-read-only t))
+        (jabber-receipts--cascade-displayed n3))
+      (should (eq :displayed (plist-get (cadr m1) :status)))
+      ;; foreign node untouched
+      (should-not (plist-get (cadr m2) :status)))))
+
+(ert-deftest jabber-test-receipts-ewoc-cascade-skips-sent ()
+  "Cascade does not promote :sent nodes (not yet delivered)."
+  (with-temp-buffer
+    (let* ((jabber-chat-ewoc (ewoc-create #'ignore))
+           (m1 (list :local (list :id "m1" :status :sent :timestamp (encode-time 0 0 10 1 1 2026))))
+           (m2 (list :local (list :id "m2" :status :delivered :timestamp (encode-time 0 1 10 1 1 2026))))
+           (m3 (list :local (list :id "m3" :status :displayed :timestamp (encode-time 0 2 10 1 1 2026))))
+           (_n1 (ewoc-enter-last jabber-chat-ewoc m1))
+           (_n2 (ewoc-enter-last jabber-chat-ewoc m2))
+           (n3 (ewoc-enter-last jabber-chat-ewoc m3)))
+      (let ((inhibit-read-only t))
+        (jabber-receipts--cascade-displayed n3))
+      (should (eq :displayed (plist-get (cadr m2) :status)))
+      ;; :sent stays :sent
+      (should (eq :sent (plist-get (cadr m1) :status))))))
+
+;;; Group 6: DB cascade
+
+(ert-deftest jabber-test-receipts-db-cascade-marks-all-delivered ()
+  "DB cascade marks all delivered outgoing messages as displayed."
+  (let* ((dir (make-temp-file "jabber-receipts-test" t))
+         (jabber-db-path (expand-file-name "test.sqlite" dir))
+         (jabber-db--connection nil)
+         (jabber-backlog-days 3.0)
+         (jabber-backlog-number 10))
+    (unwind-protect
+        (progn
+          (jabber-db-ensure-open)
+          ;; Store 3 outgoing messages
+          (jabber-db-store-message "me@example.com" "them@example.com"
+                                   "out" "chat" "msg1" 1000
+                                   nil "id-1" )
+          (jabber-db-store-message "me@example.com" "them@example.com"
+                                   "out" "chat" "msg2" 1001
+                                   nil "id-2" )
+          (jabber-db-store-message "me@example.com" "them@example.com"
+                                   "out" "chat" "msg3" 1002
+                                   nil "id-3" )
+          ;; Mark all as delivered
+          (jabber-db-update-receipt "me@example.com" "them@example.com"
+                                    "id-1" "delivered_at" 1010)
+          (jabber-db-update-receipt "me@example.com" "them@example.com"
+                                    "id-2" "delivered_at" 1011)
+          (jabber-db-update-receipt "me@example.com" "them@example.com"
+                                    "id-3" "delivered_at" 1012)
+          ;; Cascade displayed from msg3
+          (jabber-db-cascade-displayed "me@example.com" "them@example.com"
+                                       2000 1002)
+          ;; All 3 should have displayed_at
+          (let ((rows (sqlite-select jabber-db--connection
+                                     "SELECT stanza_id, displayed_at FROM message ORDER BY timestamp")))
+            (should (= 3 (length rows)))
+            (should (= 2000 (cadr (nth 0 rows))))
+            (should (= 2000 (cadr (nth 1 rows))))
+            (should (= 2000 (cadr (nth 2 rows))))))
+      (jabber-db-close)
+      (when (file-directory-p dir)
+        (delete-directory dir t)))))
+
+(ert-deftest jabber-test-receipts-db-cascade-skips-undelivered ()
+  "DB cascade skips messages without delivered_at."
+  (let* ((dir (make-temp-file "jabber-receipts-test" t))
+         (jabber-db-path (expand-file-name "test.sqlite" dir))
+         (jabber-db--connection nil)
+         (jabber-backlog-days 3.0)
+         (jabber-backlog-number 10))
+    (unwind-protect
+        (progn
+          (jabber-db-ensure-open)
+          (jabber-db-store-message "me@example.com" "them@example.com"
+                                   "out" "chat" "msg1" 1000
+                                   nil "id-1" )
+          (jabber-db-store-message "me@example.com" "them@example.com"
+                                   "out" "chat" "msg2" 1001
+                                   nil "id-2" )
+          (jabber-db-store-message "me@example.com" "them@example.com"
+                                   "out" "chat" "msg3" 1002
+                                   nil "id-3" )
+          ;; Only mark msg1 and msg3 as delivered (msg2 undelivered)
+          (jabber-db-update-receipt "me@example.com" "them@example.com"
+                                    "id-1" "delivered_at" 1010)
+          (jabber-db-update-receipt "me@example.com" "them@example.com"
+                                    "id-3" "delivered_at" 1012)
+          ;; Cascade displayed from msg3
+          (jabber-db-cascade-displayed "me@example.com" "them@example.com"
+                                       2000 1002)
+          (let ((rows (sqlite-select jabber-db--connection
+                                     "SELECT stanza_id, displayed_at FROM message ORDER BY timestamp")))
+            ;; msg1 displayed (delivered + before ref-ts)
+            (should (= 2000 (cadr (nth 0 rows))))
+            ;; msg2 NOT displayed (not delivered)
+            (should (null (cadr (nth 1 rows))))
+            ;; msg3 displayed (delivered + at ref-ts)
+            (should (= 2000 (cadr (nth 2 rows))))))
+      (jabber-db-close)
+      (when (file-directory-p dir)
+        (delete-directory dir t)))))
+
+;;; Group 7: MUC guards and edge cases
+
+(ert-deftest jabber-test-receipts-groupchat-skips-receipt-processing ()
+  "Groupchat messages do not trigger receipt updates."
+  (let ((updated nil))
+    (cl-letf (((symbol-function 'jabber-db-update-receipt)
+               (lambda (&rest _args) (setq updated t)))
+              ((symbol-function 'jabber-connection-bare-jid)
+               (lambda (_j) "me@example.com")))
+      (jabber-receipts--handle-message
+       'fake-jc
+       '(message ((from . "room@conference.example.com/nick")
+                  (type . "groupchat"))
+                 (received ((xmlns . "urn:xmpp:receipts")
+                            (id . "msg-001"))))))
+    (should-not updated)))
+
+(ert-deftest jabber-test-receipts-nil-type-does-not-crash ()
+  "Messages without type attribute do not crash."
+  (let ((updated-id nil))
+    (cl-letf (((symbol-function 'jabber-db-update-receipt)
+               (lambda (_acct _peer id _col _ts)
+                 (setq updated-id id)))
+              ((symbol-function 'jabber-connection-bare-jid)
+               (lambda (_j) "me@example.com"))
+              ((symbol-function 'jabber-chat-get-buffer)
+               (lambda (_from &optional _jc) "*test-chat*")))
+      (jabber-receipts--handle-message
+       'fake-jc
+       '(message ((from . "them@example.com"))
+                 (received ((xmlns . "urn:xmpp:receipts")
+                            (id . "msg-nil-type"))))))
+    (should (equal updated-id "msg-nil-type"))))
+
+(ert-deftest jabber-test-receipts-xep0333-received-marker ()
+  "XEP-0333 <received/> marker updates delivered_at."
+  (let ((updated-id nil)
+        (updated-col nil))
+    (cl-letf (((symbol-function 'jabber-db-update-receipt)
+               (lambda (_acct _peer id col _ts)
+                 (setq updated-id id updated-col col)))
+              ((symbol-function 'jabber-connection-bare-jid)
+               (lambda (_j) "me@example.com"))
+              ((symbol-function 'jabber-chat-get-buffer)
+               (lambda (_from &optional _jc) "*test-chat*")))
+      (jabber-receipts--handle-message
+       'fake-jc
+       '(message ((from . "them@example.com") (type . "chat"))
+                 (received ((xmlns . "urn:xmpp:chat-markers:0")
+                            (id . "msg-333"))))))
+    (should (equal updated-id "msg-333"))
+    (should (equal updated-col "delivered_at"))))
+
+(ert-deftest jabber-test-receipts-send-hook-muc-no-elements ()
+  "Send hook in MUC groupchat does not request receipts or markers."
+  (with-temp-buffer
+    (setq-local jabber-group "room@conference.example.com")
+    (let ((result (jabber-receipts--send-hook "hello" "msg-001")))
+      (should-not result))))
+
+;;; Group 8: XEP-0280 Message Carbons
+
+(defun jabber-receipts-tests--received-carbon (inner)
+  "Wrap INNER message in a valid XEP-0280 <received> carbon envelope."
+  `(message ((from . "me@example.com")
+             (to . "me@example.com/emacs")
+             (type . "chat"))
+            (received ((xmlns . "urn:xmpp:carbons:2"))
+                      (forwarded ((xmlns . "urn:xmpp:forward:0"))
+                                 ,inner))))
+
+(defun jabber-receipts-tests--sent-carbon (inner)
+  "Wrap INNER message in a valid XEP-0280 <sent> carbon envelope."
+  `(message ((from . "me@example.com")
+             (to . "me@example.com/emacs")
+             (type . "chat"))
+            (sent ((xmlns . "urn:xmpp:carbons:2"))
+                  (forwarded ((xmlns . "urn:xmpp:forward:0"))
+                             ,inner))))
+
+(ert-deftest jabber-test-receipts-carbon-received-queues-displayed ()
+  "Markable message received as a <received> carbon queues pending-displayed-id."
+  (cl-letf (((symbol-function 'jabber-db-update-receipt) #'ignore)
+            ((symbol-function 'jabber-send-sexp-if-connected) #'ignore)
+            ((symbol-function 'jabber-receipts--sender-authorized-p)
+             (lambda (_jc _from) t))
+            ((symbol-function 'jabber-connection-bare-jid)
+             (lambda (_j) "me@example.com"))
+            ((symbol-function 'jabber-chat-get-buffer)
+             (lambda (_from &optional _jc) (buffer-name))))
+    (with-temp-buffer
+      (setq-local jabber-receipts--pending-displayed-id nil)
+      (let ((jabber-chat-send-receipts t)
+            (inner `(message ((from . "them@example.com")
+                              (to . "me@example.com")
+                              (id . "inner-msg-42")
+                              (type . "chat"))
+                             (body nil "hi from phone")
+                             (markable ((xmlns . ,jabber-chat-markers-xmlns))))))
+        (jabber-receipts--handle-message
+         'fake-jc
+         (jabber-receipts-tests--received-carbon inner)))
+      (should (equal "inner-msg-42" jabber-receipts--pending-displayed-id)))))
+
+(ert-deftest jabber-test-receipts-carbon-received-suppresses-xep0184 ()
+  "Carbon-received messages with <request/> do NOT send <received/> reply."
+  (let ((sent-sexp nil))
+    (cl-letf (((symbol-function 'jabber-send-sexp-if-connected)
+               (lambda (_jc sexp) (setq sent-sexp sexp)))
+              ((symbol-function 'jabber-db-update-receipt) #'ignore)
+              ((symbol-function 'jabber-connection-bare-jid)
+               (lambda (_j) "me@example.com"))
+              ((symbol-function 'jabber-chat-get-buffer)
+               (lambda (_from &optional _jc) "*test-chat*")))
+      (let ((jabber-chat-send-receipts t)
+            (inner `(message ((from . "them@example.com")
+                              (to . "me@example.com")
+                              (id . "inner-msg-50")
+                              (type . "chat"))
+                             (body nil "hello")
+                             (request ((xmlns . ,jabber-receipts-xmlns))))))
+        (jabber-receipts--handle-message
+         'fake-jc
+         (jabber-receipts-tests--received-carbon inner))))
+    (should-not sent-sexp)))
+
+(ert-deftest jabber-test-receipts-carbon-sent-does-not-queue ()
+  "Our own outgoing message received as a <sent> carbon does not queue a marker."
+  (cl-letf (((symbol-function 'jabber-db-update-receipt) #'ignore)
+            ((symbol-function 'jabber-send-sexp-if-connected) #'ignore)
+            ((symbol-function 'jabber-connection-bare-jid)
+             (lambda (_j) "me@example.com"))
+            ((symbol-function 'jabber-chat-get-buffer)
+             (lambda (_from &optional _jc) (buffer-name))))
+    (with-temp-buffer
+      (setq-local jabber-receipts--pending-displayed-id nil)
+      (let ((jabber-chat-send-receipts t)
+            (inner `(message ((from . "me@example.com")
+                              (to . "them@example.com")
+                              (id . "our-msg-99")
+                              (type . "chat"))
+                             (body nil "hi from phone")
+                             (markable ((xmlns . ,jabber-chat-markers-xmlns))))))
+        (jabber-receipts--handle-message
+         'fake-jc
+         (jabber-receipts-tests--sent-carbon inner)))
+      (should-not jabber-receipts--pending-displayed-id))))
+
+(ert-deftest jabber-test-receipts-carbon-forged-ignored ()
+  "Carbon whose outer `from' does not match our bare JID is dropped (CVE-2017-5589)."
+  (let ((sent-sexp nil)
+        (updated nil))
+    (cl-letf (((symbol-function 'jabber-send-sexp-if-connected)
+               (lambda (_jc sexp) (setq sent-sexp sexp)))
+              ((symbol-function 'jabber-db-update-receipt)
+               (lambda (&rest _args) (setq updated t)))
+              ((symbol-function 'jabber-connection-bare-jid)
+               (lambda (_j) "me@example.com"))
+              ((symbol-function 'jabber-chat-get-buffer)
+               (lambda (_from &optional _jc) (buffer-name))))
+      (with-temp-buffer
+        (setq-local jabber-receipts--pending-displayed-id nil)
+        (let ((jabber-chat-send-receipts t)
+              (inner `(message ((from . "them@example.com")
+                                (to . "me@example.com")
+                                (id . "forged-id")
+                                (type . "chat"))
+                               (body nil "evil")
+                               (markable ((xmlns . ,jabber-chat-markers-xmlns))))))
+          ;; Forged outer from: attacker@evil.com, not our bare JID.
+          (jabber-receipts--handle-message
+           'fake-jc
+           `(message ((from . "attacker@evil.com")
+                      (to . "me@example.com/emacs")
+                      (type . "chat"))
+                     (received ((xmlns . "urn:xmpp:carbons:2"))
+                               (forwarded ((xmlns . "urn:xmpp:forward:0"))
+                                          ,inner)))))
+        (should-not jabber-receipts--pending-displayed-id)))
+    (should-not sent-sexp)
+    (should-not updated)))
+
+(ert-deftest jabber-test-receipts-carbon-received-displayed-marker ()
+  "Peer's <displayed/> delivered via a <received> carbon updates status."
+  (let ((updated-id nil)
+        (updated-col nil))
+    (cl-letf (((symbol-function 'jabber-db-update-receipt)
+               (lambda (_acct _peer id col _ts)
+                 (setq updated-id id updated-col col)))
+              ((symbol-function 'jabber-connection-bare-jid)
+               (lambda (_j) "me@example.com"))
+              ((symbol-function 'jabber-chat-get-buffer)
+               (lambda (_from &optional _jc) "*test-chat*")))
+      (let ((inner `(message ((from . "them@example.com")
+                              (to . "me@example.com")
+                              (type . "chat"))
+                             (displayed ((xmlns . ,jabber-chat-markers-xmlns)
+                                         (id . "our-msg-33"))))))
+        (jabber-receipts--handle-message
+         'fake-jc
+         (jabber-receipts-tests--received-carbon inner))))
+    (should (equal updated-id "our-msg-33"))
+    (should (equal updated-col "displayed_at"))))
+
+(ert-deftest jabber-test-receipts-carbon-sent-skips-incoming-marker ()
+  "Our own outgoing <displayed/> seen as <sent> carbon does NOT update status.
+Cross-device read-sync is a deferred feature; for now we just don't corrupt
+peer state by treating our own emitted markers as incoming ones."
+  (let ((updated nil))
+    (cl-letf (((symbol-function 'jabber-db-update-receipt)
+               (lambda (&rest _args) (setq updated t)))
+              ((symbol-function 'jabber-connection-bare-jid)
+               (lambda (_j) "me@example.com"))
+              ((symbol-function 'jabber-chat-get-buffer)
+               (lambda (_from &optional _jc) "*test-chat*")))
+      (let ((inner `(message ((from . "me@example.com")
+                              (to . "them@example.com")
+                              (type . "chat"))
+                             (displayed ((xmlns . ,jabber-chat-markers-xmlns)
+                                         (id . "peer-msg-77"))))))
+        (jabber-receipts--handle-message
+         'fake-jc
+         (jabber-receipts-tests--sent-carbon inner))))
+    (should-not updated)))
+
+;;; Group 9: Status anti-downgrade
+
+(ert-deftest jabber-test-receipts-status-upgrade-sent-to-delivered ()
+  "Status upgrade from :sent to :delivered is allowed."
+  (should (jabber-receipts--status-upgrades-p :sent :delivered)))
+
+(ert-deftest jabber-test-receipts-status-upgrade-delivered-to-displayed ()
+  "Status upgrade from :delivered to :displayed is allowed."
+  (should (jabber-receipts--status-upgrades-p :delivered :displayed)))
+
+(ert-deftest jabber-test-receipts-status-no-downgrade-displayed-to-delivered ()
+  "Status downgrade from :displayed to :delivered is rejected."
+  (should-not (jabber-receipts--status-upgrades-p :displayed :delivered)))
+
+(ert-deftest jabber-test-receipts-status-no-downgrade-same ()
+  "Same status is not an upgrade."
+  (should-not (jabber-receipts--status-upgrades-p :delivered :delivered)))
+
+(ert-deftest jabber-test-receipts-update-status-no-downgrade-ewoc ()
+  "A :delivered update does not overwrite :displayed in the EWOC."
+  (with-temp-buffer
+    (let* ((jabber-chat-ewoc (ewoc-create #'ignore))
+           (msg (list :id "msg-99" :status :displayed
+                      :timestamp (encode-time 0 0 10 1 1 2026)))
+           (node (ewoc-enter-last jabber-chat-ewoc (list :local msg))))
+      (cl-letf (((symbol-function 'jabber-db-update-receipt) #'ignore)
+                ((symbol-function 'jabber-connection-bare-jid)
+                 (lambda (_j) "me@example.com"))
+                ((symbol-function 'jabber-chat-get-buffer)
+                 (lambda (_from &optional _jc) (buffer-name)))
+                ((symbol-function 'jabber-chat-ewoc-find-by-id)
+                 (lambda (_id) node))
+                ((symbol-function 'jabber-chat-ewoc-invalidate) #'ignore))
+        (jabber-receipts--update-status
+         'fake-jc "them@example.com" "msg-99" "delivered_at"))
+      (should (eq :displayed (plist-get msg :status))))))
+
+(ert-deftest jabber-test-receipts-old-displayed-does-not-update-db ()
+  "An older displayed marker is ignored before any DB write."
+  (with-temp-buffer
+    (let* ((jabber-chat-ewoc (ewoc-create #'ignore))
+           (jabber-receipts--latest-displayed-ts
+            (floor (float-time (encode-time 0 5 10 1 1 2026))))
+           (msg (list :id "msg-old" :status :delivered
+                      :timestamp (encode-time 0 0 10 1 1 2026)))
+           (node (ewoc-enter-last jabber-chat-ewoc (list :local msg)))
+           db-updated)
+      (cl-letf (((symbol-function 'jabber-db-update-receipt)
+                 (lambda (&rest _) (setq db-updated t)))
+                ((symbol-function 'jabber-connection-bare-jid)
+                 (lambda (_j) "me@example.com"))
+                ((symbol-function 'jabber-chat-get-buffer)
+                 (lambda (_from &optional _jc) (buffer-name)))
+                ((symbol-function 'jabber-chat-ewoc-find-by-id)
+                 (lambda (_id) node))
+                ((symbol-function 'jabber-chat-ewoc-invalidate) #'ignore))
+        (jabber-receipts--update-status
+         'fake-jc "them@example.com" "msg-old" "displayed_at"))
+      (should-not db-updated)
+      (should (eq :delivered (plist-get msg :status))))))
+
+(ert-deftest jabber-test-receipts-missing-displayed-id-does-not-update-db ()
+  "A displayed marker for an unknown message is ignored when buffer is present."
+  (with-temp-buffer
+    (let (db-updated)
+      (cl-letf (((symbol-function 'jabber-db-update-receipt)
+                 (lambda (&rest _) (setq db-updated t)))
+                ((symbol-function 'jabber-connection-bare-jid)
+                 (lambda (_j) "me@example.com"))
+                ((symbol-function 'jabber-chat-get-buffer)
+                 (lambda (_from &optional _jc) (buffer-name)))
+                ((symbol-function 'jabber-chat-ewoc-find-by-id)
+                 (lambda (_id) nil)))
+        (jabber-receipts--update-status
+         'fake-jc "them@example.com" "missing" "displayed_at"))
+      (should-not db-updated))))
+
+(provide 'jabber-test-receipts)
+
+;;; jabber-test-receipts.el ends here

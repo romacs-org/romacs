@@ -1,0 +1,243 @@
+;;; hermes-notifications-tests.el --- desktop notification tests  -*- lexical-binding: t; -*-
+
+;;; Commentary:
+
+;; Shared desktop notification policy, focus suppression, and click actions.
+
+;;; Code:
+
+(require 'ert)
+(require 'cl-lib)
+(require 'hermes-notifications)
+
+(defvar notifications-on-action-map)
+(defvar notifications-on-action-object)
+
+(ert-deftest hermes-notifications-close-respects-registration-ownership ()
+  "Closing Hermes actions never retires an existing or replacement registration."
+  (dolist (case '(foreign replaced shared))
+    (let* ((foreign (list 'foreign))
+           (created (list 'owned))
+           (notifications-on-action-object (and (eq case 'foreign) foreign))
+           (notifications-on-action-map nil)
+           arguments removed)
+      (cl-letf (((symbol-function 'require) (lambda (&rest _) t))
+                ((symbol-function 'notifications-notify)
+                 (lambda (&rest args)
+                   (setq arguments args)
+                   (unless notifications-on-action-object
+                     (setq notifications-on-action-object created))
+                   (push (list '(bus service 9) (plist-get args :on-action))
+                         notifications-on-action-map)
+                   9))
+                ((symbol-function 'dbus-unregister-object)
+                 (lambda (object) (push object removed))))
+        (hermes-notifications-notify 'chat-reply "Title" "Body" :open #'ignore)
+        (pcase case
+          ('replaced
+           ;; Even a structurally equal registration is a different owner.
+           (setq notifications-on-action-object (copy-sequence created)))
+          ('shared (push (list '(bus service 10) #'ignore)
+                         notifications-on-action-map)))
+        (let ((object notifications-on-action-object))
+          (funcall (plist-get arguments :on-close) 9 'expired)
+          (should-not removed)
+          (should (eq object notifications-on-action-object))
+          (should (= (length notifications-on-action-map)
+                     (if (eq case 'shared) 1 0))))))))
+
+(ert-deftest hermes-notifications-load-keeps-notifications-optional ()
+  "Loading the Hermes boundary does not load `notifications'."
+  (should-not (featurep 'notifications)))
+
+(ert-deftest hermes-notifications-default-events-are-high-signal ()
+  "Default notifications cover unattended work without routine Kanban success."
+  (should (equal hermes-notifications-events
+                 '(chat-reply chat-error prompt background
+                   kanban-attention cron-failure)))
+  (should (hermes-notifications-enabled-p 'chat-reply))
+  (should-not (hermes-notifications-enabled-p 'kanban-done)))
+
+(ert-deftest hermes-notifications-disabled-event-does-nothing ()
+  "An event absent from the configured set emits no desktop notification."
+  (let ((hermes-notifications-events nil)
+        called)
+    (cl-letf (((symbol-function 'notifications-notify)
+               (lambda (&rest _) (setq called t))))
+      (should-not (hermes-notifications-notify 'chat-reply "Title" "Body"))
+      (should-not called))))
+
+(ert-deftest hermes-notifications-suppress-selected-buffer-on-focused-frame ()
+  "A target in the selected window of the focused frame is not interrupted."
+  (with-temp-buffer
+    (save-window-excursion
+      (set-window-buffer (selected-window) (current-buffer))
+      (let (called)
+        (cl-letf (((symbol-function 'frame-focus-state) (lambda (&rest _) t))
+                  ((symbol-function 'notifications-notify)
+                   (lambda (&rest _) (setq called t))))
+          (should-not
+           (hermes-notifications-notify
+            'chat-reply "Title" "Body" :buffer (current-buffer)))
+          (should-not called))))))
+
+(ert-deftest hermes-notifications-notify-buffer-in-unselected-window ()
+  "A target merely visible beside the selected window is not attended.
+Side windows, and EXWM sessions whose focused frame selects an X window
+buffer, still leave the chat unattended."
+  (with-temp-buffer
+    (save-window-excursion
+      (delete-other-windows)
+      (set-window-buffer (split-window) (current-buffer))
+      (should (get-buffer-window (current-buffer)))
+      (should-not (eq (window-buffer (selected-window)) (current-buffer)))
+      (let (called)
+        (cl-letf (((symbol-function 'frame-focus-state) (lambda (&rest _) t))
+                  ((symbol-function 'require) (lambda (&rest _) t))
+                  ((symbol-function 'notifications-notify)
+                   (lambda (&rest _) (setq called t) 5)))
+          (should (= 5 (hermes-notifications-notify
+                        'prompt "Title" "Body" :buffer (current-buffer))))
+          (should called))))))
+
+(ert-deftest hermes-notifications-suppress-minibuffer-for-selected-buffer ()
+  "Reading input from the target's window keeps the target attended."
+  (with-temp-buffer
+    (save-window-excursion
+      (delete-other-windows)
+      (let ((window (split-window)) called)
+        (set-window-buffer window (current-buffer))
+        (cl-letf (((symbol-function 'frame-focus-state) (lambda (&rest _) t))
+                  ((symbol-function 'minibuffer-selected-window)
+                   (lambda () window))
+                  ((symbol-function 'notifications-notify)
+                   (lambda (&rest _) (setq called t))))
+          (should-not
+           (hermes-notifications-notify
+            'prompt "Title" "Body" :buffer (current-buffer)))
+          (should-not called))))))
+
+(ert-deftest hermes-notifications-action-opens-live-buffer ()
+  "The default action opens the target buffer when it remains live."
+  (with-temp-buffer
+    (let ((buffer (current-buffer))
+          arguments opened)
+      (cl-letf (((symbol-function 'frame-focus-state) (lambda (&rest _) nil))
+                ((symbol-function 'require) (lambda (&rest _) t))
+                ((symbol-function 'notifications-notify)
+                 (lambda (&rest args) (setq arguments args) 7))
+                ((symbol-function 'pop-to-buffer)
+                 (lambda (target &rest _) (setq opened target))))
+        (should (= 7 (hermes-notifications-notify
+                      'chat-reply "Title" "Body" :buffer buffer
+                      :category "hermes.chat" :urgency 'normal)))
+        (should (equal (plist-get arguments :actions)
+                       '("default" "Open in Emacs")))
+        (should (equal (plist-get arguments :category) "hermes.chat"))
+        (should (eq (plist-get arguments :urgency) 'normal))
+        (funcall (plist-get arguments :on-action) 7 "default")
+        (should (eq opened buffer))))))
+
+(ert-deftest hermes-notifications-action-ignores-killed-buffer ()
+  "Clicking a stale notification does not recreate or display a dead buffer."
+  (let ((buffer (generate-new-buffer " hermes-notification-dead"))
+        arguments)
+    (cl-letf (((symbol-function 'frame-focus-state) (lambda (&rest _) nil))
+              ((symbol-function 'require) (lambda (&rest _) t))
+              ((symbol-function 'notifications-notify)
+               (lambda (&rest args) (setq arguments args) 8)))
+      (hermes-notifications-notify
+       'chat-reply "Title" "Body" :buffer buffer)
+      (kill-buffer buffer)
+      (cl-letf (((symbol-function 'pop-to-buffer)
+                 (lambda (&rest _)
+                   (ert-fail "Opened a killed notification buffer"))))
+        (should-not (funcall (plist-get arguments :on-action) 8 "default"))))))
+
+(ert-deftest hermes-notifications-close-removes-own-action ()
+  "Closing a notification removes its pending click callback."
+  (with-temp-buffer
+    (let (arguments)
+      (cl-letf (((symbol-function 'frame-focus-state) (lambda (&rest _) nil))
+                ((symbol-function 'require) (lambda (&rest _) t))
+                ((symbol-function 'notifications-notify)
+                 (lambda (&rest args) (setq arguments args) 9)))
+        (hermes-notifications-notify
+         'chat-reply "Title" "Body" :buffer (current-buffer)))
+      (let* ((action (plist-get arguments :on-action))
+             (close (plist-get arguments :on-close))
+             (other (lambda (&rest _)))
+             (notifications-on-action-map
+              `(((bus service 9) ,action)
+                ((bus service 10) ,other)))
+             notifications-on-action-object)
+        (funcall close 9 'expired)
+        (should (equal notifications-on-action-map
+                       `(((bus service 10) ,other))))))))
+
+(ert-deftest hermes-notifications-fall-back-to-echo-area ()
+  "Unavailable desktop notifications degrade to one concise echo message."
+  (let (text)
+    (cl-letf (((symbol-function 'require)
+               (lambda (feature &rest _)
+                 (not (eq feature 'notifications))))
+              ((symbol-function 'message)
+               (lambda (format-string &rest args)
+                 (setq text (apply #'format format-string args)))))
+      (should-not
+       (hermes-notifications-notify 'chat-error "Hermes error" "Failed"))
+      (should (equal text "Hermes error: Failed")))))
+
+(ert-deftest hermes-notifications-fallback-does-not-repeat-title-text ()
+  "The echo fallback shows a body already ending the title only once."
+  (let (texts)
+    (cl-letf (((symbol-function 'require)
+               (lambda (feature &rest _)
+                 (not (eq feature 'notifications))))
+              ((symbol-function 'message)
+               (lambda (format-string &rest args)
+                 (push (apply #'format format-string args) texts))))
+      ;; Reply notifications put the preview in both the title and the body.
+      (hermes-notifications-notify 'chat-reply "chat: Done" "Done")
+      (hermes-notifications-notify 'chat-reply "Same" "Same")
+      (hermes-notifications-notify 'chat-reply "Title" "")
+      ;; A body that only shares a word with the title is still shown.
+      (hermes-notifications-notify 'chat-error "Hermes chat error" "error")
+      (should (equal (nreverse texts)
+                     '("chat: Done" "Same" "Title"
+                       "Hermes chat error: error"))))))
+
+(ert-deftest hermes-notifications-native-unavailable-bus-falls-back ()
+  "A real native notification with an unavailable bus reaches the echo fallback."
+  ;; A fresh process preserves the optional-load assertion and cannot inherit
+  ;; integration fixtures.  Use an owned nonexistent socket, never a live bus.
+  (let* ((directory (make-temp-file "hermes-notification-bus-" t))
+         (process-environment (copy-sequence process-environment))
+         (library-directory
+          (file-name-directory (locate-library "hermes-notifications"))))
+    (unwind-protect
+        (progn
+          (setenv "DBUS_SESSION_BUS_ADDRESS"
+                  (concat "unix:path=" (expand-file-name "absent" directory)))
+          (with-temp-buffer
+            (should
+             (zerop
+              (call-process
+               (expand-file-name invocation-name invocation-directory)
+               nil (list (current-buffer) t) nil "-Q" "--batch"
+               "-L" library-directory "--eval"
+               (prin1-to-string
+                '(progn
+                   (require 'hermes-notifications)
+                   (princ (format "RESULT=%S\n"
+                                  (hermes-notifications-notify
+                                   'chat-error "Native fallback" "Literal body"))))))))
+            (should (string-match-p "Native fallback: Literal body" (buffer-string)))
+            ;; The fallback reports the event; the demoted D-Bus failure from
+            ;; notifications.el would only add a log line per notification.
+            (should-not (string-match-p "Notification error" (buffer-string)))
+            (should (string-match-p "RESULT=nil" (buffer-string)))))
+      (delete-directory directory t))))
+
+(provide 'hermes-notifications-tests)
+;;; hermes-notifications-tests.el ends here

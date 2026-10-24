@@ -1,0 +1,742 @@
+[
+  {
+    "id": "radix-000",
+    "input": "#o040"
+  },
+  {
+    "id": "radix-001",
+    "input": "#o0177"
+  },
+  {
+    "id": "radix-002",
+    "input": "#o0200"
+  },
+  {
+    "id": "radix-003",
+    "input": "#o0240"
+  },
+  {
+    "id": "radix-004",
+    "input": "#o0400"
+  },
+  {
+    "id": "radix-005",
+    "input": "#b101"
+  },
+  {
+    "id": "radix-006",
+    "input": "#B101"
+  },
+  {
+    "id": "radix-007",
+    "input": "#O77"
+  },
+  {
+    "id": "radix-008",
+    "input": "#xdeadBEEF"
+  },
+  {
+    "id": "radix-009",
+    "input": "#XDeAdbEeF"
+  },
+  {
+    "id": "radix-010",
+    "input": "#2r101"
+  },
+  {
+    "id": "radix-011",
+    "input": "#2R101"
+  },
+  {
+    "id": "radix-012",
+    "input": "#36rzZ"
+  },
+  {
+    "id": "radix-013",
+    "input": "#00016rFF"
+  },
+  {
+    "id": "radix-014",
+    "input": "#b+101"
+  },
+  {
+    "id": "radix-015",
+    "input": "#o-77"
+  },
+  {
+    "id": "radix-016",
+    "input": "#x-FF"
+  },
+  {
+    "id": "radix-017",
+    "input": "#16r+fF"
+  },
+  {
+    "id": "radix-018",
+    "input": "#16R-Ff"
+  },
+  {
+    "id": "radix-019",
+    "input": "#x-0"
+  },
+  {
+    "id": "radix-020",
+    "input": "#b"
+  },
+  {
+    "id": "radix-021",
+    "input": "#o"
+  },
+  {
+    "id": "radix-022",
+    "input": "#x"
+  },
+  {
+    "id": "radix-023",
+    "input": "#2r"
+  },
+  {
+    "id": "radix-024",
+    "input": "#x+"
+  },
+  {
+    "id": "radix-025",
+    "input": "#b-"
+  },
+  {
+    "id": "radix-026",
+    "input": "#o 7"
+  },
+  {
+    "id": "radix-027",
+    "input": "#x+ 1"
+  },
+  {
+    "id": "radix-028",
+    "input": "#b2"
+  },
+  {
+    "id": "radix-029",
+    "input": "#b102"
+  },
+  {
+    "id": "radix-030",
+    "input": "#o8"
+  },
+  {
+    "id": "radix-031",
+    "input": "#o078"
+  },
+  {
+    "id": "radix-032",
+    "input": "#x1g"
+  },
+  {
+    "id": "radix-033",
+    "input": "#10r1e2"
+  },
+  {
+    "id": "radix-034",
+    "input": "#36rZ0z"
+  },
+  {
+    "id": "radix-035",
+    "input": "#1r0"
+  },
+  {
+    "id": "radix-036",
+    "input": "#0r0"
+  },
+  {
+    "id": "radix-037",
+    "input": "#37r0"
+  },
+  {
+    "id": "radix-038",
+    "input": "#99r1"
+  },
+  {
+    "id": "radix-039",
+    "input": "#9223372036854775807r1"
+  },
+  {
+    "id": "radix-040",
+    "input": "#9223372036854775808r1"
+  },
+  {
+    "id": "radix-041",
+    "input": "#00000000000000000000000000000000000002r1"
+  },
+  {
+    "id": "radix-042",
+    "input": "#x1.2"
+  },
+  {
+    "id": "radix-043",
+    "input": "#x1+2"
+  },
+  {
+    "id": "radix-044",
+    "input": "#b0_1"
+  },
+  {
+    "id": "radix-045",
+    "input": "#x1é"
+  },
+  {
+    "id": "radix-046",
+    "input": "#x+ff)"
+  },
+  {
+    "id": "radix-047",
+    "input": "#b--1"
+  },
+  {
+    "id": "radix-048",
+    "input": "#x+-1"
+  },
+  {
+    "id": "radix-049",
+    "input": "#x0000"
+  },
+  {
+    "id": "radix-050",
+    "input": "#x1fffffffffffffff"
+  },
+  {
+    "id": "radix-051",
+    "input": "#x2000000000000000"
+  },
+  {
+    "id": "radix-052",
+    "input": "#x-2000000000000000"
+  },
+  {
+    "id": "radix-053",
+    "input": "#x-2000000000000001"
+  },
+  {
+    "id": "radix-054",
+    "input": "#x7fffffffffffffff"
+  },
+  {
+    "id": "radix-055",
+    "input": "#x8000000000000000"
+  },
+  {
+    "id": "radix-056",
+    "input": "#xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF"
+  },
+  {
+    "id": "radix-057",
+    "input": "#x-FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF"
+  },
+  {
+    "id": "radix-058",
+    "input": "#2r11111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111"
+  },
+  {
+    "id": "radix-059",
+    "input": "#36rZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ"
+  },
+  {
+    "id": "form-0",
+    "input": "#xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF",
+    "expression": "#xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF"
+  },
+  {
+    "id": "form-1",
+    "input": "'#xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF",
+    "expression": "'#xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF"
+  },
+  {
+    "id": "form-2",
+    "input": "(list #xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF #x-FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF)",
+    "expression": "(list #xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF #x-FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF)"
+  },
+  {
+    "id": "form-3",
+    "input": "(let ((x #xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF)) (list (integerp x) (bignump x) (fixnump x) (numberp x) (type-of x)))",
+    "expression": "(let ((x #xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF)) (list (integerp x) (bignump x) (fixnump x) (numberp x) (type-of x)))"
+  },
+  {
+    "id": "form-4",
+    "input": "(let ((h (make-hash-table :test 'eql))) (puthash #xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF 'found h) (list (equal #xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF #16rffffffffffffffffffffffffffffffff) (gethash #16rffffffffffffffffffffffffffffffff h)))",
+    "expression": "(let ((h (make-hash-table :test 'eql))) (puthash #xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF 'found h) (list (equal #xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF #16rffffffffffffffffffffffffffffffff) (gethash #16rffffffffffffffffffffffffffffffff h)))"
+  },
+  {
+    "id": "disk-0",
+    "input": "(progn #x10000000000000000 1)",
+    "expression": "(progn #x10000000000000000 1)"
+  },
+  {
+    "id": "disk-1",
+    "input": "(let ((x #x10000000000000000)) 1)",
+    "expression": "(let ((x #x10000000000000000)) 1)"
+  },
+  {
+    "id": "base-2-unsigned",
+    "input": "#2r11"
+  },
+  {
+    "id": "base-2-+",
+    "input": "#2r+11"
+  },
+  {
+    "id": "base-2--",
+    "input": "#2r-11"
+  },
+  {
+    "id": "base-3-unsigned",
+    "input": "#3r12"
+  },
+  {
+    "id": "base-3-+",
+    "input": "#3r+12"
+  },
+  {
+    "id": "base-3--",
+    "input": "#3r-12"
+  },
+  {
+    "id": "base-4-unsigned",
+    "input": "#4r13"
+  },
+  {
+    "id": "base-4-+",
+    "input": "#4r+13"
+  },
+  {
+    "id": "base-4--",
+    "input": "#4r-13"
+  },
+  {
+    "id": "base-5-unsigned",
+    "input": "#5r14"
+  },
+  {
+    "id": "base-5-+",
+    "input": "#5r+14"
+  },
+  {
+    "id": "base-5--",
+    "input": "#5r-14"
+  },
+  {
+    "id": "base-6-unsigned",
+    "input": "#6r15"
+  },
+  {
+    "id": "base-6-+",
+    "input": "#6r+15"
+  },
+  {
+    "id": "base-6--",
+    "input": "#6r-15"
+  },
+  {
+    "id": "base-7-unsigned",
+    "input": "#7r16"
+  },
+  {
+    "id": "base-7-+",
+    "input": "#7r+16"
+  },
+  {
+    "id": "base-7--",
+    "input": "#7r-16"
+  },
+  {
+    "id": "base-8-unsigned",
+    "input": "#8r17"
+  },
+  {
+    "id": "base-8-+",
+    "input": "#8r+17"
+  },
+  {
+    "id": "base-8--",
+    "input": "#8r-17"
+  },
+  {
+    "id": "base-9-unsigned",
+    "input": "#9r18"
+  },
+  {
+    "id": "base-9-+",
+    "input": "#9r+18"
+  },
+  {
+    "id": "base-9--",
+    "input": "#9r-18"
+  },
+  {
+    "id": "base-10-unsigned",
+    "input": "#10r19"
+  },
+  {
+    "id": "base-10-+",
+    "input": "#10r+19"
+  },
+  {
+    "id": "base-10--",
+    "input": "#10r-19"
+  },
+  {
+    "id": "base-11-unsigned",
+    "input": "#11r1a"
+  },
+  {
+    "id": "base-11-+",
+    "input": "#11r+1a"
+  },
+  {
+    "id": "base-11--",
+    "input": "#11r-1a"
+  },
+  {
+    "id": "base-12-unsigned",
+    "input": "#12r1b"
+  },
+  {
+    "id": "base-12-+",
+    "input": "#12r+1b"
+  },
+  {
+    "id": "base-12--",
+    "input": "#12r-1b"
+  },
+  {
+    "id": "base-13-unsigned",
+    "input": "#13r1c"
+  },
+  {
+    "id": "base-13-+",
+    "input": "#13r+1c"
+  },
+  {
+    "id": "base-13--",
+    "input": "#13r-1c"
+  },
+  {
+    "id": "base-14-unsigned",
+    "input": "#14r1d"
+  },
+  {
+    "id": "base-14-+",
+    "input": "#14r+1d"
+  },
+  {
+    "id": "base-14--",
+    "input": "#14r-1d"
+  },
+  {
+    "id": "base-15-unsigned",
+    "input": "#15r1e"
+  },
+  {
+    "id": "base-15-+",
+    "input": "#15r+1e"
+  },
+  {
+    "id": "base-15--",
+    "input": "#15r-1e"
+  },
+  {
+    "id": "base-16-unsigned",
+    "input": "#16r1f"
+  },
+  {
+    "id": "base-16-+",
+    "input": "#16r+1f"
+  },
+  {
+    "id": "base-16--",
+    "input": "#16r-1f"
+  },
+  {
+    "id": "base-17-unsigned",
+    "input": "#17r1g"
+  },
+  {
+    "id": "base-17-+",
+    "input": "#17r+1g"
+  },
+  {
+    "id": "base-17--",
+    "input": "#17r-1g"
+  },
+  {
+    "id": "base-18-unsigned",
+    "input": "#18r1h"
+  },
+  {
+    "id": "base-18-+",
+    "input": "#18r+1h"
+  },
+  {
+    "id": "base-18--",
+    "input": "#18r-1h"
+  },
+  {
+    "id": "base-19-unsigned",
+    "input": "#19r1i"
+  },
+  {
+    "id": "base-19-+",
+    "input": "#19r+1i"
+  },
+  {
+    "id": "base-19--",
+    "input": "#19r-1i"
+  },
+  {
+    "id": "base-20-unsigned",
+    "input": "#20r1j"
+  },
+  {
+    "id": "base-20-+",
+    "input": "#20r+1j"
+  },
+  {
+    "id": "base-20--",
+    "input": "#20r-1j"
+  },
+  {
+    "id": "base-21-unsigned",
+    "input": "#21r1k"
+  },
+  {
+    "id": "base-21-+",
+    "input": "#21r+1k"
+  },
+  {
+    "id": "base-21--",
+    "input": "#21r-1k"
+  },
+  {
+    "id": "base-22-unsigned",
+    "input": "#22r1l"
+  },
+  {
+    "id": "base-22-+",
+    "input": "#22r+1l"
+  },
+  {
+    "id": "base-22--",
+    "input": "#22r-1l"
+  },
+  {
+    "id": "base-23-unsigned",
+    "input": "#23r1m"
+  },
+  {
+    "id": "base-23-+",
+    "input": "#23r+1m"
+  },
+  {
+    "id": "base-23--",
+    "input": "#23r-1m"
+  },
+  {
+    "id": "base-24-unsigned",
+    "input": "#24r1n"
+  },
+  {
+    "id": "base-24-+",
+    "input": "#24r+1n"
+  },
+  {
+    "id": "base-24--",
+    "input": "#24r-1n"
+  },
+  {
+    "id": "base-25-unsigned",
+    "input": "#25r1o"
+  },
+  {
+    "id": "base-25-+",
+    "input": "#25r+1o"
+  },
+  {
+    "id": "base-25--",
+    "input": "#25r-1o"
+  },
+  {
+    "id": "base-26-unsigned",
+    "input": "#26r1p"
+  },
+  {
+    "id": "base-26-+",
+    "input": "#26r+1p"
+  },
+  {
+    "id": "base-26--",
+    "input": "#26r-1p"
+  },
+  {
+    "id": "base-27-unsigned",
+    "input": "#27r1q"
+  },
+  {
+    "id": "base-27-+",
+    "input": "#27r+1q"
+  },
+  {
+    "id": "base-27--",
+    "input": "#27r-1q"
+  },
+  {
+    "id": "base-28-unsigned",
+    "input": "#28r1r"
+  },
+  {
+    "id": "base-28-+",
+    "input": "#28r+1r"
+  },
+  {
+    "id": "base-28--",
+    "input": "#28r-1r"
+  },
+  {
+    "id": "base-29-unsigned",
+    "input": "#29r1s"
+  },
+  {
+    "id": "base-29-+",
+    "input": "#29r+1s"
+  },
+  {
+    "id": "base-29--",
+    "input": "#29r-1s"
+  },
+  {
+    "id": "base-30-unsigned",
+    "input": "#30r1t"
+  },
+  {
+    "id": "base-30-+",
+    "input": "#30r+1t"
+  },
+  {
+    "id": "base-30--",
+    "input": "#30r-1t"
+  },
+  {
+    "id": "base-31-unsigned",
+    "input": "#31r1u"
+  },
+  {
+    "id": "base-31-+",
+    "input": "#31r+1u"
+  },
+  {
+    "id": "base-31--",
+    "input": "#31r-1u"
+  },
+  {
+    "id": "base-32-unsigned",
+    "input": "#32r1v"
+  },
+  {
+    "id": "base-32-+",
+    "input": "#32r+1v"
+  },
+  {
+    "id": "base-32--",
+    "input": "#32r-1v"
+  },
+  {
+    "id": "base-33-unsigned",
+    "input": "#33r1w"
+  },
+  {
+    "id": "base-33-+",
+    "input": "#33r+1w"
+  },
+  {
+    "id": "base-33--",
+    "input": "#33r-1w"
+  },
+  {
+    "id": "base-34-unsigned",
+    "input": "#34r1x"
+  },
+  {
+    "id": "base-34-+",
+    "input": "#34r+1x"
+  },
+  {
+    "id": "base-34--",
+    "input": "#34r-1x"
+  },
+  {
+    "id": "base-35-unsigned",
+    "input": "#35r1y"
+  },
+  {
+    "id": "base-35-+",
+    "input": "#35r+1y"
+  },
+  {
+    "id": "base-35--",
+    "input": "#35r-1y"
+  },
+  {
+    "id": "base-36-unsigned",
+    "input": "#36r1z"
+  },
+  {
+    "id": "base-36-+",
+    "input": "#36r+1z"
+  },
+  {
+    "id": "base-36--",
+    "input": "#36r-1z"
+  },
+  {
+    "id": "context-0",
+    "input": "'#o77",
+    "expression": "(let ((v (read-from-string \"'#o77\"))) (list (equal (car v) (quote (quote 63))) (cdr v)))"
+  },
+  {
+    "id": "context-1",
+    "input": "[#o77 #Xff #B11 #24r1k]"
+  },
+  {
+    "id": "context-2",
+    "input": "?\\o"
+  },
+  {
+    "id": "context-3",
+    "input": "?\\O"
+  },
+  {
+    "id": "context-4",
+    "input": "?\\077"
+  },
+  {
+    "id": "context-5",
+    "input": "#o77symbol"
+  },
+  {
+    "id": "context-6",
+    "input": "#x1z"
+  },
+  {
+    "id": "context-7",
+    "input": "#24r1k"
+  },
+  {
+    "id": "context-8",
+    "input": "#o77;comment"
+  },
+  {
+    "id": "context-9",
+    "input": "#o77(foo)"
+  },
+  {
+    "id": "context-10",
+    "input": "#x1_foo"
+  }
+]

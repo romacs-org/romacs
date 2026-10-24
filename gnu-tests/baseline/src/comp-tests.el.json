@@ -1,0 +1,4696 @@
+{
+  "blob": "a4186dba7ba44d9877132f242b7349b5a45652f5",
+  "compiled": {
+    "complete": true,
+    "exit": 0,
+    "garbled_lines": 0,
+    "load_error": null,
+    "load_ok": true,
+    "results": {
+      "comp-tests-45576-1": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-45635-1": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-46670-1": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-46824-1": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-48029-1": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-61917-1": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-67239-1": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests->": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-add1": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-and": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-and-3": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-apply": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-aref-aset": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-arith-comp": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-assume-double-neg": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-assume-in-loop-1": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-bobp-and-eobp": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-bootstrap": {
+        "as_expected": false,
+        "detail": "(file-missing \"Opening input file\" \"No such file or directory\" \"<recording-home>/.hermes/cache/scratch/gts-tree-t8p5ta2b/lisp/emacs-lisp/comp.el\")",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": [
+          ":expensive-test",
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-bubble-sort": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-buffer": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-bug-40187": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-bug-42360": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-bug-44968": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-bug-45342": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-bug-45376-1": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-bug-45376-2": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-bug-80327": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-car-cdr": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-car-cdr-safe": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-catch": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-cl-macro-exp": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-cl-uninterned-arg-parse-f": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-comp-test-47868-1": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-comp-test-73270-1": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-comp-test-78606-1": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-comp-test-defsubst": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-comp-tests-cons-car-cdr": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-comp-tests-result-lambda": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-comp-tests-type-branch-optim": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-compile-forms": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-compile-interpreted-functions": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-concat": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-concatN": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-cond-rw-1": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-conditionals": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-consp": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-copy-insn": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-direct-call-with-duplicate-names": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-direct-call-with-lambdas": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-doc": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-dynamic-arity": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-dynamic-ffuncall": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-dynamic-help-arglist": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-eq": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ffuncall": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-fixnum": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-free-fun": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-free-fun-silly-name": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-free-fun2": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-func-call-removal": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-fw-prop-1": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-gc": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-if": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-integerp": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-interactive-form": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-jump-table": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-lambda-return": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-lambda-return2": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-length": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-list": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-listN": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-listp": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-macro": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-memq": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-negate": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-non-locals": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-not": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-not-cons-1": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-num-inline": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-numberp": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-opt": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-opt-rest": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-or": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-primitive-advice": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-primitive-redefine": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-primitive-redefine-compile-44221": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-provide": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-pure": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-recursive": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-1": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-10": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-11": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-12": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-13": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-14": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-15": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-16": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-17": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-18": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-19": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-2": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-20": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-21": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-22": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-23": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-24": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-25": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-26": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-27": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-28": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-29": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-3": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-30": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-31": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-32": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-33": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-34": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-35": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-36": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-37": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-38": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-39": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-4": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-40": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-41": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-42": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-43": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-44": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-45": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-46": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-47": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-48": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-49": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-5": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-50": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-51": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-52": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-53": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-54": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-55": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-56": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-57": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-58": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-59": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-6": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-60": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-61": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-62": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-63": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-64": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-65": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-66": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-67": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-68": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-69": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-7": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-70": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-71": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-72": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-73": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-74": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-75": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-76": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-77": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-78": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-79": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-8": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-80": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-81": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-9": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-save-excursion": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-setcarcdr": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-signal": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-speed--1": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-stack": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-string-trim": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-stringp": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-sub1": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-symbol-value": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-symbolp": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-tco": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-trampoline-removal": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-type-hints": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-unwind-protect": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-varref": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-varset": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      }
+    },
+    "timed_out": false
+  },
+  "file": "src/comp-tests.el",
+  "gnu": {
+    "emacs": "<recording-path-redacted>/emacs-32.0.50",
+    "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+    "sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+    "version": "32.0.50"
+  },
+  "harness_sha256": "78c20850429a08af22faadf73b5d164c560230e83d7eb88ef60cb995670703ef",
+  "mini": {
+    "complete": true,
+    "exit": 0,
+    "garbled_lines": 0,
+    "load_error": null,
+    "load_ok": null,
+    "results": {
+      "comp-tests-45576-1": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-45635-1": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-46670-1": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-46824-1": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-48029-1": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-61917-1": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-67239-1": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests->": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-add1": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-and": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-and-3": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-apply": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-aref-aset": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-arith-comp": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-assume-double-neg": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-assume-in-loop-1": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-bobp-and-eobp": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-bootstrap": {
+        "as_expected": null,
+        "detail": "(file-missing \"Opening input file\" \"No such file or directory\" \"<recording-home>/.hermes/cache/scratch/lisp/emacs-lisp/comp.el\")",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-bubble-sort": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-buffer": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-bug-40187": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-bug-42360": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-bug-44968": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-bug-45342": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-bug-45376-1": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-bug-45376-2": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-bug-80327": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-car-cdr": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-car-cdr-safe": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-catch": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-cl-macro-exp": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-cl-uninterned-arg-parse-f": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-comp-test-47868-1": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-comp-test-73270-1": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-comp-test-78606-1": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-comp-test-defsubst": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-comp-tests-cons-car-cdr": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-comp-tests-result-lambda": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-comp-tests-type-branch-optim": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-compile-forms": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-compile-interpreted-functions": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-concat": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-concatN": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-cond-rw-1": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-conditionals": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-consp": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-copy-insn": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-direct-call-with-duplicate-names": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-direct-call-with-lambdas": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-doc": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-dynamic-arity": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-dynamic-ffuncall": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-dynamic-help-arglist": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-eq": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ffuncall": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-fixnum": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-free-fun": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-free-fun-silly-name": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-free-fun2": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-func-call-removal": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-fw-prop-1": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-gc": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-if": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-integerp": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-interactive-form": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-jump-table": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-lambda-return": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-lambda-return2": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-length": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-list": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-listN": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-listp": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-macro": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-memq": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-negate": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-non-locals": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-not": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-not-cons-1": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-num-inline": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-numberp": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-opt": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-opt-rest": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-or": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-primitive-advice": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-primitive-redefine": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-primitive-redefine-compile-44221": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-provide": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-pure": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-recursive": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-1": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-10": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-11": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-12": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-13": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-14": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-15": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-16": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-17": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-18": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-19": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-2": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-20": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-21": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-22": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-23": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-24": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-25": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-26": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-27": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-28": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-29": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-3": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-30": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-31": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-32": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-33": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-34": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-35": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-36": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-37": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-38": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-39": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-4": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-40": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-41": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-42": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-43": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-44": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-45": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-46": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-47": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-48": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-49": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-5": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-50": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-51": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-52": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-53": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-54": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-55": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-56": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-57": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-58": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-59": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-6": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-60": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-61": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-62": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-63": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-64": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-65": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-66": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-67": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-68": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-69": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-7": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-70": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-71": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-72": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-73": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-74": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-75": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-76": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-77": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-78": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-79": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-8": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-80": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-81": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-ret-type-spec-9": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-save-excursion": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-setcarcdr": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-signal": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-speed--1": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-stack": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-string-trim": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-stringp": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-sub1": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-symbol-value": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-symbolp": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-tco": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-trampoline-removal": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-type-hints": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-unwind-protect": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-varref": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "comp-tests-varset": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      }
+    },
+    "timed_out": false
+  },
+  "read_error": null,
+  "real": {
+    "complete": true,
+    "exit": 0,
+    "garbled_lines": 0,
+    "load_error": null,
+    "load_ok": true,
+    "results": {
+      "comp-tests-45576-1": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-45635-1": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-46670-1": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-46824-1": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-48029-1": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-61917-1": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-67239-1": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests->": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-add1": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-and": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-and-3": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-apply": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-aref-aset": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-arith-comp": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-assume-double-neg": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-assume-in-loop-1": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-bobp-and-eobp": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-bootstrap": {
+        "as_expected": false,
+        "detail": "(file-missing \"Opening input file\" \"No such file or directory\" \"<recording-home>/.hermes/cache/scratch/gts-tree-t8p5ta2b/lisp/emacs-lisp/comp.el\")",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": [
+          ":expensive-test",
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-bubble-sort": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-buffer": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-bug-40187": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-bug-42360": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-bug-44968": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-bug-45342": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-bug-45376-1": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-bug-45376-2": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-bug-80327": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-car-cdr": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-car-cdr-safe": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-catch": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-cl-macro-exp": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-cl-uninterned-arg-parse-f": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-comp-test-47868-1": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-comp-test-73270-1": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-comp-test-78606-1": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-comp-test-defsubst": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-comp-tests-cons-car-cdr": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-comp-tests-result-lambda": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-comp-tests-type-branch-optim": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-compile-forms": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-compile-interpreted-functions": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-concat": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-concatN": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-cond-rw-1": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-conditionals": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-consp": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-copy-insn": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-direct-call-with-duplicate-names": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-direct-call-with-lambdas": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-doc": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-dynamic-arity": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-dynamic-ffuncall": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-dynamic-help-arglist": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-eq": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ffuncall": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-fixnum": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-free-fun": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-free-fun-silly-name": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-free-fun2": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-func-call-removal": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-fw-prop-1": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-gc": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-if": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-integerp": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-interactive-form": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-jump-table": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-lambda-return": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-lambda-return2": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-length": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-list": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-listN": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-listp": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-macro": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-memq": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-negate": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-non-locals": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-not": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-not-cons-1": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-num-inline": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-numberp": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-opt": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-opt-rest": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-or": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-primitive-advice": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-primitive-redefine": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-primitive-redefine-compile-44221": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-provide": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-pure": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-recursive": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-1": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-10": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-11": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-12": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-13": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-14": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-15": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-16": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-17": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-18": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-19": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-2": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-20": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-21": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-22": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-23": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-24": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-25": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-26": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-27": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-28": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-29": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-3": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-30": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-31": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-32": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-33": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-34": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-35": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-36": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-37": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-38": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-39": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-4": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-40": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-41": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-42": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-43": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-44": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-45": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-46": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-47": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-48": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-49": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-5": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-50": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-51": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-52": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-53": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-54": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-55": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-56": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-57": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-58": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-59": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-6": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-60": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-61": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-62": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-63": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-64": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-65": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-66": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-67": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-68": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-69": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-7": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-70": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-71": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-72": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-73": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-74": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-75": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-76": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-77": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-78": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-79": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-8": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-80": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-81": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-ret-type-spec-9": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-save-excursion": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-setcarcdr": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-signal": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-speed--1": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-stack": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-string-trim": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-stringp": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-sub1": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-symbol-value": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-symbolp": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-tco": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-trampoline-removal": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-type-hints": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-unwind-protect": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-varref": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      },
+      "comp-tests-varset": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": [
+          ":nativecomp"
+        ]
+      }
+    },
+    "timed_out": false
+  },
+  "schema": 1,
+  "toplevel_deftests": 1
+}

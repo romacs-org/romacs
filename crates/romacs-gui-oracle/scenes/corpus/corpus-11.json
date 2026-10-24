@@ -1,0 +1,320 @@
+{
+ "name": "corpus-11",
+ "frame": {
+  "width": 480,
+  "height": 168,
+  "bg": "#ffffff",
+  "fg": "#000000"
+ },
+ "font": {
+  "family": "Liberation Mono",
+  "pixel_size": 20,
+  "regular": "/usr/share/fonts/liberation/LiberationMono-Regular.ttf",
+  "bold": "/usr/share/fonts/liberation/LiberationMono-Bold.ttf",
+  "italic": "/usr/share/fonts/liberation/LiberationMono-Italic.ttf"
+ },
+ "cursor_color": "#00a000",
+ "buffer": [
+  {
+   "text": "ήλιος",
+   "fg": "#ff8c00"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "καλημέρα"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "βιβλίο"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "καλημέρα",
+   "fg": "#ff0000",
+   "bg": "#d0ffd0"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "Hello",
+   "italic": true
+  },
+  {
+   "text": "\n"
+  },
+  {
+   "text": "a&b",
+   "fg": "#ff0000"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "βιβλίο",
+   "fg": "#008000",
+   "italic": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "lazy",
+   "bold": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "over",
+   "fg": "#b8860b"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "ξένος",
+   "fg": "#1e90ff"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "q?",
+   "bold": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "jumps",
+   "bold": true
+  },
+  {
+   "text": "\n"
+  },
+  {
+   "text": "x=42;"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "jumps",
+   "underline": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "#if",
+   "bold": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "Χάος",
+   "fg": "#ff8c00",
+   "italic": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "[0-9]+"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "κόσμε",
+   "italic": true
+  },
+  {
+   "text": "\n"
+  },
+  {
+   "text": "Χάος",
+   "italic": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "frame",
+   "fg": "#008000",
+   "bold": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "@user"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "καλημέρα",
+   "fg": "#8b0000",
+   "italic": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "ξένος",
+   "fg": "#2e8b57",
+   "italic": true,
+   "underline": true,
+   "bg": "#d0ffd0"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "a&b"
+  },
+  {
+   "text": "\n"
+  }
+ ],
+ "point": 29,
+ "expect": {
+  "origin": [
+   0,
+   0
+  ],
+  "rows": [
+   {
+    "text": "ήλιος καλημέρα βιβλίο καλημέρα Hello",
+    "runs": [
+     {
+      "start": 0,
+      "end": 5,
+      "fg": "#ff8c00"
+     },
+     {
+      "start": 22,
+      "end": 30,
+      "fg": "#ff0000",
+      "bg": "#d0ffd0"
+     },
+     {
+      "start": 31,
+      "end": 36,
+      "italic": true
+     }
+    ]
+   },
+   {
+    "text": "a&b βιβλίο lazy over ξένος q? jumps",
+    "runs": [
+     {
+      "start": 0,
+      "end": 3,
+      "fg": "#ff0000"
+     },
+     {
+      "start": 4,
+      "end": 10,
+      "fg": "#008000",
+      "italic": true
+     },
+     {
+      "start": 11,
+      "end": 15,
+      "bold": true
+     },
+     {
+      "start": 16,
+      "end": 20,
+      "fg": "#b8860b"
+     },
+     {
+      "start": 21,
+      "end": 26,
+      "fg": "#1e90ff"
+     },
+     {
+      "start": 27,
+      "end": 29,
+      "bold": true
+     },
+     {
+      "start": 30,
+      "end": 35,
+      "bold": true
+     }
+    ]
+   },
+   {
+    "text": "x=42; jumps #if Χάος [0-9]+ κόσμε",
+    "runs": [
+     {
+      "start": 6,
+      "end": 11,
+      "underline": true
+     },
+     {
+      "start": 12,
+      "end": 15,
+      "bold": true
+     },
+     {
+      "start": 16,
+      "end": 20,
+      "fg": "#ff8c00",
+      "italic": true
+     },
+     {
+      "start": 28,
+      "end": 33,
+      "italic": true
+     }
+    ]
+   },
+   {
+    "text": "Χάος frame @user καλημέρα ξένος a&b",
+    "runs": [
+     {
+      "start": 0,
+      "end": 4,
+      "italic": true
+     },
+     {
+      "start": 5,
+      "end": 10,
+      "fg": "#008000",
+      "bold": true
+     },
+     {
+      "start": 17,
+      "end": 25,
+      "fg": "#8b0000",
+      "italic": true
+     },
+     {
+      "start": 26,
+      "end": 31,
+      "fg": "#2e8b57",
+      "italic": true,
+      "underline": true,
+      "bg": "#d0ffd0"
+     }
+    ]
+   }
+  ],
+  "cursor": {
+   "row": 0,
+   "col": 28
+  }
+ }
+}

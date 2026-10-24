@@ -1,0 +1,26 @@
+use romacs_vm::Vm;
+
+#[test]
+fn unrelated_handlers_allow_local_operations() {
+    let cases: serde_json::Value = serde_json::from_str(include_str!("../../../evidence/handler-local/cases.json")).unwrap();
+    let root = std::env::temp_dir().join(format!("romacs-handler-local-{}", std::process::id()));
+    std::fs::create_dir_all(&root).unwrap();
+    let directory = serde_json::to_string(&format!("{}/", root.display())).unwrap();
+    let file = serde_json::to_string(root.join("input").to_str().unwrap()).unwrap();
+    let mut failures = Vec::new();
+    for case in cases.as_array().unwrap() {
+        std::fs::write(root.join("input"), "hello\n").unwrap();
+        let mut vm = Vm::new();
+        let source = case["source"].as_str().unwrap().replace("@DIR@", &directory).replace("@FILE@", &file).replace("@HOME@", &serde_json::to_string(&std::env::var("HOME").unwrap()).unwrap());
+        let actual = vm.eval_source(&source).map(|v| v.display().unwrap()).unwrap_or_else(|e| format!("ERROR {e}"));
+        let expected = case.get("candidate_expected").unwrap_or(&case["expected"]).as_str().unwrap();
+        if case["id"].as_str().unwrap().ends_with("-selected") {
+            assert_eq!(std::fs::read_to_string(root.join("input")).unwrap(), "hello\n", "REFUSAL_BEFORE_WRITE: {}", case["id"]);
+        }
+        if actual != expected {
+            failures.push(format!("{}: {actual}", case["id"]));
+        }
+    }
+    std::fs::remove_dir_all(root).unwrap();
+    assert!(failures.is_empty(), "LOCAL_HANDLER_PARITY: {}", failures.join("\n"));
+}

@@ -1,0 +1,345 @@
+{
+  "blob": "aec9bd02ad730ff02f26920b5557d0bec311e248",
+  "compiled": {
+    "complete": true,
+    "exit": 0,
+    "garbled_lines": 0,
+    "load_error": null,
+    "load_ok": true,
+    "results": {
+      "faceup-clean": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "faceup-directory": {
+        "as_expected": false,
+        "detail": "(file-missing \"Cannot open load file\" \"No such file or directory\" \"<recording-home>/.hermes/cache/scratch/faceup-resources/faceup-test-this-file-directory.el\")",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": []
+      },
+      "faceup-functions": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "faceup-markup-anonymous-face": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "faceup-markup-anonymous-face-2keys": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "faceup-markup-anonymous-nested": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "faceup-markup-basics": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "faceup-markup-escaping": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "faceup-markup-multi-face": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "faceup-markup-multi-property": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "faceup-markup-nested": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "faceup-markup-overlapping": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "faceup-markup-plain": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "faceup-markup-plain-full-text": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "faceup-render": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      }
+    },
+    "timed_out": false
+  },
+  "file": "lisp/emacs-lisp/faceup-tests/faceup-test-basics.el",
+  "gnu": {
+    "emacs": "<recording-path-redacted>/emacs-32.0.50",
+    "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+    "sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+    "version": "32.0.50"
+  },
+  "harness_sha256": "78c20850429a08af22faadf73b5d164c560230e83d7eb88ef60cb995670703ef",
+  "mini": {
+    "complete": true,
+    "exit": 0,
+    "garbled_lines": 0,
+    "load_error": null,
+    "load_ok": null,
+    "results": {
+      "faceup-clean": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "faceup-functions": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "faceup-markup-anonymous-face": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "faceup-markup-anonymous-face-2keys": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "faceup-markup-anonymous-nested": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "faceup-markup-basics": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "faceup-markup-escaping": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "faceup-markup-multi-face": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "faceup-markup-multi-property": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "faceup-markup-nested": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "faceup-markup-overlapping": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "faceup-markup-plain": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "faceup-markup-plain-full-text": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "faceup-render": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      }
+    },
+    "timed_out": false
+  },
+  "read_error": null,
+  "real": {
+    "complete": true,
+    "exit": 0,
+    "garbled_lines": 0,
+    "load_error": null,
+    "load_ok": true,
+    "results": {
+      "faceup-clean": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "faceup-functions": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "faceup-markup-anonymous-face": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "faceup-markup-anonymous-face-2keys": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "faceup-markup-anonymous-nested": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "faceup-markup-basics": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "faceup-markup-escaping": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "faceup-markup-multi-face": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "faceup-markup-multi-property": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "faceup-markup-nested": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "faceup-markup-overlapping": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "faceup-markup-plain": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "faceup-markup-plain-full-text": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "faceup-render": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      }
+    },
+    "timed_out": false
+  },
+  "schema": 1,
+  "toplevel_deftests": 15
+}

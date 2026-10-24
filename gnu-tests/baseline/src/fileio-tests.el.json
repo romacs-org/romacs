@@ -1,0 +1,443 @@
+{
+  "blob": "2c27ef357016d8fcda5a29f140e21e4d49799cef",
+  "compiled": {
+    "complete": true,
+    "exit": 0,
+    "garbled_lines": 0,
+    "load_error": null,
+    "load_ok": true,
+    "results": {
+      "fileio--file-name-case-insensitive-p": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "fileio-tests--circular-after-insert-file-functions": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "fileio-tests--directory-file-name": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "fileio-tests--directory-file-name-dos-nt": {
+        "as_expected": true,
+        "detail": "(ert-test-skipped ((skip-unless (memq system-type '(ms-dos windows-nt))) :form (memq gnu/linux (ms-dos windows-nt)) :value nil))",
+        "expected": ":passed",
+        "outcome": "skipped",
+        "tags": []
+      },
+      "fileio-tests--expand-file-name-null-bytes": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "fileio-tests--file-name-absolute-p": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "fileio-tests--file-name-as-directory": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "fileio-tests--file-name-as-directory-dos-nt": {
+        "as_expected": true,
+        "detail": "(ert-test-skipped ((skip-unless (memq system-type '(ms-dos windows-nt))) :form (memq gnu/linux (ms-dos windows-nt)) :value nil))",
+        "expected": ":passed",
+        "outcome": "skipped",
+        "tags": []
+      },
+      "fileio-tests--insert-file-contents-supersession": {
+        "as_expected": false,
+        "detail": "(file-missing \"Opening input file\" \"No such file or directory\" \"<recording-home>/.hermes/cache/scratch/gnu-run-elc-RnpZUQ/lread-resources/somelib.el\")",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": []
+      },
+      "fileio-tests--insert-file-interrupt": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "fileio-tests--non-regular-insert": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "fileio-tests--odd-symlink-chars": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "fileio-tests--read-directory": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "fileio-tests--relative-HOME": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "fileio-tests--relative-default-directory": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "fileio-tests-invalid-UNC": {
+        "as_expected": true,
+        "detail": "(ert-test-skipped ((skip-unless (eq system-type 'windows-nt)) :form (eq gnu/linux windows-nt) :value nil))",
+        "expected": ":passed",
+        "outcome": "skipped",
+        "tags": []
+      },
+      "fileio-tests-w32-time-stamp-granularity": {
+        "as_expected": true,
+        "detail": "(ert-test-skipped ((skip-unless (eq system-type 'windows-nt)) :form (eq gnu/linux windows-nt) :value nil))",
+        "expected": ":passed",
+        "outcome": "skipped",
+        "tags": []
+      },
+      "fileio-tests/file-name-concat": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "fileio-tests/null-character": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      }
+    },
+    "timed_out": false
+  },
+  "file": "src/fileio-tests.el",
+  "gnu": {
+    "emacs": "<recording-path-redacted>/emacs-32.0.50",
+    "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+    "sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+    "version": "32.0.50"
+  },
+  "harness_sha256": "78c20850429a08af22faadf73b5d164c560230e83d7eb88ef60cb995670703ef",
+  "mini": {
+    "complete": true,
+    "exit": 0,
+    "garbled_lines": 0,
+    "load_error": null,
+    "load_ok": null,
+    "results": {
+      "fileio--file-name-case-insensitive-p": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "fileio-tests--circular-after-insert-file-functions": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "fileio-tests--directory-file-name": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "fileio-tests--directory-file-name-dos-nt": {
+        "as_expected": null,
+        "detail": "((skip-unless (memq system-type '(ms-dos windows-nt))))",
+        "expected": ":passed",
+        "outcome": "skipped",
+        "tags": null
+      },
+      "fileio-tests--expand-file-name-null-bytes": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "fileio-tests--file-name-absolute-p": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "fileio-tests--file-name-as-directory": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "fileio-tests--file-name-as-directory-dos-nt": {
+        "as_expected": null,
+        "detail": "((skip-unless (memq system-type '(ms-dos windows-nt))))",
+        "expected": ":passed",
+        "outcome": "skipped",
+        "tags": null
+      },
+      "fileio-tests--insert-file-contents-supersession": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "fileio-tests--insert-file-interrupt": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "fileio-tests--non-regular-insert": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "fileio-tests--odd-symlink-chars": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "fileio-tests--read-directory": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "fileio-tests--relative-HOME": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "fileio-tests--relative-default-directory": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "fileio-tests-invalid-UNC": {
+        "as_expected": null,
+        "detail": "((skip-unless (eq system-type 'windows-nt)))",
+        "expected": ":passed",
+        "outcome": "skipped",
+        "tags": null
+      },
+      "fileio-tests-w32-time-stamp-granularity": {
+        "as_expected": null,
+        "detail": "((skip-unless (eq system-type 'windows-nt)))",
+        "expected": ":passed",
+        "outcome": "skipped",
+        "tags": null
+      },
+      "fileio-tests/file-name-concat": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "fileio-tests/null-character": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      }
+    },
+    "timed_out": false
+  },
+  "read_error": null,
+  "real": {
+    "complete": true,
+    "exit": 0,
+    "garbled_lines": 0,
+    "load_error": null,
+    "load_ok": true,
+    "results": {
+      "fileio--file-name-case-insensitive-p": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "fileio-tests--circular-after-insert-file-functions": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "fileio-tests--directory-file-name": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "fileio-tests--directory-file-name-dos-nt": {
+        "as_expected": true,
+        "detail": "(ert-test-skipped ((skip-unless (memq system-type '(ms-dos windows-nt))) :form (memq gnu/linux (ms-dos windows-nt)) :value nil))",
+        "expected": ":passed",
+        "outcome": "skipped",
+        "tags": []
+      },
+      "fileio-tests--expand-file-name-null-bytes": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "fileio-tests--file-name-absolute-p": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "fileio-tests--file-name-as-directory": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "fileio-tests--file-name-as-directory-dos-nt": {
+        "as_expected": true,
+        "detail": "(ert-test-skipped ((skip-unless (memq system-type '(ms-dos windows-nt))) :form (memq gnu/linux (ms-dos windows-nt)) :value nil))",
+        "expected": ":passed",
+        "outcome": "skipped",
+        "tags": []
+      },
+      "fileio-tests--insert-file-contents-supersession": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "fileio-tests--insert-file-interrupt": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "fileio-tests--non-regular-insert": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "fileio-tests--odd-symlink-chars": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "fileio-tests--read-directory": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "fileio-tests--relative-HOME": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "fileio-tests--relative-default-directory": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "fileio-tests-invalid-UNC": {
+        "as_expected": true,
+        "detail": "(ert-test-skipped ((skip-unless (eq system-type 'windows-nt)) :form (eq gnu/linux windows-nt) :value nil))",
+        "expected": ":passed",
+        "outcome": "skipped",
+        "tags": []
+      },
+      "fileio-tests-w32-time-stamp-granularity": {
+        "as_expected": true,
+        "detail": "(ert-test-skipped ((skip-unless (eq system-type 'windows-nt)) :form (eq gnu/linux windows-nt) :value nil))",
+        "expected": ":passed",
+        "outcome": "skipped",
+        "tags": []
+      },
+      "fileio-tests/file-name-concat": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "fileio-tests/null-character": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      }
+    },
+    "timed_out": false
+  },
+  "schema": 1,
+  "toplevel_deftests": 19
+}

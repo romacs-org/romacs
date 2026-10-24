@@ -1,0 +1,5 @@
+(setq probe-log2 nil)
+(push 'form1 probe-log2)
+(defmacro probe-bad () (error "expander boom"))
+(defun probe-f () (probe-bad))
+(push 'after-macro-error probe-log2)

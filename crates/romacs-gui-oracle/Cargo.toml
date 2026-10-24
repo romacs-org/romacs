@@ -1,0 +1,23 @@
+[package]
+name = "romacs-gui-oracle"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Scene-specification checker over compositor captures: the GUI acceptance oracle"
+publish = false
+
+# Independence is the point of this crate. It reads a compositor capture and
+# a declared scene, and nothing else: it must never depend on a romacs
+# renderer, layout, font or face crate, or read anything a renderer reports.
+# Glyph templates come from FreeType, which romacs does not rasterise with.
+
+[dependencies]
+freetype-rs = { version = "0.38.0" }
+png.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

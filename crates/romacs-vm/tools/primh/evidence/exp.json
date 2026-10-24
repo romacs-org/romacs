@@ -1,0 +1,386 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "exp",
+ "spec_sha256": "18a5a50088ed47f8b6a1af487779d6fdcff94129167b9035a5bef8942c8f9397",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "exp",
+    "subr",
+    1,
+    1
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "floatfns.c": "7fa0e8359a366506ff71876b54638928b2836d18d20ea983f68a876f59a9c8b7",
+  "bignum.c": "b1f9fbded50391389b232e384324c91d8a094654c661fd80e503504f916e5c65"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "exp/0000",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (exp 0)) (error (list 'sig e))))",
+   "expected": "(ok 1.0)"
+  },
+  {
+   "id": "exp/0001",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (exp 1)) (error (list 'sig e))))",
+   "expected": "(ok 2.718281828459045)"
+  },
+  {
+   "id": "exp/0002",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (exp -1)) (error (list 'sig e))))",
+   "expected": "(ok 0.36787944117144233)"
+  },
+  {
+   "id": "exp/0003",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (exp 2)) (error (list 'sig e))))",
+   "expected": "(ok 7.38905609893065)"
+  },
+  {
+   "id": "exp/0004",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (exp -2)) (error (list 'sig e))))",
+   "expected": "(ok 0.1353352832366127)"
+  },
+  {
+   "id": "exp/0005",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (exp 0.0)) (error (list 'sig e))))",
+   "expected": "(ok 1.0)"
+  },
+  {
+   "id": "exp/0006",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (exp -0.0)) (error (list 'sig e))))",
+   "expected": "(ok 1.0)"
+  },
+  {
+   "id": "exp/0007",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (exp 0.5)) (error (list 'sig e))))",
+   "expected": "(ok 1.6487212707001282)"
+  },
+  {
+   "id": "exp/0008",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (exp 1.25)) (error (list 'sig e))))",
+   "expected": "(ok 3.4903429574618414)"
+  },
+  {
+   "id": "exp/0009",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (exp -3.75)) (error (list 'sig e))))",
+   "expected": "(ok 0.023517745856009107)"
+  },
+  {
+   "id": "exp/0010",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (exp most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(ok 1.0e+INF)"
+  },
+  {
+   "id": "exp/0011",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (exp most-negative-fixnum)) (error (list 'sig e))))",
+   "expected": "(ok 0.0)"
+  },
+  {
+   "id": "exp/0012",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (exp 1.0e+INF)) (error (list 'sig e))))",
+   "expected": "(ok 1.0e+INF)"
+  },
+  {
+   "id": "exp/0013",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (exp -1.0e+INF)) (error (list 'sig e))))",
+   "expected": "(ok 0.0)"
+  },
+  {
+   "id": "exp/0014",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (exp 0.0e+NaN)) (error (list 'sig e))))",
+   "expected": "(ok 0.0e+NaN)"
+  },
+  {
+   "id": "exp/0015",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (exp nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp nil))"
+  },
+  {
+   "id": "exp/0016",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (exp t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp t))"
+  },
+  {
+   "id": "exp/0017",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (exp 'wrong)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp wrong))"
+  },
+  {
+   "id": "exp/0018",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (exp \"bad\")) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp \"bad\"))"
+  },
+  {
+   "id": "exp/0019",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (exp '(1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp (1)))"
+  },
+  {
+   "id": "exp/0020",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (exp [1])) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp [1]))"
+  },
+  {
+   "id": "exp/0021",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'exp '())) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr exp> 0))"
+  },
+  {
+   "id": "exp/0022",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'exp '(1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr exp> 2))"
+  },
+  {
+   "id": "exp/0023",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (exp a0))) (error (list 'sig e))))",
+   "expected": "(ok 1.0)"
+  },
+  {
+   "id": "exp/0024",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0)) (let ((r (exp a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "exp/0025",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 2)) (let ((r (exp a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "exp/0026",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -0.0)) (let ((r (exp a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "exp/0027",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -3.75)) (let ((r (exp a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "exp/0028",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.0e+INF)) (let ((r (exp a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "exp/0029",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil)) (let ((r (exp a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp nil))"
+  },
+  {
+   "id": "exp/0030",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 \"bad\")) (let ((r (exp a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp \"bad\"))"
+  },
+  {
+   "id": "exp/0031",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (exp -1000)) (error (list 'sig e))))",
+   "expected": "(ok 0.0)"
+  },
+  {
+   "id": "exp/0032",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (exp 1000)) (error (list 'sig e))))",
+   "expected": "(ok 1.0e+INF)"
+  },
+  {
+   "id": "exp/0033",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (exp 709)) (error (list 'sig e))))",
+   "expected": "(ok 8.218407461554972e+307)"
+  },
+  {
+   "id": "exp/0034",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (= (exp -745) 5e-324)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "exp/0035",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (exp (car (read-from-string \"#x200000000000000001\")))) (error (list 'sig e))))",
+   "expected": "(ok 1.0e+INF)"
+  },
+  {
+   "id": "exp/0036",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (exp (car (read-from-string \"#x-200000000000000001\")))) (error (list 'sig e))))",
+   "expected": "(ok 0.0)"
+  },
+  {
+   "id": "exp/0037",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (fboundp 'exp) (functionp #'exp) (funcall #'exp 0))) (error (list 'sig e))))",
+   "expected": "(ok (t t 1.0))"
+  },
+  {
+   "id": "exp/0038",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"bad\") (error (list 'sig e))))",
+   "expected": "(ok \"bad\")"
+  },
+  {
+   "id": "exp/0039",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok '(1)) (error (list 'sig e))))",
+   "expected": "(ok (1))"
+  },
+  {
+   "id": "exp/0040",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 'wrong) (error (list 'sig e))))",
+   "expected": "(ok wrong)"
+  },
+  {
+   "id": "exp/0041",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok -0.0) (error (list 'sig e))))",
+   "expected": "(ok -0.0)"
+  },
+  {
+   "id": "exp/0042",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok -1) (error (list 'sig e))))",
+   "expected": "(ok -1)"
+  },
+  {
+   "id": "exp/0043",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok -1.0e+INF) (error (list 'sig e))))",
+   "expected": "(ok -1.0e+INF)"
+  },
+  {
+   "id": "exp/0044",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok -2) (error (list 'sig e))))",
+   "expected": "(ok -2)"
+  },
+  {
+   "id": "exp/0045",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok -3.75) (error (list 'sig e))))",
+   "expected": "(ok -3.75)"
+  },
+  {
+   "id": "exp/0046",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 0) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "exp/0047",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 0.0) (error (list 'sig e))))",
+   "expected": "(ok 0.0)"
+  },
+  {
+   "id": "exp/0048",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 0.0e+NaN) (error (list 'sig e))))",
+   "expected": "(ok 0.0e+NaN)"
+  },
+  {
+   "id": "exp/0049",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 0.5) (error (list 'sig e))))",
+   "expected": "(ok 0.5)"
+  },
+  {
+   "id": "exp/0050",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1) (error (list 'sig e))))",
+   "expected": "(ok 1)"
+  },
+  {
+   "id": "exp/0051",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1.0e+INF) (error (list 'sig e))))",
+   "expected": "(ok 1.0e+INF)"
+  },
+  {
+   "id": "exp/0052",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1.25) (error (list 'sig e))))",
+   "expected": "(ok 1.25)"
+  },
+  {
+   "id": "exp/0053",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 2) (error (list 'sig e))))",
+   "expected": "(ok 2)"
+  },
+  {
+   "id": "exp/0054",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok [1]) (error (list 'sig e))))",
+   "expected": "(ok [1])"
+  },
+  {
+   "id": "exp/0055",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok most-negative-fixnum) (error (list 'sig e))))",
+   "expected": "(ok -2305843009213693952)"
+  },
+  {
+   "id": "exp/0056",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok most-positive-fixnum) (error (list 'sig e))))",
+   "expected": "(ok 2305843009213693951)"
+  },
+  {
+   "id": "exp/0057",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok nil) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "exp/0058",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok t) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  }
+ ]
+}

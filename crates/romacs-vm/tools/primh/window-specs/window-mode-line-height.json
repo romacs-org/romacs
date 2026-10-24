@@ -1,0 +1,33 @@
+{
+ "name": "window-mode-line-height",
+ "arity": [
+  0,
+  1
+ ],
+ "effect": "reads",
+ "gnu_files": [
+  "window.c"
+ ],
+ "gnu_def": "window.c:1215",
+ "rust": "src/prims/window.rs:64",
+ "args": [
+  "none"
+ ],
+ "extra": {
+  "0": [
+   "1",
+   "'sym",
+   "(copy-sequence \"s\")"
+  ]
+ },
+ "probes": [
+  "(= (window-mode-line-height) (frame-char-height))",
+  "(window-mode-line-height (minibuffer-window))",
+  "(let ((mode-line-format nil)) (window-mode-line-height))",
+  "(progn (set-window-parameter nil 'mode-line-format 'none) (window-mode-line-height))",
+  "(let ((mode-line-format nil)) (set-window-parameter nil 'mode-line-format \"x\") (= (window-mode-line-height) (frame-char-height)))",
+  "(let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (list (= (window-mode-line-height a) (frame-char-height)) (= (window-mode-line-height b) (frame-char-height))))",
+  "(let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (condition-case e (window-mode-line-height p) (error (list (car e) (car (cdr e)) (eq (car (cdr (cdr e))) p)))))",
+  "(let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (progn (set-window-new-pixel p h) (set-window-new-pixel a h) (delete-window-internal b) (condition-case e (window-mode-line-height b) (error (list (car e) (car (cdr e)) (eq (car (cdr (cdr e))) b))))))"
+ ]
+}

@@ -1,0 +1,15 @@
+error[E0308]: mismatched types
+ --> tests/ui/raw_defface.rs:4:40
+  |
+4 |     Deffaces::default().defface("raw", &raw).unwrap();
+  |                         -------        ^^^^ expected `&BoundedDatum`, found `&Datum`
+  |                         |
+  |                         arguments to this method are incorrect
+  |
+  = note: expected reference `&BoundedDatum`
+             found reference `&Datum`
+note: method defined here
+ --> src/theme.rs
+  |
+  |     pub fn defface(&mut self, name: &str, spec: &BoundedDatum) -> Result<(), FaceError> {
+  |            ^^^^^^^

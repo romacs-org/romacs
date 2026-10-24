@@ -1,0 +1,58 @@
+[
+  {
+    "id": "required-arguments",
+    "form": "(progn (defvar completing-read-function) (let ((completing-read-function (lambda (&rest args) args))) (completing-read \"Pick: \" '(\"a\" \"b\"))))"
+  },
+  {
+    "id": "all-eight-arguments",
+    "form": "(progn (defvar completing-read-function) (let ((completing-read-function (lambda (&rest args) args))) (completing-read \"Pick: \" '(\"a\") 'identity 'confirm '(\"ab\" . 1) '(history . 2) '(\"a\" \"b\") t)))"
+  },
+  {
+    "id": "no-native-validation",
+    "form": "(progn (defvar completing-read-function) (let ((inhibit-interaction t) (completing-read-function (lambda (&rest args) args))) (completing-read 42 73 11 12 13 14 15 16)))"
+  },
+  {
+    "id": "non-string-result",
+    "form": "(progn (defvar completing-read-function) (let ((completing-read-function (lambda (&rest args) '(delegated . 42)))) (completing-read nil nil)))"
+  },
+  {
+    "id": "argument-identity",
+    "form": "(progn (defvar completing-read-function) (let* ((object (list 'unique)) (completing-read-function (lambda (prompt collection &rest ignored) (eq prompt collection)))) (completing-read object object)))"
+  },
+  {
+    "id": "symbol-function",
+    "form": "(progn (defvar completing-read-function) (progn (fset 'completing-test-handler (lambda (&rest args) (car args))) (let ((completing-read-function 'completing-test-handler)) (completing-read 'sentinel nil))))"
+  },
+  {
+    "id": "nested-binding",
+    "form": "(progn (defvar completing-read-function) (let ((completing-read-function (lambda (&rest args) 'outer))) (list (completing-read nil nil) (let ((completing-read-function (lambda (&rest args) 'inner))) (completing-read nil nil)) (completing-read nil nil))))"
+  },
+  {
+    "id": "signal-propagation",
+    "form": "(progn (defvar completing-read-function) (condition-case err (let ((completing-read-function (lambda (&rest args) (signal 'error '(\"handler failure\"))))) (completing-read nil nil)) (error err)))"
+  },
+  {
+    "id": "throw-propagation",
+    "form": "(progn (defvar completing-read-function) (catch 'finished (let ((completing-read-function (lambda (&rest args) (throw 'finished '(escaped 7))))) (completing-read nil nil))))"
+  },
+  {
+    "id": "nil-function",
+    "form": "(progn (defvar completing-read-function) (condition-case err (let ((completing-read-function nil)) (completing-read nil nil)) (error err)))"
+  },
+  {
+    "id": "unbound-function-variable",
+    "form": "(progn (defvar completing-read-function) (progn (makunbound 'completing-read-function) (condition-case err (completing-read nil nil) (error err))))"
+  },
+  {
+    "id": "arity-too-few",
+    "form": "(progn (defvar completing-read-function) (condition-case err (completing-read \"one\") (error (car err))))"
+  },
+  {
+    "id": "arity-too-many",
+    "form": "(progn (defvar completing-read-function) (condition-case err (completing-read 1 2 3 4 5 6 7 8 9) (error (car err))))"
+  },
+  {
+    "id": "handler-fixed-eight",
+    "form": "(progn (defvar completing-read-function) (let ((completing-read-function (lambda (a b c d e f g h) (list a b c d e f g h)))) (completing-read 'a 'b)))"
+  }
+]

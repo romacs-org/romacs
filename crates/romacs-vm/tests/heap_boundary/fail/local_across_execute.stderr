@@ -1,0 +1,9 @@
+error[E0499]: cannot borrow `vm` as mutable more than once at a time
+ --> tests/heap_boundary/fail/local_across_execute.rs:7:5
+  |
+6 |     let list = vm.eval_source("(list 1 2 3)").unwrap();
+  |                -- first mutable borrow occurs here
+7 |     vm.execute(f).unwrap();
+  |     ^^ second mutable borrow occurs here
+8 |     println!("{}", list.display().unwrap());
+  |                    ---- first borrow later used here

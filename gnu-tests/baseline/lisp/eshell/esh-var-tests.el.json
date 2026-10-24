@@ -1,0 +1,2438 @@
+{
+ "blob": "f7158a19160749f974b1bd21337e5a471b7e2150",
+ "compiled": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": true,
+  "results": {
+   "esh-var-test/alias/export": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/alias/function": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/alias/function-pair": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/alias/local-variables": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/alias/string": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/alias/string/prefer-lisp": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/alias/symbol": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/alias/symbol-pair": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/columns-var": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/command-interp": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/command-interp-splice": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/export": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/gid-var": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/inside-emacs-var": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/inside-emacs-var-split-indices": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-cmd": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-cmd-external": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-cmd-external-indices": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-cmd-indices": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-concat-cmd": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-concat-cmd-external": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-concat-cmd2": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-concat-lisp": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-concat-lisp2": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-convert-cmd-multiline": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-convert-cmd-number": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-convert-cmd-split-indices": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-convert-cmd-string-newline": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-convert-quoted-var-number": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-convert-quoted-var-split-indices": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-convert-var-number": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-convert-var-split-indices": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-lisp": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-lisp-indices": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-list-var": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-list-var-concat": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-quoted-var": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-quoted-var-concat": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-temp-cmd": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-var": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-var-assoc": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-var-indices-subcommand": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-var-indices/list": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-var-indices/ring": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-var-indices/split": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-var-indices/vector": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-var-length-alist": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-var-length-list": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-var-length-string": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-var-regexp-split-indices": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-var-splice": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-var-splice-concat": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-var-string-split-indices": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/last-arg-var": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/last-arg-var-indices": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/last-arg-var-split-indices": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/last-result-var": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/last-result-var-ext-cmd": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/last-result-var-split-indices": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/last-result-var-twice": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/last-status-var-ext-cmd": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/last-status-var-lisp-command": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/last-status-var-lisp-form": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/last-status-var-lisp-form-2": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/lines-var": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/local-variables": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/local-variables/cd": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/local-variables/env": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/local-variables/env/no-locals": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/local-variables/skip-nil": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/pager-var/default": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/pager-var/set": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/pager-var/set-locally": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/pager-var/unset": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/path-var/local-directory": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/path-var/preserve-across-hosts": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/path-var/remote-directory": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/path-var/set": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/path-var/set-locally": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/quote-interp-var-indices-subcommand": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/quoted-interp-cmd": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/quoted-interp-cmd-indices": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/quoted-interp-concat-cmd": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/quoted-interp-convert-cmd-multiline": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/quoted-interp-convert-cmd-number": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/quoted-interp-convert-cmd-split-indices": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/quoted-interp-convert-cmd-string-newline": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/quoted-interp-convert-quoted-var-number": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/quoted-interp-convert-quoted-var-split-indices": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/quoted-interp-convert-var-number": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/quoted-interp-convert-var-split-indices": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/quoted-interp-lisp": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/quoted-interp-lisp-indices": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/quoted-interp-list-var": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/quoted-interp-list-var-concat": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/quoted-interp-quoted-var": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/quoted-interp-temp-cmd": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/quoted-interp-var": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/quoted-interp-var-assoc": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/quoted-interp-var-indices": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/quoted-interp-var-length-alist": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/quoted-interp-var-length-list": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/quoted-interp-var-length-string": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/quoted-interp-var-regexp-split-indices": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/quoted-interp-var-splice": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/quoted-interp-var-splice-concat": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/quoted-interp-var-split-indices": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/quoted-interp-var-string-split-indices": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/set/env-var": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/set/symbol": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/setq": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/uid-var": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/unset/env-var": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/unset/symbol": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   }
+  },
+  "timed_out": false
+ },
+ "file": "lisp/eshell/esh-var-tests.el",
+ "gnu": {
+  "emacs": "<recording-path-redacted>/emacs-32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+  "version": "32.0.50"
+ },
+ "harness_sha256": "78c20850429a08af22faadf73b5d164c560230e83d7eb88ef60cb995670703ef",
+ "mini": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": null,
+  "results": {
+   "esh-var-test/alias/export": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-var-test/alias/function": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-var-test/alias/function-pair": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-var-test/alias/local-variables": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-var-test/alias/string": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-var-test/alias/string/prefer-lisp": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-var-test/alias/symbol": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-var-test/alias/symbol-pair": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-var-test/columns-var": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/command-interp": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/command-interp-splice": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/export": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-var-test/gid-var": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/inside-emacs-var": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-var-test/inside-emacs-var-split-indices": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-var-test/interp-cmd": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/interp-cmd-external": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-var-test/interp-cmd-external-indices": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-var-test/interp-cmd-indices": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/interp-concat-cmd": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/interp-concat-cmd-external": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-var-test/interp-concat-cmd2": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/interp-concat-lisp": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/interp-concat-lisp2": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/interp-convert-cmd-multiline": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/interp-convert-cmd-number": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/interp-convert-cmd-split-indices": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/interp-convert-cmd-string-newline": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/interp-convert-quoted-var-number": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/interp-convert-quoted-var-split-indices": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/interp-convert-var-number": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/interp-convert-var-split-indices": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/interp-lisp": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/interp-lisp-indices": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/interp-list-var": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/interp-list-var-concat": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/interp-quoted-var": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/interp-quoted-var-concat": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/interp-temp-cmd": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/interp-var": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/interp-var-assoc": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/interp-var-indices-subcommand": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/interp-var-indices/list": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/interp-var-indices/ring": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/interp-var-indices/split": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/interp-var-indices/vector": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/interp-var-length-alist": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/interp-var-length-list": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/interp-var-length-string": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/interp-var-regexp-split-indices": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/interp-var-splice": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/interp-var-splice-concat": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/interp-var-string-split-indices": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/last-arg-var": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-var-test/last-arg-var-indices": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-var-test/last-arg-var-split-indices": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-var-test/last-result-var": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-var-test/last-result-var-ext-cmd": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-var-test/last-result-var-split-indices": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-var-test/last-result-var-twice": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-var-test/last-status-var-ext-cmd": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-var-test/last-status-var-lisp-command": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-var-test/last-status-var-lisp-form": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-var-test/last-status-var-lisp-form-2": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-var-test/lines-var": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/local-variables": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-var-test/local-variables/cd": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-var-test/local-variables/env": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-var-test/local-variables/env/no-locals": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-var-test/local-variables/skip-nil": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-var-test/pager-var/default": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/pager-var/set": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-var-test/pager-var/set-locally": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-var-test/pager-var/unset": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-var-test/path-var/local-directory": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-var-test/path-var/preserve-across-hosts": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-var-test/path-var/remote-directory": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-var-test/path-var/set": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-var-test/path-var/set-locally": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-var-test/quote-interp-var-indices-subcommand": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/quoted-interp-cmd": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/quoted-interp-cmd-indices": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/quoted-interp-concat-cmd": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/quoted-interp-convert-cmd-multiline": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/quoted-interp-convert-cmd-number": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/quoted-interp-convert-cmd-split-indices": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/quoted-interp-convert-cmd-string-newline": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/quoted-interp-convert-quoted-var-number": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/quoted-interp-convert-quoted-var-split-indices": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/quoted-interp-convert-var-number": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/quoted-interp-convert-var-split-indices": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/quoted-interp-lisp": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/quoted-interp-lisp-indices": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/quoted-interp-list-var": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/quoted-interp-list-var-concat": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/quoted-interp-quoted-var": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/quoted-interp-temp-cmd": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/quoted-interp-var": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/quoted-interp-var-assoc": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/quoted-interp-var-indices": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/quoted-interp-var-length-alist": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/quoted-interp-var-length-list": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/quoted-interp-var-length-string": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/quoted-interp-var-regexp-split-indices": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/quoted-interp-var-splice": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/quoted-interp-var-splice-concat": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/quoted-interp-var-split-indices": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/quoted-interp-var-string-split-indices": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/set/env-var": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-var-test/set/symbol": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/setq": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/uid-var": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-var-test/unset/env-var": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-var-test/unset/symbol": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   }
+  },
+  "timed_out": false
+ },
+ "read_error": null,
+ "real": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": true,
+  "results": {
+   "esh-var-test/alias/export": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/alias/function": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/alias/function-pair": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/alias/local-variables": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/alias/string": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/alias/string/prefer-lisp": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/alias/symbol": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/alias/symbol-pair": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/columns-var": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/command-interp": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/command-interp-splice": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/export": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/gid-var": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/inside-emacs-var": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/inside-emacs-var-split-indices": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-cmd": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-cmd-external": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-cmd-external-indices": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-cmd-indices": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-concat-cmd": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-concat-cmd-external": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-concat-cmd2": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-concat-lisp": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-concat-lisp2": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-convert-cmd-multiline": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-convert-cmd-number": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-convert-cmd-split-indices": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-convert-cmd-string-newline": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-convert-quoted-var-number": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-convert-quoted-var-split-indices": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-convert-var-number": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-convert-var-split-indices": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-lisp": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-lisp-indices": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-list-var": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-list-var-concat": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-quoted-var": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-quoted-var-concat": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-temp-cmd": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-var": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-var-assoc": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-var-indices-subcommand": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-var-indices/list": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-var-indices/ring": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-var-indices/split": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-var-indices/vector": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-var-length-alist": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-var-length-list": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-var-length-string": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-var-regexp-split-indices": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-var-splice": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-var-splice-concat": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/interp-var-string-split-indices": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/last-arg-var": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/last-arg-var-indices": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/last-arg-var-split-indices": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/last-result-var": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/last-result-var-ext-cmd": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/last-result-var-split-indices": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/last-result-var-twice": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/last-status-var-ext-cmd": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/last-status-var-lisp-command": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/last-status-var-lisp-form": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/last-status-var-lisp-form-2": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/lines-var": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/local-variables": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/local-variables/cd": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/local-variables/env": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/local-variables/env/no-locals": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/local-variables/skip-nil": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/pager-var/default": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/pager-var/set": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/pager-var/set-locally": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/pager-var/unset": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/path-var/local-directory": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/path-var/preserve-across-hosts": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/path-var/remote-directory": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/path-var/set": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/path-var/set-locally": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/quote-interp-var-indices-subcommand": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/quoted-interp-cmd": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/quoted-interp-cmd-indices": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/quoted-interp-concat-cmd": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/quoted-interp-convert-cmd-multiline": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/quoted-interp-convert-cmd-number": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/quoted-interp-convert-cmd-split-indices": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/quoted-interp-convert-cmd-string-newline": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/quoted-interp-convert-quoted-var-number": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/quoted-interp-convert-quoted-var-split-indices": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/quoted-interp-convert-var-number": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/quoted-interp-convert-var-split-indices": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/quoted-interp-lisp": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/quoted-interp-lisp-indices": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/quoted-interp-list-var": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/quoted-interp-list-var-concat": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/quoted-interp-quoted-var": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/quoted-interp-temp-cmd": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/quoted-interp-var": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/quoted-interp-var-assoc": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/quoted-interp-var-indices": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/quoted-interp-var-length-alist": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/quoted-interp-var-length-list": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/quoted-interp-var-length-string": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/quoted-interp-var-regexp-split-indices": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/quoted-interp-var-splice": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/quoted-interp-var-splice-concat": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/quoted-interp-var-split-indices": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/quoted-interp-var-string-split-indices": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/set/env-var": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/set/symbol": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/setq": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/uid-var": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/unset/env-var": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-var-test/unset/symbol": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   }
+  },
+  "timed_out": false
+ },
+ "schema": 1,
+ "toplevel_deftests": 114
+}

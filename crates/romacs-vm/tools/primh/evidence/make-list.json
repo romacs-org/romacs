@@ -1,0 +1,373 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "make-list",
+ "spec_sha256": "50e9657b51c2f14f4651165c3937e8794b7b0d8bc57763b06feaf0778c917905",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "make-list",
+    "subr",
+    2,
+    2
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "alloc.c": "b7bbe6972facf1208414a22d803e906cb577c477adaef975d6e7bf63144bc9a1"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "make-list/0000",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (make-list 0 nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "make-list/0001",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (make-list 0 'fill)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "make-list/0002",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (make-list 0 (list 7))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "make-list/0003",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (make-list 0 [9])) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "make-list/0004",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (make-list 0 \"x\")) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "make-list/0005",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (make-list 1 nil)) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "make-list/0006",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (make-list 1 'fill)) (error (list 'sig e))))",
+   "expected": "(ok (fill))"
+  },
+  {
+   "id": "make-list/0007",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (make-list 1 (list 7))) (error (list 'sig e))))",
+   "expected": "(ok ((7)))"
+  },
+  {
+   "id": "make-list/0008",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (make-list 1 [9])) (error (list 'sig e))))",
+   "expected": "(ok ([9]))"
+  },
+  {
+   "id": "make-list/0009",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (make-list 1 \"x\")) (error (list 'sig e))))",
+   "expected": "(ok (\"x\"))"
+  },
+  {
+   "id": "make-list/0010",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (make-list 2 nil)) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "make-list/0011",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (make-list 2 'fill)) (error (list 'sig e))))",
+   "expected": "(ok (fill fill))"
+  },
+  {
+   "id": "make-list/0012",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (make-list 2 (list 7))) (error (list 'sig e))))",
+   "expected": "(ok ((7) (7)))"
+  },
+  {
+   "id": "make-list/0013",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (make-list 2 [9])) (error (list 'sig e))))",
+   "expected": "(ok ([9] [9]))"
+  },
+  {
+   "id": "make-list/0014",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (make-list 2 \"x\")) (error (list 'sig e))))",
+   "expected": "(ok (\"x\" \"x\"))"
+  },
+  {
+   "id": "make-list/0015",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (make-list -1 nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument wholenump -1))"
+  },
+  {
+   "id": "make-list/0016",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (make-list -1 'fill)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument wholenump -1))"
+  },
+  {
+   "id": "make-list/0017",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (make-list -1 (list 7))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument wholenump -1))"
+  },
+  {
+   "id": "make-list/0018",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (make-list -1 [9])) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument wholenump -1))"
+  },
+  {
+   "id": "make-list/0019",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (make-list -1 \"x\")) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument wholenump -1))"
+  },
+  {
+   "id": "make-list/0020",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (make-list 1.0 nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument wholenump 1.0))"
+  },
+  {
+   "id": "make-list/0021",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (make-list 1.0 'fill)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument wholenump 1.0))"
+  },
+  {
+   "id": "make-list/0022",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (make-list 1.0 (list 7))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument wholenump 1.0))"
+  },
+  {
+   "id": "make-list/0023",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (make-list 1.0 [9])) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument wholenump 1.0))"
+  },
+  {
+   "id": "make-list/0024",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (make-list 1.0 \"x\")) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument wholenump 1.0))"
+  },
+  {
+   "id": "make-list/0025",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (make-list 'bad nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument wholenump bad))"
+  },
+  {
+   "id": "make-list/0026",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (make-list 'bad 'fill)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument wholenump bad))"
+  },
+  {
+   "id": "make-list/0027",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (make-list 'bad (list 7))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument wholenump bad))"
+  },
+  {
+   "id": "make-list/0028",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (make-list 'bad [9])) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument wholenump bad))"
+  },
+  {
+   "id": "make-list/0029",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (make-list 'bad \"x\")) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument wholenump bad))"
+  },
+  {
+   "id": "make-list/0030",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'make-list '(1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr make-list> 1))"
+  },
+  {
+   "id": "make-list/0031",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'make-list '(1 1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr make-list> 3))"
+  },
+  {
+   "id": "make-list/0032",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0) (a1 nil)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (make-list a0 a1))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "make-list/0033",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0) (a1 nil)) (let ((r (make-list a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "make-list/0034",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0) (a1 [9])) (let ((r (make-list a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "make-list/0035",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 'fill)) (let ((r (make-list a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "make-list/0036",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 \"x\")) (let ((r (make-list a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "make-list/0037",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 2) (a1 (list 7))) (let ((r (make-list a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "make-list/0038",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1) (a1 nil)) (let ((r (make-list a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument wholenump -1))"
+  },
+  {
+   "id": "make-list/0039",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1) (a1 [9])) (let ((r (make-list a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument wholenump -1))"
+  },
+  {
+   "id": "make-list/0040",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.0) (a1 'fill)) (let ((r (make-list a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument wholenump 1.0))"
+  },
+  {
+   "id": "make-list/0041",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.0) (a1 \"x\")) (let ((r (make-list a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument wholenump 1.0))"
+  },
+  {
+   "id": "make-list/0042",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'bad) (a1 (list 7))) (let ((r (make-list a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument wholenump bad))"
+  },
+  {
+   "id": "make-list/0043",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((x (list 7)) (a (make-list 3 x)) (b (make-list 3 x))) (list (make-list 0 x) (make-list 1 'fill) (length a) (eq (car a) x) (eq (car a) (car (cdr a))) (eq a b) (eq a (cdr a)) (progn (setcar x 9) a) (progn (setcar a 'changed) (car b))))) (error (list 'sig e))))",
+   "expected": "(ok (nil (fill) 3 t t nil nil (changed (9) (9)) (9)))"
+  },
+  {
+   "id": "make-list/0044",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (fboundp 'make-list) (functionp #'make-list) (funcall #'make-list 2 'x) (condition-case e (make-list -1 nil) (error e)) (condition-case e (make-list 1.0 nil) (error e)) (condition-case e (make-list 'bad nil) (error e)) (condition-case e (apply #'make-list '(1)) (error (list (car e) (nth 2 e)))) (condition-case e (apply #'make-list '(1 nil extra)) (error (list (car e) (nth 2 e)))))) (error (list 'sig e))))",
+   "expected": "(ok (t t (x x) (wrong-type-argument wholenump -1) (wrong-type-argument wholenump 1.0) (wrong-type-argument wholenump bad) (wrong-number-of-arguments 1) (wrong-number-of-arguments 3)))"
+  },
+  {
+   "id": "make-list/0045",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((r (apply #'record 'tag (make-list 4094 'fill)))) (list (length r) (aref r 0) (aref r 4094)))) (error (list 'sig e))))",
+   "expected": "(ok (4095 tag fill))"
+  },
+  {
+   "id": "make-list/0046",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"x\") (error (list 'sig e))))",
+   "expected": "(ok \"x\")"
+  },
+  {
+   "id": "make-list/0047",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 'bad) (error (list 'sig e))))",
+   "expected": "(ok bad)"
+  },
+  {
+   "id": "make-list/0048",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 'fill) (error (list 'sig e))))",
+   "expected": "(ok fill)"
+  },
+  {
+   "id": "make-list/0049",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list 7)) (error (list 'sig e))))",
+   "expected": "(ok (7))"
+  },
+  {
+   "id": "make-list/0050",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok -1) (error (list 'sig e))))",
+   "expected": "(ok -1)"
+  },
+  {
+   "id": "make-list/0051",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 0) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "make-list/0052",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1) (error (list 'sig e))))",
+   "expected": "(ok 1)"
+  },
+  {
+   "id": "make-list/0053",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1.0) (error (list 'sig e))))",
+   "expected": "(ok 1.0)"
+  },
+  {
+   "id": "make-list/0054",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 2) (error (list 'sig e))))",
+   "expected": "(ok 2)"
+  },
+  {
+   "id": "make-list/0055",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok [9]) (error (list 'sig e))))",
+   "expected": "(ok [9])"
+  },
+  {
+   "id": "make-list/0056",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok nil) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  }
+ ]
+}

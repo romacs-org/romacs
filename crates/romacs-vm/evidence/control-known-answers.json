@@ -1,0 +1,589 @@
+{
+  "version": "32.0.50",
+  "command": "python3 tools/control_oracle.py --record --gnu-repository REPO --binary VM2",
+  "cases": [
+    {
+      "name": "normal-value",
+      "source": "(unwind-protect 17 99)",
+      "transport": [
+        "unwind-protect",
+        17,
+        99
+      ],
+      "expected": "17"
+    },
+    {
+      "name": "empty-cleanup",
+      "source": "(unwind-protect 17)",
+      "transport": [
+        "unwind-protect",
+        17
+      ],
+      "expected": "17"
+    },
+    {
+      "name": "cleanup-effect",
+      "source": "(let ((x 0)) (vector (unwind-protect 17 (setq x 9)) x))",
+      "transport": [
+        "let",
+        [
+          [
+            "x",
+            0
+          ]
+        ],
+        [
+          "vector",
+          [
+            "unwind-protect",
+            17,
+            [
+              "setq",
+              "x",
+              9
+            ]
+          ],
+          "x"
+        ]
+      ],
+      "expected": "[17 9]"
+    },
+    {
+      "name": "nested-order",
+      "source": "(let ((x 0)) (vector (unwind-protect (unwind-protect 17 (setq x (+ x 1))) (setq x (* x 10))) x))",
+      "transport": [
+        "let",
+        [
+          [
+            "x",
+            0
+          ]
+        ],
+        [
+          "vector",
+          [
+            "unwind-protect",
+            [
+              "unwind-protect",
+              17,
+              [
+                "setq",
+                "x",
+                [
+                  "+",
+                  "x",
+                  1
+                ]
+              ]
+            ],
+            [
+              "setq",
+              "x",
+              [
+                "*",
+                "x",
+                10
+              ]
+            ]
+          ],
+          "x"
+        ]
+      ],
+      "expected": "[17 10]"
+    },
+    {
+      "name": "body-signal",
+      "source": "(let ((x 0)) (vector (condition-case e (unwind-protect (signal (quote arith-error) (quote nil)) (setq x 9)) (error e)) x))",
+      "transport": [
+        "let",
+        [
+          [
+            "x",
+            0
+          ]
+        ],
+        [
+          "vector",
+          [
+            "condition-case",
+            "e",
+            [
+              "unwind-protect",
+              [
+                "signal",
+                [
+                  "quote",
+                  "arith-error"
+                ],
+                [
+                  "quote",
+                  "nil"
+                ]
+              ],
+              [
+                "setq",
+                "x",
+                9
+              ]
+            ],
+            [
+              "error",
+              "e"
+            ]
+          ],
+          "x"
+        ]
+      ],
+      "expected": "[(arith-error) 9]"
+    },
+    {
+      "name": "cleanup-replaces-signal",
+      "source": "(condition-case e (unwind-protect (signal (quote arith-error) (quote nil)) (signal (quote file-error) (quote (cleanup)))) (error e))",
+      "transport": [
+        "condition-case",
+        "e",
+        [
+          "unwind-protect",
+          [
+            "signal",
+            [
+              "quote",
+              "arith-error"
+            ],
+            [
+              "quote",
+              "nil"
+            ]
+          ],
+          [
+            "signal",
+            [
+              "quote",
+              "file-error"
+            ],
+            [
+              "quote",
+              [
+                "cleanup"
+              ]
+            ]
+          ]
+        ],
+        [
+          "error",
+          "e"
+        ]
+      ],
+      "expected": "(file-error cleanup)"
+    },
+    {
+      "name": "cleanup-replaces-normal",
+      "source": "(condition-case e (unwind-protect 17 (signal (quote file-error) (quote (cleanup)))) (error e))",
+      "transport": [
+        "condition-case",
+        "e",
+        [
+          "unwind-protect",
+          17,
+          [
+            "signal",
+            [
+              "quote",
+              "file-error"
+            ],
+            [
+              "quote",
+              [
+                "cleanup"
+              ]
+            ]
+          ]
+        ],
+        [
+          "error",
+          "e"
+        ]
+      ],
+      "expected": "(file-error cleanup)"
+    },
+    {
+      "name": "cleanup-catches-local-signal",
+      "source": "(condition-case e (unwind-protect (signal (quote arith-error) (quote (body))) (condition-case nil (signal (quote file-error) (quote nil)) (error 99))) (error e))",
+      "transport": [
+        "condition-case",
+        "e",
+        [
+          "unwind-protect",
+          [
+            "signal",
+            [
+              "quote",
+              "arith-error"
+            ],
+            [
+              "quote",
+              [
+                "body"
+              ]
+            ]
+          ],
+          [
+            "condition-case",
+            "nil",
+            [
+              "signal",
+              [
+                "quote",
+                "file-error"
+              ],
+              [
+                "quote",
+                "nil"
+              ]
+            ],
+            [
+              "error",
+              99
+            ]
+          ]
+        ],
+        [
+          "error",
+          "e"
+        ]
+      ],
+      "expected": "(arith-error body)"
+    },
+    {
+      "name": "throw-through-calls",
+      "source": "(let ((x 0)) (progn (defun s49-inner () (unwind-protect (throw (quote done) 42) (setq x (+ x 1)))) (defun s49-outer () (unwind-protect (s49-inner) (setq x (* x 10)))) (vector (catch (quote done) (s49-outer)) x)))",
+      "transport": [
+        "let",
+        [
+          [
+            "x",
+            0
+          ]
+        ],
+        [
+          "progn",
+          [
+            "defun",
+            "s49-inner",
+            [],
+            [
+              "unwind-protect",
+              [
+                "throw",
+                [
+                  "quote",
+                  "done"
+                ],
+                42
+              ],
+              [
+                "setq",
+                "x",
+                [
+                  "+",
+                  "x",
+                  1
+                ]
+              ]
+            ]
+          ],
+          [
+            "defun",
+            "s49-outer",
+            [],
+            [
+              "unwind-protect",
+              [
+                "s49-inner"
+              ],
+              [
+                "setq",
+                "x",
+                [
+                  "*",
+                  "x",
+                  10
+                ]
+              ]
+            ]
+          ],
+          [
+            "vector",
+            [
+              "catch",
+              [
+                "quote",
+                "done"
+              ],
+              [
+                "s49-outer"
+              ]
+            ],
+            "x"
+          ]
+        ]
+      ],
+      "expected": "[42 10]"
+    },
+    {
+      "name": "cleanup-throw-replaces-throw",
+      "source": "(catch (quote outer) (catch (quote inner) (unwind-protect (throw (quote inner) 1) (throw (quote outer) 2))))",
+      "transport": [
+        "catch",
+        [
+          "quote",
+          "outer"
+        ],
+        [
+          "catch",
+          [
+            "quote",
+            "inner"
+          ],
+          [
+            "unwind-protect",
+            [
+              "throw",
+              [
+                "quote",
+                "inner"
+              ],
+              1
+            ],
+            [
+              "throw",
+              [
+                "quote",
+                "outer"
+              ],
+              2
+            ]
+          ]
+        ]
+      ],
+      "expected": "2"
+    },
+    {
+      "name": "nested-cleanup-unwind",
+      "source": "(let ((x 0)) (vector (catch (quote done) (unwind-protect (throw (quote done) 42) (unwind-protect (setq x 3) (setq x (+ x 4))))) x))",
+      "transport": [
+        "let",
+        [
+          [
+            "x",
+            0
+          ]
+        ],
+        [
+          "vector",
+          [
+            "catch",
+            [
+              "quote",
+              "done"
+            ],
+            [
+              "unwind-protect",
+              [
+                "throw",
+                [
+                  "quote",
+                  "done"
+                ],
+                42
+              ],
+              [
+                "unwind-protect",
+                [
+                  "setq",
+                  "x",
+                  3
+                ],
+                [
+                  "setq",
+                  "x",
+                  [
+                    "+",
+                    "x",
+                    4
+                  ]
+                ]
+              ]
+            ]
+          ],
+          "x"
+        ]
+      ],
+      "expected": "[42 7]"
+    },
+    {
+      "name": "no-catch-still-cleans",
+      "source": "(let ((x 0)) (vector (condition-case e (unwind-protect (throw (quote missing) 5) (setq x 7)) (error (car e))) x))",
+      "transport": [
+        "let",
+        [
+          [
+            "x",
+            0
+          ]
+        ],
+        [
+          "vector",
+          [
+            "condition-case",
+            "e",
+            [
+              "unwind-protect",
+              [
+                "throw",
+                [
+                  "quote",
+                  "missing"
+                ],
+                5
+              ],
+              [
+                "setq",
+                "x",
+                7
+              ]
+            ],
+            [
+              "error",
+              [
+                "car",
+                "e"
+              ]
+            ]
+          ],
+          "x"
+        ]
+      ],
+      "expected": "[no-catch 7]"
+    },
+    {
+      "name": "normal-heap-value",
+      "source": "(unwind-protect (cons 41 42) (dotimes (i 20) (cons i nil)))",
+      "transport": [
+        "unwind-protect",
+        [
+          "cons",
+          41,
+          42
+        ],
+        [
+          "dotimes",
+          [
+            "i",
+            20
+          ],
+          [
+            "cons",
+            "i",
+            "nil"
+          ]
+        ]
+      ],
+      "expected": "(41 . 42)"
+    },
+    {
+      "name": "suspended-throw-payload",
+      "source": "(catch (quote done) (unwind-protect (throw (quote done) (cons 41 42)) (dotimes (i 20) (cons i nil))))",
+      "transport": [
+        "catch",
+        [
+          "quote",
+          "done"
+        ],
+        [
+          "unwind-protect",
+          [
+            "throw",
+            [
+              "quote",
+              "done"
+            ],
+            [
+              "cons",
+              41,
+              42
+            ]
+          ],
+          [
+            "dotimes",
+            [
+              "i",
+              20
+            ],
+            [
+              "cons",
+              "i",
+              "nil"
+            ]
+          ]
+        ]
+      ],
+      "expected": "(41 . 42)"
+    },
+    {
+      "name": "suspended-signal-payload",
+      "source": "(condition-case e (unwind-protect (signal (quote arith-error) (cons 41 42)) (dotimes (i 20) (cons i nil))) (error e))",
+      "transport": [
+        "condition-case",
+        "e",
+        [
+          "unwind-protect",
+          [
+            "signal",
+            [
+              "quote",
+              "arith-error"
+            ],
+            [
+              "cons",
+              41,
+              42
+            ]
+          ],
+          [
+            "dotimes",
+            [
+              "i",
+              20
+            ],
+            [
+              "cons",
+              "i",
+              "nil"
+            ]
+          ]
+        ],
+        [
+          "error",
+          "e"
+        ]
+      ],
+      "expected": "(arith-error 41 . 42)"
+    }
+  ],
+  "regime": "GNU byte-compiled / VM2 compiled",
+  "world": "fresh GNU process and VM2 per case; no json.el preload",
+  "gc": "GNU automatic GC enabled; VM2 moving GC floor 1",
+  "gnu_revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+  "gnu_binary_sha256": "20a94ee7abc04960e3296deead030a37866d1d1e1522f3efd818838af7fffbe4",
+  "gnu_sources": {
+    "eval.c": "db894444b2edc1e7e675d5d8f97cba7e6f77f2beb0e5c3a130afc505c6f387b4",
+    "data.c": "eca7895a8043cd0a960dfe037a46028374d1a40cc6ee4d0cf6de90ac56c242ae",
+    "json.c": "5c4b12fe53b489b5152046a97204d6b70a942f029bbf8d0dcc54005f51c68790",
+    "bytecode.c": "97fb8f41758f88c02684da4f766d7694e3c3274077f4be46a3163949bb6431ab"
+  },
+  "generator_sha256": "36d15e2d454404860b0ba430eeab1a74f0990e4da27720b8fb75c46120591947",
+  "source_sha256": "e7a46117d2458d1320b153883e11a487bacbfe5bd224ef3e0c50758ac93d07f5",
+  "compiler_id": "b27dc483f7424b4f1f432ff6c859b510fe8f541c240ec91920935c979b7f261e",
+  "binary_sha256": "69ea60c139074965526327e399117de162a70f1e6c3b52db836b3e941fa4c4cd"
+}

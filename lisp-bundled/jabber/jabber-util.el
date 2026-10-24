@@ -1,0 +1,894 @@
+;;; jabber-util.el --- various utility functions    -*- coding: utf-8; lexical-binding: t; -*-
+
+;; Copyright (C) 2003, 2004, 2007, 2008 - Magnus Henoch - mange@freemail.hu
+;; Copyright (C) 2002, 2003, 2004 - tom berger - object@intelectronica.net
+;; Copyright (C) 2008, 2010 - Terechkov Evgenii - evg@altlinux.org
+;; Copyright (C) 2010 - Kirill A. Korinskiy - catap@catap.ru
+;; Copyright (C) 2026  Thanos Apollo
+
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
+
+;; This file is a part of jabber.el.
+
+;; This program is free software; you can redistribute it and/or modify
+;; it under the terms of the GNU General Public License as published by
+;; the Free Software Foundation; either version 2 of the License, or
+;; (at your option) any later version.
+
+;; This program is distributed in the hope that it will be useful,
+;; but WITHOUT ANY WARRANTY; without even the implied warranty of
+;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+;; GNU General Public License for more details.
+
+;; You should have received a copy of the GNU General Public License
+;; along with this program; if not, write to the Free Software
+;; Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+
+;;; Commentary:
+;;
+
+;;; Code:
+
+(require 'cl-lib)
+(require 'crm)
+(require 'jabber-jid)
+(require 'jabber-muc-state)
+(require 'jabber-presence-display)
+(require 'jabber-state)
+(require 'jabber-stanza)
+(require 'jabber-xml)
+(require 'fsm)
+(require 'password-cache)
+
+(condition-case nil
+    (require 'auth-source)
+  (error nil))
+
+(defvar jabber-jid-history nil
+  "History of entered JIDs.")
+
+;; Global reference declarations
+
+(declare-function auth-source-search "auth-source" (&rest spec))
+(defvar jabber-delay-xmlns)            ; jabber-xml.el
+(defvar jabber-delay-legacy-xmlns)     ; jabber-xml.el
+(defvar jabber-stanzas-xmlns)          ; jabber-xml.el
+
+;;
+
+(defsubst jabber-read-with-input-method (prompt &optional initial-contents history default-value)
+  "Like `read-string' with PROMPT, but always inheriting the current input method.
+INITIAL-CONTENTS, HISTORY and DEFAULT-VALUE are passed straight through."
+  ;; Preserve input method when entering a minibuffer.
+  (read-string prompt initial-contents history default-value t))
+
+(defun jabber-completing-read-multiple
+    (prompt collection defaults &optional require-match)
+  "Read multiple values with PROMPT, preserving accepted DEFAULTS.
+COLLECTION and REQUIRE-MATCH are passed to `completing-read-multiple'."
+  (let* ((default (and defaults (string-join defaults ",")))
+         (values (completing-read-multiple
+                  prompt collection nil require-match nil nil default)))
+    (if (and default
+             (equal values (split-string default crm-separator t)))
+        defaults
+      values)))
+
+(defvar jabber-connections)
+(defun jabber-roster-contact-p (jc jid)
+  "Return non-nil when JID's bare JID is on connection JC's roster."
+  (and jc jid
+       (memq (jabber-jid-symbol jid jc)
+             (plist-get (fsm-get-state-data jc) :roster))))
+
+(defun jabber-concat-rosters ()
+  "Concatenate the rosters of all connected accounts."
+  (apply #'append
+	 (mapcar
+	  (lambda (jc)
+	    (plist-get (fsm-get-state-data jc) :roster))
+	  jabber-connections)))
+
+(defun jabber--roster-full-jids (roster)
+  "Return full-JID completion symbols for scoped contacts in ROSTER.
+Preserve resource spelling and the contact owner without interning full JIDs."
+  (apply #'append
+         (mapcar
+          (lambda (jid)
+            (mapcar (lambda (resource)
+                      (let ((full (make-symbol (format "%s/%s" jid (car resource)))))
+                        (setplist full (copy-sequence (symbol-plist jid)))
+                        full))
+                    (get jid 'resources)))
+          roster)))
+
+(defun jabber-concat-rosters-full ()
+  "Concatenate the rosters of all connected accounts with resources."
+  (jabber--roster-full-jids (jabber-concat-rosters)))
+
+(defun jabber-connection-jid (jc)
+  "Return the full JID of connection JC."
+  (let ((sd (fsm-get-state-data jc)))
+    (concat (plist-get sd :username) "@"
+	    (plist-get sd :server) "/"
+	    (plist-get sd :resource))))
+
+(defun jabber-connection-bare-jid (jc)
+  "Return the bare JID of connection JC."
+  (let ((sd (fsm-get-state-data jc)))
+    (concat (plist-get sd :username) "@"
+	    (plist-get sd :server))))
+
+(defun jabber-connection-original-jid (jc)
+  "Return the original JID of connection JC.
+The \"original JID\" is the JID we authenticated with.  The
+server might subsequently assign us a different JID at resource
+binding."
+  (plist-get (fsm-get-state-data jc) :original-jid))
+
+(defun jabber-find-connection (bare-jid)
+  "Find the connection to the account named by BARE-JID.
+Return nil if none found."
+  (cl-dolist (jc jabber-connections)
+    (when (string= bare-jid (jabber-connection-bare-jid jc))
+      (cl-return jc))))
+
+(defun jabber-connection-active-p (jc)
+  "Return non-nil when JC has an established XMPP session."
+  (and (memq jc jabber-connections)
+       (eq (get jc :state) :session-established)))
+
+(defun jabber-find-active-connection (dead-jc)
+  "Find an active connection for dead connection DEAD-JC.
+Return nil if none found."
+  (let ((jid (jabber-connection-bare-jid dead-jc)))
+    (cl-find-if
+     (lambda (jc)
+       (and (jabber-connection-active-p jc)
+            (string= jid (jabber-connection-bare-jid jc))))
+     jabber-connections)))
+
+(defun jabber-jid-username (jid)
+  "Return the username portion of JID, or nil if none found.
+JID must be a string."
+  (let ((bare (jabber-jid-user jid)))
+    (when (string-match "\\(.*\\)@" bare)
+      (match-string 1 bare))))
+
+(defun jabber-jid-server (jid)
+  "Return the server portion of JID."
+  (let ((bare (jabber-jid-user jid)))
+    (when (string-match "\\`\\(?:.*@\\)?\\([^@]+\\)\\'" bare)
+      (match-string 1 bare))))
+
+(defun jabber-jid-rostername (user &optional jc)
+  "Return USER's roster name on JC, or nil.
+Without JC, use only a supplied symbol or legacy accountless metadata."
+  (let* ((user (jabber-jid-symbol user jc))
+         (name (get user 'name)))
+    (and name (> (length name) 0) name)))
+
+(defun jabber-jid-displayname (jid &optional jc)
+  "Return JID's roster name on JC, or its bare JID.
+Without JC, never borrow metadata from a connected account."
+  (or (jabber-jid-rostername jid jc)
+      (jabber-jid-user (if (symbolp jid) (symbol-name jid) jid))))
+
+(defvar jabber-bookmarks)
+(defun jabber-jid-bookmarkname (jid &optional jc)
+  "Return JID's conference bookmark name on JC, or its display name.
+A supplied scoped symbol retains its owner when JC is omitted."
+  (require 'jabber-bookmarks)
+  (let* ((owner (or jc (jabber-jid-owner jid)))
+         (bare (jabber-jid-user (if (symbolp jid) (symbol-name jid) jid)))
+         (bookmarks (and owner (gethash (jabber-connection-bare-jid owner)
+                                        jabber-bookmarks)))
+         (bookmark (and (listp bookmarks)
+                        (cl-find bare bookmarks
+                                 :key (lambda (bm) (plist-get bm :jid))
+                                 :test #'equal))))
+    (or (plist-get bookmark :name) (jabber-jid-displayname jid owner))))
+
+(defun jabber-jid-owner (jid)
+  "Return the connection owning supplied JID symbol, or nil."
+  (and (symbolp jid) (get jid 'jabber--jid-owner)))
+
+(defvar jabber-jid-obarray)
+(defun jabber-jid-symbol (jid &optional jc)
+  "Return the contact symbol for JID, a symbol or string, on JC.
+Explicit JC always resolves JID in that connection's private namespace,
+even if JID is a foreign symbol.  Without JC, retain supplied symbols
+or use the legacy accountless namespace.  Never infer an account.
+The namespace survives FSM state replacement and stream resumption."
+  (if (and (symbolp jid) (null jc))
+      jid
+    (let* ((table (if jc
+                      (or (get jc 'jabber--jid-obarray)
+                          (put jc 'jabber--jid-obarray (make-vector 127 0)))
+                    jabber-jid-obarray))
+           (symbol (intern (downcase (jabber-jid-user
+                                     (if (symbolp jid) (symbol-name jid) jid)))
+                           table)))
+      (when jc (put symbol 'jabber--jid-owner jc))
+      symbol)))
+
+(defvar jabber-account-list)
+(defun jabber-my-jid-p (jc jid)
+  "Return non-nil if the specified JID is in the `jabber-account-list'.
+Comment: (modulo resource).
+Also return non-nil if JID matches JC, modulo resource."
+  (or
+   (equal (jabber-jid-user jid)
+	  (jabber-connection-bare-jid jc))
+   (member (jabber-jid-user jid) (mapcar (lambda (x) (jabber-jid-user (car x))) jabber-account-list))))
+
+(defcustom jabber-jid-completion-display 'jid
+  "What to show as the primary completion candidate for JID prompts.
+Both modes match against JID and display name; this only controls
+which is shown as the candidate and which as the annotation.
+
+`jid'  shows JIDs with display names as annotations.
+`name' shows display names with JIDs as annotations.
+Full-JID candidates include their exact JID even in name mode, so resources
+remain independently selectable.  Unnamed contacts show as JIDs."
+  :type '(choice (const :tag "JID (annotated with name)" jid)
+		 (const :tag "Display name (annotated with JID)" name))
+  :group 'jabber)
+
+(defun jabber--jid-completion-table (roster-items)
+  "Build a completion table from ROSTER-ITEMS.
+Return an alist of (CANDIDATE . SYMBOL) pairs following
+`jabber-jid-completion-display'.  Named full JIDs include both name and JID."
+  (let ((use-names (eq jabber-jid-completion-display 'name)))
+    (mapcar (lambda (item)
+              (let ((jid (symbol-name item))
+                    (name (get item 'name)))
+                (cons (if (and use-names name)
+                          (if (jabber-jid-resource jid)
+                              (format "%s <%s>" name jid)
+                            name)
+                        jid)
+                      item)))
+            roster-items)))
+
+(defconst jabber--presence-sort-order '("chat" "" "away" "dnd" "xa")
+  "Presence shows from most to least available, for contact sorting.
+Offline contacts (nil show) sort last.")
+
+(defun jabber--presence-rank (sym)
+  "Return sort rank of roster symbol SYM; lower is more available."
+  (let ((tail (and sym (member (get sym 'show) jabber--presence-sort-order))))
+    (if tail
+        (- (length jabber--presence-sort-order) (length tail))
+      (length jabber--presence-sort-order))))
+
+(defun jabber--jid-candidate-lessp (a b table)
+  "Order completion candidates A and B by availability, then name.
+TABLE maps candidate strings to roster symbols."
+  (let ((rank-a (jabber--presence-rank
+                 (cdr (or (assoc-string a table) (assoc-string a table t)))))
+        (rank-b (jabber--presence-rank
+                 (cdr (or (assoc-string b table) (assoc-string b table t))))))
+    (if (= rank-a rank-b)
+        (string-lessp (downcase a) (downcase b))
+      (< rank-a rank-b))))
+
+(defun jabber--jid-completion-with-metadata (table)
+  "Wrap TABLE as a completion table matching both JIDs and names.
+Candidates follow `jabber-jid-completion-display'; the other form
+is shown as an annotation.  Both are matchable regardless of mode.
+Candidates display sorted by availability, then name."
+  (let ((alt-to-candidate (make-hash-table :test 'equal))
+        (use-names (eq jabber-jid-completion-display 'name))
+        (sort-candidates
+         (lambda (candidates)
+           (sort (copy-sequence candidates)
+                 (lambda (a b) (jabber--jid-candidate-lessp a b table))))))
+    ;; Build reverse lookup: alternate form -> candidate string.
+    (dolist (entry table)
+      (let* ((candidate (car entry))
+             (sym (cdr entry))
+             (jid (symbol-name sym))
+             (name (get sym 'name))
+             (alt (if use-names jid name)))
+        (when (and alt (not (string= alt candidate)))
+          (puthash alt candidate alt-to-candidate))))
+    (lambda (string pred action)
+      (cond
+       ((eq action 'metadata)
+        `(metadata
+          (display-sort-function . ,sort-candidates)
+          (cycle-sort-function . ,sort-candidates)
+          (annotation-function
+           . ,(lambda (candidate)
+                (when-let* ((sym (cdr (or (assoc-string candidate table)
+                                         (assoc-string candidate table t)))))
+                  (let* ((jid (symbol-name sym))
+                         (name (get sym 'name))
+                         (alt (if use-names jid name))
+                         (show (get sym 'show))
+                         (presence (cdr (assoc show jabber-presence-strings)))
+                         (parts (list
+                                 (and alt (not (string= alt candidate)) alt)
+                                 presence)))
+                    (when-let* ((text (string-join
+                                       (delq nil parts)
+                                       "  ")))
+                      (unless (string-empty-p text)
+                        (concat "  " text)))))))))
+       ;; all-completions: match by candidate or alternate form.
+       ((eq action t)
+        (let ((matches (all-completions string table pred))
+              (down (downcase string)))
+          (maphash (lambda (alt candidate)
+                     (when (and (string-prefix-p down (downcase alt))
+                                (not (member candidate matches))
+                                (or (null pred) (funcall pred candidate)))
+                       (push candidate matches)))
+                   alt-to-candidate)
+          matches))
+       ;; test-completion: accept exact alternate form matches.
+       ((eq action 'lambda)
+        (or (test-completion string table pred)
+            (cl-loop for alt being the hash-keys of alt-to-candidate
+                     thereis (string-equal-ignore-case string alt))))
+       (t
+        (complete-with-action action table string pred))))))
+
+(defun jabber-read-jid-completing (prompt &optional subset require-match default resource fulljids jc)
+  "Read a JID out of the current roster from the minibuffer, with PROMPT.
+If SUBSET is non-nil, it should be a list of symbols from which
+the JID is to be selected, instead of using the entire roster.
+If REQUIRE-MATCH is non-nil, the JID must be in the list used.
+If DEFAULT is non-nil, it's used as the default value, otherwise
+the default is inferred from context.
+RESOURCE is one of the following:
+
+nil         Accept full or bare JID, as entered
+full        Turn bare JIDs to full ones with highest-priority resource
+bare-or-muc Turn full JIDs to bare ones, except for in MUC
+
+If FULLJIDS is non-nil, complete jids with resources.
+Optional JC restricts lookup and completion to that owner, even if empty."
+  (let* ((roster-items
+          (cond
+           ((and jc subset)
+            (mapcar
+             (lambda (jid)
+               (let ((contact (jabber-jid-symbol jid jc))
+                     (text (if (symbolp jid) (symbol-name jid) jid)))
+                 (if (jabber-jid-resource text)
+                     (let ((full (make-symbol text)))
+                       (setplist full (copy-sequence (symbol-plist contact)))
+                       full)
+                   contact)))
+             subset))
+           (jc
+            (let ((items (plist-get (fsm-get-state-data jc) :roster)))
+              (if fulljids (jabber--roster-full-jids items) items)))
+           (subset subset)
+           (fulljids (jabber-concat-rosters-full))
+           (t (jabber-concat-rosters))))
+         (jid-completion-table (jabber--jid-completion-table roster-items))
+         (completion-ignore-case t)
+         (jid-at-point (or
+                        (and default
+                             (if (symbolp default)
+                                 (symbol-name default)
+                               default))
+                        (let* ((jid (get-text-property (point) 'jabber-jid))
+                               (res (and jid (get (jabber-jid-symbol jid jc) 'resource))))
+                          (when jid
+                            (if (and fulljids res (not (jabber-jid-resource jid)))
+                                (format "%s/%s" jid res)
+                              jid)))
+                        (bound-and-true-p jabber-chatting-with)
+                        (bound-and-true-p jabber-group)))
+         chosen)
+    ;; Convert default to display form when using name mode.
+    (when (and jid-at-point (eq jabber-jid-completion-display 'name))
+      (when-let* ((entry (cl-find jid-at-point jid-completion-table
+                                 :key (lambda (entry) (symbol-name (cdr entry)))
+                                 :test #'equal)))
+        (setq jid-at-point (car entry))))
+    ;; If the default is not in the allowed subset, it's not a good default.
+    (when (and (or subset jc) (not (assoc jid-at-point jid-completion-table)))
+      (setq jid-at-point nil))
+    (let ((input
+	   (completing-read (concat prompt
+				    (if jid-at-point
+					(format "(default %s) " jid-at-point)))
+			    (jabber--jid-completion-with-metadata
+			     jid-completion-table)
+			    nil require-match nil 'jabber-jid-history jid-at-point)))
+      ;; Resourceparts are case-sensitive.  Prefer the exact selection even
+      ;; when completion itself matches names and JIDs case-insensitively.
+      (let ((entry (or (assoc-string input jid-completion-table)
+                       (assoc-string input jid-completion-table t))))
+        (setq chosen (if entry (symbol-name (cdr entry))
+                       (and (not (zerop (length input))) input)))))
+
+    (when chosen
+      (pcase resource
+	('full
+	 ;; If JID is bare, add the highest-priority resource.
+	 (if (jabber-jid-resource chosen)
+	     chosen
+	   (let* ((matches (cl-remove-if-not
+                            (lambda (entry) (equal chosen (symbol-name (cdr entry))))
+                            jid-completion-table))
+                  (contact (if jc (jabber-jid-symbol chosen jc)
+                             (if (= (length matches) 1) (cdar matches)
+                               (jabber-jid-symbol chosen))))
+                  (highest-resource (get contact 'resource)))
+	     (if highest-resource
+		 (concat chosen "/" highest-resource)
+	       chosen))))
+	('bare-or-muc
+	 ;; If JID is full and non-MUC, remove resource.
+	 (if (null (jabber-jid-resource chosen))
+	     chosen
+	   (let ((bare (jabber-jid-user chosen)))
+	     (if (jabber-muc-joined-p bare jc)
+		 chosen
+	       bare))))
+	(_
+	 chosen)))))
+
+(defun jabber-read-node (prompt)
+  "Read node name with PROMPT, taking default from disco item at point."
+  (let ((node-at-point (get-text-property (point) 'jabber-node)))
+    (read-string (concat prompt
+			 (if node-at-point
+			     (format "(default %s) " node-at-point)))
+		 node-at-point)))
+
+(defun jabber-password-key (bare-jid)
+  "Construct key for `password' library from BARE-JID."
+  (concat "xmpp:" bare-jid))
+
+(defun jabber-read-password (bare-jid)
+  "Read Jabber password for BARE-JID from minibuffer or auth-source."
+  (let ((found
+	 (nth 0 (auth-source-search
+		 :user (jabber-jid-username bare-jid)
+		 :host (jabber-jid-server bare-jid)
+		 :port "xmpp"
+		 :max 1
+		 :require '(:secret)))))
+    (if found
+	(let ((secret (plist-get found :secret)))
+	  (copy-sequence
+	   (if (functionp secret)
+	       (funcall secret)
+	     secret)))
+      (let ((prompt (format "Jabber password for %s: " bare-jid)))
+	;; Need to copy the password, as sasl.el wants to erase it.
+	(copy-sequence
+	 (password-read prompt (jabber-password-key bare-jid)))))))
+
+(defun jabber-cache-password (bare-jid password)
+  "Cache PASSWORD for BARE-JID."
+  (password-cache-add (jabber-password-key bare-jid) password))
+
+(defun jabber-uncache-password (bare-jid)
+  "Uncache cached password for BARE-JID.
+Useful if the password proved to be wrong."
+  (interactive (list (jabber-jid-user
+		      (completing-read "Forget password of account: " jabber-account-list nil nil nil 'jabber-account-history))))
+  (password-cache-remove (jabber-password-key bare-jid)))
+
+(defvar jabber-buffer-connection)
+(defun jabber-read-account (&optional always-ask contact-hint)
+  "Ask for which connected account to use.
+If ALWAYS-ASK is nil and there is only one account, return that
+account.
+If CONTACT-HINT is a string or a JID symbol, default to an account
+that has that contact in its roster."
+  (let ((completions
+         (mapcar (lambda (c)
+                   (cons
+                    (jabber-connection-bare-jid c)
+                    c))
+                 jabber-connections)))
+    (cond
+     ((null jabber-connections)
+      (error "Not connected to Jabber"))
+     ((and (null (cdr jabber-connections)) (not always-ask))
+      ;; only one account
+      (car jabber-connections))
+     (t
+      (or
+       ;; if there is a jabber-account property at point,
+       ;; present it as default value
+       (cdr (assoc (let ((at-point (get-text-property (point) 'jabber-account)))
+                     (when (and at-point
+                                (memq at-point jabber-connections))
+                       (jabber-connection-bare-jid at-point)))
+                   completions))
+       (let* ((default
+               (or
+		(and-let* ((contact-hint)
+			   (matching
+			    (cl-find-if
+			     (lambda (jc)
+			       (jabber-roster-contact-p jc contact-hint))
+			     jabber-connections)))
+		  (jabber-connection-bare-jid matching))
+                ;; if the buffer is associated with a connection, use it
+                (when (and jabber-buffer-connection
+			   (jabber-find-active-connection jabber-buffer-connection))
+                  (jabber-connection-bare-jid jabber-buffer-connection))
+                ;; else, use the first connection in the list
+                (caar completions)))
+              (input (completing-read
+                      (concat "Select Jabber account (default "
+                              default
+                              "): ")
+                      completions nil t nil 'jabber-account-history
+                      default)))
+         (cdr (assoc input completions))))))))
+
+(defun jabber-iq-query (xml-data)
+  "Return the query part of an IQ stanza.
+An IQ stanza may have zero or one query child, and zero or one <error/> child.
+The query child is often but not always <query/>.
+
+XML-DATA is the parsed tree data from the stream (stanzas)
+obtained from `xml-parse-region'."
+  (let (query)
+    (dolist (x (jabber-xml-node-children xml-data))
+      (if (and
+	   (listp x)
+	   (not (eq (jabber-xml-node-name x) 'error)))
+	  (setq query x)))
+    query))
+
+(defun jabber-iq-error (xml-data)
+  "Return the <error/> part of an IQ stanza, if any.
+
+XML-DATA is the parsed tree data from the stream (stanzas)
+obtained from `xml-parse-region'."
+  (car (jabber-xml-get-children xml-data 'error)))
+
+(defun jabber-iq-xmlns (xml-data)
+  "Return the namespace of an IQ stanza, i.e. the namespace of its query part.
+
+XML-DATA is the parsed tree data from the stream (stanzas)
+obtained from `xml-parse-region'."
+  (jabber-xml-get-attribute (jabber-iq-query xml-data) 'xmlns))
+
+(defun jabber-message-timestamp (xml-data)
+  "Given a <message/> element, return its timestamp, or nil if none.
+
+XML-DATA is the parsed tree data from the stream (stanzas)
+obtained from `xml-parse-region'."
+  ;; Since Emacs 27.1, timestamps may be represented by a cons
+  ;; consisting of two integers.  :rare-time EWOC entries consist of
+  ;; just a timestamp, detect those timestamps and return them
+  ;; directly.
+  (if (integerp (cdr xml-data))
+      (time-convert xml-data 'list)
+    (jabber-x-delay
+     (or
+      (jabber-xml-path xml-data `((,jabber-delay-xmlns . "delay")))
+      (jabber-xml-path xml-data `((,jabber-delay-legacy-xmlns . "x")))))))
+
+(defun jabber-x-delay (xml-data)
+  "Return timestamp given a delayed delivery element.
+This can be either a <delay/> tag in namespace urn:xmpp:delay (XEP-0203), or
+a <x/> tag in namespace jabber:x:delay (XEP-0091).
+Return nil if no such data available.
+
+XML-DATA is the parsed tree data from the stream (stanzas)
+obtained from `xml-parse-region'."
+  (cond
+   ((and (eq (jabber-xml-node-name xml-data) 'x)
+	 (string= (jabber-xml-get-attribute xml-data 'xmlns) jabber-delay-legacy-xmlns))
+    (let ((stamp (jabber-xml-get-attribute xml-data 'stamp)))
+      (if (and (stringp stamp)
+	       (= (length stamp) 17))
+	  (jabber-parse-legacy-time stamp))))
+   ((and (eq (jabber-xml-node-name xml-data) 'delay)
+	 (string= (jabber-xml-get-attribute xml-data 'xmlns) jabber-delay-xmlns))
+    (let ((stamp (jabber-xml-get-attribute xml-data 'stamp)))
+      (when (stringp stamp)
+	(jabber-parse-time stamp))))))
+
+(defun jabber-parse-legacy-time (timestamp)
+  "Parse TIMESTAMP in ccyymmddThh:mm:ss format (UTC) and return Emacs time."
+  (let ((year (string-to-number (substring timestamp 0 4)))
+	(month (string-to-number (substring timestamp 4 6)))
+	(day (string-to-number (substring timestamp 6 8)))
+	(hour (string-to-number (substring timestamp 9 11)))
+	(minute (string-to-number (substring timestamp 12 14)))
+	(second (string-to-number (substring timestamp 15 17))))
+    (encode-time (list second minute hour day month year nil -1 0))))
+
+(defun jabber-encode-legacy-time (timestamp)
+  "Parse TIMESTAMP as internal time value and encode as ccyymmddThh:mm:ss (UTC)."
+  (format-time-string "%Y%m%dT%H:%M:%S" timestamp t))
+
+(defun jabber-encode-time (time)
+  "Convert TIME to a string by XEP-0082.
+TIME is in a format accepted by `format-time-string'."
+  (format-time-string "%Y-%m-%dT%H:%M:%SZ" time t))
+
+(defun jabber-encode-timezone ()
+  "Return the local timezone formatted as an XEP-0082 numeric offset."
+  (let ((time-zone-offset (nth 0 (current-time-zone))))
+    (if (null time-zone-offset)
+        "Z"
+      (let* ((positivep (>= time-zone-offset 0))
+             (hours (/ (abs time-zone-offset) 3600))
+             (minutes (/ (% (abs time-zone-offset) 3600) 60)))
+        (format "%s%02d:%02d"(if positivep "+" "-") hours minutes)))))
+
+(defun jabber-parse-time (raw-time)
+  "Parse the DateTime encoded in RAW-TIME according to XEP-0082."
+  (let* ((time (if (string= (substring raw-time 4 5) "-")
+                   raw-time
+                 (concat
+                  (substring raw-time 0 4) "-"
+                  (substring raw-time 4 6) "-"
+                  (substring raw-time 6 (length raw-time)))))
+         (year (string-to-number (substring time 0 4)))
+	 (month (string-to-number (substring time 5 7)))
+	 (day (string-to-number (substring time 8 10)))
+	 (hour (string-to-number (substring time 11 13)))
+	 (minute (string-to-number (substring time 14 16)))
+         (tail (substring time 17))
+         (tz (string-match "[Z+-]" tail))
+	 (second (string-to-number (substring tail 0 tz)))
+         (timezone (if tz (substring tail tz) "Z")))
+    ;; timezone is either Z (UTC) or [+-]HH:MM
+    (let ((timezone-seconds
+	   (if (string= timezone "Z")
+	       0
+	     (* (if (eq (aref timezone 0) ?+) 1 -1)
+		(* 60 (+ (* 60 (string-to-number (substring timezone 1 3)))
+			 (string-to-number (substring timezone 4 6))))))))
+      (encode-time (list second minute hour day month year nil -1 timezone-seconds)))))
+
+(defun jabber-report-success (_jc xml-data context)
+  "IQ callback reporting success or failure of the operation.
+CONTEXT is a string describing the action.
+\"CONTEXT succeeded\" or \"CONTEXT failed: REASON\" is displayed in
+the echo area.
+JC is the Jabber connection.
+XML-DATA is the parsed tree data from the stream (stanzas)
+obtained from `xml-parse-region'."
+  (let ((type (jabber-xml-get-attribute xml-data 'type)))
+    (message (concat context
+		     (if (string= type "result")
+			 " succeeded"
+		       (concat
+			" failed: "
+			(let ((the-error (jabber-iq-error xml-data)))
+			  (if the-error
+			      (jabber-parse-error the-error)
+			    "No error message given"))))))))
+
+(defconst jabber-error-messages
+  (list
+   (cons 'bad-request "Bad request")
+   (cons 'conflict "Conflict")
+   (cons 'feature-not-implemented "Feature not implemented")
+   (cons 'forbidden "Forbidden")
+   (cons 'gone "Gone")
+   (cons 'internal-server-error "Internal server error")
+   (cons 'item-not-found "Item not found")
+   (cons 'jid-malformed "JID malformed")
+   (cons 'not-acceptable "Not acceptable")
+   (cons 'not-allowed "Not allowed")
+   (cons 'not-authorized "Not authorized")
+   (cons 'payment-required "Payment required")
+   (cons 'recipient-unavailable "Recipient unavailable")
+   (cons 'redirect "Redirect")
+   (cons 'registration-required "Registration required")
+   (cons 'remote-server-not-found "Remote server not found")
+   (cons 'remote-server-timeout "Remote server timeout")
+   (cons 'resource-constraint "Resource constraint")
+   (cons 'service-unavailable "Service unavailable")
+   (cons 'subscription-required "Subscription required")
+   (cons 'undefined-condition "Undefined condition")
+   (cons 'unexpected-request "Unexpected request"))
+  "String descriptions of XMPP stanza errors.")
+
+(defconst jabber-legacy-error-messages
+  (list
+   (cons 302 "Redirect")
+   (cons 400 "Bad request")
+   (cons 401 "Unauthorized")
+   (cons 402 "Payment required")
+   (cons 403 "Forbidden")
+   (cons 404 "Not found")
+   (cons 405 "Not allowed")
+   (cons 406 "Not acceptable")
+   (cons 407 "Registration required")
+   (cons 408 "Request timeout")
+   (cons 409 "Conflict")
+   (cons 500 "Internal server error")
+   (cons 501 "Not implemented")
+   (cons 502 "Remote server error")
+   (cons 503 "Service unavailable")
+   (cons 504 "Remote server timeout")
+   (cons 510 "Disconnected"))
+  "String descriptions of legacy errors (XEP-0086).")
+
+(defun jabber-parse-error (error-xml)
+  "Parse the given ERROR-XML <error/> tag and return a human-readable string.
+See secton 9.3, Stanza Errors, of XMPP Core, and XEP-0086, Legacy Errors."
+  (let ((error-type (jabber-xml-get-attribute error-xml 'type))
+	(error-code (jabber-xml-get-attribute error-xml 'code))
+	condition text)
+    (if error-type
+	;; If the <error/> tag has a type element, it is new-school.
+	(dolist (child (jabber-xml-node-children error-xml))
+	  (when (string=
+		 (jabber-xml-get-attribute child 'xmlns)
+		 jabber-stanzas-xmlns)
+	    (if (eq (jabber-xml-node-name child) 'text)
+		(setq text (car (jabber-xml-node-children child)))
+	      (setq condition
+		    (or (cdr (assq (jabber-xml-node-name child) jabber-error-messages))
+			(symbol-name (jabber-xml-node-name child)))))))
+      (setq condition (or (cdr (assq (string-to-number error-code) jabber-legacy-error-messages))
+			  error-code))
+      (setq text (car (jabber-xml-node-children error-xml))))
+    (concat condition
+	    (if text (format ": %s" text)))))
+
+(defun jabber-error-condition (error-xml)
+  "Parse the given ERROR-XML <error/> tag and return the condition symbol."
+  (catch 'condition
+    (dolist (child (jabber-xml-node-children error-xml))
+      (when (string=
+	     (jabber-xml-get-attribute child 'xmlns)
+	     jabber-stanzas-xmlns)
+	(throw 'condition (jabber-xml-node-name child))))))
+
+(defvar jabber-stream-error-messages
+  (list
+   (cons 'bad-format "Bad XML format")
+   (cons 'bad-namespace-prefix "Bad namespace prefix")
+   (cons 'conflict "Conflict")
+   (cons 'connection-timeout "Connection timeout")
+   (cons 'host-gone "Host gone")
+   (cons 'host-unknown "Host unknown")
+   (cons 'improper-addressing "Improper addressing") ; actually only s2s
+   (cons 'internal-server-error "Internal server error")
+   (cons 'invalid-from "Invalid from")
+   (cons 'invalid-id "Invalid id")
+   (cons 'invalid-namespace "Invalid namespace")
+   (cons 'invalid-xml "Invalid XML")
+   (cons 'not-authorized "Not authorized")
+   (cons 'policy-violation "Policy violation")
+   (cons 'remote-connection-failed "Remote connection failed")
+   (cons 'resource-constraint "Resource constraint")
+   (cons 'restricted-xml "Restricted XML")
+   (cons 'see-other-host "See other host")
+   (cons 'system-shutdown "System shutdown")
+   (cons 'undefined-condition "Undefined condition")
+   (cons 'unsupported-encoding "Unsupported encoding")
+   (cons 'unsupported-stanza-type "Unsupported stanza type")
+   (cons 'unsupported-version "Unsupported version")
+   (cons 'xml-not-well-formed "XML not well formed"))
+  "String descriptions of XMPP stream errors.")
+
+(defun jabber-stream-error-condition (error-xml)
+  "Return the condition of ERROR-XML, a <stream:error/> tag."
+  ;; as we don't know the node name of the condition, we have to
+  ;; search for it.
+  (cl-dolist (node (jabber-xml-node-children error-xml))
+    (when (and (string= (jabber-xml-get-attribute node 'xmlns)
+			"urn:ietf:params:xml:ns:xmpp-streams")
+	       (assq (jabber-xml-node-name node)
+		     jabber-stream-error-messages))
+      (cl-return (jabber-xml-node-name node)))))
+
+(defun jabber-parse-stream-error (error-xml)
+  "Parse the given error tag and return a string fit for human consumption.
+ERROR-XML is a <stream:error/> tag parsed with `xml-parse-region'."
+  (let ((text-node (car (jabber-xml-get-children error-xml 'text)))
+	(condition (jabber-stream-error-condition error-xml)))
+    (concat (if condition (cdr (assq condition jabber-stream-error-messages))
+	      "Unknown stream error")
+	    (if (and text-node (stringp (car (jabber-xml-node-children text-node))))
+		(concat ": " (car (jabber-xml-node-children text-node)))))))
+
+(put 'jabber-error
+     'error-conditions
+     '(error jabber-error))
+(put 'jabber-error
+     'error-message
+     "Jabber error")
+
+
+;; https://www.rfc-editor.org/rfc/rfc6120.html#section-8.3 explains
+;; that there are stanza errors, which are recoverable and do not
+;; terminate the stream.
+
+;; Each stanza has a type which are the one explained at the
+;; ERROR-TYPE parameter. checkdoc throws warnings stating that errors
+;; messages should start with capital letters, thus the `downcase'
+;; function is used as a workaround.
+(defun jabber-signal-error (error-type condition &optional text app-specific)
+  "Signal an error to be sent by Jabber.
+ERROR-TYPE is one of \"Cancel\", \"Continue\", \"Mmodify\", \"Auth\"
+and \"Wait\" (lowercase versions make `checkdoc' to throw errors).
+CONDITION is a symbol denoting a defined XMPP condition.
+TEXT is a string to be sent in the error message, or nil for no text.
+APP-SPECIFIC is a list of extra XML tags.
+
+See section 9.3 of XMPP Core (RFC 3920).
+See section 8.3 of XMPP Core (RFC 6120)."
+  (signal 'jabber-error
+	  (list (downcase error-type) condition text app-specific)))
+
+(defun jabber-unhex (string)
+  "Convert a hex-encoded UTF-8 STRING to Emacs representation.
+For example, \"ji%C5%99i@%C4%8Dechy.example/v%20Praze\" becomes
+\"jiři@čechy.example/v Praze\"."
+  (decode-coding-string (url-unhex-string string) 'utf-8))
+
+(defun jabber-string>-numerical (s1 s2)
+  "Return t when S1 collates after S2 in numerical order."
+  (cond ((string= s1 s2) nil)
+	((> (length s1) (length s2)) t)
+	((< (length s1) (length s2)) nil)
+	((< (string-to-number (substring s1 0 1)) (string-to-number (substring s2 0 1))) nil)
+	((> (string-to-number (substring s1 0 1)) (string-to-number (substring s2 0 1))) t)
+	(t (jabber-string>-numerical (substring s1 1) (substring s2 1)))))
+
+(define-obsolete-function-alias 'string>-numerical
+  'jabber-string>-numerical "0.11.0")
+
+(defun jabber-append-string-to-file (string file &optional func &rest args)
+  "Append STRING (may be nil) to FILE.  Create FILE if needed.
+If FUNC is non-nil, then call FUNC with ARGS at beginning of
+temporaly buffer _before_ inserting STRING."
+  (when (or (stringp string) (functionp func))
+    (with-temp-buffer
+      (when (functionp func) (apply func args))
+      (when (stringp string) (insert string))
+      (write-region (point-min) (point-max) file t (list t)))))
+
+(defun jabber-tree-map (fn tree)
+  "Apply FN to all nodes in the TREE starting with root.
+FN is applied to the node and not to the data itself."
+  (let ((result (cons nil nil)))
+    (cl-do ((tail tree (cdr tail))
+	    (prev result end)
+	    (end result (let* ((x (car tail))
+			       (val (if (atom x)
+				        (funcall fn x)
+                                      (jabber-tree-map fn x))))
+		          (setf (car end) val (cdr end) (cons nil
+                                                              nil)))))
+	((atom tail)
+	 (progn
+	   (setf (cdr prev) (if tail (funcall fn tail) nil))
+	   result)))))
+
+(defface jabber-separator
+  '((((background light)) :strike-through "gray70" :foreground "gray70")
+    (t :strike-through "gray30" :foreground "gray30"))
+  "Face for separator lines in jabber buffers."
+  :group 'jabber)
+
+(defun jabber-separator ()
+  "Return a propertized separator string.
+Uses a `display' property so the separator adjusts to window
+width on redisplay."
+  (propertize " " 'display '(space :width text) 'face 'jabber-separator))
+
+(defun jabber--decrypt-failure-body-p (body)
+  "Return non-nil when BODY is a decrypt-failure placeholder.
+Matches the \"[LABEL: could not decrypt]\" bodies produced by
+`jabber-chat--try-decrypt' so callers can avoid overwriting real
+message text with a placeholder."
+  (and body (string-match-p "\\`\\[.*: could not decrypt\\]\\'" body)))
+
+(provide 'jabber-util)
+;;; jabber-util.el ends here

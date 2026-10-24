@@ -1,0 +1,11 @@
+GNU 32.0.50
+("%999999999999999999999999999999b|") len=1073741824 head="probe       " tail="   |"
+("%4294967297b|") len=6 head="probe|" tail="obe|"
+("%2147483648b|") len=6 head="probe|" tail="obe|"
+("%9999999999999999999l|") len=2 head="3|" tail="3|"
+((2305843009213693951 "x") "|") len=2 head="x|" tail="x|"
+((-2305843009213693951 "abcdefgh") "|") len=9 head="abcdefgh|" tail="fgh|"
+((4294967297 "abc") "|") len=4 head="abc|" tail="abc|"
+((-4294967295 "abc") "|") len=4 head="abc|" tail="abc|"
+((4294967295 "abc") "|") len=2 head="a|" tail="a|"
+((-2305843009213693951 "x") (2305843009213693951 "y") "z") len=3 head="xyz" tail="xyz"

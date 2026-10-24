@@ -1,0 +1,53 @@
+{
+  "name": "internal--define-uninitialized-variable",
+  "arity": [
+    1,
+    2
+  ],
+  "effect": "global",
+  "gnu_files": [
+    "eval.c"
+  ],
+  "gnu_def": "eval.c:889",
+  "rust": "src/prims/vars_uninitialized.rs:8",
+  "args": [
+    "uv-symbol-only",
+    "uv-doc-only"
+  ],
+  "extra": {
+    "0": [
+      "'uv-domain",
+      "(make-symbol \"uv-domain\")",
+      "nil",
+      "t",
+      ":uv-domain"
+    ],
+    "1": [
+      "nil",
+      "\"doc\"",
+      "7",
+      "'(a b)",
+      "[1 2]"
+    ]
+  },
+  "probes": [
+    "(list (fboundp 'internal--define-uninitialized-variable) (functionp #'internal--define-uninitialized-variable) (funcall #'internal--define-uninitialized-variable 'uv-call) (special-variable-p 'uv-call) (boundp 'uv-call))",
+    "(progn (internal--define-uninitialized-variable 'uv-fresh) (list (special-variable-p 'uv-fresh) (boundp 'uv-fresh)))",
+    "(progn (setq uv-value '(7 8)) (list (internal--define-uninitialized-variable 'uv-value) uv-value (special-variable-p 'uv-value)))",
+    "(progn (put 'uv-doc 'variable-documentation \"old\") (internal--define-uninitialized-variable 'uv-doc) (get 'uv-doc 'variable-documentation))",
+    "(progn (put 'uv-doc 'variable-documentation \"old\") (internal--define-uninitialized-variable 'uv-doc nil) (get 'uv-doc 'variable-documentation))",
+    "(let* ((s (make-symbol \"uv-twin\")) (doc (list 1 2))) (list (internal--define-uninitialized-variable s doc) (special-variable-p s) (boundp s) (eq (get s 'variable-documentation) doc) (special-variable-p 'uv-twin)))",
+    "(progn (defvaralias 'uv-alias 'uv-base) (setq uv-base 19) (internal--define-uninitialized-variable 'uv-alias \"alias-doc\") (list uv-alias uv-base (get 'uv-alias 'variable-documentation) (get 'uv-base 'variable-documentation)))",
+    "(let ((current-load-list nil)) (internal--define-uninitialized-variable 'uv-history) current-load-list)",
+    "(let ((current-load-list '(existing))) (internal--define-uninitialized-variable 'uv-history) (internal--define-uninitialized-variable 'uv-history) current-load-list)",
+    "(progn (defvar uv-dynamic 4) (let ((uv-dynamic 9)) (internal--define-uninitialized-variable 'uv-dynamic) uv-dynamic))",
+    "(let ((uv-lexical 8)) (list (internal--define-uninitialized-variable 'uv-lexical) uv-lexical))",
+    "(list (internal--define-uninitialized-variable nil '(a b)) (special-variable-p nil) (get nil 'variable-documentation))",
+    "(list (internal--define-uninitialized-variable t '(a b)) (special-variable-p t) (get t 'variable-documentation))",
+    "(list (internal--define-uninitialized-variable :uv-constant '(a b)) (special-variable-p :uv-constant) (get :uv-constant 'variable-documentation))",
+    "(list (internal--define-uninitialized-variable 'most-positive-fixnum '(a b)) (special-variable-p 'most-positive-fixnum) (get 'most-positive-fixnum 'variable-documentation))",
+    "(list (special-variable-p nil) (special-variable-p t))",
+    "(let ((current-load-list nil)) (setplist 'uv-bad 'junk) (list (condition-case e (internal--define-uninitialized-variable 'uv-bad 7) (error e)) (special-variable-p 'uv-bad) current-load-list))",
+    "(let ((current-load-list nil)) (setplist 'uv-bad '(x . junk)) (list (condition-case e (internal--define-uninitialized-variable 'uv-bad 7) (error e)) (special-variable-p 'uv-bad) current-load-list))"
+  ]
+}

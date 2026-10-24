@@ -1,0 +1,31 @@
+{
+  "oracle": "<recording-path-redacted>/emacs-32.0.50",
+  "oracle_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+  "cases": [
+    {
+      "source": "(list (arrayp nil) (arrayp '(1)) (arrayp 1) (arrayp [1]) (arrayp \"x\") (arrayp (unibyte-string 255)) (arrayp (make-char-table 'test)) (arrayp (record 'tag 1)) (arrayp (make-hash-table)) (arrayp (obarray-make)) (arrayp #'car) (arrayp (lambda () nil)))",
+      "expected": "(nil nil nil t t t t nil nil nil nil nil)",
+      "label": "ARRAYP_REPRESENTATION"
+    },
+    {
+      "source": "(list (fboundp 'arrayp) (functionp #'arrayp) (funcall #'arrayp [1]) (condition-case e (apply #'arrayp nil) (error (list (car e) (nth 2 e)))) (condition-case e (apply #'arrayp '(nil nil)) (error (list (car e) (nth 2 e)))))",
+      "expected": "(t t t (wrong-number-of-arguments 0) (wrong-number-of-arguments 2))",
+      "label": "ARRAYP_CALLABLE"
+    },
+    {
+      "source": "(let* ((x (list 7)) (a (make-list 3 x)) (b (make-list 3 x))) (list (make-list 0 x) (make-list 1 'fill) (length a) (eq (car a) x) (eq (car a) (car (cdr a))) (eq a b) (eq a (cdr a)) (progn (setcar x 9) a) (progn (setcar a 'changed) (car b))))",
+      "expected": "(nil (fill) 3 t t nil nil (changed (9) (9)) (9))",
+      "label": "MAKE_LIST_IDENTITY"
+    },
+    {
+      "source": "(list (fboundp 'make-list) (functionp #'make-list) (funcall #'make-list 2 'x) (condition-case e (make-list -1 nil) (error e)) (condition-case e (make-list 1.0 nil) (error e)) (condition-case e (make-list 'bad nil) (error e)) (condition-case e (apply #'make-list '(1)) (error (list (car e) (nth 2 e)))) (condition-case e (apply #'make-list '(1 nil extra)) (error (list (car e) (nth 2 e)))))",
+      "expected": "(t t (x x) (wrong-type-argument wholenump -1) (wrong-type-argument wholenump 1.0) (wrong-type-argument wholenump bad) (wrong-number-of-arguments 1) (wrong-number-of-arguments 3))",
+      "label": "MAKE_LIST_CONTRACT"
+    },
+    {
+      "source": "(let ((r (apply #'record 'tag (make-list 4094 'fill)))) (list (length r) (aref r 0) (aref r 4094)))",
+      "expected": "(4095 tag fill)",
+      "label": "MAKE_LIST_RECORD_BOUNDARY"
+    }
+  ]
+}

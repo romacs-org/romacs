@@ -1,0 +1,3428 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "call-interactively",
+ "spec_sha256": "d52b9d8d3f2c3a8f6ca856acec3234d56ad9ada99d6f75b58d23868bf8dc2f2b",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "call-interactively",
+    "subr",
+    1,
+    3
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "callint.c": "729933a791b7fe48b1ed766c97e58bc7080caec8a0ca1990234ce1ca94ad3083"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "call-interactively/0000",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp nil))"
+  },
+  {
+   "id": "call-interactively/0001",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively nil nil t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0002",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively nil nil 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0003",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively nil nil :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0004",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively nil t nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp nil))"
+  },
+  {
+   "id": "call-interactively/0005",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively nil t t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0006",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively nil t 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0007",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively nil t :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0008",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively nil 'sym nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp nil))"
+  },
+  {
+   "id": "call-interactively/0009",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively nil 'sym t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0010",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively nil 'sym 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0011",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively nil 'sym :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0012",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively nil :kw nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp nil))"
+  },
+  {
+   "id": "call-interactively/0013",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively nil :kw t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0014",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively nil :kw 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0015",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively nil :kw :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0016",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively t nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp t))"
+  },
+  {
+   "id": "call-interactively/0017",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively t nil t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0018",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively t nil 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0019",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively t nil :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0020",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively t t nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp t))"
+  },
+  {
+   "id": "call-interactively/0021",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively t t t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0022",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively t t 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0023",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively t t :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0024",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively t 'sym nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp t))"
+  },
+  {
+   "id": "call-interactively/0025",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively t 'sym t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0026",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively t 'sym 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0027",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively t 'sym :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0028",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively t :kw nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp t))"
+  },
+  {
+   "id": "call-interactively/0029",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively t :kw t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0030",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively t :kw 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0031",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively t :kw :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0032",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 0 nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp 0))"
+  },
+  {
+   "id": "call-interactively/0033",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 0 nil t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0034",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 0 nil 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0035",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 0 nil :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0036",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 0 t nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp 0))"
+  },
+  {
+   "id": "call-interactively/0037",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 0 t t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0038",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 0 t 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0039",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 0 t :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0040",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 0 'sym nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp 0))"
+  },
+  {
+   "id": "call-interactively/0041",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 0 'sym t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0042",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 0 'sym 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0043",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 0 'sym :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0044",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 0 :kw nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp 0))"
+  },
+  {
+   "id": "call-interactively/0045",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 0 :kw t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0046",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 0 :kw 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0047",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 0 :kw :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0048",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 1 nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp 1))"
+  },
+  {
+   "id": "call-interactively/0049",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 1 nil t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0050",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 1 nil 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0051",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 1 nil :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0052",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 1 t nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp 1))"
+  },
+  {
+   "id": "call-interactively/0053",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 1 t t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0054",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 1 t 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0055",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 1 t :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0056",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 1 'sym nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp 1))"
+  },
+  {
+   "id": "call-interactively/0057",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 1 'sym t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0058",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 1 'sym 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0059",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 1 'sym :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0060",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 1 :kw nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp 1))"
+  },
+  {
+   "id": "call-interactively/0061",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 1 :kw t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0062",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 1 :kw 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0063",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 1 :kw :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0064",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 2 nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp 2))"
+  },
+  {
+   "id": "call-interactively/0065",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 2 nil t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0066",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 2 nil 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0067",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 2 nil :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0068",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 2 t nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp 2))"
+  },
+  {
+   "id": "call-interactively/0069",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 2 t t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0070",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 2 t 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0071",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 2 t :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0072",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 2 'sym nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp 2))"
+  },
+  {
+   "id": "call-interactively/0073",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 2 'sym t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0074",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 2 'sym 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0075",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 2 'sym :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0076",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 2 :kw nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp 2))"
+  },
+  {
+   "id": "call-interactively/0077",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 2 :kw t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0078",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 2 :kw 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0079",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 2 :kw :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0080",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively -1 nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp -1))"
+  },
+  {
+   "id": "call-interactively/0081",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively -1 nil t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0082",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively -1 nil 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0083",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively -1 nil :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0084",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively -1 t nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp -1))"
+  },
+  {
+   "id": "call-interactively/0085",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively -1 t t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0086",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively -1 t 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0087",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively -1 t :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0088",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively -1 'sym nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp -1))"
+  },
+  {
+   "id": "call-interactively/0089",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively -1 'sym t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0090",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively -1 'sym 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0091",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively -1 'sym :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0092",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively -1 :kw nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp -1))"
+  },
+  {
+   "id": "call-interactively/0093",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively -1 :kw t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0094",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively -1 :kw 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0095",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively -1 :kw :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0096",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively most-positive-fixnum nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp 2305843009213693951))"
+  },
+  {
+   "id": "call-interactively/0097",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively most-positive-fixnum nil t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0098",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively most-positive-fixnum nil 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0099",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively most-positive-fixnum nil :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0100",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively most-positive-fixnum t nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp 2305843009213693951))"
+  },
+  {
+   "id": "call-interactively/0101",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively most-positive-fixnum t t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0102",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively most-positive-fixnum t 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0103",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively most-positive-fixnum t :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0104",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively most-positive-fixnum 'sym nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp 2305843009213693951))"
+  },
+  {
+   "id": "call-interactively/0105",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively most-positive-fixnum 'sym t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0106",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively most-positive-fixnum 'sym 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0107",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively most-positive-fixnum 'sym :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0108",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively most-positive-fixnum :kw nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp 2305843009213693951))"
+  },
+  {
+   "id": "call-interactively/0109",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively most-positive-fixnum :kw t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0110",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively most-positive-fixnum :kw 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0111",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively most-positive-fixnum :kw :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0112",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 1.5 nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp 1.5))"
+  },
+  {
+   "id": "call-interactively/0113",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 1.5 nil t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0114",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 1.5 nil 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0115",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 1.5 nil :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0116",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 1.5 t nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp 1.5))"
+  },
+  {
+   "id": "call-interactively/0117",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 1.5 t t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0118",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 1.5 t 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0119",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 1.5 t :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0120",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 1.5 'sym nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp 1.5))"
+  },
+  {
+   "id": "call-interactively/0121",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 1.5 'sym t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0122",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 1.5 'sym 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0123",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 1.5 'sym :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0124",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 1.5 :kw nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp 1.5))"
+  },
+  {
+   "id": "call-interactively/0125",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 1.5 :kw t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0126",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 1.5 :kw 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0127",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 1.5 :kw :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0128",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 'sym nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp sym))"
+  },
+  {
+   "id": "call-interactively/0129",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 'sym nil t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0130",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 'sym nil 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0131",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 'sym nil :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0132",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 'sym t nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp sym))"
+  },
+  {
+   "id": "call-interactively/0133",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 'sym t t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0134",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 'sym t 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0135",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 'sym t :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0136",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 'sym 'sym nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp sym))"
+  },
+  {
+   "id": "call-interactively/0137",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 'sym 'sym t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0138",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 'sym 'sym 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0139",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 'sym 'sym :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0140",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 'sym :kw nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp sym))"
+  },
+  {
+   "id": "call-interactively/0141",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 'sym :kw t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0142",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 'sym :kw 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0143",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 'sym :kw :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0144",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively :kw nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp :kw))"
+  },
+  {
+   "id": "call-interactively/0145",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively :kw nil t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0146",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively :kw nil 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0147",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively :kw nil :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0148",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively :kw t nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp :kw))"
+  },
+  {
+   "id": "call-interactively/0149",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively :kw t t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0150",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively :kw t 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0151",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively :kw t :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0152",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively :kw 'sym nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp :kw))"
+  },
+  {
+   "id": "call-interactively/0153",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively :kw 'sym t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0154",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively :kw 'sym 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0155",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively :kw 'sym :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0156",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively :kw :kw nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp :kw))"
+  },
+  {
+   "id": "call-interactively/0157",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively :kw :kw t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0158",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively :kw :kw 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0159",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively :kw :kw :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0160",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (copy-sequence \"\") nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp \"\"))"
+  },
+  {
+   "id": "call-interactively/0161",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (copy-sequence \"\") nil t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0162",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (copy-sequence \"\") nil 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0163",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (copy-sequence \"\") nil :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0164",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (copy-sequence \"\") t nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp \"\"))"
+  },
+  {
+   "id": "call-interactively/0165",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (copy-sequence \"\") t t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0166",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (copy-sequence \"\") t 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0167",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (copy-sequence \"\") t :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0168",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (copy-sequence \"\") 'sym nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp \"\"))"
+  },
+  {
+   "id": "call-interactively/0169",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (copy-sequence \"\") 'sym t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0170",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (copy-sequence \"\") 'sym 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0171",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (copy-sequence \"\") 'sym :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0172",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (copy-sequence \"\") :kw nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp \"\"))"
+  },
+  {
+   "id": "call-interactively/0173",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (copy-sequence \"\") :kw t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0174",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (copy-sequence \"\") :kw 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0175",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (copy-sequence \"\") :kw :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0176",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (copy-sequence \"abc\") nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp \"abc\"))"
+  },
+  {
+   "id": "call-interactively/0177",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (copy-sequence \"abc\") nil t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0178",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (copy-sequence \"abc\") nil 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0179",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (copy-sequence \"abc\") nil :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0180",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (copy-sequence \"abc\") t nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp \"abc\"))"
+  },
+  {
+   "id": "call-interactively/0181",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (copy-sequence \"abc\") t t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0182",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (copy-sequence \"abc\") t 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0183",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (copy-sequence \"abc\") t :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0184",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (copy-sequence \"abc\") 'sym nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp \"abc\"))"
+  },
+  {
+   "id": "call-interactively/0185",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (copy-sequence \"abc\") 'sym t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0186",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (copy-sequence \"abc\") 'sym 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0187",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (copy-sequence \"abc\") 'sym :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0188",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (copy-sequence \"abc\") :kw nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp \"abc\"))"
+  },
+  {
+   "id": "call-interactively/0189",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (copy-sequence \"abc\") :kw t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0190",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (copy-sequence \"abc\") :kw 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0191",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (copy-sequence \"abc\") :kw :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0192",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (copy-sequence \"λx\") nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp \"λx\"))"
+  },
+  {
+   "id": "call-interactively/0193",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (copy-sequence \"λx\") nil t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0194",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (copy-sequence \"λx\") nil 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0195",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (copy-sequence \"λx\") nil :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0196",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (copy-sequence \"λx\") t nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp \"λx\"))"
+  },
+  {
+   "id": "call-interactively/0197",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (copy-sequence \"λx\") t t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0198",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (copy-sequence \"λx\") t 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0199",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (copy-sequence \"λx\") t :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0200",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (copy-sequence \"λx\") 'sym nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp \"λx\"))"
+  },
+  {
+   "id": "call-interactively/0201",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (copy-sequence \"λx\") 'sym t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0202",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (copy-sequence \"λx\") 'sym 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0203",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (copy-sequence \"λx\") 'sym :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0204",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (copy-sequence \"λx\") :kw nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp \"λx\"))"
+  },
+  {
+   "id": "call-interactively/0205",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (copy-sequence \"λx\") :kw t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0206",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (copy-sequence \"λx\") :kw 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0207",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (copy-sequence \"λx\") :kw :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0208",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (list 1 2 3) nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp (1 2 3)))"
+  },
+  {
+   "id": "call-interactively/0209",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (list 1 2 3) nil t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0210",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (list 1 2 3) nil 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0211",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (list 1 2 3) nil :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0212",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (list 1 2 3) t nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp (1 2 3)))"
+  },
+  {
+   "id": "call-interactively/0213",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (list 1 2 3) t t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0214",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (list 1 2 3) t 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0215",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (list 1 2 3) t :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0216",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (list 1 2 3) 'sym nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp (1 2 3)))"
+  },
+  {
+   "id": "call-interactively/0217",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (list 1 2 3) 'sym t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0218",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (list 1 2 3) 'sym 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0219",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (list 1 2 3) 'sym :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0220",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (list 1 2 3) :kw nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp (1 2 3)))"
+  },
+  {
+   "id": "call-interactively/0221",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (list 1 2 3) :kw t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0222",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (list 1 2 3) :kw 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0223",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (list 1 2 3) :kw :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0224",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (list 'a (list 'b)) nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp (a (b))))"
+  },
+  {
+   "id": "call-interactively/0225",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (list 'a (list 'b)) nil t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0226",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (list 'a (list 'b)) nil 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0227",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (list 'a (list 'b)) nil :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0228",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (list 'a (list 'b)) t nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp (a (b))))"
+  },
+  {
+   "id": "call-interactively/0229",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (list 'a (list 'b)) t t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0230",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (list 'a (list 'b)) t 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0231",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (list 'a (list 'b)) t :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0232",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (list 'a (list 'b)) 'sym nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp (a (b))))"
+  },
+  {
+   "id": "call-interactively/0233",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (list 'a (list 'b)) 'sym t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0234",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (list 'a (list 'b)) 'sym 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0235",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (list 'a (list 'b)) 'sym :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0236",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (list 'a (list 'b)) :kw nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp (a (b))))"
+  },
+  {
+   "id": "call-interactively/0237",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (list 'a (list 'b)) :kw t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0238",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (list 'a (list 'b)) :kw 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0239",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (list 'a (list 'b)) :kw :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0240",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (cons 1 2) nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp (1 . 2)))"
+  },
+  {
+   "id": "call-interactively/0241",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (cons 1 2) nil t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0242",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (cons 1 2) nil 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0243",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (cons 1 2) nil :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0244",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (cons 1 2) t nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp (1 . 2)))"
+  },
+  {
+   "id": "call-interactively/0245",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (cons 1 2) t t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0246",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (cons 1 2) t 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0247",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (cons 1 2) t :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0248",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (cons 1 2) 'sym nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp (1 . 2)))"
+  },
+  {
+   "id": "call-interactively/0249",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (cons 1 2) 'sym t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0250",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (cons 1 2) 'sym 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0251",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (cons 1 2) 'sym :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0252",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (cons 1 2) :kw nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp (1 . 2)))"
+  },
+  {
+   "id": "call-interactively/0253",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (cons 1 2) :kw t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0254",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (cons 1 2) :kw 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0255",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (cons 1 2) :kw :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0256",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (cons 1 (cons 2 3)) nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp (1 2 . 3)))"
+  },
+  {
+   "id": "call-interactively/0257",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (cons 1 (cons 2 3)) nil t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0258",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (cons 1 (cons 2 3)) nil 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0259",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (cons 1 (cons 2 3)) nil :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0260",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (cons 1 (cons 2 3)) t nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp (1 2 . 3)))"
+  },
+  {
+   "id": "call-interactively/0261",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (cons 1 (cons 2 3)) t t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0262",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (cons 1 (cons 2 3)) t 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0263",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (cons 1 (cons 2 3)) t :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0264",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (cons 1 (cons 2 3)) 'sym nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp (1 2 . 3)))"
+  },
+  {
+   "id": "call-interactively/0265",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (cons 1 (cons 2 3)) 'sym t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0266",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (cons 1 (cons 2 3)) 'sym 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0267",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (cons 1 (cons 2 3)) 'sym :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0268",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (cons 1 (cons 2 3)) :kw nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp (1 2 . 3)))"
+  },
+  {
+   "id": "call-interactively/0269",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (cons 1 (cons 2 3)) :kw t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0270",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (cons 1 (cons 2 3)) :kw 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0271",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (cons 1 (cons 2 3)) :kw :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0272",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (vector 1 2) nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp [1 2]))"
+  },
+  {
+   "id": "call-interactively/0273",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (vector 1 2) nil t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0274",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (vector 1 2) nil 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0275",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (vector 1 2) nil :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0276",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (vector 1 2) t nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp [1 2]))"
+  },
+  {
+   "id": "call-interactively/0277",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (vector 1 2) t t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0278",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (vector 1 2) t 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0279",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (vector 1 2) t :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0280",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (vector 1 2) 'sym nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp [1 2]))"
+  },
+  {
+   "id": "call-interactively/0281",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (vector 1 2) 'sym t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0282",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (vector 1 2) 'sym 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0283",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (vector 1 2) 'sym :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0284",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (vector 1 2) :kw nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp [1 2]))"
+  },
+  {
+   "id": "call-interactively/0285",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (vector 1 2) :kw t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0286",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (vector 1 2) :kw 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0287",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (vector 1 2) :kw :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0288",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (let ((x (list 1 2))) (setcdr (cdr x) x) x) nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "call-interactively/0289",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (let ((x (list 1 2))) (setcdr (cdr x) x) x) nil t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0290",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (let ((x (list 1 2))) (setcdr (cdr x) x) x) nil 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0291",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (let ((x (list 1 2))) (setcdr (cdr x) x) x) nil :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0292",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (let ((x (list 1 2))) (setcdr (cdr x) x) x) t nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "call-interactively/0293",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (let ((x (list 1 2))) (setcdr (cdr x) x) x) t t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0294",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (let ((x (list 1 2))) (setcdr (cdr x) x) x) t 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0295",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (let ((x (list 1 2))) (setcdr (cdr x) x) x) t :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0296",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (let ((x (list 1 2))) (setcdr (cdr x) x) x) 'sym nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "call-interactively/0297",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (let ((x (list 1 2))) (setcdr (cdr x) x) x) 'sym t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0298",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (let ((x (list 1 2))) (setcdr (cdr x) x) x) 'sym 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0299",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (let ((x (list 1 2))) (setcdr (cdr x) x) x) 'sym :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0300",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (let ((x (list 1 2))) (setcdr (cdr x) x) x) :kw nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "call-interactively/0301",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (let ((x (list 1 2))) (setcdr (cdr x) x) x) :kw t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0302",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (let ((x (list 1 2))) (setcdr (cdr x) x) x) :kw 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0303",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (let ((x (list 1 2))) (setcdr (cdr x) x) x) :kw :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0304",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'call-interactively '())) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr call-interactively> 0))"
+  },
+  {
+   "id": "call-interactively/0305",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'call-interactively '(1 1 1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr call-interactively> 4))"
+  },
+  {
+   "id": "call-interactively/0306",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 nil) (a2 nil)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (call-interactively a0 a1 a2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp nil))"
+  },
+  {
+   "id": "call-interactively/0307",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0) (a1 t) (a2 t)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (call-interactively a0 a1 a2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0308",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 2) (a1 'sym) (a2 'sym)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (call-interactively a0 a1 a2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0309",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-positive-fixnum) (a1 :kw) (a2 :kw)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (call-interactively a0 a1 a2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0310",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :kw) (a1 t) (a2 nil)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (call-interactively a0 a1 a2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp :kw))"
+  },
+  {
+   "id": "call-interactively/0311",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 'sym) (a2 t)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (call-interactively a0 a1 a2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0312",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 1 2 3)) (a1 :kw) (a2 'sym)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (call-interactively a0 a1 a2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0313",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 (cons 2 3))) (a1 nil) (a2 :kw)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (call-interactively a0 a1 a2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0314",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (a1 'sym) (a2 nil)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (call-interactively a0 a1 a2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "call-interactively/0315",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 nil) (a2 nil)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp nil))"
+  },
+  {
+   "id": "call-interactively/0316",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 nil) (a2 :kw)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0317",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 t) (a2 'sym)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0318",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 'sym) (a2 t)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0319",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 :kw) (a2 nil)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp nil))"
+  },
+  {
+   "id": "call-interactively/0320",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 :kw) (a2 :kw)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0321",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 nil) (a2 'sym)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0322",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 t) (a2 t)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0323",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 'sym) (a2 nil)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp t))"
+  },
+  {
+   "id": "call-interactively/0324",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 'sym) (a2 :kw)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0325",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 :kw) (a2 'sym)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0326",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0) (a1 nil) (a2 t)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0327",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0) (a1 t) (a2 nil)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp 0))"
+  },
+  {
+   "id": "call-interactively/0328",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0) (a1 t) (a2 :kw)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0329",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0) (a1 'sym) (a2 'sym)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0330",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0) (a1 :kw) (a2 t)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0331",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 nil) (a2 nil)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp 1))"
+  },
+  {
+   "id": "call-interactively/0332",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 nil) (a2 :kw)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0333",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 t) (a2 'sym)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0334",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 'sym) (a2 t)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0335",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 :kw) (a2 nil)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp 1))"
+  },
+  {
+   "id": "call-interactively/0336",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 :kw) (a2 :kw)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0337",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 2) (a1 nil) (a2 'sym)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0338",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 2) (a1 t) (a2 t)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0339",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 2) (a1 'sym) (a2 nil)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp 2))"
+  },
+  {
+   "id": "call-interactively/0340",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 2) (a1 'sym) (a2 :kw)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0341",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 2) (a1 :kw) (a2 'sym)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0342",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1) (a1 nil) (a2 t)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0343",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1) (a1 t) (a2 nil)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp -1))"
+  },
+  {
+   "id": "call-interactively/0344",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1) (a1 t) (a2 :kw)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0345",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1) (a1 'sym) (a2 'sym)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0346",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1) (a1 :kw) (a2 t)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0347",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-positive-fixnum) (a1 nil) (a2 nil)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp 2305843009213693951))"
+  },
+  {
+   "id": "call-interactively/0348",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-positive-fixnum) (a1 nil) (a2 :kw)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0349",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-positive-fixnum) (a1 t) (a2 'sym)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0350",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-positive-fixnum) (a1 'sym) (a2 t)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0351",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-positive-fixnum) (a1 :kw) (a2 nil)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp 2305843009213693951))"
+  },
+  {
+   "id": "call-interactively/0352",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-positive-fixnum) (a1 :kw) (a2 :kw)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0353",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.5) (a1 nil) (a2 'sym)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0354",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.5) (a1 t) (a2 t)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0355",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.5) (a1 'sym) (a2 nil)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp 1.5))"
+  },
+  {
+   "id": "call-interactively/0356",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.5) (a1 'sym) (a2 :kw)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0357",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.5) (a1 :kw) (a2 'sym)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0358",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'sym) (a1 nil) (a2 t)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0359",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'sym) (a1 t) (a2 nil)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp sym))"
+  },
+  {
+   "id": "call-interactively/0360",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'sym) (a1 t) (a2 :kw)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0361",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'sym) (a1 'sym) (a2 'sym)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0362",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'sym) (a1 :kw) (a2 t)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0363",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :kw) (a1 nil) (a2 nil)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp :kw))"
+  },
+  {
+   "id": "call-interactively/0364",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :kw) (a1 nil) (a2 :kw)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0365",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :kw) (a1 t) (a2 'sym)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0366",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :kw) (a1 'sym) (a2 t)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0367",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :kw) (a1 :kw) (a2 nil)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp :kw))"
+  },
+  {
+   "id": "call-interactively/0368",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :kw) (a1 :kw) (a2 :kw)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0369",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\")) (a1 nil) (a2 'sym)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0370",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\")) (a1 t) (a2 t)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0371",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\")) (a1 'sym) (a2 nil)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp \"\"))"
+  },
+  {
+   "id": "call-interactively/0372",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\")) (a1 'sym) (a2 :kw)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0373",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\")) (a1 :kw) (a2 'sym)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0374",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 nil) (a2 t)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0375",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 t) (a2 nil)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp \"abc\"))"
+  },
+  {
+   "id": "call-interactively/0376",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 t) (a2 :kw)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0377",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 'sym) (a2 'sym)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0378",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 :kw) (a2 t)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0379",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 nil) (a2 nil)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp \"λx\"))"
+  },
+  {
+   "id": "call-interactively/0380",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 nil) (a2 :kw)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0381",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 t) (a2 'sym)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0382",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 'sym) (a2 t)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0383",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 :kw) (a2 nil)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp \"λx\"))"
+  },
+  {
+   "id": "call-interactively/0384",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 :kw) (a2 :kw)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0385",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 1 2 3)) (a1 nil) (a2 'sym)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0386",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 1 2 3)) (a1 t) (a2 t)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0387",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 1 2 3)) (a1 'sym) (a2 nil)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp (1 2 3)))"
+  },
+  {
+   "id": "call-interactively/0388",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 1 2 3)) (a1 'sym) (a2 :kw)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0389",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 1 2 3)) (a1 :kw) (a2 'sym)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0390",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 'a (list 'b))) (a1 nil) (a2 t)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0391",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 'a (list 'b))) (a1 t) (a2 nil)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp (a (b))))"
+  },
+  {
+   "id": "call-interactively/0392",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 'a (list 'b))) (a1 t) (a2 :kw)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0393",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 'a (list 'b))) (a1 'sym) (a2 'sym)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0394",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 'a (list 'b))) (a1 :kw) (a2 t)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0395",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 2)) (a1 nil) (a2 nil)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp (1 . 2)))"
+  },
+  {
+   "id": "call-interactively/0396",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 2)) (a1 nil) (a2 :kw)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0397",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 2)) (a1 t) (a2 'sym)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0398",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 2)) (a1 'sym) (a2 t)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0399",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 2)) (a1 :kw) (a2 nil)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp (1 . 2)))"
+  },
+  {
+   "id": "call-interactively/0400",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 2)) (a1 :kw) (a2 :kw)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0401",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 (cons 2 3))) (a1 nil) (a2 'sym)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0402",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 (cons 2 3))) (a1 t) (a2 t)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0403",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 (cons 2 3))) (a1 'sym) (a2 nil)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp (1 2 . 3)))"
+  },
+  {
+   "id": "call-interactively/0404",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 (cons 2 3))) (a1 'sym) (a2 :kw)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0405",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 (cons 2 3))) (a1 :kw) (a2 'sym)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0406",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (vector 1 2)) (a1 nil) (a2 t)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0407",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (vector 1 2)) (a1 t) (a2 nil)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp [1 2]))"
+  },
+  {
+   "id": "call-interactively/0408",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (vector 1 2)) (a1 t) (a2 :kw)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0409",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (vector 1 2)) (a1 'sym) (a2 'sym)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0410",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (vector 1 2)) (a1 :kw) (a2 t)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0411",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (a1 nil) (a2 nil)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "call-interactively/0412",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (a1 nil) (a2 :kw)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0413",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (a1 t) (a2 'sym)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp sym))"
+  },
+  {
+   "id": "call-interactively/0414",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (a1 'sym) (a2 t)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp t))"
+  },
+  {
+   "id": "call-interactively/0415",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (a1 :kw) (a2 nil)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "call-interactively/0416",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (a1 :kw) (a2 :kw)) (let ((r (call-interactively a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp :kw))"
+  },
+  {
+   "id": "call-interactively/0417",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (lambda (a) (interactive \"p\") a))) (error (list 'sig e))))",
+   "expected": "(ok 1)"
+  },
+  {
+   "id": "call-interactively/0418",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (lambda (a) (interactive \"P\") a))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "call-interactively/0419",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((current-prefix-arg '(4))) (call-interactively (lambda (a b) (interactive \"p\\nP\") (list a b))))) (error (list 'sig e))))",
+   "expected": "(ok (4 (4)))"
+  },
+  {
+   "id": "call-interactively/0420",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((current-prefix-arg 3)) (call-interactively (lambda (a b) (interactive \"p\\nP\") (list a b))))) (error (list 'sig e))))",
+   "expected": "(ok (3 3))"
+  },
+  {
+   "id": "call-interactively/0421",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((current-prefix-arg '-)) (call-interactively (lambda (a b) (interactive \"p\\nP\") (list a b))))) (error (list 'sig e))))",
+   "expected": "(ok (-1 -))"
+  },
+  {
+   "id": "call-interactively/0422",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((current-prefix-arg 'foo)) (call-interactively (lambda (a b) (interactive \"p\\nP\") (list a b))))) (error (list 'sig e))))",
+   "expected": "(ok (1 foo))"
+  },
+  {
+   "id": "call-interactively/0423",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((prefix-arg 3)) (call-interactively (lambda (a) (interactive \"P\") a)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "call-interactively/0424",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((prefix-arg 3)) (call-interactively (lambda (a) (interactive \"p\") a)))) (error (list 'sig e))))",
+   "expected": "(ok 1)"
+  },
+  {
+   "id": "call-interactively/0425",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((current-prefix-arg 5)) (call-interactively (lambda (a) (interactive \"P\") (setq current-prefix-arg 9) a)))) (error (list 'sig e))))",
+   "expected": "(ok 5)"
+  },
+  {
+   "id": "call-interactively/0426",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((current-prefix-arg 5)) (list (call-interactively (lambda (a) (interactive \"p\") (setq current-prefix-arg 9) a)) current-prefix-arg))) (error (list 'sig e))))",
+   "expected": "(ok (5 9))"
+  },
+  {
+   "id": "call-interactively/0427",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((this-command 'tc) (real-this-command 'rtc) (this-original-command 'toc) (last-command 'lc)) (list (call-interactively (lambda () (interactive) (list this-command real-this-command this-original-command last-command))) this-command))) (error (list 'sig e))))",
+   "expected": "(ok ((tc rtc toc lc) tc))"
+  },
+  {
+   "id": "call-interactively/0428",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((this-command 'tc) (real-this-command 'rtc)) (list (call-interactively (lambda () (interactive) (setq this-command 'x real-this-command 'y) 1)) this-command real-this-command))) (error (list 'sig e))))",
+   "expected": "(ok (1 x y))"
+  },
+  {
+   "id": "call-interactively/0429",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((this-command 'tc)) (list (call-interactively (lambda () (interactive (progn (setq this-command 'z) nil)) this-command)) this-command))) (error (list 'sig e))))",
+   "expected": "(ok (tc tc))"
+  },
+  {
+   "id": "call-interactively/0430",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((last-command 'lc)) (list (call-interactively (lambda () (interactive (progn (setq last-command 'z) nil)) last-command)) last-command))) (error (list 'sig e))))",
+   "expected": "(ok (lc lc))"
+  },
+  {
+   "id": "call-interactively/0431",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((this-command 'tc)) (call-interactively (lambda (x) (interactive (list this-command)) x)))) (error (list 'sig e))))",
+   "expected": "(ok tc)"
+  },
+  {
+   "id": "call-interactively/0432",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (lambda () 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp #[0 \"\\300\\207\" [1] 1]))",
+   "gnu_regime_variant": "(sig (wrong-type-argument commandp #[nil (1) (t)]))"
+  },
+  {
+   "id": "call-interactively/0433",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 'car)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp car))"
+  },
+  {
+   "id": "call-interactively/0434",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 'cl-no-such-fn)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp cl-no-such-fn))"
+  },
+  {
+   "id": "call-interactively/0435",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp nil))"
+  },
+  {
+   "id": "call-interactively/0436",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively 5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp 5))"
+  },
+  {
+   "id": "call-interactively/0437",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively \"forward-char\")) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp \"forward-char\"))"
+  },
+  {
+   "id": "call-interactively/0438",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively '(lambda (x) x))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument commandp (lambda (x) x)))"
+  },
+  {
+   "id": "call-interactively/0439",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively '(lambda (&rest a) (interactive \"p\") a))) (error (list 'sig e))))",
+   "expected": "(ok (1))"
+  },
+  {
+   "id": "call-interactively/0440",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively '(lambda (&rest a) \"doc\" (ignore) (interactive (list 1 2)) a))) (error (list 'sig e))))",
+   "expected": "(ok (1 2))"
+  },
+  {
+   "id": "call-interactively/0441",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defalias 'cl-a (lambda (&rest a) (interactive \"P\") a)) (call-interactively 'cl-a))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "call-interactively/0442",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defalias 'cl-a (lambda (&rest a) (interactive \"P\") a)) (defalias 'cl-b 'cl-a) (let ((current-prefix-arg '(16))) (call-interactively 'cl-b)))) (error (list 'sig e))))",
+   "expected": "(ok ((16)))"
+  },
+  {
+   "id": "call-interactively/0443",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defalias 'cl-a (lambda (&rest a) (interactive \"P\") a)) (put 'cl-a 'interactive-form '(interactive \"p\")) (call-interactively 'cl-a))) (error (list 'sig e))))",
+   "expected": "(ok (1))"
+  },
+  {
+   "id": "call-interactively/0444",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defalias 'cl-a (lambda (&rest a) a)) (put 'cl-a 'interactive-form '(interactive (list 'from-prop))) (call-interactively 'cl-a))) (error (list 'sig e))))",
+   "expected": "(ok (from-prop))"
+  },
+  {
+   "id": "call-interactively/0445",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defalias 'cl-a 'list) (put 'cl-a 'interactive-form '(interactive \"i\\np\")) (call-interactively 'cl-a))) (error (list 'sig e))))",
+   "expected": "(ok (nil 1))"
+  },
+  {
+   "id": "call-interactively/0446",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defalias 'interactive-form (lambda (f) '(interactive (list 'advised)))) (call-interactively 'list))) (error (list 'sig e))))",
+   "expected": "(ok (advised))"
+  },
+  {
+   "id": "call-interactively/0447",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defalias 'funcall-interactively (lambda (f &rest a) (list 'fi f a))) (call-interactively (lambda (&rest a) (interactive \"p\") a)))) (error (list 'sig e))))",
+   "expected": "(ok (fi #[128 \"\\207\" [] 2 \"\n\n(fn &rest A)\" \"p\"] (1)))",
+   "gnu_regime_variant": "(ok (fi #[(&rest a) (a) (t) nil nil \"p\"] (1)))"
+  },
+  {
+   "id": "call-interactively/0448",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (lambda (&rest a) (interactive \"i\\ni\") a))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "call-interactively/0449",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (lambda (&rest a) (interactive \"\") a))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "call-interactively/0450",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (lambda (&rest a) (interactive nil) a))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "call-interactively/0451",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (lambda (&rest a) (interactive \"p\\n\") a))) (error (list 'sig e))))",
+   "expected": "(ok (1))"
+  },
+  {
+   "id": "call-interactively/0452",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (lambda (&rest a) (interactive \"p\\n\\np\") a))) (error (list 'sig e))))",
+   "expected": "(sig (error \"Invalid control letter ‘\n’ (#o012, #x000a) in interactive calling string\"))"
+  },
+  {
+   "id": "call-interactively/0453",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (lambda (&rest a) (interactive \"pfoo\\nPbar\") a))) (error (list 'sig e))))",
+   "expected": "(ok (1 nil))"
+  },
+  {
+   "id": "call-interactively/0454",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (lambda (&rest a) (interactive \"*p\") a))) (error (list 'sig e))))",
+   "expected": "(ok (1))"
+  },
+  {
+   "id": "call-interactively/0455",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (lambda (&rest a) (interactive \"-p\") a))) (error (list 'sig e))))",
+   "expected": "(ok (1))"
+  },
+  {
+   "id": "call-interactively/0456",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (lambda (&rest a) (interactive \"+p\") a))) (error (list 'sig e))))",
+   "expected": "(sig (error \"‘+’ is not used in ‘interactive’ for ordinary commands\"))"
+  },
+  {
+   "id": "call-interactively/0457",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (lambda (&rest a) (interactive \"q\") a))) (error (list 'sig e))))",
+   "expected": "(sig (error \"Invalid control letter ‘q’ (#o161, #x0071) in interactive calling string\"))"
+  },
+  {
+   "id": "call-interactively/0458",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (lambda (&rest a) (interactive \"pq\\nλ\") a))) (error (list 'sig e))))",
+   "expected": "(sig (error \"Invalid control letter ‘λ’ (#o1673, #x03bb) in interactive calling string\"))"
+  },
+  {
+   "id": "call-interactively/0459",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (lambda (&rest a) (interactive \"*-*p\") a))) (error (list 'sig e))))",
+   "expected": "(ok (1))"
+  },
+  {
+   "id": "call-interactively/0460",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (lambda (&rest a) (interactive \"^p\") a))) (error (list 'sig e))))",
+   "expected": "(ok (1))"
+  },
+  {
+   "id": "call-interactively/0461",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (lambda (&rest a) (interactive \"@p\") a))) (error (list 'sig e))))",
+   "expected": "(ok (1))"
+  },
+  {
+   "id": "call-interactively/0462",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (lambda (&rest a) (interactive \"^@*-i\") a))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "call-interactively/0463",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (lambda (&rest a) (interactive \"U\") a))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "call-interactively/0464",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (lambda (&rest a) (interactive \"e\") a))) (error (list 'sig e))))",
+   "expected": "(sig (error \"command must be bound to an event with parameters\"))"
+  },
+  {
+   "id": "call-interactively/0465",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (lambda (&rest a) (interactive \"Z\") a))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "call-interactively/0466",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (lambda (&rest a) (interactive \"N\") a))) (error (list 'sig e))))",
+   "expected": "(sig (end-of-file \"Error reading from stdin\"))"
+  },
+  {
+   "id": "call-interactively/0467",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (lambda (&rest a) (interactive \"m\") a))) (error (list 'sig e))))",
+   "expected": "(sig (error \"The mark is not set now\"))"
+  },
+  {
+   "id": "call-interactively/0468",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (lambda (&rest a) (interactive \"r\") a))) (error (list 'sig e))))",
+   "expected": "(sig (error \"The mark is not set now, so there is no region\"))"
+  },
+  {
+   "id": "call-interactively/0469",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (lambda (&rest a) (interactive \"d\") a))) (error (list 'sig e))))",
+   "expected": "(ok (1))"
+  },
+  {
+   "id": "call-interactively/0470",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((current-prefix-arg '(4))) (call-interactively (lambda (&rest a) (interactive \"N\") a)))) (error (list 'sig e))))",
+   "expected": "(ok (4))"
+  },
+  {
+   "id": "call-interactively/0471",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((current-prefix-arg '(4))) (call-interactively (lambda (&rest a) (interactive \"Z\") a)))) (error (list 'sig e))))",
+   "expected": "(sig (end-of-file \"Error reading from stdin\"))"
+  },
+  {
+   "id": "call-interactively/0472",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (insert \"abc\") (goto-char 2) (call-interactively (lambda (&rest a) (interactive \"d\\nd\") a)))) (error (list 'sig e))))",
+   "expected": "(ok (2 2))"
+  },
+  {
+   "id": "call-interactively/0473",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (insert \"αβγ\") (goto-char 3) (call-interactively (lambda (&rest a) (interactive \"d\") a)))) (error (list 'sig e))))",
+   "expected": "(ok (3))"
+  },
+  {
+   "id": "call-interactively/0474",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (insert \"abc\") (goto-char 2) (call-interactively (lambda (&rest a) (interactive \"r\") a)))) (error (list 'sig e))))",
+   "expected": "(sig (error \"The mark is not set now, so there is no region\"))"
+  },
+  {
+   "id": "call-interactively/0475",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (insert \"abcdef\") (goto-char 2) (set-mark 5) (call-interactively (lambda (&rest a) (interactive \"r\") a)))) (error (list 'sig e))))",
+   "expected": "(ok (2 5))"
+  },
+  {
+   "id": "call-interactively/0476",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (setq buffer-read-only t) (call-interactively (lambda (&rest a) (interactive \"*p\") a)))) (error (list 'sig e))))",
+   "expected": "(sig (buffer-read-only #<killed buffer>))"
+  },
+  {
+   "id": "call-interactively/0477",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (setq buffer-read-only t) (let ((inhibit-read-only t)) (call-interactively (lambda (&rest a) (interactive \"*p\") a))))) (error (list 'sig e))))",
+   "expected": "(ok (1))"
+  },
+  {
+   "id": "call-interactively/0478",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (lambda (&rest a) (interactive \"e\") a) nil [(mouse-1 (foo))])) (error (list 'sig e))))",
+   "expected": "(ok ((mouse-1 (foo))))"
+  },
+  {
+   "id": "call-interactively/0479",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (lambda (&rest a) (interactive \"e\\ne\") a) nil [(m1 1) x (m2 2)])) (error (list 'sig e))))",
+   "expected": "(ok ((m1 1) (m2 2)))"
+  },
+  {
+   "id": "call-interactively/0480",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (lambda (&rest a) (interactive \"e\\ne\") a) nil [(m1 1)])) (error (list 'sig e))))",
+   "expected": "(sig (error \"command must be bound to an event with parameters\"))"
+  },
+  {
+   "id": "call-interactively/0481",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((inhibit-mouse-event-check t)) (call-interactively (lambda (&rest a) (interactive \"e\\ne\") a) nil [x (m1 1) y]))) (error (list 'sig e))))",
+   "expected": "(ok (x (m1 1)))"
+  },
+  {
+   "id": "call-interactively/0482",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((command-history nil)) (call-interactively (lambda (&rest a) (interactive \"e\\nd\") a) t [(m1 sym)]) (cdr (car command-history)))) (error (list 'sig e))))",
+   "expected": "(ok ('(m1 sym) (point)))"
+  },
+  {
+   "id": "call-interactively/0483",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((command-history nil)) (call-interactively (lambda (&rest a) (interactive (list 1 2)) a) t) (call-interactively (lambda (&rest a) (interactive (list 3)) a) t) (list (length command-history) (cdr (car command-history)) (cdr (car (cdr command-history)))))) (error (list 'sig e))))",
+   "expected": "(ok (2 (3) (1 2)))"
+  },
+  {
+   "id": "call-interactively/0484",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((command-history nil) (history-length 2)) (call-interactively (lambda (&rest a) (interactive (list 1)) a) t) (call-interactively (lambda (&rest a) (interactive (list 2)) a) t) (call-interactively (lambda (&rest a) (interactive (list 3)) a) t) (list (length command-history) (cdr (car command-history)) (cdr (car (cdr command-history)))))) (error (list 'sig e))))",
+   "expected": "(ok (2 (3) (2)))"
+  },
+  {
+   "id": "call-interactively/0485",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((command-history nil)) (put 'command-history 'history-length 1) (call-interactively (lambda (&rest a) (interactive (list 1)) a) t) (call-interactively (lambda (&rest a) (interactive (list 2)) a) t) (list (length command-history) (cdr (car command-history))))) (error (list 'sig e))))",
+   "expected": "(ok (1 (2)))"
+  },
+  {
+   "id": "call-interactively/0486",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((command-history nil) (history-length 0)) (call-interactively (lambda (&rest a) (interactive (list 1)) a) t) command-history)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "call-interactively/0487",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((command-history 'not-a-list)) (call-interactively (lambda (&rest a) (interactive (list 1)) a) t) command-history)) (error (list 'sig e))))",
+   "expected": "(ok not-a-list)"
+  },
+  {
+   "id": "call-interactively/0488",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((command-history nil)) (defalias 'cl-same (lambda (&rest a) (interactive (list 1)) a)) (call-interactively 'cl-same t) (call-interactively 'cl-same t) command-history)) (error (list 'sig e))))",
+   "expected": "(ok ((cl-same 1) (cl-same 1)))"
+  },
+  {
+   "id": "call-interactively/0489",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (lambda (&rest a) (interactive \"p\") a) nil 5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp 5))"
+  },
+  {
+   "id": "call-interactively/0490",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (lambda (&rest a) (interactive \"p\") a) nil [1 2])) (error (list 'sig e))))",
+   "expected": "(ok (1))"
+  },
+  {
+   "id": "call-interactively/0491",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (lambda (&rest a) (interactive \"p\") a) nil \"ab\")) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp \"ab\"))"
+  },
+  {
+   "id": "call-interactively/0492",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defalias 'cl-e (lambda (&rest a) (interactive \"e\") a)) (call-interactively 'cl-e))) (error (list 'sig e))))",
+   "expected": "(sig (error \"cl-e must be bound to an event with parameters\"))"
+  },
+  {
+   "id": "call-interactively/0493",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defalias 'handle-shift-selection (lambda () (set 'cl-log (cons 'shift (symbol-value 'cl-log))))) (progn (set 'cl-log nil) (list (condition-case e (call-interactively (lambda (&rest a) (interactive \"^p\") a)) (error (list 'err e))) (nreverse (symbol-value 'cl-log)))))) (error (list 'sig e))))",
+   "expected": "(ok ((1) (shift)))"
+  },
+  {
+   "id": "call-interactively/0494",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defalias 'handle-shift-selection (lambda () (set 'cl-log (cons 'shift (symbol-value 'cl-log))))) (progn (set 'cl-log nil) (list (condition-case e (call-interactively (lambda (&rest a) (interactive \"p\") a)) (error (list 'err e))) (nreverse (symbol-value 'cl-log)))))) (error (list 'sig e))))",
+   "expected": "(ok ((1) nil))"
+  },
+  {
+   "id": "call-interactively/0495",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defalias 'use-region-p (lambda () nil)) (call-interactively (lambda (&rest a) (interactive \"R\") a)))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "call-interactively/0496",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defalias 'use-region-p (lambda () t)) (call-interactively (lambda (&rest a) (interactive \"R\") a)))) (error (list 'sig e))))",
+   "expected": "(sig (error \"The mark is not set now, so there is no region\"))"
+  },
+  {
+   "id": "call-interactively/0497",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (lambda (&rest a) (interactive \"pP%s\") a))) (error (list 'sig e))))",
+   "expected": "(sig (error \"Not enough arguments for format string\"))"
+  },
+  {
+   "id": "call-interactively/0498",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (lambda (&rest a) (interactive (list 1 2)) a))) (error (list 'sig e))))",
+   "expected": "(ok (1 2))"
+  },
+  {
+   "id": "call-interactively/0499",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (lambda (&rest a) (interactive 7) a))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 7))"
+  },
+  {
+   "id": "call-interactively/0500",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (lambda (&rest a) (interactive '(1 . 2)) a))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "call-interactively/0501",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (lambda (&rest a) (interactive (error \"cl-boom\")) a))) (error (list 'sig e))))",
+   "expected": "(sig (error \"cl-boom\"))"
+  },
+  {
+   "id": "call-interactively/0502",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (lambda (&rest a) (interactive 'cl-unbound-variable) a))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp cl-unbound-variable))"
+  },
+  {
+   "id": "call-interactively/0503",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (lambda (&rest a) (interactive (list current-prefix-arg)) a))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "call-interactively/0504",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((x 5)) (call-interactively (lambda (a) (interactive (list x)) a)))) (error (list 'sig e))))",
+   "expected": "(ok 5)"
+  },
+  {
+   "id": "call-interactively/0505",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((x 1)) (let ((f (lambda (a) (interactive (list (setq x (1+ x)))) a))) (list (call-interactively f) (call-interactively f) x)))) (error (list 'sig e))))",
+   "expected": "(ok (2 3 3))"
+  },
+  {
+   "id": "call-interactively/0506",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((f (let ((y 'inner)) (lambda (a) (interactive (list y)) a)))) (call-interactively f))) (error (list 'sig e))))",
+   "expected": "(ok inner)"
+  },
+  {
+   "id": "call-interactively/0507",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defvar cl-dynvar 'global) (let ((cl-dynvar 'let)) (call-interactively (lambda (a) (interactive (list cl-dynvar)) a))))) (error (list 'sig e))))",
+   "expected": "(ok let)"
+  },
+  {
+   "id": "call-interactively/0508",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defun cl-d7 (n) (interactive (list (* 2 (prefix-numeric-value current-prefix-arg)))) n) (let ((current-prefix-arg 4)) (call-interactively 'cl-d7)))) (error (list 'sig e))))",
+   "expected": "(ok 8)"
+  },
+  {
+   "id": "call-interactively/0509",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defun cl-d9 (n) \"Doc.\" (interactive \"p\") (list 'd9 n)) (let ((current-prefix-arg '(4))) (call-interactively 'cl-d9)))) (error (list 'sig e))))",
+   "expected": "(ok (d9 4))"
+  },
+  {
+   "id": "call-interactively/0510",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (lambda (&rest a) (interactive (list (called-interactively-p 'any))) (cons (called-interactively-p 'any) a)))) (error (list 'sig e))))",
+   "expected": "(ok (t nil))"
+  },
+  {
+   "id": "call-interactively/0511",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (insert \"abc\") (goto-char 1) (list (call-interactively 'forward-char) (point)))) (error (list 'sig e))))",
+   "expected": "(ok (nil 2))"
+  },
+  {
+   "id": "call-interactively/0512",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (insert \"abc\") (goto-char 1) (let ((current-prefix-arg 2)) (list (call-interactively 'forward-char) (point))))) (error (list 'sig e))))",
+   "expected": "(ok (nil 3))"
+  },
+  {
+   "id": "call-interactively/0513",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (insert \"abc\") (goto-char 4) (let ((current-prefix-arg '-)) (list (call-interactively 'forward-char) (point))))) (error (list 'sig e))))",
+   "expected": "(ok (nil 3))"
+  },
+  {
+   "id": "call-interactively/0514",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (insert \"abc\") (goto-char 4) (list (condition-case e (call-interactively 'forward-char) (error e)) (point)))) (error (list 'sig e))))",
+   "expected": "(ok ((end-of-buffer) 4))"
+  },
+  {
+   "id": "call-interactively/0515",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (insert \"abc\") (goto-char 4) (list (call-interactively 'backward-char) (point)))) (error (list 'sig e))))",
+   "expected": "(ok (nil 3))"
+  },
+  {
+   "id": "call-interactively/0516",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (insert \"ab\\ncd\") (goto-char 5) (list (call-interactively 'beginning-of-line) (point)))) (error (list 'sig e))))",
+   "expected": "(ok (nil 4))"
+  },
+  {
+   "id": "call-interactively/0517",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (insert \"ab\\ncd\") (goto-char 1) (list (call-interactively 'end-of-line) (point)))) (error (list 'sig e))))",
+   "expected": "(ok (nil 3))"
+  },
+  {
+   "id": "call-interactively/0518",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (insert \"abc\") (goto-char 1) (list (call-interactively 'delete-char) (buffer-string)))) (error (list 'sig e))))",
+   "expected": "(ok (nil \"bc\"))"
+  },
+  {
+   "id": "call-interactively/0519",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (insert \"abc\") (goto-char 2) (let ((last-command-event ?z)) (list (call-interactively 'self-insert-command) (buffer-string))))) (error (list 'sig e))))",
+   "expected": "(ok (nil \"azbc\"))"
+  },
+  {
+   "id": "call-interactively/0520",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (insert \"abc\") (goto-char 2) (let ((last-command-event ?z) (current-prefix-arg 3)) (list (call-interactively 'self-insert-command) (buffer-string))))) (error (list 'sig e))))",
+   "expected": "(ok (nil \"azzzbc\"))"
+  },
+  {
+   "id": "call-interactively/0521",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (insert \"abc\") (narrow-to-region 2 3) (list (call-interactively 'widen) (point-min) (point-max)))) (error (list 'sig e))))",
+   "expected": "(ok (nil 1 4))"
+  },
+  {
+   "id": "call-interactively/0522",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (insert \"abc\") (list (call-interactively 'erase-buffer) (buffer-string)))) (error (list 'sig e))))",
+   "expected": "(ok (nil \"\"))"
+  },
+  {
+   "id": "call-interactively/0523",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((command-history nil)) (call-interactively (lambda (&rest a) (interactive (list 1 'sym \"s\" '(l))) a) t) (cdr (car command-history)))) (error (list 'sig e))))",
+   "expected": "(ok (1 'sym \"s\" '(l)))"
+  },
+  {
+   "id": "call-interactively/0524",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((command-history nil)) (defalias 'cl-h (lambda (&rest a) (interactive \"p\\nP\\ni\") a)) (call-interactively 'cl-h t) command-history)) (error (list 'sig e))))",
+   "expected": "(ok ((cl-h 1 nil nil)))"
+  },
+  {
+   "id": "call-interactively/0525",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((command-history nil)) (defalias 'cl-h (lambda (&rest a) (interactive \"p\") a)) (call-interactively 'cl-h nil) command-history)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "call-interactively/0526",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((command-history nil)) (with-temp-buffer (insert \"ab\") (defalias 'cl-h (lambda (&rest a) (interactive \"d\") a)) (call-interactively 'cl-h t)) command-history)) (error (list 'sig e))))",
+   "expected": "(ok ((cl-h (point))))"
+  },
+  {
+   "id": "call-interactively/0527",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((command-history nil)) (defalias 'cl-h (lambda (&rest a) (interactive (list 1 2)) a)) (put 'cl-h 'interactive-args '((1 . (+ 1 1)))) (call-interactively 'cl-h t) command-history)) (error (list 'sig e))))",
+   "expected": "(ok ((cl-h 1 (+ 1 1))))"
+  },
+  {
+   "id": "call-interactively/0528",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((command-history nil)) (defalias 'cl-h (lambda (&rest a) (interactive \"U\") a)) (call-interactively 'cl-h) command-history)) (error (list 'sig e))))",
+   "expected": "(ok ((cl-h nil)))"
+  },
+  {
+   "id": "call-interactively/0529",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (setq buffer-read-only t) (let ((command-history nil)) (defalias 'cl-h (lambda (&rest a) (interactive \"*p\") a)) (list (condition-case e (call-interactively 'cl-h t) (error e)) command-history)))) (error (list 'sig e))))",
+   "expected": "(ok ((buffer-read-only #<killed buffer>) ((cl-h 1))))"
+  },
+  {
+   "id": "call-interactively/0530",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defalias 'cl-ce (lambda (&rest a) (interactive \"p\") (list 'ce a this-command))) (command-execute 'cl-ce))) (error (list 'sig e))))",
+   "expected": "(ok (ce (1) nil))"
+  },
+  {
+   "id": "call-interactively/0531",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (catch 'cl-tag (call-interactively (lambda () (interactive (throw 'cl-tag 'in-spec)) 1)))) (error (list 'sig e))))",
+   "expected": "(ok in-spec)"
+  },
+  {
+   "id": "call-interactively/0532",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (catch 'cl-tag (call-interactively (lambda () (interactive) (throw 'cl-tag 'in-body))))) (error (list 'sig e))))",
+   "expected": "(ok in-body)"
+  },
+  {
+   "id": "call-interactively/0533",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (call-interactively (lambda (n) (interactive \"p\") (if (< n 3) (let ((current-prefix-arg (1+ n))) (call-interactively (lambda (m) (interactive \"p\") (list 'inner m)))) n)))) (error (list 'sig e))))",
+   "expected": "(ok (inner 2))"
+  },
+  {
+   "id": "call-interactively/0534",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((x (list 'kept (make-string 2 ?k)))) (list (call-interactively (lambda (a b) (interactive (progn (let ((i 0)) (while (< i 3000) (list i (make-string 3 ?x) (vector i)) (setq i (1+ i)))) (list x (make-string 1 ?q)))) (let ((i 0)) (while (< i 3000) (list i (make-string 3 ?x) (vector i)) (setq i (1+ i)))) (list (eq a x) b))) x))) (error (list 'sig e))))",
+   "expected": "(ok ((t \"q\") (kept \"kk\")))"
+  },
+  {
+   "id": "call-interactively/0535",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((current-prefix-arg (list 4))) (call-interactively (lambda (a b) (interactive \"P\\np\") (let ((i 0)) (while (< i 3000) (list i (make-string 3 ?x) (vector i)) (setq i (1+ i)))) (list a b))))) (error (list 'sig e))))",
+   "expected": "(ok ((4) 4))"
+  },
+  {
+   "id": "call-interactively/0536",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (funcall #'call-interactively (lambda (a) (interactive \"p\") a)) (apply #'call-interactively (list (lambda (a) (interactive \"P\") a))))) (error (list 'sig e))))",
+   "expected": "(ok (1 nil))"
+  },
+  {
+   "id": "call-interactively/0537",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((x 0)) (let ((f (function (lambda () (:documentation (setq x 5)) (interactive) 9)))) (list x (condition-case e (call-interactively f) (error e)) x)))) (error (list 'sig e))))",
+   "expected": "(ok (0 9 0))",
+   "gnu_regime_variant": "(ok (5 9 5))"
+  },
+  {
+   "id": "call-interactively/0538",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((s (copy-sequence \"^p\"))) (fset 'handle-shift-selection (lambda () (aset s 1 ?P))) (fset 'interactive-form (lambda (f) (list 'interactive s))) (let ((current-prefix-arg '(4))) (call-interactively (lambda (x) x))))) (error (list 'sig e))))",
+   "expected": "(ok 4)"
+  },
+  {
+   "id": "call-interactively/0539",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eval '(call-interactively (function (lambda (a) (interactive \"p\" . 3) a))) t)) (error (list 'sig e))))",
+   "expected": "(ok 1)"
+  },
+  {
+   "id": "call-interactively/0540",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((command-debug-status 9)) (call-interactively (lambda () (interactive \"\") command-debug-status)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "call-interactively/0541",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eval '(let ((x 7)) (let ((f (lambda (a) (interactive (list x)) a))) (fset 'interactive-form (lambda (g) '(interactive (list (+ x 1))))) (call-interactively f))) t)) (error (list 'sig e))))",
+   "expected": "(ok 8)"
+  },
+  {
+   "id": "call-interactively/0542",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eval '(let ((x 0)) (let ((f (function (lambda () (:documentation (setq x 5) . 3) (interactive) 9)))) (list x (call-interactively f) x))) t)) (error (list 'sig e))))",
+   "expected": "(ok (5 9 5))"
+  },
+  {
+   "id": "call-interactively/0543",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 'sym) (error (list 'sig e))))",
+   "expected": "(ok sym)"
+  },
+  {
+   "id": "call-interactively/0544",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (cons 1 (cons 2 3))) (error (list 'sig e))))",
+   "expected": "(ok (1 2 . 3))"
+  },
+  {
+   "id": "call-interactively/0545",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (cons 1 2)) (error (list 'sig e))))",
+   "expected": "(ok (1 . 2))"
+  },
+  {
+   "id": "call-interactively/0546",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"\")) (error (list 'sig e))))",
+   "expected": "(ok \"\")"
+  },
+  {
+   "id": "call-interactively/0547",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"abc\")) (error (list 'sig e))))",
+   "expected": "(ok \"abc\")"
+  },
+  {
+   "id": "call-interactively/0548",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"λx\")) (error (list 'sig e))))",
+   "expected": "(ok \"λx\")"
+  },
+  {
+   "id": "call-interactively/0549",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (error (list 'sig e))))",
+   "expected": "(ok (1 2 1 2 . #2))"
+  },
+  {
+   "id": "call-interactively/0550",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list 'a (list 'b))) (error (list 'sig e))))",
+   "expected": "(ok (a (b)))"
+  },
+  {
+   "id": "call-interactively/0551",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list 1 2 3)) (error (list 'sig e))))",
+   "expected": "(ok (1 2 3))"
+  },
+  {
+   "id": "call-interactively/0552",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vector 1 2)) (error (list 'sig e))))",
+   "expected": "(ok [1 2])"
+  },
+  {
+   "id": "call-interactively/0553",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok -1) (error (list 'sig e))))",
+   "expected": "(ok -1)"
+  },
+  {
+   "id": "call-interactively/0554",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 0) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "call-interactively/0555",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1) (error (list 'sig e))))",
+   "expected": "(ok 1)"
+  },
+  {
+   "id": "call-interactively/0556",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1.5) (error (list 'sig e))))",
+   "expected": "(ok 1.5)"
+  },
+  {
+   "id": "call-interactively/0557",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 2) (error (list 'sig e))))",
+   "expected": "(ok 2)"
+  },
+  {
+   "id": "call-interactively/0558",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok :kw) (error (list 'sig e))))",
+   "expected": "(ok :kw)"
+  },
+  {
+   "id": "call-interactively/0559",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok most-positive-fixnum) (error (list 'sig e))))",
+   "expected": "(ok 2305843009213693951)"
+  },
+  {
+   "id": "call-interactively/0560",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok nil) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "call-interactively/0561",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok t) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  }
+ ],
+ "pinned": {
+  "call-interactively/0288": "PRINTER",
+  "call-interactively/0292": "PRINTER",
+  "call-interactively/0296": "PRINTER",
+  "call-interactively/0300": "PRINTER",
+  "call-interactively/0314": "PRINTER",
+  "call-interactively/0411": "PRINTER",
+  "call-interactively/0415": "PRINTER",
+  "call-interactively/0432": "DATA",
+  "call-interactively/0439": "MISSING",
+  "call-interactively/0440": "MISSING",
+  "call-interactively/0447": "PRINTER",
+  "call-interactively/0466": "CONDITION",
+  "call-interactively/0471": "CONDITION",
+  "call-interactively/0475": "MISSING",
+  "call-interactively/0497": "DATA",
+  "call-interactively/0510": "MISSING",
+  "call-interactively/0530": "MISSING",
+  "call-interactively/0540": "VALUE",
+  "call-interactively/0541": "SIGNAL-VS-VALUE",
+  "call-interactively/0549": "PRINTER"
+ }
+}

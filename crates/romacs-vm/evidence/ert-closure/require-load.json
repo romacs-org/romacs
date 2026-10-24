@@ -1,0 +1,469 @@
+[
+  {
+    "feature": "ert",
+    "file": "lisp/emacs-lisp/ert.el",
+    "forms": 204,
+    "edges": [
+      {
+        "feature": "cl-lib",
+        "context": "load-time",
+        "form": 1,
+        "line": 57
+      },
+      {
+        "feature": "debug",
+        "context": "load-time",
+        "form": 2,
+        "line": 58
+      },
+      {
+        "feature": "backtrace",
+        "context": "load-time",
+        "form": 3,
+        "line": 59
+      },
+      {
+        "feature": "ewoc",
+        "context": "load-time",
+        "form": 4,
+        "line": 60
+      },
+      {
+        "feature": "find-func",
+        "context": "load-time",
+        "form": 5,
+        "line": 61
+      },
+      {
+        "feature": "pp",
+        "context": "load-time",
+        "form": 6,
+        "line": 62
+      },
+      {
+        "feature": "map",
+        "context": "load-time",
+        "form": 7,
+        "line": 63
+      },
+      {
+        "feature": "help-mode",
+        "context": "load-time",
+        "form": 180,
+        "line": 3024
+      }
+    ],
+    "error": null
+  },
+  {
+    "feature": "cl-lib",
+    "file": "lisp/emacs-lisp/cl-lib.el",
+    "forms": 97,
+    "edges": [
+      {
+        "feature": "macroexp",
+        "context": "load-time",
+        "form": 1,
+        "line": 87
+      },
+      {
+        "feature": "cl-macs",
+        "context": "load-time",
+        "form": 92,
+        "line": 553
+      },
+      {
+        "feature": "cl-seq",
+        "context": "load-time",
+        "form": 92,
+        "line": 553
+      }
+    ],
+    "error": null
+  },
+  {
+    "feature": "macroexp",
+    "file": "lisp/emacs-lisp/macroexp.el",
+    "forms": 50,
+    "edges": [],
+    "error": null
+  },
+  {
+    "feature": "cl-macs",
+    "file": "lisp/emacs-lisp/cl-macs.el",
+    "forms": 178,
+    "edges": [
+      {
+        "feature": "cl-lib",
+        "context": "load-time",
+        "form": 1,
+        "line": 46
+      },
+      {
+        "feature": "macroexp",
+        "context": "load-time",
+        "form": 2,
+        "line": 47
+      },
+      {
+        "feature": "gv",
+        "context": "load-time",
+        "form": 3,
+        "line": 49
+      },
+      {
+        "feature": "help",
+        "context": "deferred",
+        "form": 39,
+        "line": 270
+      },
+      {
+        "feature": "generator",
+        "context": "deferred",
+        "form": 41,
+        "line": 406
+      }
+    ],
+    "error": null
+  },
+  {
+    "feature": "gv",
+    "file": "lisp/emacs-lisp/gv.el",
+    "forms": 176,
+    "edges": [
+      {
+        "feature": "macroexp",
+        "context": "load-time",
+        "form": 1,
+        "line": 69
+      }
+    ],
+    "error": null
+  },
+  {
+    "feature": "cl-seq",
+    "file": "lisp/emacs-lisp/cl-seq.el",
+    "forms": 82,
+    "edges": [
+      {
+        "feature": "cl-lib",
+        "context": "load-time",
+        "form": 1,
+        "line": 44
+      }
+    ],
+    "error": null
+  },
+  {
+    "feature": "debug",
+    "file": "lisp/emacs-lisp/debug.el",
+    "forms": 61,
+    "edges": [
+      {
+        "feature": "cl-lib",
+        "context": "load-time",
+        "form": 1,
+        "line": 30
+      },
+      {
+        "feature": "backtrace",
+        "context": "load-time",
+        "form": 2,
+        "line": 31
+      },
+      {
+        "feature": "help-mode",
+        "context": "deferred",
+        "form": 51,
+        "line": 748
+      }
+    ],
+    "error": null
+  },
+  {
+    "feature": "backtrace",
+    "file": "lisp/emacs-lisp/backtrace.el",
+    "forms": 69,
+    "edges": [
+      {
+        "feature": "cl-lib",
+        "context": "compile-only",
+        "form": 1,
+        "line": 34
+      },
+      {
+        "feature": "pcase",
+        "context": "compile-only",
+        "form": 2,
+        "line": 35
+      },
+      {
+        "feature": "find-func",
+        "context": "load-time",
+        "form": 3,
+        "line": 36
+      },
+      {
+        "feature": "help-mode",
+        "context": "load-time",
+        "form": 4,
+        "line": 37
+      },
+      {
+        "feature": "lisp-mode",
+        "context": "load-time",
+        "form": 5,
+        "line": 38
+      }
+    ],
+    "error": null
+  },
+  {
+    "feature": "pcase",
+    "file": "lisp/emacs-lisp/pcase.el",
+    "forms": 53,
+    "edges": [
+      {
+        "feature": "macroexp",
+        "context": "load-time",
+        "form": 1,
+        "line": 55
+      },
+      {
+        "feature": "help-fns",
+        "context": "deferred",
+        "form": 14,
+        "line": 183
+      }
+    ],
+    "error": null
+  },
+  {
+    "feature": "find-func",
+    "file": "lisp/emacs-lisp/find-func.el",
+    "forms": 65,
+    "edges": [],
+    "error": null
+  },
+  {
+    "feature": "help-mode",
+    "file": "lisp/help-mode.el",
+    "forms": 94,
+    "edges": [
+      {
+        "feature": "cl-lib",
+        "context": "load-time",
+        "form": 1,
+        "line": 32
+      },
+      {
+        "feature": "find-func",
+        "context": "deferred",
+        "form": 37,
+        "line": 262
+      },
+      {
+        "feature": "find-func",
+        "context": "deferred",
+        "form": 41,
+        "line": 342
+      }
+    ],
+    "error": null
+  },
+  {
+    "feature": "lisp-mode",
+    "file": "lisp/emacs-lisp/lisp-mode.el",
+    "forms": 102,
+    "edges": [
+      {
+        "feature": "cl-lib",
+        "context": "compile-only",
+        "form": 1,
+        "line": 31
+      },
+      {
+        "feature": "subr-x",
+        "context": "compile-only",
+        "form": 2,
+        "line": 32
+      }
+    ],
+    "error": null
+  },
+  {
+    "feature": "subr-x",
+    "file": "lisp/emacs-lisp/subr-x.el",
+    "forms": 36,
+    "edges": [
+      {
+        "feature": "cl-lib",
+        "context": "compile-only",
+        "form": 1,
+        "line": 38
+      },
+      {
+        "feature": "mule-util",
+        "context": "load-time",
+        "form": 2,
+        "line": 40
+      },
+      {
+        "feature": "cl-lib",
+        "context": "deferred",
+        "form": 20,
+        "line": 286
+      }
+    ],
+    "error": null
+  },
+  {
+    "feature": "mule-util",
+    "file": "lisp/international/mule-util.el",
+    "forms": 18,
+    "edges": [],
+    "error": null
+  },
+  {
+    "feature": "ewoc",
+    "file": "lisp/emacs-lisp/ewoc.el",
+    "forms": 38,
+    "edges": [
+      {
+        "feature": "cl-lib",
+        "context": "compile-only",
+        "form": 1,
+        "line": 99
+      }
+    ],
+    "error": null
+  },
+  {
+    "feature": "pp",
+    "file": "lisp/emacs-lisp/pp.el",
+    "forms": 37,
+    "edges": [
+      {
+        "feature": "cl-lib",
+        "context": "load-time",
+        "form": 1,
+        "line": 27
+      },
+      {
+        "feature": "edebug",
+        "context": "deferred",
+        "form": 25,
+        "line": 468
+      }
+    ],
+    "error": null
+  },
+  {
+    "feature": "map",
+    "file": "lisp/emacs-lisp/map.el",
+    "forms": 77,
+    "edges": [
+      {
+        "feature": "seq",
+        "context": "load-time",
+        "form": 1,
+        "line": 48
+      },
+      {
+        "feature": "cl-lib",
+        "context": "compile-only",
+        "form": 2,
+        "line": 49
+      }
+    ],
+    "error": null
+  },
+  {
+    "feature": "seq",
+    "file": "lisp/emacs-lisp/seq.el",
+    "forms": 72,
+    "edges": [
+      {
+        "feature": "cl-generic",
+        "context": "compile-only",
+        "form": 1,
+        "line": 61
+      }
+    ],
+    "error": null
+  },
+  {
+    "feature": "cl-generic",
+    "file": "lisp/emacs-lisp/cl-generic.el",
+    "forms": 107,
+    "edges": [
+      {
+        "feature": "cl-lib",
+        "context": "compile-only",
+        "form": 1,
+        "line": 103
+      },
+      {
+        "feature": "cl-macs",
+        "context": "compile-only",
+        "form": 2,
+        "line": 104
+      },
+      {
+        "feature": "pcase",
+        "context": "compile-only",
+        "form": 3,
+        "line": 105
+      },
+      {
+        "feature": "subr-x",
+        "context": "compile-only",
+        "form": 4,
+        "line": 106
+      },
+      {
+        "feature": "gv",
+        "context": "deferred",
+        "form": 17,
+        "line": 251
+      },
+      {
+        "feature": "cl-lib",
+        "context": "deferred",
+        "form": 21,
+        "line": 384
+      },
+      {
+        "feature": "help-fns",
+        "context": "deferred",
+        "form": 23,
+        "line": 512
+      },
+      {
+        "feature": "gv",
+        "context": "deferred",
+        "form": 26,
+        "line": 544
+      },
+      {
+        "feature": "cl-generic",
+        "context": "deferred",
+        "form": 52,
+        "line": 1082
+      },
+      {
+        "feature": "help-fns",
+        "context": "deferred",
+        "form": 73,
+        "line": 1285
+      },
+      {
+        "feature": "help-mode",
+        "context": "deferred",
+        "form": 73,
+        "line": 1285
+      }
+    ],
+    "error": null
+  }
+]

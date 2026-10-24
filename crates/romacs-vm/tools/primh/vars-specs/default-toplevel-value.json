@@ -1,0 +1,47 @@
+{
+  "name": "default-toplevel-value",
+  "arity": [
+    1,
+    1
+  ],
+  "effect": "global",
+  "gnu_files": [
+    "eval.c",
+    "data.c"
+  ],
+  "gnu_def": "eval.c:811",
+  "rust": "src/prims/vars.rs:200",
+  "args": [
+    "tv-symbol"
+  ],
+  "extra": {
+    "0": [
+      "'tv",
+      "nil",
+      "t",
+      ":tv",
+      "1",
+      "\"text\"",
+      "'(a)",
+      "[1]"
+    ]
+  },
+  "probes": [
+    "(list (fboundp 'default-toplevel-value) (functionp #'default-toplevel-value) (funcall #'default-toplevel-value nil))",
+    "(progn (setq tv 1) (default-toplevel-value 'tv))",
+    "(progn (defvar tv 1) (let ((tv 2)) (let ((tv 3)) (list tv (default-value 'tv) (default-toplevel-value 'tv)))))",
+    "(progn (defvar tv) (makunbound 'tv) (let ((tv 2)) (list (default-boundp 'tv) (condition-case e (default-toplevel-value 'tv) (error e)))))",
+    "(progn (defvar tv 1) (defvaralias 'ta 'tv) (let ((tv 2)) (list (default-toplevel-value 'ta) (default-toplevel-value 'tv))))",
+    "(progn (defvar tv 1) (defvaralias 'ta 'tv) (let ((ta 2)) (list (default-toplevel-value 'ta) (default-toplevel-value 'tv))))",
+    "(progn (defvaralias 'ta 'tv) (condition-case e (default-toplevel-value 'ta) (error e)))",
+    "(progn (defvar tv 1) (make-local-variable 'tv) (setq tv 5) (let ((tv 9)) (list tv (default-value 'tv) (default-toplevel-value 'tv))))",
+    "(progn (defvar tv 1) (make-variable-buffer-local 'tv) (let ((tv 9)) (list tv (default-value 'tv) (default-toplevel-value 'tv))))",
+    "(progn (defvar tv 1) (make-variable-buffer-local 'tv) (let ((tv 9)) (set-buffer (get-buffer-create \"tv-other\")) (list tv (default-value 'tv) (default-toplevel-value 'tv))))",
+    "(progn (defvar tv) (makunbound 'tv) (make-local-variable 'tv) (setq tv 7) (condition-case e (default-toplevel-value 'tv) (error e)))",
+    "(let ((s (make-symbol \":tv\"))) (set-default s 8) (default-toplevel-value s))",
+    "(progn (defvar tv 1) (let ((tv 2)) (makunbound 'tv) (list (default-boundp 'tv) (default-toplevel-value 'tv))))",
+    "(progn (setq undo-limit 11) (let ((undo-limit 22)) (list undo-limit (default-toplevel-value 'undo-limit))))",
+    "(progn (set-buffer (get-buffer-create \"tv-fresh\")) (set-default 'fill-column 71) (let ((fill-column 82)) (list fill-column (default-value 'fill-column) (default-toplevel-value 'fill-column))))",
+    "(progn (set-buffer (get-buffer-create \"tv-fresh\")) (set-default 'fill-column 71) (make-local-variable 'fill-column) (setq fill-column 75) (let ((fill-column 82)) (list fill-column (default-value 'fill-column) (default-toplevel-value 'fill-column))))"
+  ]
+}

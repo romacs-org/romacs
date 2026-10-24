@@ -1,0 +1,568 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "vconcat",
+ "spec_sha256": "5a2cdcde68a4b1f25ab73f6aa6ba04cfbe0f0378ffdba985d1ee1ce3583aa8ac",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "vconcat",
+    "subr",
+    0,
+    "many"
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "fns.c": "db81c235d7c63f312128ad84c11d55ae4665a2599099be1229dbaa329afdb3bf"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "vconcat/0000",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vconcat nil)) (error (list 'sig e))))",
+   "expected": "(ok [])"
+  },
+  {
+   "id": "vconcat/0001",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vconcat t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep t))"
+  },
+  {
+   "id": "vconcat/0002",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vconcat 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 0))"
+  },
+  {
+   "id": "vconcat/0003",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vconcat 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 1))"
+  },
+  {
+   "id": "vconcat/0004",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vconcat 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 2))"
+  },
+  {
+   "id": "vconcat/0005",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vconcat -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep -1))"
+  },
+  {
+   "id": "vconcat/0006",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vconcat most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 2305843009213693951))"
+  },
+  {
+   "id": "vconcat/0007",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vconcat 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 1.5))"
+  },
+  {
+   "id": "vconcat/0008",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vconcat 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep sym))"
+  },
+  {
+   "id": "vconcat/0009",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vconcat :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep :kw))"
+  },
+  {
+   "id": "vconcat/0010",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vconcat (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(ok [])"
+  },
+  {
+   "id": "vconcat/0011",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vconcat (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(ok [97 98 99])"
+  },
+  {
+   "id": "vconcat/0012",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vconcat (copy-sequence \"\u03bbx\"))) (error (list 'sig e))))",
+   "expected": "(ok [955 120])"
+  },
+  {
+   "id": "vconcat/0013",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vconcat (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok [1 2 3])"
+  },
+  {
+   "id": "vconcat/0014",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vconcat (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok [a (b)])"
+  },
+  {
+   "id": "vconcat/0015",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vconcat (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "vconcat/0016",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vconcat (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 3))"
+  },
+  {
+   "id": "vconcat/0017",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vconcat (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(ok [1 2])"
+  },
+  {
+   "id": "vconcat/0018",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vconcat (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "vconcat/0019",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (vconcat a0))) (error (list 'sig e))))",
+   "expected": "(ok [])"
+  },
+  {
+   "id": "vconcat/0020",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil)) (let ((r (vconcat a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "vconcat/0021",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1)) (let ((r (vconcat a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 1))"
+  },
+  {
+   "id": "vconcat/0022",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-positive-fixnum)) (let ((r (vconcat a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 2305843009213693951))"
+  },
+  {
+   "id": "vconcat/0023",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :kw)) (let ((r (vconcat a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep :kw))"
+  },
+  {
+   "id": "vconcat/0024",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\u03bbx\"))) (let ((r (vconcat a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "vconcat/0025",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 2))) (let ((r (vconcat a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "vconcat/0026",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (vconcat a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "vconcat/0027",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vconcat)) (error (list 'sig e))))",
+   "expected": "(ok [])"
+  },
+  {
+   "id": "vconcat/0028",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vconcat nil nil)) (error (list 'sig e))))",
+   "expected": "(ok [])"
+  },
+  {
+   "id": "vconcat/0029",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vconcat '(1 2) [3] \"a\u03bb\" nil)) (error (list 'sig e))))",
+   "expected": "(ok [1 2 3 97 955])"
+  },
+  {
+   "id": "vconcat/0030",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vconcat (unibyte-string 255 65))) (error (list 'sig e))))",
+   "expected": "(ok [255 65])"
+  },
+  {
+   "id": "vconcat/0031",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vconcat (string-to-multibyte (unibyte-string 255)))) (error (list 'sig e))))",
+   "expected": "(ok [4194303])"
+  },
+  {
+   "id": "vconcat/0032",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vconcat \"\u96ea\ud83d\ude00\")) (error (list 'sig e))))",
+   "expected": "(ok [38634 128512])"
+  },
+  {
+   "id": "vconcat/0033",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vconcat '(1 2 . 3) 5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 3))"
+  },
+  {
+   "id": "vconcat/0034",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vconcat 5 '(1 . 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 5))"
+  },
+  {
+   "id": "vconcat/0035",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vconcat [1] 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep sym))"
+  },
+  {
+   "id": "vconcat/0036",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vconcat [1] [2] 7)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 7))"
+  },
+  {
+   "id": "vconcat/0037",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((l (list 1 2))) (setcdr (cdr l) l) (condition-case e (vconcat [9] l) (circular-list (eq (car (cdr e)) l))))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "vconcat/0038",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((v (vector 1))) (eq v (vconcat v)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "vconcat/0039",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((x (list 1)) (v (vconcat (list x)))) (eq (aref v 0) x))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "vconcat/0040",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eq (vconcat) (vconcat))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "vconcat/0041",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (length (vconcat (let ((l nil) (i 0)) (while (< i 5000) (setq l (cons i l)) (setq i (1+ i))) l) (make-vector 3 'y)))) (error (list 'sig e))))",
+   "expected": "(ok 5003)"
+  },
+  {
+   "id": "vconcat/0042",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vconcat (make-bool-vector 3 t))) (error (list 'sig e))))",
+   "expected": "(ok [t t t])"
+  },
+  {
+   "id": "vconcat/0043",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vconcat (lambda (x) x))) (error (list 'sig e))))",
+   "expected": "(ok [257 \"\\207\" [] 2 \"\n\n(fn X)\"])",
+   "gnu_regime_variant": "(ok [(x) (x) (t)])"
+  },
+  {
+   "id": "vconcat/0044",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vconcat (byte-compile (lambda (x) x)))) (error (list 'sig e))))",
+   "expected": "(ok [257 \"\\207\" [] 2 \"\n\n(fn X)\"])"
+  },
+  {
+   "id": "vconcat/0045",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vconcat (make-char-table 'test))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep #^[nil nil test nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil]))"
+  },
+  {
+   "id": "vconcat/0046",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vconcat (make-hash-table))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep #s(hash-table)))"
+  },
+  {
+   "id": "vconcat/0047",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vconcat (current-buffer))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep #<buffer *scratch*>))"
+  },
+  {
+   "id": "vconcat/0048",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vconcat (record 'foo 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep #s(foo 1)))"
+  },
+  {
+   "id": "vconcat/0049",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'vconcat '((1) (2) [3]))) (error (list 'sig e))))",
+   "expected": "(ok [1 2 3])"
+  },
+  {
+   "id": "vconcat/0050",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((s (copy-sequence \"ab\"))) (put-text-property 0 1 'face 'bold s) (vconcat s))) (error (list 'sig e))))",
+   "expected": "(ok [97 98])"
+  },
+  {
+   "id": "vconcat/0051",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vconcat nil nil)) (error (list 'sig e))))",
+   "expected": "(ok [])"
+  },
+  {
+   "id": "vconcat/0052",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vconcat t t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep t))"
+  },
+  {
+   "id": "vconcat/0053",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vconcat 0 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 0))"
+  },
+  {
+   "id": "vconcat/0054",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vconcat 1 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 1))"
+  },
+  {
+   "id": "vconcat/0055",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vconcat 2 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 2))"
+  },
+  {
+   "id": "vconcat/0056",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vconcat -1 -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep -1))"
+  },
+  {
+   "id": "vconcat/0057",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vconcat most-positive-fixnum most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 2305843009213693951))"
+  },
+  {
+   "id": "vconcat/0058",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vconcat 1.5 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 1.5))"
+  },
+  {
+   "id": "vconcat/0059",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vconcat 'sym 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep sym))"
+  },
+  {
+   "id": "vconcat/0060",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vconcat :kw :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep :kw))"
+  },
+  {
+   "id": "vconcat/0061",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vconcat (copy-sequence \"\") (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(ok [])"
+  },
+  {
+   "id": "vconcat/0062",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vconcat (copy-sequence \"abc\") (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(ok [97 98 99 97 98 99])"
+  },
+  {
+   "id": "vconcat/0063",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vconcat (copy-sequence \"\u03bbx\") (copy-sequence \"\u03bbx\"))) (error (list 'sig e))))",
+   "expected": "(ok [955 120 955 120])"
+  },
+  {
+   "id": "vconcat/0064",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vconcat (list 1 2 3) (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok [1 2 3 1 2 3])"
+  },
+  {
+   "id": "vconcat/0065",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vconcat (list 'a (list 'b)) (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok [a (b) a (b)])"
+  },
+  {
+   "id": "vconcat/0066",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vconcat (cons 1 2) (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "vconcat/0067",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vconcat (cons 1 (cons 2 3)) (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 3))"
+  },
+  {
+   "id": "vconcat/0068",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vconcat (vector 1 2) (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(ok [1 2 1 2])"
+  },
+  {
+   "id": "vconcat/0069",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 'sym) (error (list 'sig e))))",
+   "expected": "(ok sym)"
+  },
+  {
+   "id": "vconcat/0070",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (cons 1 (cons 2 3))) (error (list 'sig e))))",
+   "expected": "(ok (1 2 . 3))"
+  },
+  {
+   "id": "vconcat/0071",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (cons 1 2)) (error (list 'sig e))))",
+   "expected": "(ok (1 . 2))"
+  },
+  {
+   "id": "vconcat/0072",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"\")) (error (list 'sig e))))",
+   "expected": "(ok \"\")"
+  },
+  {
+   "id": "vconcat/0073",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"abc\")) (error (list 'sig e))))",
+   "expected": "(ok \"abc\")"
+  },
+  {
+   "id": "vconcat/0074",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"\u03bbx\")) (error (list 'sig e))))",
+   "expected": "(ok \"\u03bbx\")"
+  },
+  {
+   "id": "vconcat/0075",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (error (list 'sig e))))",
+   "expected": "(ok (1 2 1 2 . #2))"
+  },
+  {
+   "id": "vconcat/0076",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list 'a (list 'b))) (error (list 'sig e))))",
+   "expected": "(ok (a (b)))"
+  },
+  {
+   "id": "vconcat/0077",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list 1 2 3)) (error (list 'sig e))))",
+   "expected": "(ok (1 2 3))"
+  },
+  {
+   "id": "vconcat/0078",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vector 1 2)) (error (list 'sig e))))",
+   "expected": "(ok [1 2])"
+  },
+  {
+   "id": "vconcat/0079",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok -1) (error (list 'sig e))))",
+   "expected": "(ok -1)"
+  },
+  {
+   "id": "vconcat/0080",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 0) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "vconcat/0081",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1) (error (list 'sig e))))",
+   "expected": "(ok 1)"
+  },
+  {
+   "id": "vconcat/0082",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1.5) (error (list 'sig e))))",
+   "expected": "(ok 1.5)"
+  },
+  {
+   "id": "vconcat/0083",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 2) (error (list 'sig e))))",
+   "expected": "(ok 2)"
+  },
+  {
+   "id": "vconcat/0084",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok :kw) (error (list 'sig e))))",
+   "expected": "(ok :kw)"
+  },
+  {
+   "id": "vconcat/0085",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok most-positive-fixnum) (error (list 'sig e))))",
+   "expected": "(ok 2305843009213693951)"
+  },
+  {
+   "id": "vconcat/0086",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok nil) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "vconcat/0087",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok t) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  }
+ ],
+ "pinned": {
+  "vconcat/0018": "PRINTER",
+  "vconcat/0026": "PRINTER",
+  "vconcat/0040": "VALUE",
+  "vconcat/0043": "SIGNAL-VS-VALUE",
+  "vconcat/0044": "MISSING",
+  "vconcat/0075": "PRINTER"
+ }
+}

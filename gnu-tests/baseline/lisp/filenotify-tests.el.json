@@ -1,0 +1,728 @@
+{
+ "blob": "75386d95f79195f6ac03946faa017fd9f35de5d0",
+ "compiled": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": true,
+  "results": {
+   "file-notify-test00-availability": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "file-notify-test00-availability-remote": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "file-notify-test01-add-watch": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "file-notify-test01-add-watch-remote": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "file-notify-test02-rm-watch": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "file-notify-test02-rm-watch-remote": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "file-notify-test03-events": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "file-notify-test03-events-remote": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "file-notify-test04-autorevert": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "file-notify-test04-autorevert-remote": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "file-notify-test05-file-validity": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "file-notify-test05-file-validity-remote": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "file-notify-test06-dir-validity": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "file-notify-test06-dir-validity-remote": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "file-notify-test07-many-events": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "file-notify-test07-many-events-remote": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "file-notify-test08-backup": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "file-notify-test08-backup-remote": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "file-notify-test09-watched-file-in-watched-dir": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "file-notify-test09-watched-file-in-watched-dir-remote": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "file-notify-test10-move-file-to-another-watched-dir": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "file-notify-test10-move-file-to-another-watched-dir-remote": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "file-notify-test11-sufficient-resources": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (string-equal (file-notify--test-library) \"kqueue\")) :form (string-equal \"inotify\" \"kqueue\") :value nil :explanation (arrays-of-different-length 7 6 \"inotify\" \"kqueue\" first-mismatch-at 0)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "file-notify-test11-sufficient-resources-remote": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (string-equal (file-notify--test-library) \"kqueue\")) :form (string-equal \"inotifywait\" \"kqueue\") :value nil :explanation (arrays-of-different-length 11 6 \"inotifywait\" \"kqueue\" first-mismatch-at 0)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "file-notify-test12-symlinks": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "file-notify-test12-symlinks-remote": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "file-notify-test13-unmount": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "file-notify-test13-unmount-remote": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   }
+  },
+  "timed_out": false
+ },
+ "file": "lisp/filenotify-tests.el",
+ "gnu": {
+  "emacs": "<recording-path-redacted>/emacs-32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+  "version": "32.0.50"
+ },
+ "harness_sha256": "78c20850429a08af22faadf73b5d164c560230e83d7eb88ef60cb995670703ef",
+ "mini": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": null,
+  "results": {
+   "file-notify-test00-availability": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "file-notify-test00-availability-remote": {
+    "as_expected": null,
+    "detail": "(void-function ert-get-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "file-notify-test01-add-watch": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "file-notify-test01-add-watch-remote": {
+    "as_expected": null,
+    "detail": "(void-function ert-get-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "file-notify-test02-rm-watch": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "file-notify-test02-rm-watch-remote": {
+    "as_expected": null,
+    "detail": "(void-function ert-get-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "file-notify-test03-events": {
+    "as_expected": null,
+    "detail": "(void-function ert-run-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "file-notify-test03-events-remote": {
+    "as_expected": null,
+    "detail": "(void-function ert-get-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "file-notify-test04-autorevert": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "file-notify-test04-autorevert-remote": {
+    "as_expected": null,
+    "detail": "(void-function ert-get-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "file-notify-test05-file-validity": {
+    "as_expected": null,
+    "detail": "(void-function ert-run-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "file-notify-test05-file-validity-remote": {
+    "as_expected": null,
+    "detail": "(void-function ert-get-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "file-notify-test06-dir-validity": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "file-notify-test06-dir-validity-remote": {
+    "as_expected": null,
+    "detail": "(void-function ert-get-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "file-notify-test07-many-events": {
+    "as_expected": null,
+    "detail": "(void-function ert-run-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "file-notify-test07-many-events-remote": {
+    "as_expected": null,
+    "detail": "(void-function ert-get-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "file-notify-test08-backup": {
+    "as_expected": null,
+    "detail": "(void-function ert-run-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "file-notify-test08-backup-remote": {
+    "as_expected": null,
+    "detail": "(void-function ert-get-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "file-notify-test09-watched-file-in-watched-dir": {
+    "as_expected": null,
+    "detail": "(void-function ert-run-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "file-notify-test09-watched-file-in-watched-dir-remote": {
+    "as_expected": null,
+    "detail": "(void-function ert-get-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "file-notify-test10-move-file-to-another-watched-dir": {
+    "as_expected": null,
+    "detail": "(void-function ert-run-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "file-notify-test10-move-file-to-another-watched-dir-remote": {
+    "as_expected": null,
+    "detail": "(void-function ert-get-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "file-notify-test11-sufficient-resources": {
+    "as_expected": null,
+    "detail": "((skip-unless (string-equal (file-notify--test-library) \"kqueue\")))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "file-notify-test11-sufficient-resources-remote": {
+    "as_expected": null,
+    "detail": "(void-function ert-get-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "file-notify-test12-symlinks": {
+    "as_expected": null,
+    "detail": "(void-function ert-run-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "file-notify-test12-symlinks-remote": {
+    "as_expected": null,
+    "detail": "(void-function ert-get-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "file-notify-test13-unmount": {
+    "as_expected": null,
+    "detail": "(void-function ert-run-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "file-notify-test13-unmount-remote": {
+    "as_expected": null,
+    "detail": "(void-function ert-get-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   }
+  },
+  "timed_out": false
+ },
+ "read_error": null,
+ "real": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": true,
+  "results": {
+   "file-notify-test00-availability": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "file-notify-test00-availability-remote": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "file-notify-test01-add-watch": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "file-notify-test01-add-watch-remote": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "file-notify-test02-rm-watch": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "file-notify-test02-rm-watch-remote": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "file-notify-test03-events": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "file-notify-test03-events-remote": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "file-notify-test04-autorevert": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "file-notify-test04-autorevert-remote": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "file-notify-test05-file-validity": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "file-notify-test05-file-validity-remote": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "file-notify-test06-dir-validity": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "file-notify-test06-dir-validity-remote": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "file-notify-test07-many-events": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "file-notify-test07-many-events-remote": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "file-notify-test08-backup": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "file-notify-test08-backup-remote": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "file-notify-test09-watched-file-in-watched-dir": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "file-notify-test09-watched-file-in-watched-dir-remote": {
+    "as_expected": false,
+    "detail": "(ert-test-failed ((should (file-notify--test-with-actions-check actions)) :form (file-notify--test-with-actions-check ((:random changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed ...) (:random changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed ...) (:random changed changed changed changed changed changed changed changed changed changed created created created created created) (:random changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed created created created created ...) (:random changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed ...) (:random created created created created created))) :value nil :explanation \"Received actions do not match any sequence of expected actions\n(changed changed created changed changed changed changed changed created changed changed changed changed changed created changed changed changed changed changed created changed changed changed changed changed created changed)\n((:random changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed changed created created created created created created created created created created) (:random changed changed changed chang",
+    "expected": ":passed",
+    "outcome": "failed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "file-notify-test10-move-file-to-another-watched-dir": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "file-notify-test10-move-file-to-another-watched-dir-remote": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "file-notify-test11-sufficient-resources": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (string-equal (file-notify--test-library) \"kqueue\")) :form (string-equal \"inotify\" \"kqueue\") :value nil :explanation (arrays-of-different-length 7 6 \"inotify\" \"kqueue\" first-mismatch-at 0)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "file-notify-test11-sufficient-resources-remote": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (string-equal (file-notify--test-library) \"kqueue\")) :form (string-equal \"inotifywait\" \"kqueue\") :value nil :explanation (arrays-of-different-length 11 6 \"inotifywait\" \"kqueue\" first-mismatch-at 0)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "file-notify-test12-symlinks": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "file-notify-test12-symlinks-remote": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "file-notify-test13-unmount": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "file-notify-test13-unmount-remote": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   }
+  },
+  "timed_out": false
+ },
+ "schema": 1,
+ "toplevel_deftests": 14
+}

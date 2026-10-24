@@ -1,0 +1,55 @@
+{
+  "name": "mapc",
+  "arity": [
+    2,
+    2
+  ],
+  "effect": "global",
+  "gnu_files": [
+    "fns.c"
+  ],
+  "gnu_def": "fns.c:3569",
+  "rust": "src/prims/fns_map.rs:139",
+  "args": [
+    "mapc-finite",
+    "mapc-finite"
+  ],
+  "extra": {
+    "0": [
+      "#'identity",
+      "(lambda (x) (cons x x))",
+      "'absent-mapc-callback",
+      "nil",
+      "7",
+      "(lambda () 1)"
+    ],
+    "1": [
+      "nil",
+      "'(1 2 3)",
+      "'(1 . 2)",
+      "[]",
+      "[1 2 3]",
+      "(string ?a ?λ ?雪)",
+      "(unibyte-string 0 128 255)",
+      "7"
+    ]
+  },
+  "probes": [
+    "(list (fboundp 'mapc) (functionp #'mapc) (funcall #'mapc #'identity nil))",
+    "(let ((s (list 1 2 3)) calls) (list (eq s (mapc (lambda (x) (setq calls (cons x calls)) (cons x x)) s)) calls))",
+    "(let ((s (vector 1 2 3)) calls) (list (eq s (mapc (lambda (x) (setq calls (cons x calls)) (aset s 2 'z)) s)) calls))",
+    "(let ((s (list 1 2 3)) calls) (mapc (lambda (x) (setq calls (cons x calls)) (setcdr s nil)) s) calls)",
+    "(let ((s (list 1 2)) calls) (mapc (lambda (x) (setq calls (cons x calls)) (setcdr (cdr s) (list 9))) s) calls)",
+    "(let (calls) (mapc (lambda (x) (setq calls (cons x calls))) (string ?a ?λ ?雪)) calls)",
+    "(let (calls) (mapc (lambda (x) (setq calls (cons x calls))) (unibyte-string 0 128 255)) calls)",
+    "(mapc 'absent-mapc-callback [])",
+    "(condition-case e (mapc #'identity '(1 . 2)) (error e))",
+    "(condition-case e (mapc #'identity 7) (error e))",
+    "(condition-case e (apply #'mapc '(identity)) (error e))",
+    "(catch 'done (mapc (lambda (x) (if (eq x 2) (throw 'done x))) '(1 2 3)))",
+    "(mapc (lambda (x) nil) (make-bool-vector 3 t))",
+    "(mapc (lambda (x) nil) (lambda () 1))",
+    "(condition-case e (mapc #'list (car (cdr (make-keymap)))) (error (list (car e) (car (cdr e)))))",
+    "(condition-case e (mapc (lambda (x) (signal 'error (list x))) '(1 2)) (error e))"
+  ]
+}

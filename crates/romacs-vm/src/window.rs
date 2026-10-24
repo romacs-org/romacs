@@ -1,0 +1,1653 @@
+//! VM-owned windows. GNU window.c's prepared-size transactions, not Lisp policy.
+use crate::{data::Object, *};
+#[path = "redisplay.rs"]
+mod redisplay;
+const ROOT: &str = "#:vm2-root-window";
+const MINI: &str = "#:vm2-minibuffer-window";
+const SELECTED: &str = "#:vm2-selected-window";
+#[derive(Clone)]
+pub(super) struct Window {
+    pub id: u64,
+    pub frame: Value,
+    pub combination_limit: Value,
+    pub buffer: Value,
+    pub point: Value,
+    pub start: Value,
+    pub parent: Value,
+    pub children: Vec<Value>,
+    pub horizontal: bool,
+    pub dead: bool,
+    pub mini: bool,
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
+    pub new_pixel: u32,
+    pub left_margin: u32,
+    pub right_margin: u32,
+    /// Per-window vertical scroll in pixels. GNU keeps this on the window as
+    /// `w->vscroll` and both `window-vscroll` and `set-window-vscroll` begin by
+    /// decoding the WINDOW argument (`src/window.c:8947`, `:8978`). It lived on
+    /// `DisplayState` and was published into every window, so one window's
+    /// scroll was observable from another. It belongs here, beside the margins,
+    /// which are per-window for the same reason and never had that defect.
+    pub vscroll_px: u32,
+    /// Deferred scroll, applied after the frozen frame paints (D-ML1).
+    pub pending_vscroll: Option<u32>,
+    pub parameters: Vec<(Value, Value)>,
+    /// GNU `w->new_total`, `w->new_normal`, `w->normal_lines` and
+    /// `w->normal_cols` (window.h): Lisp objects, set by `make_window`
+    /// (window.c:4599) to 0, 0, 1.0 and 1.0. `window_resize_apply`
+    /// (window.c:4815) installs a numeric `new_normal` as the normal size
+    /// along the resized axis. Traced by `visit_values`.
+    pub new_total: Value,
+    pub new_normal: Value,
+    pub normal_lines: Value,
+    pub normal_cols: Value,
+    /// GNU `w->use_time` (window.c:767): `window_select_count` at the last
+    /// recorded selection, 0 for a window never selected that way.
+    pub use_time: u64,
+    pub end_distance: usize,
+    pub end_valid: bool,
+    pub force_start: bool,
+}
+impl Window {
+    fn new(id: u64, buffer: Value) -> Self {
+        Self {
+            id,
+            frame: Value::NIL,
+            combination_limit: Value::NIL,
+            buffer,
+            point: Value::NIL,
+            start: Value::NIL,
+            parent: Value::NIL,
+            children: vec![],
+            horizontal: false,
+            dead: false,
+            mini: false,
+            x: 0,
+            y: 0,
+            width: 640,
+            height: 460,
+            new_pixel: 0,
+            left_margin: 0,
+            vscroll_px: 0,
+            pending_vscroll: None,
+            right_margin: 0,
+            parameters: vec![],
+            new_total: Value::NIL,
+            new_normal: Value::NIL,
+            normal_lines: Value::NIL,
+            normal_cols: Value::NIL,
+            use_time: 0,
+            end_distance: 0,
+            end_valid: false,
+            force_start: false,
+        }
+    }
+    pub fn visit_values(&mut self, f: &mut impl FnMut(&mut Value)) {
+        for v in [
+            &mut self.frame,
+            &mut self.combination_limit,
+            &mut self.buffer,
+            &mut self.point,
+            &mut self.start,
+            &mut self.parent,
+            &mut self.new_total,
+            &mut self.new_normal,
+            &mut self.normal_lines,
+            &mut self.normal_cols,
+        ] {
+            f(v);
+        }
+        for v in &mut self.children {
+            f(v);
+        }
+        for (k, v) in &mut self.parameters {
+            f(k);
+            f(v);
+        }
+    }
+    pub fn storage_bytes(&self) -> usize {
+        size_of::<Self>()
+            + self.children.capacity() * size_of::<Value>()
+            + self.parameters.capacity() * size_of::<(Value, Value)>()
+    }
+    pub fn live(&self) -> bool {
+        !self.dead && self.children.is_empty() && self.buffer != Value::NIL
+    }
+}
+pub(super) struct WindowState {
+    next: u64,
+    /// GNU `window_select_count` (window.c:136).
+    select_count: u64,
+    pub width: u32,
+    pub height: u32,
+    pub line: u32,
+    pub column: u32,
+}
+impl Default for WindowState {
+    fn default() -> Self {
+        Self {
+            next: 1,
+            select_count: 0,
+            width: 640,
+            height: 480,
+            line: 20,
+            column: 10,
+        }
+    }
+}
+impl Vm {
+    pub(super) fn window(&self, v: Value) -> Result<&Window> {
+        match self.object_if(v) {
+            Some(Object::Window(w)) => Ok(w),
+            _ => Err("window required".into()),
+        }
+    }
+    pub(super) fn window_mut(&mut self, v: Value) -> Result<&mut Window> {
+        match self.objects.get_mut(v.index(0)?.saturating_sub(1)) {
+            Some(Object::Window(w)) => Ok(w),
+            _ => Err("window required".into()),
+        }
+    }
+    fn window_root(&mut self, name: &str) -> Value {
+        self.window_root_peek(name)
+    }
+    /// The root/selected/minibuffer window, read without interning: the
+    /// slot exists once `ensure_windows` has run.
+    fn window_root_peek(&self, name: &str) -> Value {
+        let Ok(f) = self.frame(self.frame_value_peek()) else { return Value::UNBOUND; };
+        match name { ROOT => f.root, SELECTED => f.selected, MINI => f.minibuffer, _ => unreachable!() }
+    }
+    fn put_window_root(&mut self, name: &str, v: Value) {
+        let f = self.frame_mut(self.frame_value_peek()).expect("initialized frame");
+        match name { ROOT => f.root = v, SELECTED => f.selected = v, MINI => f.minibuffer = v, _ => unreachable!() }
+    }
+    fn window_marker(&mut self, buffer: Value, position: Value) -> Result<Value> {
+        let v = self.allocate_object(Object::Marker(Box::new(annotations::Marker {
+            buffer: Value::NIL,
+            anchor: None,
+            bias: anchors::Bias::Left,
+        })));
+        self.set_marker_object(v, position, buffer)?;
+        Ok(v)
+    }
+    fn allocate_window(&mut self, buffer: Value) -> Result<Value> {
+        let id = self.window_state.next;
+        self.window_state.next += 1;
+        let mut w = Window::new(id, buffer);
+        if self.frame_value_peek() != Value::UNBOUND {
+            w.frame = self.frame_value_peek();
+        }
+        w.new_total = Value::integer(0)?;
+        w.new_normal = Value::integer(0)?;
+        w.normal_lines = self.allocate_object(Object::Float(1.0));
+        w.normal_cols = self.allocate_object(Object::Float(1.0));
+        if buffer != Value::NIL {
+            w.point = self.window_marker(buffer, Value::integer(1)?)?;
+            w.start = self.window_marker(buffer, Value::integer(1)?)?;
+        }
+        Ok(self.allocate_object(Object::Window(Box::new(w))))
+    }
+    pub(super) fn ensure_windows(&mut self) -> Result<()> {
+        if self.window_root(ROOT) != Value::UNBOUND {
+            return Ok(());
+        }
+        let scratch = self.create_named_buffer("*scratch*", false)?;
+        let root = self.allocate_window(scratch)?;
+        let mini_buffer = self.create_named_buffer(" *Minibuf-0*", false)?;
+        let mini = self.allocate_window(mini_buffer)?;
+        self.allocate_initial_frame(root, mini)?;
+        // The initial frame's window is selected with NORECORD nil
+        // (frame.c make_initial_frame -> Fselect_window), so it starts at 1.
+        self.window_state.select_count += 1;
+        self.window_mut(root)?.use_time = self.window_state.select_count;
+        let (width, height, line) = (
+            self.window_state.width,
+            self.window_state.height,
+            self.window_state.line,
+        );
+        {
+            let w = self.window_mut(root)?;
+            w.width = width;
+            w.height = height - line;
+        }
+        {
+            let w = self.window_mut(mini)?;
+            w.mini = true;
+            w.width = width;
+            w.height = line;
+            w.y = height - line;
+        }
+        Ok(())
+    }
+    pub(super) fn selected_window_value(&mut self) -> Result<Value> {
+        self.ensure_windows()?;
+        Ok(self.window_root(SELECTED))
+    }
+    pub(super) fn decode_window(&mut self, v: Value, live: bool, dead_ok: bool) -> Result<Value> {
+        self.ensure_windows()?;
+        let v = if v == Value::NIL {
+            self.window_root(SELECTED)
+        } else {
+            v
+        };
+        let w = self.window(v)?;
+        if (live && !w.live()) || (!dead_ok && w.dead) {
+            return Err("live/valid window required".into());
+        }
+        Ok(v)
+    }
+    fn frame_arg(&mut self, v: Value) -> Result<()> {
+        let frame = self.selected_frame_value()?;
+        if v == Value::NIL || v == frame {
+            Ok(())
+        } else {
+            Err("unknown frame".into())
+        }
+    }
+    pub(super) fn window_point_value(&mut self, v: Value) -> Result<Value> {
+        if v == self.window_root(SELECTED) {
+            let Object::Buffer(b) = self.object(self.window(v)?.buffer)? else {
+                return Err("buffer required".into());
+            };
+            Value::integer((b.char_of_byte(b.point)?.0 + 1) as i64)
+        } else {
+            self.marker_position_value(self.window(v)?.point)
+        }
+    }
+    pub(super) fn set_buffer_point_for_window(&mut self, v: Value, pos: Value) -> Result<()> {
+        let buffer = self.window(v)?.buffer;
+        let marker = self.window(v)?.point;
+        self.set_marker_object(marker, pos, buffer)?;
+        let pos = self.marker_position_value(marker)?.as_integer()?;
+        let Object::Buffer(b) = &mut self.objects[buffer.index(0)? - 1] else {
+            return Err("buffer required".into());
+        };
+        b.point = b.byte_of_char(coordinates::CharOffset((pos - 1) as usize))?;
+        Ok(())
+    }
+    /// GNU `select_window` (window.c:536): NORECORD nil bumps the use time
+    /// even when V is already selected (`record_and_return`).
+    fn select_window_value(&mut self, v: Value, record: bool) -> Result<Value> {
+        if record {
+            self.window_state.select_count += 1;
+            let count = self.window_state.select_count;
+            self.window_mut(v)?.use_time = count;
+        }
+        let old = self.window_root(SELECTED);
+        if old != v {
+            let old_point = self.window_point_value(old)?;
+            let old_buffer = self.window(old)?.buffer;
+            self.set_marker_object(self.window(old)?.point, old_point, old_buffer)?;
+            let new_point = self.marker_position_value(self.window(v)?.point)?;
+            self.set_buffer_point_for_window(v, new_point)?;
+            self.put_window_root(SELECTED, v);
+        }
+        self.slots[self.buffer_slot].value = self.window(v)?.buffer;
+        Ok(v)
+    }
+    fn prepared_check(&self, v: Value, horizontal: bool, omit: Value) -> Result<bool> {
+        let w = self.window(v)?;
+        if w.children.is_empty() {
+            return Ok(w.new_pixel
+                >= if horizontal {
+                    2 * self.window_state.column
+                } else {
+                    self.window_state.line
+                });
+        }
+        let mut sum = 0u64;
+        for &c in &w.children {
+            if c == omit {
+                continue;
+            }
+            if !self.prepared_check(c, horizontal, omit)? {
+                return Ok(false);
+            }
+            let size = self.window(c)?.new_pixel;
+            if w.horizontal == horizontal {
+                sum += u64::from(size);
+            } else if size != w.new_pixel {
+                return Ok(false);
+            }
+        }
+        Ok(w.horizontal != horizontal || sum == u64::from(w.new_pixel))
+    }
+    fn apply_prepared(&mut self, v: Value, horizontal: bool, edge: u32) -> Result<()> {
+        let numeric = self.numberp(self.window(v)?.new_normal);
+        let w = self.window_mut(v)?;
+        if horizontal {
+            w.width = w.new_pixel;
+            w.x = edge;
+            if numeric {
+                w.normal_cols = w.new_normal;
+            }
+        } else {
+            w.height = w.new_pixel;
+            w.y = edge;
+            if numeric {
+                w.normal_lines = w.new_normal;
+            }
+        }
+        w.end_valid = false;
+        let (children, same) = (w.children.clone(), w.horizontal == horizontal);
+        let mut at = edge;
+        for c in children {
+            self.apply_prepared(c, horizontal, at)?;
+            if same {
+                at += self.window(c)?.new_pixel;
+            }
+        }
+        Ok(())
+    }
+    fn replace_tree_node(&mut self, old: Value, new: Value) -> Result<()> {
+        let parent = self.window(old)?.parent;
+        if parent == Value::NIL {
+            self.put_window_root(ROOT, new);
+        } else {
+            let p = self.window_mut(parent)?;
+            let at = p
+                .children
+                .iter()
+                .position(|v| *v == old)
+                .ok_or("broken window parent")?;
+            p.children[at] = new;
+        }
+        self.window_mut(new)?.parent = parent;
+        Ok(())
+    }
+    fn retire_window(&mut self, v: Value) -> Result<()> {
+        let children = self.window(v)?.children.clone();
+        for c in children {
+            self.retire_window(c)?;
+        }
+        // Prune here, not at the deletion site: this is the function that
+        // recurses, so a descendant leaf retired as part of a subtree would
+        // otherwise keep its published snapshot forever. Window ids are
+        // monotonic and never reused, so the map would grow for the life of the
+        // VM and hold that window's owned text with it. The publication map is
+        // Rust-side state rather than a Lisp heap object, so no heap-object or
+        // live-byte assertion can observe this leak.
+        let retired_id = self.window(v)?.id;
+        self.display_state.forget_window(retired_id);
+        let (point, start) = (self.window(v)?.point, self.window(v)?.start);
+        for marker in [point, start] {
+            if marker != Value::NIL {
+                self.set_marker_object(marker, Value::NIL, Value::NIL)?;
+            }
+        }
+        let w = self.window_mut(v)?;
+        w.dead = true;
+        w.buffer = Value::NIL;
+        w.point = Value::NIL;
+        w.start = Value::NIL;
+        w.parent = Value::NIL;
+        w.children = vec![];
+        w.end_valid = false;
+        Ok(())
+    }
+    fn first_leaf(&self, mut v: Value) -> Result<Value> {
+        while let Some(&c) = self.window(v)?.children.first() {
+            v = c;
+        }
+        Ok(v)
+    }
+    fn delete_window_value(&mut self, v: Value) -> Result<Value> {
+        let w = self.window(v)?;
+        if w.dead {
+            return Ok(Value::NIL);
+        }
+        let parent = w.parent;
+        if parent == Value::NIL {
+            return Err("Attempt to delete minibuffer or sole ordinary window".into());
+        }
+        let horizontal = self.window(parent)?.horizontal;
+        let root = self.window_root(ROOT);
+        let root_size = if horizontal {
+            self.window(root)?.width
+        } else {
+            self.window(root)?.height
+        };
+        if !self.prepared_check(root, horizontal, v)? || self.window(root)?.new_pixel != root_size {
+            return Err("Deletion failed".into());
+        }
+        // Validation precedes mutation: failure has exactly GNU's relinked state.
+        self.window_mut(parent)?.children.retain(|c| *c != v);
+        // `retain` removes elements but keeps the allocation, and the
+        // collector forwards a surviving window without compacting its
+        // vectors. A parent that grows to many children and is then reduced
+        // would otherwise retain its peak storage for as long as it lives:
+        // measured flat at 14 objects while bytes climbed 5136 -> 5392 ->
+        // 5904 across peaks of 4, 8 and 16, i.e. 64 bytes per peak child
+        // held by a parent whose final topology is identical.
+        self.window_mut(parent)?.children.shrink_to_fit();
+        let edge = if horizontal {
+            self.window(parent)?.x
+        } else {
+            self.window(parent)?.y
+        };
+        self.apply_prepared(parent, horizontal, edge)?;
+        let selected = self.window_root(SELECTED);
+        let selected_point = self.window_point_value(selected)?;
+        let selected_buffer = self.window(selected)?.buffer;
+        self.set_marker_object(
+            self.window(selected)?.point,
+            selected_point,
+            selected_buffer,
+        )?;
+        self.retire_window(v)?;
+        if self.window(parent)?.children.len() == 1 {
+            let sibling = self.window(parent)?.children[0];
+            self.replace_tree_node(parent, sibling)?;
+            // window.c:5810-5811: SIBLING inherits PARENT's normal sizes.
+            let (cols, lines) = {
+                let p = self.window(parent)?;
+                (p.normal_cols, p.normal_lines)
+            };
+            let s = self.window_mut(sibling)?;
+            s.normal_cols = cols;
+            s.normal_lines = lines;
+            self.window_mut(parent)?.children.clear();
+            self.retire_window(parent)?;
+            self.recombine_window(sibling)?;
+        }
+        if !self.window(selected)?.live() {
+            let root = self.window_root(ROOT);
+            let next = self.first_leaf(root)?;
+            self.put_window_root(SELECTED, next);
+            self.slots[self.buffer_slot].value = self.window(next)?.buffer;
+            let point = self.marker_position_value(self.window(next)?.point)?;
+            self.set_buffer_point_for_window(next, point)?;
+        }
+        Ok(Value::NIL)
+    }
+    fn recombine_window(&mut self, v: Value) -> Result<()> {
+        let w = self.window(v)?;
+        let parent = w.parent;
+        if parent == Value::NIL
+            || w.children.is_empty()
+            || w.combination_limit != Value::NIL
+            || self.window(parent)?.horizontal != w.horizontal
+        {
+            return Ok(());
+        }
+        let children = w.children.clone();
+        let p = self.window_mut(parent)?;
+        let at = p
+            .children
+            .iter()
+            .position(|c| *c == v)
+            .ok_or("broken window parent")?;
+        p.children.splice(at..at + 1, children.iter().copied());
+        for c in children {
+            self.window_mut(c)?.parent = parent;
+        }
+        self.window_mut(v)?.children = vec![];
+        self.retire_window(v)
+    }
+    fn split_window_value(
+        &mut self,
+        v: Value,
+        pixels: u32,
+        side: Value,
+        normal: Value,
+        refer: Value,
+    ) -> Result<Value> {
+        if refer != Value::NIL {
+            return Err("VM2 split REFER resurrection is unsupported".into());
+        }
+        // window.c:5378 does not check NORMAL-SIZE: it becomes the new
+        // window's new normal size, installed only if it is a number
+        // (window_resize_apply, window.c:4830).
+        let side_name = self.display(side)?;
+        let horizontal = side == Value::TRUE || side_name == "left" || side_name == "right";
+        let before = side_name == "left" || side_name == "above";
+        let w = self.window(v)?.clone();
+        if w.mini {
+            return Err("Attempt to split minibuffer window".into());
+        }
+        let minimum = if horizontal {
+            2 * self.window_state.column
+        } else {
+            self.window_state.line
+        };
+        let old_size = if horizontal { w.width } else { w.height };
+        if pixels < minimum
+            || !self.prepared_check(v, horizontal, Value::NIL)?
+            || pixels.checked_add(w.new_pixel) != Some(old_size)
+        {
+            return Err("Sum of sizes of old and new window don't fit".into());
+        }
+        let reference = if w.live() {
+            v
+        } else {
+            self.window_root(SELECTED)
+        };
+        let (buffer, left_margin, right_margin) = {
+            let reference = self.window(reference)?;
+            (reference.buffer, reference.left_margin, reference.right_margin)
+        };
+        let new = self.allocate_window(buffer)?;
+        {
+            let n = self.window_mut(new)?;
+            n.x = w.x;
+            n.y = w.y;
+            n.width = w.width;
+            n.height = w.height;
+            n.new_pixel = pixels;
+            n.left_margin = left_margin;
+            n.right_margin = right_margin;
+        }
+        if w.live() {
+            let point = self.window_point_value(v)?;
+            self.set_marker_object(self.window(new)?.point, point, buffer)?;
+            let start = self.marker_position_value(w.start)?;
+            self.set_marker_object(self.window(new)?.start, start, buffer)?;
+        }
+        let unit = if horizontal {
+            self.window_state.column
+        } else {
+            self.window_state.line
+        };
+        let limit_slot = self.slot("window-combination-limit");
+        let limit = self.variable_value(limit_slot)? == Value::TRUE;
+        let parent = if !limit && w.parent != Value::NIL && self.window(w.parent)?.horizontal == horizontal {
+            w.parent
+        } else {
+            let p = self.allocate_window(Value::NIL)?;
+            {
+                // make_parent_window copies OLD (window.c:5142); then
+                // Fsplit_window_internal gives the parent OLD's pixel and
+                // total size and OLD's normal size as its new ones
+                // (window.c:5506-5511).
+                let node = self.window_mut(p)?;
+                node.combination_limit = if limit { Value::TRUE } else { Value::NIL };
+                node.x = w.x;
+                node.y = w.y;
+                node.width = w.width;
+                node.height = w.height;
+                node.horizontal = horizontal;
+                node.new_pixel = old_size;
+                node.normal_lines = w.normal_lines;
+                node.normal_cols = w.normal_cols;
+                node.new_total = Value::integer(i64::from(old_size / unit))?;
+                node.new_normal = if horizontal {
+                    w.normal_cols
+                } else {
+                    w.normal_lines
+                };
+            }
+            // replace_window (window.c:2571-2574, SETFLAG true) hands OLD's
+            // normal sizes to the parent and resets OLD's own to 1.0.
+            let lines = self.allocate_object(Object::Float(1.0));
+            let cols = self.allocate_object(Object::Float(1.0));
+            {
+                let old = self.window_mut(v)?;
+                old.normal_lines = lines;
+                old.normal_cols = cols;
+            }
+            self.replace_tree_node(v, p)?;
+            self.window_mut(p)?.children.push(v);
+            self.window_mut(v)?.parent = p;
+            p
+        };
+        let at = self
+            .window(parent)?
+            .children
+            .iter()
+            .position(|c| *c == v)
+            .unwrap()
+            + usize::from(!before);
+        self.window_mut(parent)?.children.insert(at, new);
+        self.window_mut(new)?.parent = parent;
+        // window.c:5641-5653: the new window's new total is what its
+        // siblings' new totals leave of the parent's total; its new normal
+        // is NORMAL-SIZE.
+        let parent_total = {
+            let p = self.window(parent)?;
+            i64::from(if horizontal { p.width } else { p.height } / unit)
+        };
+        let mut sum = 0i64;
+        for &c in &self.window(parent)?.children {
+            if c != new {
+                sum = sum.saturating_add(self.window(c)?.new_total.as_integer().unwrap_or(0));
+            }
+        }
+        {
+            let total = Value::integer(parent_total.saturating_sub(sum))?;
+            let n = self.window_mut(new)?;
+            n.new_total = total;
+            n.new_normal = normal;
+        }
+        let edge = if horizontal { w.x } else { w.y };
+        if before {
+            self.apply_prepared(new, horizontal, edge)?;
+            self.apply_prepared(v, horizontal, edge + pixels)?;
+        } else {
+            self.apply_prepared(v, horizontal, edge)?;
+            self.apply_prepared(new, horizontal, edge + w.new_pixel)?;
+        }
+        // window_resize_apply (p, horflag) also installs every numeric new
+        // normal size in PARENT's subtree along the split axis.
+        self.install_normals(parent, horizontal)?;
+        Ok(new)
+    }
+    fn numberp(&self, v: Value) -> bool {
+        v.as_integer().is_ok() || matches!(self.object_if(v), Some(Object::Float(_)))
+    }
+    /// The normal-size half of GNU `window_resize_apply` (window.c:4815).
+    fn install_normals(&mut self, v: Value, horizontal: bool) -> Result<()> {
+        if self.numberp(self.window(v)?.new_normal) {
+            let w = self.window_mut(v)?;
+            if horizontal {
+                w.normal_cols = w.new_normal;
+            } else {
+                w.normal_lines = w.new_normal;
+            }
+        }
+        for c in self.window(v)?.children.clone() {
+            self.install_normals(c, horizontal)?;
+        }
+        Ok(())
+    }
+    /// Freeze leaf publications using stable scalar IDs across collecting mode-line eval.
+    pub(super) fn frame_window_snapshots(
+        &mut self,
+        width: u32,
+        height: u32,
+    ) -> Result<Vec<(u32, u32, romacs_layout_input::WindowSnapshot)>> {
+        self.set_frame_geometry(
+            width,
+            height,
+            self.window_state.line,
+            self.window_state.column,
+        )?;
+        let root = self.window_root(ROOT);
+        let mut ids = vec![];
+        self.window_leaf_ids(root, &mut ids)?;
+        let mini = self.window_root(MINI);
+        ids.push(self.window(mini)?.id);
+        let outcome = (|| {
+            let mut snapshots = vec![];
+            for id in ids {
+                let v = self
+                    .objects
+                    .iter()
+                    .enumerate()
+                    .find_map(|(i, o)| match o {
+                        Object::Window(w) if w.id == id && w.live() => {
+                            Some(Value::reference(i + 1, 0))
+                        }
+                        _ => None,
+                    })
+                    .ok_or("window deleted during frame snapshot")?;
+                let w = self.window(v)?;
+                let (x, y, width, height) = (
+                    w.x + w.left_margin * self.window_state.column,
+                    w.y,
+                    w.width.saturating_sub(
+                        (w.left_margin + w.right_margin) * self.window_state.column,
+                    ),
+                    w.height,
+                );
+                snapshots.push((x, y, self.snapshot_window(v, width, height)?));
+            }
+            Ok(snapshots)
+        })();
+        self.display_state.width = width;
+        self.display_state.height = height;
+        outcome
+    }
+    fn window_leaf_ids(&self, v: Value, out: &mut Vec<u64>) -> Result<()> {
+        let w = self.window(v)?;
+        if w.live() {
+            out.push(w.id);
+        } else {
+            for &c in &w.children {
+                self.window_leaf_ids(c, out)?;
+            }
+        }
+        Ok(())
+    }
+    /// Install canonical font metrics before startup Lisp observes window sizes.
+    pub fn set_frame_geometry(
+        &mut self,
+        width: u32,
+        height: u32,
+        line_height: u32,
+        column_width: u32,
+    ) -> Result<()> {
+        if line_height == 0
+            || column_width == 0
+            || u64::from(height) < 2 * u64::from(line_height)
+            || u64::from(width) < 2 * u64::from(column_width)
+        {
+            return Err("frame geometry is below safe window minimum".into());
+        }
+        self.ensure_windows()?;
+        let root = self.window_root(ROOT);
+        let mut geometry = vec![];
+        self.plan_window_geometry(
+            root,
+            0,
+            0,
+            width,
+            height - line_height,
+            line_height,
+            column_width,
+            &mut geometry,
+        )?;
+        let mini = self.window_root(MINI);
+        geometry.push((mini, 0, height - line_height, width, line_height));
+        for (v, x, y, w, h) in geometry {
+            let window = self.window_mut(v)?;
+            if (window.x, window.y, window.width, window.height) != (x, y, w, h) {
+                window.end_valid = false;
+            }
+            window.x = x;
+            window.y = y;
+            window.width = w;
+            window.height = h;
+        }
+        self.window_state.width = width;
+        self.window_state.height = height;
+        self.window_state.line = line_height;
+        self.window_state.column = column_width;
+        self.display_state.width = width;
+        self.display_state.height = height;
+        Ok(())
+    }
+    #[allow(clippy::too_many_arguments)]
+    fn plan_window_geometry(
+        &self,
+        v: Value,
+        x: u32,
+        y: u32,
+        width: u32,
+        height: u32,
+        line: u32,
+        column: u32,
+        out: &mut Vec<(Value, u32, u32, u32, u32)>,
+    ) -> Result<()> {
+        let w = self.window(v)?;
+        if width < 2 * column || height < line {
+            return Err("frame resize would violate safe window minimum".into());
+        }
+        out.push((v, x, y, width, height));
+        let total = if w.horizontal { width } else { height };
+        let old_total = if w.horizontal { w.width } else { w.height };
+        let mut old_edge = 0u64;
+        let mut edge = 0;
+        for (i, &child) in w.children.iter().enumerate() {
+            let c = self.window(child)?;
+            old_edge += u64::from(if w.horizontal { c.width } else { c.height });
+            let next = if i + 1 == w.children.len() {
+                total
+            } else {
+                (old_edge * u64::from(total) / u64::from(old_total.max(1))) as u32
+            };
+            let size = next.saturating_sub(edge);
+            if w.horizontal {
+                self.plan_window_geometry(child, x + edge, y, size, height, line, column, out)?;
+            } else {
+                self.plan_window_geometry(child, x, y + edge, width, size, line, column, out)?;
+            }
+            edge = next;
+        }
+        Ok(())
+    }
+    pub fn display_apply_layout(&mut self, ends: &[(u64, usize)]) -> Result<()> {
+        // Validate the complete journal before publishing any per-window end.
+        let mut changes = vec![];
+        for &(id, end) in ends {
+            let (index, w) = self
+                .objects
+                .iter()
+                .enumerate()
+                .find_map(|(i, o)| match o {
+                    Object::Window(w) if w.id == id && w.live() => Some((i, w)),
+                    _ => None,
+                })
+                .ok_or("layout journal names an unknown live window")?;
+            let Object::Buffer(b) = self.object(w.buffer)? else {
+                return Err("buffer required".into());
+            };
+            let end_char = b.char_of_byte(coordinates::ByteOffset(end))?.0;
+            changes.push((index, b.len_chars() - end_char));
+        }
+        for (index, distance) in changes {
+            let Object::Window(w) = &mut self.objects[index] else {
+                unreachable!()
+            };
+            w.end_distance = distance;
+            w.end_valid = true;
+        }
+        Ok(())
+    }
+    pub(super) fn window_primitive(
+        &mut self,
+        p: Primitive,
+        start: usize,
+        n: usize,
+    ) -> Result<Value> {
+        use Primitive::*;
+        let valid = match p {
+            SelectedWindow => n == 0,
+            SetWindowPoint | SetWindowBuffer => n >= 2 && n <= 3 && (p != SetWindowPoint || n == 2),
+            SetWindowStart | SetWindowMargins | SetWindowNewPixel => n >= 2 && n <= 3,
+            SetWindowParameter => n == 3,
+            SplitWindowInternal => n == 4 || n == 5,
+            SelectWindow | WindowEnd | WindowTotalHeight | WindowTotalWidth | WindowResizeApply => {
+                n <= 2 && (p != SelectWindow || n >= 1)
+            }
+            WindowParameter => n == 2,
+            DeleteWindowInternal | Windowp | WindowLiveP => n == 1,
+            _ => n <= 1,
+        };
+        if !valid {
+            return Err("wrong primitive arity".into());
+        }
+        let arg = |i: usize| {
+            if i < n {
+                self.stack[start + i]
+            } else {
+                Value::NIL
+            }
+        };
+        let (a, b, c, d, e) = (arg(0), arg(1), arg(2), arg(3), arg(4));
+        if matches!(p, Windowp | WindowLiveP) {
+            return Ok(
+                if matches!(self.object_if(a),Some(Object::Window(w)) if p==Windowp || w.live()) {
+                    Value::TRUE
+                } else {
+                    Value::NIL
+                },
+            );
+        }
+        self.ensure_windows()?;
+        if matches!(
+            p,
+            SelectedWindow | FrameSelectedWindow | MinibufferWindow | FrameRootWindow
+        ) {
+            if p != SelectedWindow {
+                self.frame_arg(a)?;
+            }
+            return Ok(self.window_root(if p == MinibufferWindow {
+                MINI
+            } else if p == FrameRootWindow {
+                ROOT
+            } else {
+                SELECTED
+            }));
+        }
+        if p == WindowResizeApply {
+            self.frame_arg(a)?;
+            let root = self.window_root(ROOT);
+            let horizontal = b != Value::NIL;
+            let size = if horizontal {
+                self.window(root)?.width
+            } else {
+                self.window(root)?.height
+            };
+            if self.window(root)?.new_pixel != size
+                || !self.prepared_check(root, horizontal, Value::NIL)?
+            {
+                return Ok(Value::NIL);
+            }
+            self.apply_prepared(root, horizontal, 0)?;
+            return Ok(Value::TRUE);
+        }
+        let live = matches!(
+            p,
+            SelectWindow
+                | SetWindowPoint
+                | SetWindowStart
+                | WindowPoint
+                | WindowStart
+                | WindowEnd
+                | SetWindowMargins
+                | WindowMargins
+                | SetWindowBuffer
+        );
+        let dead_ok = matches!(
+            p,
+            DeleteWindowInternal | WindowParameter | SetWindowParameter | WindowBuffer
+        );
+        let v = self.decode_window(a, live, dead_ok)?;
+        let value = match p {
+            SelectWindow => self.select_window_value(v, b == Value::NIL)?,
+            DeleteWindowInternal => self.delete_window_value(v)?,
+            SplitWindowInternal => self.split_window_value(
+                v,
+                u32::try_from(b.as_integer()?).map_err(|_| "positive size required")?,
+                c,
+                d,
+                e,
+            )?,
+            WindowBuffer => self.window(v)?.buffer,
+            SetWindowBuffer => {
+                let buffer = self.display_buffer(b)?;
+                let keep = c != Value::NIL;
+                // GNU computes `samebuf` BEFORE assigning, then skips the
+                // whole marker/scroll reset when KEEP-MARGINS is set and the
+                // buffer is unchanged (src/window.c:4367, the
+                // `!(keep_margins_p && samebuf)` guard). Its comment
+                // explains why: resetting hscroll/vscroll breaks image-mode
+                // and doc-view-mode on every frame resize.
+                let samebuf = self.window(v)?.buffer == buffer;
+                if !(keep && samebuf) {
+                    let (point, st) = (self.window(v)?.point, self.window(v)?.start);
+                    // GNU takes the buffer's own point, `BUF_PT (b)`, not 1
+                    // (src/window.c:4375). Resetting to 1 loses an
+                    // unselected window's position: verified on live GNU
+                    // 32.0.50, assigning a buffer whose point is 7 leaves
+                    // window-point at 7 and selecting the window puts point
+                    // at 7.
+                    let pos = {
+                        let Object::Buffer(buf) = self.object(buffer)? else {
+                            return Err("buffer required".into());
+                        };
+                        Value::integer((buf.char_of_byte(buf.point)?.0 + 1) as i64)?
+                    };
+                    self.set_marker_object(point, pos, buffer)?;
+                    // GNU restores `b->last_window_start` here; VM2 keeps no
+                    // per-buffer last window start, so it starts at 1. See
+                    // DIVERGENCES.md VM2-WB1.
+                    self.set_marker_object(st, Value::integer(1)?, buffer)?;
+                }
+                let w = self.window_mut(v)?;
+                w.buffer = buffer;
+                w.end_distance = 0;
+                w.end_valid = false;
+                // GNU resets margins when KEEP-MARGINS is nil
+                // (src/window.c:4397), independently of the guard above.
+                if !keep {
+                    w.left_margin = 0;
+                    w.right_margin = 0;
+                }
+                Value::NIL
+            }
+            WindowPoint => self.window_point_value(v)?,
+            SetWindowPoint => {
+                if v == self.window_root(SELECTED) {
+                    self.set_buffer_point_for_window(v, b)?;
+                } else {
+                    self.set_marker_object(self.window(v)?.point, b, self.window(v)?.buffer)?;
+                }
+                b
+            }
+            WindowStart => self.marker_position_value(self.window(v)?.start)?,
+            SetWindowStart => {
+                if c != Value::NIL {
+                    return Err("VM2 NOFORCE redisplay selection is unsupported".into());
+                }
+                self.set_marker_object(self.window(v)?.start, b, self.window(v)?.buffer)?;
+                let w = self.window_mut(v)?;
+                w.end_valid = false;
+                w.force_start = true;
+                b
+            }
+            WindowEnd => {
+                let w = self.window(v)?;
+                let Object::Buffer(buffer) = self.object(w.buffer)? else {
+                    return Err("buffer required".into());
+                };
+                if b != Value::NIL {
+                    return Err(
+                        "VM2 window-end UPDATE requires synchronous layout, which is unsupported"
+                            .into(),
+                    );
+                }
+                Value::integer(buffer.len_chars() as i64 + 1 - w.end_distance as i64)?
+            }
+            WindowParent => self.window(v)?.parent,
+            WindowChild => self
+                .window(v)?
+                .children
+                .first()
+                .copied()
+                .unwrap_or(Value::NIL),
+            WindowNextSibling | WindowPrevSibling => {
+                let parent = self.window(v)?.parent;
+                if parent == Value::NIL {
+                    Value::NIL
+                } else {
+                    let children = &self.window(parent)?.children;
+                    let at = children.iter().position(|c| *c == v).unwrap();
+                    let next = if p == WindowNextSibling {
+                        at.checked_add(1)
+                    } else {
+                        at.checked_sub(1)
+                    };
+                    next.and_then(|i| children.get(i))
+                        .copied()
+                        .unwrap_or(Value::NIL)
+                }
+            }
+            SetWindowNewPixel => {
+                let base = if c == Value::NIL {
+                    0
+                } else {
+                    self.window(v)?.new_pixel as i64
+                };
+                let pixels = base
+                    .checked_add(b.as_integer()?)
+                    .and_then(|n| u32::try_from(n).ok())
+                    .filter(|n| *n <= i32::MAX as u32)
+                    .ok_or("new pixel size out of range")?;
+                self.window_mut(v)?.new_pixel = pixels;
+                Value::integer(pixels as i64)?
+            }
+            WindowNewPixel => Value::integer(self.window(v)?.new_pixel as i64)?,
+            WindowPixelHeight => Value::integer(self.window(v)?.height as i64)?,
+            WindowPixelWidth => Value::integer(self.window(v)?.width as i64)?,
+            WindowTotalHeight | WindowTotalWidth => {
+                let pixels = if p == WindowTotalHeight {
+                    self.window(v)?.height
+                } else {
+                    self.window(v)?.width
+                };
+                let unit = if p == WindowTotalHeight {
+                    self.window_state.line
+                } else {
+                    self.window_state.column
+                };
+                let ceiling = self.display(b)? == "ceiling";
+                Value::integer(if ceiling {
+                    pixels.div_ceil(unit)
+                } else {
+                    pixels / unit
+                } as i64)?
+            }
+            WindowParameter => self
+                .window(v)?
+                .parameters
+                .iter()
+                .find(|(k, _)| *k == b)
+                .map(|(_, v)| *v)
+                .unwrap_or(Value::NIL),
+            SetWindowParameter => {
+                let w = self.window_mut(v)?;
+                if let Some((_, value)) = w.parameters.iter_mut().find(|(k, _)| *k == b) {
+                    *value = c;
+                } else {
+                    w.parameters.insert(0, (b, c));
+                }
+                c
+            }
+            WindowParameters => {
+                let params = self.window(v)?.parameters.clone();
+                let pairs = params
+                    .iter()
+                    .map(|&(k, v)| {
+                        self.conses.push((k, v));
+                        Value::reference(self.conses.len() - 1, 3)
+                    })
+                    .collect::<Vec<_>>();
+                self.list_value(&pairs)
+            }
+            WindowMargins => {
+                let w = self.window(v)?;
+                let l = if w.left_margin == 0 {
+                    Value::NIL
+                } else {
+                    Value::integer(w.left_margin as i64)?
+                };
+                let r = if w.right_margin == 0 {
+                    Value::NIL
+                } else {
+                    Value::integer(w.right_margin as i64)?
+                };
+                self.conses.push((l, r));
+                Value::reference(self.conses.len() - 1, 3)
+            }
+            SetWindowMargins => {
+                let dim = |v: Value| -> Result<u32> {
+                    if v == Value::NIL {
+                        Ok(0)
+                    } else {
+                        Ok(u32::try_from(v.as_integer()?)
+                            .ok()
+                            .filter(|n| *n <= i32::MAX as u32)
+                            .ok_or("margin out of range")?)
+                    }
+                };
+                let (l, r) = (dim(b)?, dim(c)?);
+                let col = self.window_state.column;
+                let w = self.window_mut(v)?;
+                if (u64::from(l) + u64::from(r) + 2) * u64::from(col) > u64::from(w.width)
+                    || (l, r) == (w.left_margin, w.right_margin)
+                {
+                    Value::NIL
+                } else {
+                    w.left_margin = l;
+                    w.right_margin = r;
+                    w.end_valid = false;
+                    Value::TRUE
+                }
+            }
+            _ => return Err("unknown window primitive".into()),
+        };
+        if matches!(
+            p,
+            SelectWindow
+                | DeleteWindowInternal
+                | SplitWindowInternal
+                | SetWindowBuffer
+                | SetWindowPoint
+                | SetWindowStart
+                | SetWindowParameter
+                | SetWindowMargins
+        ) {
+            self.display_state.version += 1;
+        }
+        Ok(value)
+    }
+}
+
+/// The window surface `prims/window.rs` declares as primitives (GNU
+/// window.c, frame.c and minibuf.c's `active-minibuffer-window`). Reached only
+/// through `Leaf::windows`, so a body never holds `&mut Vm`; nothing here
+/// evaluates Lisp or collects, and every Value it returns is already rooted
+/// in a window, a slot or a fresh allocation.
+pub(crate) struct Windows<'a> {
+    vm: &'a mut Vm,
+}
+type Out = std::result::Result<Value, crate::prim::Fault>;
+use crate::prim::Fault;
+fn internal(e: String) -> Fault {
+    Fault::Error(e)
+}
+impl<'a> Windows<'a> {
+    pub(crate) fn new(vm: &'a mut Vm) -> Self {
+        Windows { vm }
+    }
+    fn frame(&mut self) -> Value {
+        self.vm.selected_frame_value().expect("initial frame")
+    }
+    fn is_frame(&mut self, v: Value) -> bool {
+        matches!(self.vm.object_if(v), Some(Object::Frame(_)))
+    }
+    /// GNU `decode_live_frame`: nil is the selected frame, else
+    /// `CHECK_LIVE_FRAME` (`wrong-type-argument frame-live-p`).
+    fn live_frame(&mut self, v: Value) -> std::result::Result<(), Fault> {
+        if v == Value::NIL || matches!(self.vm.object_if(v), Some(Object::Frame(f)) if f.live) {
+            Ok(())
+        } else {
+            Err(Fault::Wrong("frame-live-p", v))
+        }
+    }
+    /// GNU `decode_any_frame`: `CHECK_FRAME` (`wrong-type-argument framep`).
+    fn any_frame(&mut self, v: Value) -> std::result::Result<(), Fault> {
+        if v == Value::NIL || self.is_frame(v) {
+            Ok(())
+        } else {
+            Err(Fault::Wrong("framep", v))
+        }
+    }
+    /// GNU `decode_valid_window` (nil is the selected window).
+    fn valid(&mut self, v: Value) -> Out {
+        self.vm.ensure_windows().map_err(internal)?;
+        let w = if v == Value::NIL { self.vm.window_root(SELECTED) } else { v };
+        match self.vm.object_if(w) {
+            Some(Object::Window(x)) if !x.dead => Ok(w),
+            _ => Err(Fault::Wrong("window-valid-p", v)),
+        }
+    }
+    /// GNU `decode_live_window` (nil is the selected window).
+    fn live(&mut self, v: Value) -> Out {
+        self.vm.ensure_windows().map_err(internal)?;
+        let w = if v == Value::NIL { self.vm.window_root(SELECTED) } else { v };
+        match self.vm.object_if(w) {
+            Some(Object::Window(x)) if x.live() => Ok(w),
+            _ => Err(Fault::Wrong("window-live-p", v)),
+        }
+    }
+    fn get(&self, v: Value) -> std::result::Result<&Window, Fault> {
+        self.vm.window(v).map_err(internal)
+    }
+    fn get_mut(&mut self, v: Value) -> std::result::Result<&mut Window, Fault> {
+        self.vm.window_mut(v).map_err(internal)
+    }
+    fn int(n: i64) -> Out {
+        Value::integer(n).map_err(internal)
+    }
+    pub(crate) fn window_valid_p(&mut self, object: Value) -> Value {
+        let valid = object != Value::NIL
+            && matches!(self.vm.object_if(object), Some(Object::Window(w)) if !w.dead);
+        if valid { Value::TRUE } else { Value::NIL }
+    }
+    pub(crate) fn window_frame(&mut self, window: Value) -> Out {
+        let window = self.valid(window)?;
+        Ok(self.get(window)?.frame)
+    }
+    pub(crate) fn window_minibuffer_p(&mut self, window: Value) -> Out {
+        let w = self.valid(window)?;
+        Ok(if self.get(w)?.mini { Value::TRUE } else { Value::NIL })
+    }
+    /// `window-top-child` (HORIZONTAL false) / `window-left-child` (true).
+    pub(crate) fn first_child(&mut self, window: Value, horizontal: bool) -> Out {
+        let v = self.valid(window)?;
+        let w = self.get(v)?;
+        Ok(match w.children.first() {
+            Some(&c) if w.horizontal == horizontal => c,
+            _ => Value::NIL,
+        })
+    }
+    pub(crate) fn window_normal_size(&mut self, window: Value, horizontal: Value) -> Out {
+        let v = self.valid(window)?;
+        let w = self.get(v)?;
+        Ok(if horizontal == Value::NIL { w.normal_lines } else { w.normal_cols })
+    }
+    pub(crate) fn window_new_total(&mut self, window: Value) -> Out {
+        let v = self.valid(window)?;
+        Ok(self.get(v)?.new_total)
+    }
+    pub(crate) fn window_new_normal(&mut self, window: Value) -> Out {
+        let v = self.valid(window)?;
+        Ok(self.get(v)?.new_normal)
+    }
+    /// window.c:4667: `CHECK_FIXNUM (size)`; ADD sums with the old value.
+    pub(crate) fn set_window_new_total(&mut self, window: Value, size: Value, add: Value) -> Out {
+        let w = self.valid(window)?;
+        let n = size.integer_value().ok_or(Fault::Wrong("fixnump", size))?;
+        let total = if add == Value::NIL {
+            size
+        } else {
+            let old = self.get(w)?.new_total.integer_value().unwrap_or(0);
+            Self::int(old.checked_add(n).ok_or(Fault::Wrong("fixnump", size))?)?
+        };
+        self.get_mut(w)?.new_total = total;
+        Ok(total)
+    }
+    pub(crate) fn set_window_new_normal(&mut self, window: Value, size: Value) -> Out {
+        let w = self.valid(window)?;
+        self.get_mut(w)?.new_normal = size;
+        Ok(size)
+    }
+    /// window.c:5003. VM2 derives a window's total size from its pixel size
+    /// (`window-total-height`), so there is no separate total to install:
+    /// this validates FRAME and returns t (DIVERGENCES.md VM2-WIN1).
+    pub(crate) fn window_resize_apply_total(&mut self, frame: Value) -> Out {
+        self.live_frame(frame)?;
+        Ok(Value::TRUE)
+    }
+    pub(crate) fn window_use_time(&mut self, window: Value) -> Out {
+        let w = self.live(window)?;
+        Self::int(self.get(w)?.use_time as i64)
+    }
+    /// VM2 has no `set-window-dedicated-p` yet, so no window is dedicated.
+    pub(crate) fn window_dedicated_p(&mut self, window: Value) -> Out {
+        self.live(window)?;
+        Ok(Value::NIL)
+    }
+    /// Decorations VM2 does not draw: header/tab lines, scroll bars and
+    /// dividers are 0 pixels (window.c:1224-1269 on a live window).
+    pub(crate) fn live_zero(&mut self, window: Value) -> Out {
+        self.live(window)?;
+        Ok(Value::integer(0).unwrap())
+    }
+    /// window.c:1215 `WINDOW_MODE_LINE_HEIGHT` over `window_wants_mode_line`
+    /// (window.c:6037): a live non-minibuffer window whose `mode-line-format`
+    /// parameter is not `none`, with that parameter or `mode-line-format`
+    /// non-nil, taller than one canonical line. VM2 draws a mode line one
+    /// canonical line tall; it reads `mode-line-format`'s current value cell,
+    /// as display.rs `build_mode_line` does, not the window buffer's local
+    /// value (DIVERGENCES.md VM2-WIN3).
+    pub(crate) fn window_mode_line_height(&mut self, window: Value) -> Out {
+        let w = self.live(window)?;
+        let format = {
+            let slot = self.vm.slot("mode-line-format");
+            self.vm.slots[slot].value
+        };
+        let line = self.vm.window_state.line;
+        let key = self.vm.intern("mode-line-format");
+        let none = self.vm.intern("none");
+        let x = self.get(w)?;
+        let parameter = x.parameters.iter().find(|(k, _)| *k == key).map_or(Value::NIL, |(_, v)| *v);
+        let wants = !x.mini
+            && parameter != none
+            && (parameter != Value::NIL || (format != Value::UNBOUND && format != Value::NIL))
+            && x.height > line;
+        Self::int(if wants { i64::from(line) } else { 0 })
+    }
+    /// window.c:8639: (LEFT RIGHT OUTSIDE-MARGINS PERSISTENT). VM2 draws no
+    /// fringes.
+    pub(crate) fn window_fringes(&mut self, window: Value) -> Out {
+        self.live(window)?;
+        let zero = Value::integer(0).unwrap();
+        Ok(self.vm.list_value(&[zero, zero, Value::NIL, Value::NIL]))
+    }
+    /// frame.c:4358/4376: VM2 reports backend LINE_HEIGHT / COLUMN_WIDTH,
+    /// even though frame-live-p returns t (DIVERGENCES.md VM2-WIN5).
+    pub(crate) fn frame_char_size(&mut self, frame: Value, horizontal: bool) -> Out {
+        self.any_frame(frame)?;
+        let unit = if horizontal { self.vm.window_state.column } else { self.vm.window_state.line };
+        Self::int(i64::from(unit))
+    }
+    /// frame.c:4531/4538: VM2 frames have no dividers.
+    pub(crate) fn frame_divider_width(&mut self, frame: Value) -> Out {
+        self.any_frame(frame)?;
+        Ok(Value::integer(0).unwrap())
+    }
+    /// frame.c:327: VM2 returns the initial/termcap type t, but retains
+    /// graphical character metrics (documented hybrid, VM2-WIN5).
+    pub(crate) fn frame_live_p(&mut self, object: Value) -> Value {
+        if matches!(self.vm.object_if(object), Some(Object::Frame(f)) if f.live) { Value::TRUE } else { Value::NIL }
+    }
+    pub(crate) fn frame_p(&self, object: Value) -> Value {
+        if matches!(self.vm.object_if(object), Some(Object::Frame(_))) { Value::TRUE } else { Value::NIL }
+    }
+    pub(crate) fn frame_list(&mut self) -> Out {
+        let frame = self.frame();
+        Ok(self.vm.list_value(&[frame]))
+    }
+    pub(crate) fn last_nonminibuffer_frame(&mut self) -> Out {
+        self.vm.ensure_windows().map_err(internal)?;
+        let i = self.vm.slot("#:vm2-last-nonminibuffer-frame");
+        Ok(self.vm.slots[i].value)
+    }
+    pub(crate) fn frame_terminal(&mut self, frame: Value) -> Out {
+        self.live_frame(frame)?;
+        let frame = if frame == Value::NIL { self.frame() } else { frame };
+        Ok(self.vm.frame(frame).map_err(internal)?.terminal)
+    }
+    fn terminal(&mut self, object: Value) -> Option<Value> {
+        let object = if object == Value::NIL { self.frame() } else { object };
+        let terminal = match self.vm.object_if(object) {
+            Some(Object::Frame(f)) => f.terminal,
+            Some(Object::Terminal(_)) => object,
+            _ => return None,
+        };
+        matches!(self.vm.object_if(terminal), Some(Object::Terminal(t)) if t.live).then_some(terminal)
+    }
+    pub(crate) fn terminal_live_p(&mut self, object: Value) -> Value {
+        if self.terminal(object).is_some() { Value::TRUE } else { Value::NIL }
+    }
+    pub(crate) fn terminal_list(&mut self) -> Out {
+        let terminal = self.frame_terminal(Value::NIL)?;
+        Ok(self.vm.list_value(&[terminal]))
+    }
+    pub(crate) fn tty_top_frame(&mut self, terminal: Value) -> Out {
+        self.terminal(terminal).ok_or(Fault::Wrong("terminal-live-p", terminal))?;
+        // GNU returns nil for output_initial. There is no TTY backend here.
+        Ok(Value::NIL)
+    }
+    pub(crate) fn window_list(&mut self, frame: Value, minibuf: Value, window: Value) -> Out {
+        self.vm.ensure_windows().map_err(internal)?;
+        let window = if window == Value::NIL {
+            if self.is_frame(frame) { self.vm.frame(frame).map_err(internal)?.selected }
+            else { self.vm.window_root(SELECTED) }
+        } else { window };
+        if !matches!(self.vm.object_if(window), Some(Object::Window(_))) {
+            return Err(Fault::Wrong("windowp", window));
+        }
+        let frame = if frame == Value::NIL { self.frame() } else { frame };
+        if self.get(window)?.frame != frame {
+            return Err(Fault::Error("Window is on a different frame".into()));
+        }
+        self.window_list_1(window, minibuf, frame)
+    }
+    pub(crate) fn get_buffer_window(&mut self, buffer: Value, _all_frames: Value) -> Out {
+        self.vm.ensure_windows().map_err(internal)?;
+        let buffer = if buffer == Value::NIL {
+            let index = self.vm.buffer_index().map_err(internal)?;
+            Value::reference(index + 1, 0)
+        }
+        else if matches!(self.vm.object_if(buffer), Some(Object::Buffer(_) | Object::ByteBuffer(_))) { buffer }
+        else {
+            let name = self.vm.str_view(buffer).and_then(|v| v.as_str()).ok_or(Fault::Wrong("stringp", buffer))?.to_owned();
+            let Some(buffer) = self.vm.named_buffer(&name) else { return Ok(Value::NIL); };
+            buffer
+        };
+        let selected = self.vm.window_root(SELECTED);
+        let (_, mut windows) = self.candidates(selected, Value::NIL, Value::TRUE)?;
+        if let Some(at) = windows.iter().position(|&w| w == selected) {
+            windows.rotate_left(at);
+        }
+        Ok(windows.into_iter().find(|&w| {
+            self.get(w).is_ok_and(|w| w.live() && w.buffer == buffer && (!w.mini || self.vm.names.get("romacs--minibuf-level").is_some_and(|&i| self.vm.slots[i].value.integer_value().is_some_and(|depth| depth > 0))))
+        }).unwrap_or(Value::NIL))
+    }
+    pub(crate) fn window_combination_limit(&mut self, window: Value) -> Out {
+        if window == Value::NIL { return Err(Fault::Wrong("window-valid-p", window)); }
+        let window = self.valid(window)?;
+        let w = self.get(window)?;
+        if w.children.is_empty() {
+            return Err(Fault::Error("Combination limit is meaningful for internal windows only".into()));
+        }
+        Ok(w.combination_limit)
+    }
+    /// VM2's minibuffer depth: the Lisp half of read-from-minibuffer
+    /// (prims/minibuf.el) counts it in `romacs--minibuf-level`.
+    fn minibuf_level(&mut self) -> i64 {
+        let slot = self.vm.slot("romacs--minibuf-level");
+        self.vm.variable_value(slot).ok().and_then(|v| v.integer_value()).unwrap_or(0)
+    }
+    /// minibuf.c:215: the minibuffer window while a minibuffer is active.
+    pub(crate) fn active_minibuffer_window(&mut self) -> Out {
+        self.vm.ensure_windows().map_err(internal)?;
+        Ok(if self.minibuf_level() > 0 { self.vm.window_root(MINI) } else { Value::NIL })
+    }
+    /// GNU `window_list` for VM2's one frame: the leaves of the root window
+    /// in tree order, then the minibuffer window (the root's `next`).
+    fn all_windows(&self) -> std::result::Result<Vec<Value>, Fault> {
+        let mut out = vec![];
+        self.leaves(self.vm.window_root_peek(ROOT), &mut out)?;
+        out.push(self.vm.window_root_peek(MINI));
+        Ok(out)
+    }
+    fn leaves(&self, v: Value, out: &mut Vec<Value>) -> std::result::Result<(), Fault> {
+        let w = self.get(v)?;
+        if w.children.is_empty() {
+            out.push(v);
+        } else {
+            for &c in &w.children {
+                self.leaves(c, out)?;
+            }
+        }
+        Ok(())
+    }
+    /// GNU `decode_next_window_args` then `candidate_window_p` (window.c),
+    /// specialized to one frame: every frame filter admits it, a window
+    /// filter admits it when MINIBUF is t or that window's buffer is not the
+    /// depth-0 minibuffer.
+    fn candidates(&mut self, window: Value, minibuf: Value, all_frames: Value)
+        -> std::result::Result<(Value, Vec<Value>), Fault> {
+        let window = self.live(window)?;
+        let mini = self.vm.window_root(MINI);
+        let level = self.minibuf_level();
+        let lambda = self.vm.intern("lambda");
+        let minibuf = if minibuf == Value::NIL {
+            if level > 0 { mini } else { lambda }
+        } else if minibuf != Value::TRUE {
+            lambda
+        } else {
+            minibuf
+        };
+        // decode_next_window_args (window.c:2827): nil becomes the
+        // minibuffer window when MINIBUF counts it; `visible', 0, a frame and
+        // t stand; anything else, including an explicit window, means nil.
+        let visible = self.vm.intern("visible");
+        let all_frames = if all_frames == Value::NIL {
+            if minibuf != lambda { mini } else { Value::NIL }
+        } else if all_frames == Value::TRUE
+            || all_frames == visible
+            || all_frames.as_integer() == Ok(0)
+            || self.is_frame(all_frames)
+        {
+            all_frames
+        } else {
+            Value::NIL
+        };
+        let mini_buffer = self.get(mini)?.buffer;
+        let filter_window = matches!(self.vm.object_if(all_frames), Some(Object::Window(_)));
+        let mut out = vec![];
+        for w in self.all_windows()? {
+            let x = self.get(w)?;
+            if !x.live() {
+                continue;
+            }
+            if x.mini && (minibuf == lambda || (minibuf != Value::TRUE && minibuf != w)) {
+                continue;
+            }
+            if filter_window && minibuf != Value::TRUE {
+                let shown = self.get(all_frames)?.buffer;
+                if shown == mini_buffer && level == 0 {
+                    continue;
+                }
+            }
+            out.push(w);
+        }
+        Ok((window, out))
+    }
+    /// window.c:2941/2980 `next_window`.
+    pub(crate) fn next_window(&mut self, window: Value, minibuf: Value, all_frames: Value, next: bool) -> Out {
+        let (window, candidates) = self.candidates(window, minibuf, all_frames)?;
+        let all = self.all_windows()?;
+        let is = |w: &Value| candidates.contains(w);
+        let at = all.iter().position(|w| *w == window);
+        if next {
+            if let Some(at) = at {
+                if let Some(&w) = all[at + 1..].iter().find(|w| is(w)) {
+                    return Ok(w);
+                }
+            }
+            let stop = at.unwrap_or(all.len());
+            Ok(all[..stop].iter().copied().find(|w| is(w)).unwrap_or(window))
+        } else {
+            let mut candidate = None;
+            for &w in &all {
+                if w == window {
+                    if candidate.is_some() {
+                        break;
+                    }
+                } else if is(&w) {
+                    candidate = Some(w);
+                }
+            }
+            Ok(candidate.unwrap_or(window))
+        }
+    }
+    /// window.c:3079 `window_list_1`: the candidates rotated to start at
+    /// WINDOW.
+    pub(crate) fn window_list_1(&mut self, window: Value, minibuf: Value, all_frames: Value) -> Out {
+        let (window, mut list) = self.candidates(window, minibuf, all_frames)?;
+        if let Some(at) = list.iter().position(|w| *w == window) {
+            list.rotate_left(at);
+        }
+        Ok(self.vm.list_value(&list))
+    }
+    /// window.c:456.
+    pub(crate) fn set_frame_selected_window(&mut self, frame: Value, window: Value, norecord: Value) -> Out {
+        self.live_frame(frame)?;
+        let w = match self.vm.object_if(window) {
+            Some(Object::Window(x)) if x.live() => window,
+            _ => return Err(Fault::Wrong("window-live-p", window)),
+        };
+        self.vm.select_window_value(w, norecord == Value::NIL).map_err(internal)?;
+        self.vm.display_state.version += 1;
+        Ok(w)
+    }
+    /// window.c:3467 `Fdelete_other_windows_internal`, for VM2's one frame.
+    pub(crate) fn delete_other_windows_internal(&mut self, window: Value, root: Value) -> Out {
+        let w = self.valid(window)?;
+        let frame_root = self.vm.window_root(ROOT);
+        let root = if root == Value::NIL {
+            frame_root
+        } else {
+            let r = self.valid(root)?;
+            let mut p = self.get(w)?.parent;
+            while p != Value::NIL && p != r {
+                p = self.get(p)?.parent;
+            }
+            if p != r {
+                return Err(Fault::Error("Specified root is not an ancestor of specified window".into()));
+            }
+            r
+        };
+        if w == root {
+            return Ok(Value::NIL);
+        }
+        if self.get(w)?.mini {
+            return Err(Fault::Error("Can’t expand minibuffer to full frame".into()));
+        }
+        let selected = self.vm.window_root(SELECTED);
+        if self.get(w)?.live() {
+            if w != selected {
+                self.vm.select_window_value(w, true).map_err(internal)?;
+            }
+        } else {
+            // The selected window, or the nearest previous window inside
+            // WINDOW's subtree, stays selected.
+            let mut s = selected;
+            loop {
+                let mut p = s;
+                while p != Value::NIL && p != w {
+                    p = self.get(p)?.parent;
+                }
+                if p == w {
+                    break;
+                }
+                let lambda = self.vm.intern("lambda");
+                s = self.next_window(s, lambda, Value::NIL, false)?;
+            }
+            if s != selected {
+                self.vm.select_window_value(s, true).map_err(internal)?;
+            }
+        }
+        // WINDOW takes ROOT's place and geometry; everything else in ROOT's
+        // subtree is deleted. An internal WINDOW's children are resized
+        // proportionally (GNU asks `window--resize-root-window`; VM2 uses its
+        // frame-resize plan, DIVERGENCES.md VM2-WIN2).
+        let (x, y, width, height) = {
+            let r = self.get(root)?;
+            (r.x, r.y, r.width, r.height)
+        };
+        let parent = self.get(w)?.parent;
+        self.get_mut(parent)?.children.retain(|c| *c != w);
+        // replace_window (root, window, true) (window.c:3667, 2571-2574):
+        // WINDOW inherits ROOT's normal sizes; ROOT is retired below.
+        let (normal_lines, normal_cols) = {
+            let r = self.get(root)?;
+            (r.normal_lines, r.normal_cols)
+        };
+        {
+            let x = self.get_mut(w)?;
+            x.normal_lines = normal_lines;
+            x.normal_cols = normal_cols;
+        }
+        self.vm.replace_tree_node(root, w).map_err(internal)?;
+        self.vm.retire_window(root).map_err(internal)?;
+        let (line, column) = (self.vm.window_state.line, self.vm.window_state.column);
+        let mut geometry = vec![];
+        self.vm
+            .plan_window_geometry(w, x, y, width, height, line, column, &mut geometry)
+            .map_err(internal)?;
+        // Live-window start is intentionally unchanged: GNU's vmotion-based
+        // scroll preservation is deferred (DIVERGENCES.md VM2-WIN4).
+        for (v, x, y, wd, ht) in geometry {
+            let window = self.get_mut(v)?;
+            window.x = x;
+            window.y = y;
+            window.width = wd;
+            window.height = ht;
+            window.end_valid = false;
+        }
+        self.vm.display_state.version += 1;
+        Ok(Value::NIL)
+    }
+    /// window.c:3852: the window's buffer, its start, and the hook value,
+    /// for the T2 body that runs `window-scroll-functions`.
+    pub(crate) fn scroll_functions_call(&mut self, window: Value) -> std::result::Result<(Value, Value, Value), Fault> {
+        let w = self.live(window)?;
+        let (buffer, start) = {
+            let x = self.get(w)?;
+            (x.buffer, x.start)
+        };
+        let start = self.vm.marker_position_value(start).map_err(internal)?;
+        Ok((w, buffer, start))
+    }
+}

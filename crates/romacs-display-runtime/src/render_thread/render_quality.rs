@@ -1,0 +1,419 @@
+//! Render-backend facts and product quality policy.
+//!
+//! Adapter classification is a fact about the active wgpu device.  Quality is
+//! a product decision derived from that fact and the exact configuration the
+//! user requested.  Keeping those concepts separate prevents render, asset,
+//! and scheduling call sites from inventing their own `DeviceType::Cpu`
+//! behavior.
+
+use romacs_display_protocol::motion_spec::MotionSpec;
+use std::num::NonZeroU16;
+
+use romacs_display_protocol::{
+    EffectOperation, EffectValue, FrameGlyphBuffer, TransitionPolicy, VisualConfig,
+};
+
+/// Coarse cost class of the active adapter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum AdapterClass {
+    /// No wgpu adapter has been selected yet.
+    Pending,
+    Hardware,
+    /// A software rasterizer reported by wgpu as `DeviceType::Cpu`.
+    Software,
+}
+
+/// Immutable facts projected from the active renderer backend.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct RenderBackendProfile {
+    adapter_class: AdapterClass,
+}
+
+impl RenderBackendProfile {
+    pub(super) const fn pending() -> Self {
+        Self {
+            adapter_class: AdapterClass::Pending,
+        }
+    }
+
+    pub(super) const fn hardware() -> Self {
+        Self {
+            adapter_class: AdapterClass::Hardware,
+        }
+    }
+
+    pub(super) const fn software() -> Self {
+        Self {
+            adapter_class: AdapterClass::Software,
+        }
+    }
+
+    pub(super) fn from_device_type(device_type: wgpu::DeviceType) -> Self {
+        if device_type == wgpu::DeviceType::Cpu {
+            Self::software()
+        } else {
+            Self::hardware()
+        }
+    }
+
+    pub(super) const fn adapter_class(self) -> AdapterClass {
+        self.adapter_class
+    }
+}
+
+impl Default for RenderBackendProfile {
+    fn default() -> Self {
+        Self::pending()
+    }
+}
+
+/// Effective quality mode selected for the active backend.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum QualityMode {
+    Full,
+    /// Hard compatibility mode for a wgpu software adapter: preserve editor
+    /// correctness and static presentation while suppressing the current
+    /// GPU/offscreen effect families and their standing demand.
+    SoftwareCompatibility,
+}
+
+/// Whether an explicitly requested full-frame shader can be installed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum FramePostDisposition {
+    Enabled,
+    SuppressedByQualityPolicy,
+}
+
+impl FramePostDisposition {
+    pub(super) const fn is_enabled(self) -> bool {
+        matches!(self, Self::Enabled)
+    }
+}
+
+/// Immutable decisions needed to execute one committed frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct RenderFeaturePlan {
+    /// Compose this frame into the ring rather than straight onto the surface.
+    ///
+    /// Not only for transitions. Any effect that shows the frame as it was
+    /// *before* a change needs the previous composition to exist already when
+    /// the change lands — and a picture that was never composed offscreen was
+    /// never kept. Deciding this from the arrival of the change is too late by
+    /// exactly one frame: that is the frame whose picture is wanted.
+    pub(super) compose_offscreen: bool,
+    pub(super) accept_transition_hints: bool,
+    pub(super) accept_derived_effects: bool,
+    pub(super) accept_cursor_effects: bool,
+    pub(super) apply_frame_post: bool,
+}
+
+impl RenderFeaturePlan {
+    /// Materialize the execution view of a frame without changing the retained
+    /// committed frame. Runtime hints are one-shot inputs; a suppressed family
+    /// is consumed but cannot leak into renderer implementation code.
+    pub(super) fn prepare_frame(self, frame: &mut FrameGlyphBuffer) {
+        if !self.accept_transition_hints {
+            frame.transition_hints.clear();
+        }
+        if !self.accept_cursor_effects {
+            frame.cursor_effects_by_window.clear();
+        }
+    }
+}
+
+/// One negotiated policy is the source of truth for configuration, frame
+/// planning, scheduler eligibility, and asset capability.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct RenderQualityPolicy {
+    profile: RenderBackendProfile,
+    mode: QualityMode,
+    effective_visual_config: VisualConfig,
+}
+
+impl RenderQualityPolicy {
+    pub(super) fn negotiate(profile: RenderBackendProfile, requested: &VisualConfig) -> Self {
+        let mode = if profile.adapter_class() == AdapterClass::Software {
+            QualityMode::SoftwareCompatibility
+        } else {
+            QualityMode::Full
+        };
+        let effective_visual_config = match mode {
+            QualityMode::Full => requested.clone(),
+            QualityMode::SoftwareCompatibility => software_compat_visual_config(requested),
+        };
+        Self {
+            profile,
+            mode,
+            effective_visual_config,
+        }
+    }
+
+    pub(super) const fn profile(&self) -> RenderBackendProfile {
+        self.profile
+    }
+
+    pub(super) const fn mode(&self) -> QualityMode {
+        self.mode
+    }
+
+    pub(super) const fn allows_dynamic_effects(&self) -> bool {
+        matches!(self.mode, QualityMode::Full)
+    }
+
+    /// Policy-owned scheduler rate for dynamic visual work. `None` is the
+    /// software-compatibility bound: no standing animation demand. Keeping
+    /// the rate decision here prevents a future retained effect from silently
+    /// inheriting full display cadence at an unrelated lifecycle call site.
+    pub(super) const fn dynamic_animation_rate(
+        &self,
+        display_rate: NonZeroU16,
+    ) -> Option<NonZeroU16> {
+        match self.mode {
+            QualityMode::Full => Some(display_rate),
+            QualityMode::SoftwareCompatibility => None,
+        }
+    }
+
+    pub(super) const fn frame_post_disposition(&self) -> FramePostDisposition {
+        match self.mode {
+            QualityMode::Full => FramePostDisposition::Enabled,
+            QualityMode::SoftwareCompatibility => FramePostDisposition::SuppressedByQualityPolicy,
+        }
+    }
+
+    /// One predicate owns both execution and continuous scheduler demand for
+    /// the installed post shader, so suppression cannot stop drawing while
+    /// accidentally leaving its clock alive (or vice versa).
+    pub(super) const fn frame_post_active(&self, installed: bool) -> bool {
+        self.frame_post_disposition().is_enabled() && installed
+    }
+
+    /// A renderer-global post pipeline creates demand only for windows with a
+    /// complete retained presentation. Otherwise an `AwaitingContent` result
+    /// would be re-requested forever by the standing clock.
+    pub(super) const fn frame_post_scheduler_active(
+        &self,
+        installed: bool,
+        window_has_presentation: bool,
+    ) -> bool {
+        self.frame_post_active(installed) && window_has_presentation
+    }
+
+    pub(super) const fn effective_visual_config(&self) -> &VisualConfig {
+        &self.effective_visual_config
+    }
+
+    /// How panes travel under this policy, one spec per role.
+    pub(super) fn pane_motion(&self) -> WindowAnimationSpecs {
+        // A reduced-quality plan declines every compositor-derived effect; a
+        // pane morph is one, and one of the most expensive.
+        if self.mode != QualityMode::Full {
+            return WindowAnimationSpecs::INSTANT;
+        }
+        let config = &self.effective_visual_config;
+        let globals = config.window_animations;
+        WindowAnimationSpecs {
+            resize: config.window_resize.motion(globals),
+            movement: config.window_movement.motion(globals),
+            open: config.window_open.motion(globals),
+            close: config.window_close.motion(globals),
+        }
+    }
+
+    /// How child frames travel under this policy, one spec per lifecycle role.
+    ///
+    /// Unlike [`Self::pane_motion`], a reduced-quality plan does **not**
+    /// decline this family. A pane morph animates the whole tiling and needs
+    /// the previous picture composed offscreen; a child-frame fade draws the
+    /// popup's own pixels onto the retained root scene, the same work the
+    /// popup itself already costs every frame, and the software-mode smoke
+    /// and close-confirmation suites already sustain display-rate demand for
+    /// exactly that kind of redraw. A user on a software adapter gets the
+    /// fade they asked for; turning it off remains their `enabled` setting.
+    pub(super) fn child_frame_motion(&self) -> ChildFrameMotionSpecs {
+        let config = &self.effective_visual_config;
+        let globals = config.child_frame_animations;
+        ChildFrameMotionSpecs {
+            open: config.child_frame_open.motion(globals),
+            open_slide: config.child_frame_open.slide_pixels,
+            open_scale_from: config.child_frame_open.scale_from,
+            close: config.child_frame_close.motion(globals),
+            close_slide: config.child_frame_close.slide_pixels,
+            close_scale_from: config.child_frame_close.scale_from,
+            movement: config.child_frame_movement.motion(globals),
+            resize: config.child_frame_resize.motion(globals),
+        }
+    }
+
+    pub(super) fn transition_policy(&self) -> TransitionPolicy {
+        TransitionPolicy::from(&self.effective_visual_config)
+    }
+
+    pub(super) fn plan_frame(
+        &self,
+        frame_has_theme_transition: bool,
+        frame_post_installed: bool,
+    ) -> RenderFeaturePlan {
+        let full = self.mode == QualityMode::Full;
+        RenderFeaturePlan {
+            compose_offscreen: full
+                && (self.transition_policy().needs_offscreen()
+                    || self.pane_motion().needs_previous_picture()
+                    || frame_has_theme_transition),
+            accept_transition_hints: full,
+            accept_derived_effects: full,
+            accept_cursor_effects: full,
+            apply_frame_post: self.frame_post_active(frame_post_installed),
+        }
+    }
+}
+
+/// The four motion specs a morph may need, resolved from config for one frame.
+///
+/// They travel together because a morph classifies every pane at once and needs
+/// all four answers from the same configuration snapshot; splitting them into
+/// four arguments only creates the chance to pass one from a stale policy.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct WindowAnimationSpecs {
+    /// Geometry, when any surviving pane's size changes.
+    pub(super) resize: MotionSpec,
+    /// Geometry, when surviving panes only move.
+    pub(super) movement: MotionSpec,
+    /// Opacity of a pane that is appearing.
+    pub(super) open: MotionSpec,
+    /// Opacity of a pane that is going away.
+    pub(super) close: MotionSpec,
+}
+
+impl WindowAnimationSpecs {
+    /// Every role instant: no morph is built and nothing is composed offscreen.
+    pub(super) const INSTANT: Self = Self {
+        resize: MotionSpec::Instant,
+        movement: MotionSpec::Instant,
+        open: MotionSpec::Instant,
+        close: MotionSpec::Instant,
+    };
+
+    /// Whether any enabled role needs the frame as it was *before* the change.
+    ///
+    /// This is what decides `compose_offscreen`, and it costs a full-frame
+    /// texture and a blit on *every* frame while it is true -- so it must ask
+    /// about the roles that actually read the previous picture, not merely
+    /// whether some animation is on.
+    ///
+    /// Geometry does: a shrinking pane's vacated strip and its reflow crossfade
+    /// are both drawn from the old picture. Closing does: a departing pane is
+    /// absent from the destination entirely, so the old picture is the only
+    /// place its pixels exist. Opening does not -- an entering pane fades in
+    /// from the destination, which is already in hand.
+    pub(super) const fn needs_previous_picture(self) -> bool {
+        !self.resize.is_instant() || !self.movement.is_instant() || !self.close.is_instant()
+    }
+
+    /// The geometry spec for a morph whose changes ask for `role`.
+    pub(super) const fn geometry(self, role: GeometryRole) -> MotionSpec {
+        match role {
+            GeometryRole::Resize => self.resize,
+            GeometryRole::Movement => self.movement,
+        }
+    }
+}
+
+/// Which geometry slot a morph's changes ask for.
+///
+/// One answer for the whole morph, and that is the point. `placed_bounds` reads
+/// a single progress and adjacent panes tile edge to edge: two panes on two
+/// clocks disagree about where their shared edge is, and a one-pixel gap on a
+/// moving seam is far more visible than the motion itself. niri can give every
+/// window its own curve because its windows have gaps between them.
+///
+/// Resize wins a mixed morph. In an edge-to-edge tiling a pure move is the rare
+/// case -- moving one pane's edge resizes its neighbour -- so the mixed morph is
+/// the common one, and resize is the change the reflow crossfade and the
+/// vacated strip are built for.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum GeometryRole {
+    Resize,
+    Movement,
+}
+
+/// The lifecycle motion specs a child frame may need, resolved from config
+/// for one frame.
+///
+/// They travel together for the same reason [`WindowAnimationSpecs`] does: a
+/// frame is installed, updated and deleted through the same ingest paths, and
+/// splitting the four answers into separate lookups creates the chance to
+/// pass one from a stale policy snapshot. The slide distances travel with
+/// them because the displacement shares the slot's own curve.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct ChildFrameMotionSpecs {
+    /// Opacity of a child frame that is appearing.
+    pub(super) open: MotionSpec,
+    /// Vertical displacement of an appearing frame, in logical pixels.
+    pub(super) open_slide: f32,
+    /// The scale an appearing frame grows from; 1.0 scales nothing.
+    pub(super) open_scale_from: f32,
+    /// Opacity of a child frame that is going away.
+    pub(super) close: MotionSpec,
+    /// Vertical displacement of a departing frame, in logical pixels.
+    pub(super) close_slide: f32,
+    /// The scale a departing frame shrinks toward; 1.0 scales nothing.
+    pub(super) close_scale_from: f32,
+    /// Placement drift toward a re-anchored frame.
+    pub(super) movement: MotionSpec,
+    /// Reserved for content-crossfade resizes; resolves Instant today.
+    pub(super) resize: MotionSpec,
+}
+
+impl ChildFrameMotionSpecs {
+    /// Every lifecycle event is instant: no animation state is built.
+    pub(super) const INSTANT: Self = Self {
+        open: MotionSpec::Instant,
+        open_slide: 0.0,
+        open_scale_from: 1.0,
+        close: MotionSpec::Instant,
+        close_slide: 0.0,
+        close_scale_from: 1.0,
+        movement: MotionSpec::Instant,
+        resize: MotionSpec::Instant,
+    };
+}
+
+fn software_compat_visual_config(requested: &VisualConfig) -> VisualConfig {
+    let mut effective = requested.clone();
+    effective.cursor_motion.enabled = false;
+    effective.cursor_size_transition.enabled = false;
+    effective.buffer_transition.enabled = false;
+    effective.scroll_transition.enabled = false;
+    // A software adapter redraws the whole surface for every frame of a morph.
+    // Disabling it there is the honest setting, and it also costs nothing: the
+    // compositor builds no motion at all for a disabled spec.
+    effective.window_animations.off = true;
+
+    let disable_effects = effective
+        .effects
+        .effect_names()
+        .into_iter()
+        .filter(|name| {
+            effective
+                .effects
+                .effect_values(name)
+                .is_ok_and(|properties| {
+                    properties.iter().any(|(property, _)| property == "enabled")
+                })
+        })
+        .map(|name| EffectOperation::set(name, [("enabled", EffectValue::Bool(false))]))
+        .collect::<Vec<_>>();
+    effective.effects = effective
+        .effects
+        .apply_effects(&disable_effects)
+        .expect("effect registry must be able to disable every enabled effect");
+    effective.effects.bg_pattern.style = 0;
+    effective.effects.mode_line_separator.style = 0;
+    effective.effects.scroll_bar.width = 0;
+    effective
+}
+
+#[cfg(test)]
+#[path = "render_quality/tests/render_quality_test.rs"]
+mod tests;

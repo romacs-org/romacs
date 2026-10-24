@@ -1,0 +1,842 @@
+{
+  "blob": "2badb8f7aaca2184982f099c43ca013753758d59",
+  "compiled": {
+    "complete": true,
+    "exit": 0,
+    "garbled_lines": 0,
+    "load_error": null,
+    "load_ok": true,
+    "results": {
+      "test-font-lock-test-file--correct": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-font-lock-test-file--wrong": {
+        "as_expected": true,
+        "detail": "(ert-test-failed (\"Expected face (wrong-face), got (font-lock-variable-name-face) on line 1 column 5\" :line \"var abc = function(d) {\" :assert \"//   ^ wrong-face\"))",
+        "expected": ":failed",
+        "outcome": "failed",
+        "tags": []
+      },
+      "test-font-lock-test-string--correct": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-line-comment-p--c": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-line-comment-p--emacs-lisp": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-line-comment-p--fundamental": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-line-comment-p--javascript": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-line-comment-p--php": {
+        "as_expected": true,
+        "detail": "(ert-test-skipped ((skip-unless (fboundp 'php-mode)) :form (fboundp php-mode) :value nil))",
+        "expected": ":passed",
+        "outcome": "skipped",
+        "tags": []
+      },
+      "test-line-comment-p--python": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-line-comment-p--shell-script": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-macro-test--correct-highlighting": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-macro-test--docstring": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-macro-test--failing": {
+        "as_expected": true,
+        "detail": "(ert-test-failed (\"Expected face (wrong-face), got (font-lock-keyword-face) on line 2 column 3\" :line \"(defun fun ())\" :assert \";; ^ wrong-face\"))",
+        "expected": ":failed",
+        "outcome": "failed",
+        "tags": []
+      },
+      "test-macro-test--file": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-macro-test--file-failing": {
+        "as_expected": true,
+        "detail": "(ert-test-failed (\"Expected face (wrong-face), got (font-lock-variable-name-face) on line 1 column 5\" :line \"var abc = function(d) {\" :assert \"//   ^ wrong-face\"))",
+        "expected": ":failed",
+        "outcome": "failed",
+        "tags": []
+      },
+      "test-macro-test--file-no-asserts": {
+        "as_expected": true,
+        "detail": "(user-error \"No test assertions found\")",
+        "expected": ":failed",
+        "outcome": "errored",
+        "tags": []
+      },
+      "test-parse-comments--arrow-single-line-single": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-parse-comments--caret-negation": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-parse-comments--face-list": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-parse-comments--multiline-comment-multiple": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-parse-comments--multiline-comment-single": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-parse-comments--multiple-line-multiple-assert-lines": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-parse-comments--no-assertion-error": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-parse-comments--non-assert-comment-multiple": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-parse-comments--non-assert-comment-single": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-parse-comments--single-line-error": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-parse-comments--single-line-many-carets": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-parse-comments--single-line-multiple-assert-lines": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-parse-comments--single-line-single-caret": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-parse-comments-arrow-multiple-line-single": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-regexp--assertion-line-re": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-regexp--face-symbol-list-re": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-regexp--face-symbol-re": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-syntax-highlight-inline--caret-multiple-assertions": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-syntax-highlight-inline--caret-negated-wrong-face": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-syntax-highlight-inline--caret-wrong-face": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-syntax-highlight-inline--comment-face": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-syntax-highlight-inline--face-list": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-syntax-highlight-inline--multiline-comment-face": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-syntax-highlight-inline--nil-list": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      }
+    },
+    "timed_out": false
+  },
+  "file": "lisp/emacs-lisp/ert-font-lock-tests.el",
+  "gnu": {
+    "emacs": "<recording-path-redacted>/emacs-32.0.50",
+    "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+    "sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+    "version": "32.0.50"
+  },
+  "harness_sha256": "78c20850429a08af22faadf73b5d164c560230e83d7eb88ef60cb995670703ef",
+  "mini": {
+    "complete": true,
+    "exit": 0,
+    "garbled_lines": 0,
+    "load_error": null,
+    "load_ok": null,
+    "results": {
+      "test-font-lock-test-file--correct": {
+        "as_expected": null,
+        "detail": "(file-missing \"Opening input file\" \"No such file or directory\" \"<recording-home>/.hermes/cache/scratch/gts-tree-t8p5ta2b/test/lisp/emacs-lisp/correct.js\")",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "test-font-lock-test-file--wrong": {
+        "as_expected": null,
+        "detail": "(file-missing \"Opening input file\" \"No such file or directory\" \"<recording-home>/.hermes/cache/scratch/gts-tree-t8p5ta2b/test/lisp/emacs-lisp/broken.js\")",
+        "expected": ":failed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "test-font-lock-test-string--correct": {
+        "as_expected": null,
+        "detail": "(void-function ert-pass)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "test-line-comment-p--c": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "test-line-comment-p--emacs-lisp": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "test-line-comment-p--fundamental": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "test-line-comment-p--javascript": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "test-line-comment-p--php": {
+        "as_expected": null,
+        "detail": "((skip-unless (fboundp 'php-mode)))",
+        "expected": ":passed",
+        "outcome": "skipped",
+        "tags": null
+      },
+      "test-line-comment-p--python": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "test-line-comment-p--shell-script": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "test-parse-comments--arrow-single-line-single": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "test-parse-comments--caret-negation": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "test-parse-comments--face-list": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "test-parse-comments--multiline-comment-multiple": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "test-parse-comments--multiline-comment-single": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "test-parse-comments--multiple-line-multiple-assert-lines": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "test-parse-comments--no-assertion-error": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "test-parse-comments--non-assert-comment-multiple": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "test-parse-comments--non-assert-comment-single": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "test-parse-comments--single-line-error": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "test-parse-comments--single-line-many-carets": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "test-parse-comments--single-line-multiple-assert-lines": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "test-parse-comments--single-line-single-caret": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "test-parse-comments-arrow-multiple-line-single": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "test-regexp--assertion-line-re": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "test-regexp--face-symbol-list-re": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "test-regexp--face-symbol-re": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "test-syntax-highlight-inline--caret-multiple-assertions": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "test-syntax-highlight-inline--caret-negated-wrong-face": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "test-syntax-highlight-inline--caret-wrong-face": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "test-syntax-highlight-inline--comment-face": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "test-syntax-highlight-inline--face-list": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "test-syntax-highlight-inline--multiline-comment-face": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "test-syntax-highlight-inline--nil-list": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      }
+    },
+    "timed_out": false
+  },
+  "read_error": null,
+  "real": {
+    "complete": true,
+    "exit": 0,
+    "garbled_lines": 0,
+    "load_error": null,
+    "load_ok": true,
+    "results": {
+      "test-font-lock-test-file--correct": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-font-lock-test-file--wrong": {
+        "as_expected": true,
+        "detail": "(ert-test-failed (\"Expected face (wrong-face), got (font-lock-variable-name-face) on line 1 column 5\" :line \"var abc = function(d) {\" :assert \"//   ^ wrong-face\"))",
+        "expected": ":failed",
+        "outcome": "failed",
+        "tags": []
+      },
+      "test-font-lock-test-string--correct": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-line-comment-p--c": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-line-comment-p--emacs-lisp": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-line-comment-p--fundamental": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-line-comment-p--javascript": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-line-comment-p--php": {
+        "as_expected": true,
+        "detail": "(ert-test-skipped ((skip-unless (fboundp 'php-mode)) :form (fboundp php-mode) :value nil))",
+        "expected": ":passed",
+        "outcome": "skipped",
+        "tags": []
+      },
+      "test-line-comment-p--python": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-line-comment-p--shell-script": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-macro-test--correct-highlighting": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-macro-test--docstring": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-macro-test--failing": {
+        "as_expected": true,
+        "detail": "(ert-test-failed (\"Expected face (wrong-face), got (font-lock-keyword-face) on line 2 column 3\" :line \"(defun fun ())\" :assert \";; ^ wrong-face\"))",
+        "expected": ":failed",
+        "outcome": "failed",
+        "tags": []
+      },
+      "test-macro-test--file": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-macro-test--file-failing": {
+        "as_expected": true,
+        "detail": "(ert-test-failed (\"Expected face (wrong-face), got (font-lock-variable-name-face) on line 1 column 5\" :line \"var abc = function(d) {\" :assert \"//   ^ wrong-face\"))",
+        "expected": ":failed",
+        "outcome": "failed",
+        "tags": []
+      },
+      "test-macro-test--file-no-asserts": {
+        "as_expected": true,
+        "detail": "(user-error \"No test assertions found\")",
+        "expected": ":failed",
+        "outcome": "errored",
+        "tags": []
+      },
+      "test-parse-comments--arrow-single-line-single": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-parse-comments--caret-negation": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-parse-comments--face-list": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-parse-comments--multiline-comment-multiple": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-parse-comments--multiline-comment-single": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-parse-comments--multiple-line-multiple-assert-lines": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-parse-comments--no-assertion-error": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-parse-comments--non-assert-comment-multiple": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-parse-comments--non-assert-comment-single": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-parse-comments--single-line-error": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-parse-comments--single-line-many-carets": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-parse-comments--single-line-multiple-assert-lines": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-parse-comments--single-line-single-caret": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-parse-comments-arrow-multiple-line-single": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-regexp--assertion-line-re": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-regexp--face-symbol-list-re": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-regexp--face-symbol-re": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-syntax-highlight-inline--caret-multiple-assertions": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-syntax-highlight-inline--caret-negated-wrong-face": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-syntax-highlight-inline--caret-wrong-face": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-syntax-highlight-inline--comment-face": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-syntax-highlight-inline--face-list": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-syntax-highlight-inline--multiline-comment-face": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-syntax-highlight-inline--nil-list": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      }
+    },
+    "timed_out": false
+  },
+  "schema": 1,
+  "toplevel_deftests": 34
+}

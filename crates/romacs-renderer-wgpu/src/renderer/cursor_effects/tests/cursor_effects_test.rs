@@ -1,0 +1,977 @@
+use super::super::effect_common::EffectCtx;
+use super::*;
+use crate::effect_config::EffectsConfig;
+use romacs_display_protocol::frame_glyphs::{
+    FrameGlyphBuffer, LineNumberFieldWidth, PresentedCellOrigin, PresentedWindowGeometry,
+    PresentedWindowRegions, WindowInfo,
+};
+use romacs_display_protocol::frame_time::{EventTime, FrameSample, observe_platform_now};
+use romacs_display_protocol::types::{AnimatedCursor, Rect};
+use std::time::Duration;
+
+/// Helper to create an EffectCtx for testing
+fn make_ctx<'a>(
+    effects: &'a EffectsConfig,
+    fgb: &'a FrameGlyphBuffer,
+    animated_cursor: &'a Option<AnimatedCursor>,
+    cursor_visible: bool,
+) -> EffectCtx<'a> {
+    EffectCtx {
+        effects,
+        frame_glyphs: fgb,
+        animated_cursor,
+        cursor_visible,
+        surface_width: 800,
+        surface_height: 600,
+        aurora_start: observe_platform_now(),
+        // Effects date themselves to the frame's sample, not to the clock, so
+        // a test frame carries one explicitly.
+        frame_sample: FrameSample::new(observe_platform_now(), Duration::from_millis(16)),
+        frame_seq: 1,
+        scale_factor: 1.0,
+        logical_w: 800.0,
+        logical_h: 600.0,
+        renderer_width: 800.0,
+        renderer_height: 600.0,
+    }
+}
+
+/// Helper to create a test animated cursor
+fn make_animated_cursor(x: f32, y: f32, w: f32, h: f32, window_id: i64) -> AnimatedCursor {
+    AnimatedCursor {
+        window_id: romacs_display_protocol::types::DisplayWindowId::new(window_id),
+        x,
+        y,
+        width: w,
+        height: h,
+        corners: None,
+        frame_id: romacs_display_protocol::types::DisplayFrameId::new(0),
+    }
+}
+
+/// Gap between the test window's outer left edge and its text area: a left
+/// fringe plus a left display margin. The line-number field starts after it,
+/// so a band drawn at `bounds.x` is visibly wrong by this much.
+const TEST_LEFT_CHROME_PX: f32 = 30.0;
+
+/// Line-number field the test window reports. Deliberately not the 40px the
+/// renderer used to invent, so a test can tell a measurement from a constant.
+const TEST_LINE_NUMBER_FIELD_PX: f32 = 27.0;
+
+/// Helper to create a WindowInfo laid out like a real one: geometry installed,
+/// text area inset from the outer edge, line-number field measured.
+fn make_window_info(window_id: i64, selected: bool, x: f32, y: f32, w: f32, h: f32) -> WindowInfo {
+    let mode_line_height = 20.0;
+    let body = Rect::new(
+        x + TEST_LEFT_CHROME_PX,
+        y,
+        w - TEST_LEFT_CHROME_PX,
+        h - mode_line_height,
+    );
+    WindowInfo {
+        window_id: romacs_display_protocol::types::DisplayWindowId::new(window_id),
+        buffer_id: 1,
+        window_start: 0,
+        window_end: 100,
+        buffer_size: 200,
+        buffer_modiff: romacs_display_protocol::presentation_origin::BufferModiff::default(),
+        bounds: Rect::new(x, y, w, h),
+        geometry: PresentedWindowGeometry::Complete {
+            cell_origin: PresentedCellOrigin::default(),
+            regions: PresentedWindowRegions {
+                outer: Rect::new(x, y, w, h),
+                text_body: body,
+                left_fringe: Some(Rect::new(x, body.y, 8.0, body.height)),
+                left_margin: Some(Rect::new(x + 8.0, body.y, 22.0, body.height)),
+                mode_line: Some(Rect::new(x, y + h - mode_line_height, w, mode_line_height)),
+                ..PresentedWindowRegions::default()
+            },
+        },
+        line_number_field: LineNumberFieldWidth::measured(TEST_LINE_NUMBER_FIELD_PX),
+        mode_line_height,
+        header_line_height: 0.0,
+        tab_line_height: 0.0,
+        selected,
+        is_minibuffer: false,
+        char_height: 16.0,
+        buffer_name: String::new(),
+        buffer_file_name: String::new(),
+        modified: false,
+    }
+}
+
+/// Helper to create a selected WindowInfo for testing
+fn make_selected_window_info(x: f32, y: f32, w: f32, h: f32) -> WindowInfo {
+    make_window_info(1, true, x, y, w, h)
+}
+
+/// Property test: all vertices have valid positions and colors
+fn validate_vertices(vertices: &[RectVertex]) {
+    for (i, v) in vertices.iter().enumerate() {
+        assert!(
+            v.position[0].is_finite(),
+            "vertex {} x position not finite",
+            i
+        );
+        assert!(
+            v.position[1].is_finite(),
+            "vertex {} y position not finite",
+            i
+        );
+        assert!(
+            v.color[0].is_finite() && v.color[0] >= 0.0 && v.color[0] <= 1.0,
+            "vertex {} r invalid",
+            i
+        );
+        assert!(
+            v.color[1].is_finite() && v.color[1] >= 0.0 && v.color[1] <= 1.0,
+            "vertex {} g invalid",
+            i
+        );
+        assert!(
+            v.color[2].is_finite() && v.color[2] >= 0.0 && v.color[2] <= 1.0,
+            "vertex {} b invalid",
+            i
+        );
+        assert!(
+            v.color[3].is_finite() && v.color[3] >= 0.0 && v.color[3] <= 1.0,
+            "vertex {} a invalid",
+            i
+        );
+    }
+}
+
+/// Property test: vertex count is always multiple of 6 (each rect = 2 triangles = 6 verts)
+fn validate_vertex_count(vertices: &[RectVertex]) {
+    assert_eq!(
+        vertices.len() % 6,
+        0,
+        "vertex count {} not multiple of 6",
+        vertices.len()
+    );
+}
+
+// ========================================================================
+// emit_cursor_glow tests
+// ========================================================================
+
+#[test]
+fn test_cursor_glow_disabled() {
+    let mut config = EffectsConfig::default();
+    config.cursor_glow.enabled = false;
+
+    let fgb = FrameGlyphBuffer::default();
+    let anim_cursor = Some(make_animated_cursor(100.0, 100.0, 10.0, 20.0, 1));
+
+    let ctx = make_ctx(&config, &fgb, &anim_cursor, true);
+    let cursor_pulse_start = observe_platform_now();
+
+    let verts = emit_cursor_glow(&ctx, &cursor_pulse_start);
+    assert_eq!(verts.len(), 0, "disabled glow should produce no vertices");
+}
+
+#[test]
+fn test_cursor_glow_cursor_not_visible() {
+    let mut config = EffectsConfig::default();
+    config.cursor_glow.enabled = true;
+
+    let fgb = FrameGlyphBuffer::default();
+    let anim_cursor = Some(make_animated_cursor(100.0, 100.0, 10.0, 20.0, 1));
+
+    let ctx = make_ctx(&config, &fgb, &anim_cursor, false);
+    let cursor_pulse_start = observe_platform_now();
+
+    let verts = emit_cursor_glow(&ctx, &cursor_pulse_start);
+    assert_eq!(verts.len(), 0, "invisible cursor should produce no glow");
+}
+
+#[test]
+fn test_cursor_glow_no_cursor() {
+    let mut config = EffectsConfig::default();
+    config.cursor_glow.enabled = true;
+
+    let fgb = FrameGlyphBuffer::default();
+    let anim_cursor = None;
+
+    let ctx = make_ctx(&config, &fgb, &anim_cursor, true);
+    let cursor_pulse_start = observe_platform_now();
+
+    let verts = emit_cursor_glow(&ctx, &cursor_pulse_start);
+    assert_eq!(verts.len(), 0, "no cursor should produce no glow");
+}
+
+#[test]
+fn test_cursor_glow_with_animated_cursor() {
+    let mut config = EffectsConfig::default();
+    config.cursor_glow.enabled = true;
+    config.cursor_glow.radius = 30.0;
+    config.cursor_glow.opacity = 0.5;
+    config.cursor_glow.color = (1.0, 0.5, 0.25);
+
+    let fgb = FrameGlyphBuffer::default();
+    let anim_cursor = Some(make_animated_cursor(100.0, 100.0, 10.0, 20.0, 1));
+
+    let ctx = make_ctx(&config, &fgb, &anim_cursor, true);
+    let cursor_pulse_start = observe_platform_now();
+
+    let verts = emit_cursor_glow(&ctx, &cursor_pulse_start);
+
+    assert!(!verts.is_empty(), "glow should produce vertices");
+    validate_vertex_count(&verts);
+    validate_vertices(&verts);
+
+    // With radius 30.0, layers = ceil(30.0/2.0) = 15 layers, each is 6 verts
+    let expected_layers = (30.0_f32 / 2.0).ceil() as usize;
+    assert_eq!(verts.len(), expected_layers * 6);
+}
+
+#[test]
+fn test_cursor_glow_with_pulse() {
+    let mut config = EffectsConfig::default();
+    config.cursor_glow.enabled = true;
+    config.cursor_glow.radius = 20.0;
+    config.cursor_pulse.enabled = true;
+    config.cursor_pulse.speed = 1.0;
+    config.cursor_pulse.min_opacity = 0.3;
+
+    let fgb = FrameGlyphBuffer::default();
+    let anim_cursor = Some(make_animated_cursor(100.0, 100.0, 10.0, 20.0, 1));
+
+    let ctx = make_ctx(&config, &fgb, &anim_cursor, true);
+    let cursor_pulse_start = observe_platform_now();
+
+    let verts = emit_cursor_glow(&ctx, &cursor_pulse_start);
+
+    assert!(!verts.is_empty(), "glow with pulse should produce vertices");
+    validate_vertex_count(&verts);
+    validate_vertices(&verts);
+}
+
+// ========================================================================
+// emit_cursor_crosshair tests
+// ========================================================================
+
+#[test]
+fn test_cursor_crosshair_disabled() {
+    let mut config = EffectsConfig::default();
+    config.cursor_crosshair.enabled = false;
+
+    let fgb = FrameGlyphBuffer::default();
+    let anim_cursor = Some(make_animated_cursor(100.0, 100.0, 10.0, 20.0, 1));
+
+    let ctx = make_ctx(&config, &fgb, &anim_cursor, true);
+
+    let verts = emit_cursor_crosshair(&ctx);
+    assert_eq!(
+        verts.len(),
+        0,
+        "disabled crosshair should produce no vertices"
+    );
+}
+
+#[test]
+fn test_cursor_crosshair_cursor_not_visible() {
+    let mut config = EffectsConfig::default();
+    config.cursor_crosshair.enabled = true;
+
+    let fgb = FrameGlyphBuffer::default();
+    let anim_cursor = Some(make_animated_cursor(100.0, 100.0, 10.0, 20.0, 1));
+
+    let ctx = make_ctx(&config, &fgb, &anim_cursor, false);
+
+    let verts = emit_cursor_crosshair(&ctx);
+    assert_eq!(
+        verts.len(),
+        0,
+        "invisible cursor should produce no crosshair"
+    );
+}
+
+#[test]
+fn test_cursor_crosshair_no_cursor() {
+    let mut config = EffectsConfig::default();
+    config.cursor_crosshair.enabled = true;
+
+    let fgb = FrameGlyphBuffer::default();
+    let anim_cursor = None;
+
+    let ctx = make_ctx(&config, &fgb, &anim_cursor, true);
+
+    let verts = emit_cursor_crosshair(&ctx);
+    assert_eq!(verts.len(), 0, "no cursor should produce no crosshair");
+}
+
+#[test]
+fn test_cursor_crosshair_no_selected_window() {
+    let mut config = EffectsConfig::default();
+    config.cursor_crosshair.enabled = true;
+
+    let fgb = FrameGlyphBuffer::default();
+    let anim_cursor = Some(make_animated_cursor(100.0, 100.0, 10.0, 20.0, 1));
+
+    let ctx = make_ctx(&config, &fgb, &anim_cursor, true);
+
+    let verts = emit_cursor_crosshair(&ctx);
+    assert_eq!(
+        verts.len(),
+        0,
+        "no selected window should produce no crosshair"
+    );
+}
+
+#[test]
+fn test_cursor_crosshair_with_selected_window() {
+    let mut config = EffectsConfig::default();
+    config.cursor_crosshair.enabled = true;
+    config.cursor_crosshair.opacity = 0.5;
+    config.cursor_crosshair.color = (0.5, 0.5, 0.5);
+
+    let mut fgb = FrameGlyphBuffer::default();
+    fgb.window_infos
+        .push(make_selected_window_info(0.0, 0.0, 800.0, 600.0));
+
+    let anim_cursor = Some(make_animated_cursor(400.0, 300.0, 10.0, 20.0, 1));
+
+    let ctx = make_ctx(&config, &fgb, &anim_cursor, true);
+
+    let verts = emit_cursor_crosshair(&ctx);
+
+    // Should produce 2 rects: horizontal line + vertical line = 12 vertices
+    assert_eq!(
+        verts.len(),
+        12,
+        "crosshair should produce 2 rects (12 vertices)"
+    );
+    validate_vertex_count(&verts);
+    validate_vertices(&verts);
+}
+
+#[test]
+fn test_cursor_crosshair_minibuffer_excluded() {
+    let mut config = EffectsConfig::default();
+    config.cursor_crosshair.enabled = true;
+
+    let mut fgb = FrameGlyphBuffer::default();
+    let mut win_info = make_selected_window_info(0.0, 0.0, 800.0, 600.0);
+    win_info.is_minibuffer = true;
+    fgb.window_infos.push(win_info);
+
+    let anim_cursor = Some(make_animated_cursor(400.0, 300.0, 10.0, 20.0, 1));
+
+    let ctx = make_ctx(&config, &fgb, &anim_cursor, true);
+
+    let verts = emit_cursor_crosshair(&ctx);
+    assert_eq!(verts.len(), 0, "minibuffer should not show crosshair");
+}
+
+// ========================================================================
+// emit_cursor_magnetism tests
+// ========================================================================
+
+#[test]
+fn test_cursor_magnetism_disabled() {
+    let mut config = EffectsConfig::default();
+    config.cursor_magnetism.enabled = false;
+
+    let fgb = FrameGlyphBuffer::default();
+    let anim_cursor = Some(make_animated_cursor(100.0, 100.0, 10.0, 20.0, 1));
+
+    let ctx = make_ctx(&config, &fgb, &anim_cursor, true);
+    let mut entries = Vec::new();
+
+    let (verts, needs_redraw) = emit_cursor_magnetism(&ctx, &mut entries);
+    assert_eq!(verts.len(), 0);
+    assert!(!needs_redraw);
+}
+
+#[test]
+fn test_cursor_magnetism_no_entries() {
+    let mut config = EffectsConfig::default();
+    config.cursor_magnetism.enabled = true;
+
+    let fgb = FrameGlyphBuffer::default();
+    let anim_cursor = Some(make_animated_cursor(100.0, 100.0, 10.0, 20.0, 1));
+
+    let ctx = make_ctx(&config, &fgb, &anim_cursor, true);
+    let mut entries = Vec::new();
+
+    let (verts, needs_redraw) = emit_cursor_magnetism(&ctx, &mut entries);
+
+    // First call should create initial entry
+    assert_eq!(entries.len(), 1);
+    assert!(!verts.is_empty(), "magnetism should produce vertices");
+    assert!(needs_redraw);
+    validate_vertex_count(&verts);
+    validate_vertices(&verts);
+}
+
+#[test]
+fn test_cursor_magnetism_expired_entries_pruned() {
+    let mut config = EffectsConfig::default();
+    config.cursor_magnetism.enabled = true;
+    config.cursor_magnetism.duration_ms = 1; // Very short duration
+
+    let fgb = FrameGlyphBuffer::default();
+    // Cursor at a different position to trigger a jump and add new entry
+    let anim_cursor = Some(make_animated_cursor(200.0, 100.0, 10.0, 20.0, 1));
+
+    let ctx = make_ctx(&config, &fgb, &anim_cursor, true);
+
+    // Add an old entry at a different position. No sleep is needed any more:
+    // the effect ages entries against the injected frame sample, so this entry
+    // is exactly ten seconds old however fast the test runs.
+    let old_time =
+        EventTime::from_observed_instant(std::time::Instant::now() - Duration::from_secs(10));
+    let mut entries = vec![(50.0, 50.0, old_time)];
+
+    let (_verts, _) = emit_cursor_magnetism(&ctx, &mut entries);
+
+    // Old entry should be pruned, new one added (cursor jumped from 50,50 to 200,100)
+    assert_eq!(entries.len(), 1);
+    assert_eq!(
+        entries[0].2,
+        ctx.frame_sample.presentation_time(),
+        "the surviving entry is the one this frame stamped"
+    );
+    // New entry should be near cursor position (205, 110 = cursor center)
+    assert!((entries[0].0 - 205.0).abs() < 1.0);
+    assert!((entries[0].1 - 110.0).abs() < 1.0);
+}
+
+// ========================================================================
+// emit_line_number_pulse tests
+// ========================================================================
+
+#[test]
+fn test_line_number_pulse_disabled() {
+    let mut config = EffectsConfig::default();
+    config.line_number_pulse.enabled = false;
+
+    let fgb = FrameGlyphBuffer::default();
+    let anim_cursor = Some(make_animated_cursor(100.0, 100.0, 10.0, 20.0, 1));
+
+    let ctx = make_ctx(&config, &fgb, &anim_cursor, true);
+
+    let (verts, needs_redraw) = emit_line_number_pulse(&ctx);
+    assert_eq!(verts.len(), 0);
+    assert!(!needs_redraw);
+}
+
+/// The band must cover the line-number field the window actually reserved.
+/// If this is false the pulse is back to the hardcoded 40px rect drawn at the
+/// window's outer edge: it sits on the fringe and the left display margin, the
+/// first gutter column stays unlit, and it spills past the last one.
+#[test]
+fn the_line_number_pulse_spans_the_measured_field_starting_at_the_text_area_origin() {
+    let mut config = EffectsConfig::default();
+    config.line_number_pulse.enabled = true;
+    config.line_number_pulse.intensity = 0.8;
+    config.line_number_pulse.cycle_ms = 1000;
+
+    let mut fgb = FrameGlyphBuffer::default();
+    fgb.window_infos
+        .push(make_selected_window_info(0.0, 0.0, 800.0, 600.0));
+
+    let anim_cursor = Some(make_animated_cursor(100.0, 100.0, 10.0, 20.0, 1));
+
+    let ctx = make_ctx(&config, &fgb, &anim_cursor, true);
+
+    let (verts, needs_redraw) = emit_line_number_pulse(&ctx);
+
+    assert!(needs_redraw);
+    assert_eq!(verts.len(), 6, "the pulse draws exactly one band");
+    validate_vertex_count(&verts);
+    validate_vertices(&verts);
+
+    let left = verts[0].position[0];
+    let right = verts[1].position[0];
+    assert_eq!(
+        left, TEST_LEFT_CHROME_PX,
+        "the band starts at the text area, not at the window's outer edge"
+    );
+    assert_eq!(
+        right - left,
+        TEST_LINE_NUMBER_FIELD_PX,
+        "the band is as wide as the field the window reserved"
+    );
+}
+
+/// `display-line-numbers` is nil in a default session, so the common case is a
+/// window with no field at all. If this is false, enabling the effect paints a
+/// solid block over buffer text.
+#[test]
+fn the_line_number_pulse_draws_nothing_for_a_window_that_reserved_no_field() {
+    let mut config = EffectsConfig::default();
+    config.line_number_pulse.enabled = true;
+    config.line_number_pulse.intensity = 0.8;
+
+    let mut fgb = FrameGlyphBuffer::default();
+    let mut info = make_selected_window_info(0.0, 0.0, 800.0, 600.0);
+    info.line_number_field = None;
+    fgb.window_infos.push(info);
+
+    let anim_cursor = Some(make_animated_cursor(100.0, 100.0, 10.0, 20.0, 1));
+
+    let ctx = make_ctx(&config, &fgb, &anim_cursor, true);
+
+    let (verts, needs_redraw) = emit_line_number_pulse(&ctx);
+    assert_eq!(verts.len(), 0);
+    assert!(
+        !needs_redraw,
+        "a window with no band to light has no standing animation demand"
+    );
+}
+
+/// The band lights the number of the row the cursor is on, so it belongs to the
+/// cursor's window. If this is false, an active minibuffer makes the echo area
+/// the selected window and the band lands there instead.
+#[test]
+fn the_line_number_pulse_follows_the_cursors_window_rather_than_the_selected_one() {
+    let mut config = EffectsConfig::default();
+    config.line_number_pulse.enabled = true;
+    config.line_number_pulse.intensity = 0.8;
+
+    let mut fgb = FrameGlyphBuffer::default();
+    // The selected window sits elsewhere on the frame, as an active minibuffer does.
+    fgb.window_infos
+        .push(make_window_info(2, true, 400.0, 0.0, 400.0, 600.0));
+    fgb.window_infos
+        .push(make_window_info(1, false, 0.0, 0.0, 400.0, 600.0));
+
+    let anim_cursor = Some(make_animated_cursor(100.0, 100.0, 10.0, 20.0, 1));
+
+    let ctx = make_ctx(&config, &fgb, &anim_cursor, true);
+
+    let (verts, _) = emit_line_number_pulse(&ctx);
+    assert_eq!(verts.len(), 6);
+    assert_eq!(
+        verts[0].position[0], TEST_LEFT_CHROME_PX,
+        "the band belongs to window 1, which the cursor names, not to selected window 2"
+    );
+}
+
+// ========================================================================
+// emit_cursor_spotlight tests
+// ========================================================================
+
+#[test]
+fn test_cursor_spotlight_disabled() {
+    let mut config = EffectsConfig::default();
+    config.cursor_spotlight.enabled = false;
+
+    let fgb = FrameGlyphBuffer::default();
+    let anim_cursor = Some(make_animated_cursor(100.0, 100.0, 10.0, 20.0, 1));
+
+    let ctx = make_ctx(&config, &fgb, &anim_cursor, true);
+
+    let verts = emit_cursor_spotlight(&ctx);
+    assert_eq!(verts.len(), 0);
+}
+
+#[test]
+fn test_cursor_spotlight_no_cursor() {
+    let mut config = EffectsConfig::default();
+    config.cursor_spotlight.enabled = true;
+
+    let fgb = FrameGlyphBuffer::default();
+    let anim_cursor = None;
+
+    let ctx = make_ctx(&config, &fgb, &anim_cursor, true);
+
+    let verts = emit_cursor_spotlight(&ctx);
+    assert_eq!(verts.len(), 0);
+}
+
+// ========================================================================
+// emit_cursor_comet tests
+// ========================================================================
+
+#[test]
+fn test_cursor_comet_disabled() {
+    let mut config = EffectsConfig::default();
+    config.cursor_comet.enabled = false;
+
+    let fgb = FrameGlyphBuffer::default();
+    let anim_cursor = Some(make_animated_cursor(100.0, 100.0, 10.0, 20.0, 1));
+
+    let ctx = make_ctx(&config, &fgb, &anim_cursor, true);
+    let mut positions = Vec::new();
+
+    let (verts, needs_redraw) = emit_cursor_comet(&ctx, &mut positions);
+    assert_eq!(verts.len(), 0);
+    assert!(!needs_redraw);
+}
+
+// ========================================================================
+// emit_cursor_particles tests
+// ========================================================================
+
+#[test]
+fn test_cursor_particles_disabled() {
+    let mut config = EffectsConfig::default();
+    config.cursor_particles.enabled = false;
+
+    let fgb = FrameGlyphBuffer::default();
+    let anim_cursor = Some(make_animated_cursor(100.0, 100.0, 10.0, 20.0, 1));
+
+    let ctx = make_ctx(&config, &fgb, &anim_cursor, true);
+    let mut particles = Vec::new();
+    let mut prev_pos = None;
+
+    let (verts, needs_redraw) = emit_cursor_particles(&ctx, &mut particles, &mut prev_pos);
+    assert_eq!(verts.len(), 0);
+    assert!(!needs_redraw);
+}
+
+#[test]
+fn test_cursor_particles_emits_on_movement() {
+    let mut config = EffectsConfig::default();
+    config.cursor_particles.enabled = true;
+    config.cursor_particles.count = 5;
+    config.cursor_particles.lifetime_ms = 1000;
+
+    let fgb = FrameGlyphBuffer::default();
+    let anim_cursor = Some(make_animated_cursor(100.0, 100.0, 10.0, 20.0, 1));
+
+    let ctx = make_ctx(&config, &fgb, &anim_cursor, true);
+    let mut particles = Vec::new();
+    let mut prev_pos = Some((50.0, 50.0)); // Previous position far from current
+
+    let (verts, _) = emit_cursor_particles(&ctx, &mut particles, &mut prev_pos);
+
+    // Should have created particles
+    assert!(
+        particles.len() >= 5,
+        "should emit at least 5 particles on movement"
+    );
+    if !verts.is_empty() {
+        validate_vertex_count(&verts);
+        validate_vertices(&verts);
+    }
+}
+
+// ========================================================================
+// emit_cursor_drop_shadow tests
+// ========================================================================
+
+#[test]
+fn test_cursor_drop_shadow_disabled() {
+    let mut config = EffectsConfig::default();
+    config.cursor_shadow.enabled = false;
+
+    let fgb = FrameGlyphBuffer::default();
+    let anim_cursor = Some(make_animated_cursor(100.0, 100.0, 10.0, 20.0, 1));
+
+    let ctx = make_ctx(&config, &fgb, &anim_cursor, true);
+
+    let verts = emit_cursor_drop_shadow(&ctx);
+    assert_eq!(verts.len(), 0);
+}
+
+// ========================================================================
+// emit_cursor_trail_fade tests
+// ========================================================================
+
+#[test]
+fn test_cursor_trail_fade_disabled() {
+    let mut config = EffectsConfig::default();
+    config.cursor_trail_fade.enabled = false;
+
+    let fgb = FrameGlyphBuffer::default();
+    let anim_cursor = Some(make_animated_cursor(100.0, 100.0, 10.0, 20.0, 1));
+
+    let ctx = make_ctx(&config, &fgb, &anim_cursor, true);
+    let mut positions = Vec::new();
+    let fade_dur = std::time::Duration::from_millis(300);
+
+    let (verts, needs_redraw) = emit_cursor_trail_fade(&ctx, &mut positions, &fade_dur);
+    assert_eq!(verts.len(), 0);
+    assert!(!needs_redraw);
+}
+
+#[test]
+fn test_cursor_trail_fade_prunes_old_positions() {
+    let mut config = EffectsConfig::default();
+    config.cursor_trail_fade.enabled = true;
+    config.cursor_trail_fade.ms = 100;
+
+    let fgb = FrameGlyphBuffer::default();
+    let anim_cursor = Some(make_animated_cursor(100.0, 100.0, 10.0, 20.0, 1));
+
+    let ctx = make_ctx(&config, &fgb, &anim_cursor, true);
+
+    // Add old position
+    let old_time =
+        EventTime::from_observed_instant(std::time::Instant::now() - Duration::from_secs(10));
+    let mut positions = vec![(50.0, 50.0, 10.0, 20.0, old_time)];
+    let fade_dur = std::time::Duration::from_millis(100);
+
+    let (verts, _) = emit_cursor_trail_fade(&ctx, &mut positions, &fade_dur);
+
+    // Old position should be pruned
+    assert_eq!(
+        positions.len(),
+        0,
+        "expired trail positions should be pruned"
+    );
+    assert_eq!(verts.len(), 0);
+}
+
+// ========================================================================
+// General property tests
+// ========================================================================
+
+#[test]
+fn test_all_effects_produce_valid_vertices() {
+    let mut config = EffectsConfig::default();
+
+    // Enable a variety of cursor effects
+    config.cursor_glow.enabled = true;
+    config.cursor_crosshair.enabled = true;
+    config.cursor_magnetism.enabled = true;
+
+    let mut fgb = FrameGlyphBuffer::default();
+    fgb.window_infos
+        .push(make_selected_window_info(0.0, 0.0, 800.0, 600.0));
+
+    let anim_cursor = Some(make_animated_cursor(400.0, 300.0, 10.0, 20.0, 1));
+
+    let ctx = make_ctx(&config, &fgb, &anim_cursor, true);
+
+    // Test cursor_glow
+    let cursor_pulse_start = observe_platform_now();
+    let verts = emit_cursor_glow(&ctx, &cursor_pulse_start);
+    validate_vertex_count(&verts);
+    validate_vertices(&verts);
+
+    // Test cursor_crosshair
+    let verts = emit_cursor_crosshair(&ctx);
+    validate_vertex_count(&verts);
+    validate_vertices(&verts);
+
+    // Test cursor_magnetism
+    let mut entries = Vec::new();
+    let (verts, _) = emit_cursor_magnetism(&ctx, &mut entries);
+    validate_vertex_count(&verts);
+    validate_vertices(&verts);
+}
+
+#[test]
+fn test_effects_respect_cursor_visible_flag() {
+    let mut config = EffectsConfig::default();
+    config.cursor_glow.enabled = true;
+    config.cursor_crosshair.enabled = true;
+
+    let fgb = FrameGlyphBuffer::default();
+    let anim_cursor = Some(make_animated_cursor(100.0, 100.0, 10.0, 20.0, 1));
+
+    // Test with cursor_visible = false
+    let ctx = make_ctx(&config, &fgb, &anim_cursor, false);
+
+    let cursor_pulse_start = observe_platform_now();
+    let verts = emit_cursor_glow(&ctx, &cursor_pulse_start);
+    assert_eq!(verts.len(), 0, "glow should respect cursor_visible=false");
+
+    let verts = emit_cursor_crosshair(&ctx);
+    assert_eq!(
+        verts.len(),
+        0,
+        "crosshair should respect cursor_visible=false"
+    );
+}
+
+#[test]
+fn test_cursor_glow_layer_count_calculation() {
+    let mut config = EffectsConfig::default();
+    config.cursor_glow.enabled = true;
+
+    let fgb = FrameGlyphBuffer::default();
+    let anim_cursor = Some(make_animated_cursor(100.0, 100.0, 10.0, 20.0, 1));
+    let cursor_pulse_start = observe_platform_now();
+
+    // Test different radius values
+    for radius in [10.0_f32, 20.0, 30.0, 50.0, 100.0] {
+        config.cursor_glow.radius = radius;
+        let ctx = make_ctx(&config, &fgb, &anim_cursor, true);
+        let verts = emit_cursor_glow(&ctx, &cursor_pulse_start);
+
+        let expected_layers = (radius / 2.0).ceil() as usize;
+        let expected_verts = expected_layers * 6;
+
+        assert_eq!(
+            verts.len(),
+            expected_verts,
+            "radius {} should produce {} layers ({} verts)",
+            radius,
+            expected_layers,
+            expected_verts
+        );
+        validate_vertex_count(&verts);
+    }
+}
+
+// ========================================================================
+// emit_line_number_pulse phase tests
+//
+// The pulse phase was pinned at zero for the life of this effect (it
+// measured the interval from "now" to "now"), so it rendered a constant
+// mid-brightness gutter while still asking for a redraw every frame. These
+// pin the property that broke: the phase has to move as the frame sample
+// advances, and `cycle_ms` has to be what sets how fast.
+// ========================================================================
+
+/// Build a ctx whose ambient anchor is `anchor` and whose frame is presented
+/// exactly `offset` after it.
+///
+/// The phase under test is then a pure function of `offset`: the frame
+/// interval is zero, and no wall-clock duration elapses between the anchor and
+/// the sample, so the result does not depend on when the test happens to run.
+fn make_phase_ctx<'a>(
+    effects: &'a EffectsConfig,
+    fgb: &'a FrameGlyphBuffer,
+    animated_cursor: &'a Option<AnimatedCursor>,
+    anchor: EventTime,
+    offset: Duration,
+) -> EffectCtx<'a> {
+    EffectCtx {
+        effects,
+        frame_glyphs: fgb,
+        animated_cursor,
+        cursor_visible: true,
+        surface_width: 800,
+        surface_height: 600,
+        aurora_start: anchor,
+        frame_sample: FrameSample::new(anchor.plus(offset), Duration::ZERO),
+        frame_seq: 1,
+        scale_factor: 1.0,
+        logical_w: 800.0,
+        logical_h: 600.0,
+        renderer_width: 800.0,
+        renderer_height: 600.0,
+    }
+}
+
+/// Alpha of the emitted gutter rect, or `None` when the pulse is at a trough
+/// dim enough that the effect emits nothing.
+fn pulse_alpha(verts: &[RectVertex]) -> Option<f32> {
+    verts.first().map(|v| v.color[3])
+}
+
+#[test]
+fn test_line_number_pulse_phase_varies_across_frame_samples() {
+    let mut config = EffectsConfig::default();
+    config.line_number_pulse.enabled = true;
+    config.line_number_pulse.intensity = 0.8;
+    config.line_number_pulse.cycle_ms = 1000;
+
+    let mut fgb = FrameGlyphBuffer::default();
+    fgb.window_infos
+        .push(make_selected_window_info(0.0, 0.0, 800.0, 600.0));
+    let anim_cursor = Some(make_animated_cursor(100.0, 100.0, 10.0, 20.0, 1));
+
+    // One anchor; every sample below is derived from it by an exact offset.
+    let anchor = observe_platform_now();
+    let alpha_at = |offset: Duration| {
+        let ctx = make_phase_ctx(&config, &fgb, &anim_cursor, anchor, offset);
+        let (verts, needs_redraw) = emit_line_number_pulse(&ctx);
+        assert!(needs_redraw, "the pulse always asks for the next frame");
+        validate_vertex_count(&verts);
+        pulse_alpha(&verts)
+    };
+
+    // Quarter-cycle points of a 1s cycle: rising midpoint, peak, falling
+    // midpoint, trough.
+    let start = alpha_at(Duration::from_millis(0)).expect("midpoint emits");
+    let peak = alpha_at(Duration::from_millis(250)).expect("peak emits");
+    let falling = alpha_at(Duration::from_millis(500)).expect("midpoint emits");
+    let trough = alpha_at(Duration::from_millis(750));
+
+    // The property that was broken: the phase moves.
+    assert!(
+        (peak - start).abs() > 0.01,
+        "phase pinned: peak {peak} == start {start}"
+    );
+    assert!((start - 0.4).abs() < 1e-4, "sin(0) midpoint: {start}");
+    assert!(
+        (peak - 0.8).abs() < 1e-4,
+        "sin(pi/2) peak = intensity: {peak}"
+    );
+    assert!((falling - 0.4).abs() < 1e-4, "sin(pi) midpoint: {falling}");
+    assert!(
+        trough.is_none(),
+        "sin(3pi/2) trough is fully transparent, so nothing is emitted: {trough:?}"
+    );
+}
+
+#[test]
+fn test_line_number_pulse_period_comes_from_cycle_ms() {
+    let mut fgb = FrameGlyphBuffer::default();
+    fgb.window_infos
+        .push(make_selected_window_info(0.0, 0.0, 800.0, 600.0));
+    let anim_cursor = Some(make_animated_cursor(100.0, 100.0, 10.0, 20.0, 1));
+    let anchor = observe_platform_now();
+
+    let peak_offset_for = |cycle_ms: u32, offset: Duration| {
+        let mut config = EffectsConfig::default();
+        config.line_number_pulse.enabled = true;
+        config.line_number_pulse.intensity = 0.8;
+        config.line_number_pulse.cycle_ms = cycle_ms;
+        let ctx = make_phase_ctx(&config, &fgb, &anim_cursor, anchor, offset);
+        pulse_alpha(&emit_line_number_pulse(&ctx).0)
+    };
+
+    // A 1s cycle peaks at 250ms; a 2s cycle is only a quarter of the way to
+    // its own peak by then and does not reach it until 500ms.
+    let fast_peak = peak_offset_for(1000, Duration::from_millis(250)).expect("emits");
+    let slow_early = peak_offset_for(2000, Duration::from_millis(250)).expect("emits");
+    let slow_peak = peak_offset_for(2000, Duration::from_millis(500)).expect("emits");
+    assert!(
+        (fast_peak - 0.8).abs() < 1e-4,
+        "1s cycle peaks: {fast_peak}"
+    );
+    assert!(
+        (slow_peak - 0.8).abs() < 1e-4,
+        "2s cycle peaks later: {slow_peak}"
+    );
+    assert!(
+        slow_early < fast_peak - 0.05,
+        "a longer cycle must be slower: {slow_early} vs {fast_peak}"
+    );
+
+    // A full cycle later the phase has come back round.
+    let one_cycle_on = peak_offset_for(1000, Duration::from_millis(1250)).expect("emits");
+    assert!(
+        (one_cycle_on - fast_peak).abs() < 1e-4,
+        "phase is periodic in cycle_ms: {one_cycle_on} vs {fast_peak}"
+    );
+}
+
+#[test]
+fn test_line_number_pulse_zero_cycle_holds_still() {
+    // A zero period names no cycle. It must hold the phase rather than divide
+    // by zero and paint a NaN alpha.
+    let mut config = EffectsConfig::default();
+    config.line_number_pulse.enabled = true;
+    config.line_number_pulse.intensity = 0.8;
+    config.line_number_pulse.cycle_ms = 0;
+
+    let mut fgb = FrameGlyphBuffer::default();
+    fgb.window_infos
+        .push(make_selected_window_info(0.0, 0.0, 800.0, 600.0));
+    let anim_cursor = Some(make_animated_cursor(100.0, 100.0, 10.0, 20.0, 1));
+    let anchor = observe_platform_now();
+
+    for offset in [0u64, 250, 750] {
+        let ctx = make_phase_ctx(
+            &config,
+            &fgb,
+            &anim_cursor,
+            anchor,
+            Duration::from_millis(offset),
+        );
+        let (verts, _) = emit_line_number_pulse(&ctx);
+        validate_vertices(&verts);
+        let alpha = pulse_alpha(&verts).expect("midpoint emits");
+        assert!((alpha - 0.4).abs() < 1e-4, "held at midpoint: {alpha}");
+    }
+}

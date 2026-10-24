@@ -1,0 +1,6 @@
+scratch: "-UUU:--- F1  *scratch*      All L4     (Lisp Interaction ElDoc) ---"
+line-number-mode=t column-number-mode=nil
+probe@100: "-UUU:**- F1  probe          44% L100   (Fundamental) ---"
+split-below: heights 7 6 total 24
+split-right: widths 40 40 total 80
+other-mode-line: "-UUU:**- F1  probe          46% L100   (Fundamental) ---"

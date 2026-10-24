@@ -1,0 +1,270 @@
+{
+ "name": "corpus-19",
+ "frame": {
+  "width": 480,
+  "height": 168,
+  "bg": "#ffffff",
+  "fg": "#000000"
+ },
+ "font": {
+  "family": "Liberation Mono",
+  "pixel_size": 20,
+  "regular": "/usr/share/fonts/liberation/LiberationMono-Regular.ttf",
+  "bold": "/usr/share/fonts/liberation/LiberationMono-Bold.ttf",
+  "italic": "/usr/share/fonts/liberation/LiberationMono-Italic.ttf"
+ },
+ "cursor_color": "#00a000",
+ "buffer": [
+  {
+   "text": "λόγος",
+   "bold": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "C:\\tmp",
+   "fg": "#a020f0",
+   "bold": true,
+   "underline": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "fox",
+   "italic": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "q?",
+   "italic": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "glyph"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "world"
+  },
+  {
+   "text": "\n"
+  },
+  {
+   "text": "δέντρο",
+   "fg": "#ff0000"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "βιβλίο"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "καλημέρα",
+   "fg": "#696969"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "jumps",
+   "underline": true,
+   "bg": "#e0e0ff"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "ΣΟΦΙΑ",
+   "bold": true
+  },
+  {
+   "text": "\n"
+  },
+  {
+   "text": "{ok}"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "φως"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "Ωμέγα"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "Emacs",
+   "italic": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "{ok}"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "θάλασσα",
+   "fg": "#008000"
+  },
+  {
+   "text": "\n"
+  },
+  {
+   "text": "C:\\tmp"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "ήλιος"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "window"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "λόγος"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "ήλιος",
+   "bg": "#ffe4e1"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "Χάος",
+   "fg": "#ff0000",
+   "bold": true
+  },
+  {
+   "text": "\n"
+  }
+ ],
+ "point": 128,
+ "expect": {
+  "origin": [
+   0,
+   0
+  ],
+  "rows": [
+   {
+    "text": "λόγος C:\\tmp fox q? glyph world",
+    "runs": [
+     {
+      "start": 0,
+      "end": 5,
+      "bold": true
+     },
+     {
+      "start": 6,
+      "end": 12,
+      "fg": "#a020f0",
+      "bold": true,
+      "underline": true
+     },
+     {
+      "start": 13,
+      "end": 16,
+      "italic": true
+     },
+     {
+      "start": 17,
+      "end": 19,
+      "italic": true
+     }
+    ]
+   },
+   {
+    "text": "δέντρο βιβλίο καλημέρα jumps ΣΟΦΙΑ",
+    "runs": [
+     {
+      "start": 0,
+      "end": 6,
+      "fg": "#ff0000"
+     },
+     {
+      "start": 14,
+      "end": 22,
+      "fg": "#696969"
+     },
+     {
+      "start": 23,
+      "end": 28,
+      "underline": true,
+      "bg": "#e0e0ff"
+     },
+     {
+      "start": 29,
+      "end": 34,
+      "bold": true
+     }
+    ]
+   },
+   {
+    "text": "{ok} φως Ωμέγα Emacs {ok} θάλασσα",
+    "runs": [
+     {
+      "start": 15,
+      "end": 20,
+      "italic": true
+     },
+     {
+      "start": 26,
+      "end": 33,
+      "fg": "#008000"
+     }
+    ]
+   },
+   {
+    "text": "C:\\tmp ήλιος window λόγος ήλιος Χάος",
+    "runs": [
+     {
+      "start": 26,
+      "end": 31,
+      "bg": "#ffe4e1"
+     },
+     {
+      "start": 32,
+      "end": 36,
+      "fg": "#ff0000",
+      "bold": true
+     }
+    ]
+   }
+  ],
+  "cursor": {
+   "row": 3,
+   "col": 26
+  }
+ }
+}

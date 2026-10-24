@@ -1,0 +1,389 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "buffer-name",
+ "spec_sha256": "fb4077397780490fa7c6923c2354ef37428b0000621c64625452e881c153e10f",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "buffer-name",
+    "subr",
+    0,
+    1
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "buffer.c": "bb93b33042953fab31294645204d46c48c3a3d7b8516f7b923c7d86b9766b91d"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "buffer-name/0000",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (buffer-name nil)) (error (list 'sig e))))",
+   "expected": "(ok \"*scratch*\")"
+  },
+  {
+   "id": "buffer-name/0001",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (buffer-name t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument bufferp t))"
+  },
+  {
+   "id": "buffer-name/0002",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (buffer-name 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument bufferp 0))"
+  },
+  {
+   "id": "buffer-name/0003",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (buffer-name 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument bufferp 1))"
+  },
+  {
+   "id": "buffer-name/0004",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (buffer-name 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument bufferp 2))"
+  },
+  {
+   "id": "buffer-name/0005",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (buffer-name -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument bufferp -1))"
+  },
+  {
+   "id": "buffer-name/0006",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (buffer-name most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument bufferp 2305843009213693951))"
+  },
+  {
+   "id": "buffer-name/0007",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (buffer-name 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument bufferp 1.5))"
+  },
+  {
+   "id": "buffer-name/0008",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (buffer-name 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument bufferp sym))"
+  },
+  {
+   "id": "buffer-name/0009",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (buffer-name :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument bufferp :kw))"
+  },
+  {
+   "id": "buffer-name/0010",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (buffer-name (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument bufferp \"\"))"
+  },
+  {
+   "id": "buffer-name/0011",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (buffer-name (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument bufferp \"abc\"))"
+  },
+  {
+   "id": "buffer-name/0012",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (buffer-name (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument bufferp \"λx\"))"
+  },
+  {
+   "id": "buffer-name/0013",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (buffer-name (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument bufferp (1 2 3)))"
+  },
+  {
+   "id": "buffer-name/0014",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (buffer-name (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument bufferp (a (b))))"
+  },
+  {
+   "id": "buffer-name/0015",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (buffer-name (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument bufferp (1 . 2)))"
+  },
+  {
+   "id": "buffer-name/0016",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (buffer-name (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument bufferp (1 2 . 3)))"
+  },
+  {
+   "id": "buffer-name/0017",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (buffer-name (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument bufferp [1 2]))"
+  },
+  {
+   "id": "buffer-name/0018",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (buffer-name (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument bufferp (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "buffer-name/0019",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'buffer-name '(1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr buffer-name> 2))"
+  },
+  {
+   "id": "buffer-name/0020",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (buffer-name a0))) (error (list 'sig e))))",
+   "expected": "(ok \"*scratch*\")"
+  },
+  {
+   "id": "buffer-name/0021",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil)) (let ((r (buffer-name a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "buffer-name/0022",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1)) (let ((r (buffer-name a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument bufferp 1))"
+  },
+  {
+   "id": "buffer-name/0023",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-positive-fixnum)) (let ((r (buffer-name a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument bufferp 2305843009213693951))"
+  },
+  {
+   "id": "buffer-name/0024",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :kw)) (let ((r (buffer-name a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument bufferp :kw))"
+  },
+  {
+   "id": "buffer-name/0025",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\"))) (let ((r (buffer-name a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument bufferp \"λx\"))"
+  },
+  {
+   "id": "buffer-name/0026",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 2))) (let ((r (buffer-name a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument bufferp (1 . 2)))"
+  },
+  {
+   "id": "buffer-name/0027",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (buffer-name a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument bufferp (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "buffer-name/0028",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (buffer-name)) (error (list 'sig e))))",
+   "expected": "(ok \"*scratch*\")"
+  },
+  {
+   "id": "buffer-name/0029",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (buffer-name nil)) (error (list 'sig e))))",
+   "expected": "(ok \"*scratch*\")"
+  },
+  {
+   "id": "buffer-name/0030",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (buffer-name (current-buffer))) (error (list 'sig e))))",
+   "expected": "(ok \"*scratch*\")"
+  },
+  {
+   "id": "buffer-name/0031",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (buffer-name (get-buffer-create \"primh-name\"))) (error (list 'sig e))))",
+   "expected": "(ok \"primh-name\")"
+  },
+  {
+   "id": "buffer-name/0032",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (buffer-name (get-buffer-create (generate-new-buffer-name \"primh-name\")))) (error (list 'sig e))))",
+   "expected": "(ok \"primh-name\")",
+   "gnu_regime_variant": "(ok \"primh-name<2>\")"
+  },
+  {
+   "id": "buffer-name/0033",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (buffer-name))) (error (list 'sig e))))",
+   "expected": "(ok \" *temp*\")"
+  },
+  {
+   "id": "buffer-name/0034",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (with-temp-buffer (buffer-name)))) (error (list 'sig e))))",
+   "expected": "(ok \" *temp*-261721\")",
+   "gnu_regime_variant": "(ok \" *temp*-316263\")"
+  },
+  {
+   "id": "buffer-name/0035",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (buffer-name (with-temp-buffer (current-buffer)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "buffer-name/0036",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((b nil)) (condition-case nil (with-temp-buffer (setq b (current-buffer)) (error \"test\")) (error nil)) (buffer-name b))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "buffer-name/0037",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((b (get-buffer-create \"primh-name\"))) (eq (buffer-name b) (buffer-name b)))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "buffer-name/0038",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((b (with-temp-buffer (current-buffer)))) (set-buffer b) (buffer-name))) (error (list 'sig e))))",
+   "expected": "(sig (error \"Selecting deleted buffer\"))"
+  },
+  {
+   "id": "buffer-name/0039",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 'sym) (error (list 'sig e))))",
+   "expected": "(ok sym)"
+  },
+  {
+   "id": "buffer-name/0040",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (cons 1 (cons 2 3))) (error (list 'sig e))))",
+   "expected": "(ok (1 2 . 3))"
+  },
+  {
+   "id": "buffer-name/0041",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (cons 1 2)) (error (list 'sig e))))",
+   "expected": "(ok (1 . 2))"
+  },
+  {
+   "id": "buffer-name/0042",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"\")) (error (list 'sig e))))",
+   "expected": "(ok \"\")"
+  },
+  {
+   "id": "buffer-name/0043",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"abc\")) (error (list 'sig e))))",
+   "expected": "(ok \"abc\")"
+  },
+  {
+   "id": "buffer-name/0044",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"λx\")) (error (list 'sig e))))",
+   "expected": "(ok \"λx\")"
+  },
+  {
+   "id": "buffer-name/0045",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (error (list 'sig e))))",
+   "expected": "(ok (1 2 1 2 . #2))"
+  },
+  {
+   "id": "buffer-name/0046",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list 'a (list 'b))) (error (list 'sig e))))",
+   "expected": "(ok (a (b)))"
+  },
+  {
+   "id": "buffer-name/0047",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list 1 2 3)) (error (list 'sig e))))",
+   "expected": "(ok (1 2 3))"
+  },
+  {
+   "id": "buffer-name/0048",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vector 1 2)) (error (list 'sig e))))",
+   "expected": "(ok [1 2])"
+  },
+  {
+   "id": "buffer-name/0049",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok -1) (error (list 'sig e))))",
+   "expected": "(ok -1)"
+  },
+  {
+   "id": "buffer-name/0050",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 0) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "buffer-name/0051",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1) (error (list 'sig e))))",
+   "expected": "(ok 1)"
+  },
+  {
+   "id": "buffer-name/0052",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1.5) (error (list 'sig e))))",
+   "expected": "(ok 1.5)"
+  },
+  {
+   "id": "buffer-name/0053",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 2) (error (list 'sig e))))",
+   "expected": "(ok 2)"
+  },
+  {
+   "id": "buffer-name/0054",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok :kw) (error (list 'sig e))))",
+   "expected": "(ok :kw)"
+  },
+  {
+   "id": "buffer-name/0055",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok most-positive-fixnum) (error (list 'sig e))))",
+   "expected": "(ok 2305843009213693951)"
+  },
+  {
+   "id": "buffer-name/0056",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok nil) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "buffer-name/0057",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok t) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  }
+ ],
+ "pinned": {
+  "buffer-name/0018": "PRINTER",
+  "buffer-name/0027": "PRINTER",
+  "buffer-name/0045": "PRINTER",
+  "buffer-name/0034": "VALUE",
+  "buffer-name/0037": "VALUE",
+  "buffer-name/0038": "DATA"
+ }
+}

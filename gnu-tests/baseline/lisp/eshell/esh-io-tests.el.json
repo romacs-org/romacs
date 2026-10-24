@@ -1,0 +1,863 @@
+{
+ "blob": "ba4b5710b5152cb3b405bad22df4f6748a62e06b",
+ "compiled": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": true,
+  "results": {
+   "esh-io-test/output-newline/add-newline": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/output-newline/no-extra-newline": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/output-newline/no-newline": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/pipeline/all": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/pipeline/default": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/pipeline/stdin-to-head": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/pipeline/subcommands": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/redirect-all/append": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/redirect-all/insert": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/redirect-all/overwrite": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/redirect-buffer/append": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/redirect-buffer/escaped": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/redirect-buffer/insert": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/redirect-buffer/overwrite": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/redirect-copy": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/redirect-copy-first": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/redirect-file/append": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/redirect-file/insert": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/redirect-file/overwrite": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/redirect-marker": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/redirect-multiple": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/redirect-multiple/repeat": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/redirect-stderr/append": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/redirect-stderr/insert": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/redirect-stderr/overwrite": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/redirect-stdout": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/redirect-stdout-and-stderr": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/redirect-subcommands": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/redirect-subcommands/dev-null": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/redirect-subcommands/interpolated": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/redirect-subcommands/override": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/redirect-symbol/append": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/redirect-symbol/overwrite": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/redirect-symbol/with-function-slot": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/virtual/dev-eshell": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/virtual/dev-kill": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/virtual/dev-null": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/virtual/dev-null/multiple": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/virtual/device-close": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   }
+  },
+  "timed_out": false
+ },
+ "file": "lisp/eshell/esh-io-tests.el",
+ "gnu": {
+  "emacs": "<recording-path-redacted>/emacs-32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+  "version": "32.0.50"
+ },
+ "harness_sha256": "78c20850429a08af22faadf73b5d164c560230e83d7eb88ef60cb995670703ef",
+ "mini": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": null,
+  "results": {
+   "esh-io-test/output-newline/add-newline": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-io-test/output-newline/no-extra-newline": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-io-test/output-newline/no-newline": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-io-test/pipeline/all": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-io-test/pipeline/default": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "esh-io-test/pipeline/stdin-to-head": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-io-test/pipeline/subcommands": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-io-test/redirect-all/append": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-io-test/redirect-all/insert": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-io-test/redirect-all/overwrite": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-io-test/redirect-buffer/append": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-io-test/redirect-buffer/escaped": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-io-test/redirect-buffer/insert": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-io-test/redirect-buffer/overwrite": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-io-test/redirect-copy": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-io-test/redirect-copy-first": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-io-test/redirect-file/append": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-io-test/redirect-file/insert": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-io-test/redirect-file/overwrite": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-io-test/redirect-marker": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-io-test/redirect-multiple": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-io-test/redirect-multiple/repeat": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-io-test/redirect-stderr/append": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-io-test/redirect-stderr/insert": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-io-test/redirect-stderr/overwrite": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-io-test/redirect-stdout": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-io-test/redirect-stdout-and-stderr": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-io-test/redirect-subcommands": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-io-test/redirect-subcommands/dev-null": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-io-test/redirect-subcommands/interpolated": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-io-test/redirect-subcommands/override": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-io-test/redirect-symbol/append": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-io-test/redirect-symbol/overwrite": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-io-test/redirect-symbol/with-function-slot": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-io-test/virtual/dev-eshell": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-io-test/virtual/dev-kill": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-io-test/virtual/dev-null": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-io-test/virtual/dev-null/multiple": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "esh-io-test/virtual/device-close": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   }
+  },
+  "timed_out": false
+ },
+ "read_error": null,
+ "real": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": true,
+  "results": {
+   "esh-io-test/output-newline/add-newline": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/output-newline/no-extra-newline": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/output-newline/no-newline": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/pipeline/all": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/pipeline/default": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/pipeline/stdin-to-head": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/pipeline/subcommands": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/redirect-all/append": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/redirect-all/insert": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/redirect-all/overwrite": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/redirect-buffer/append": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/redirect-buffer/escaped": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/redirect-buffer/insert": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/redirect-buffer/overwrite": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/redirect-copy": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/redirect-copy-first": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/redirect-file/append": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/redirect-file/insert": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/redirect-file/overwrite": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/redirect-marker": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/redirect-multiple": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/redirect-multiple/repeat": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/redirect-stderr/append": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/redirect-stderr/insert": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/redirect-stderr/overwrite": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/redirect-stdout": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/redirect-stdout-and-stderr": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/redirect-subcommands": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/redirect-subcommands/dev-null": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/redirect-subcommands/interpolated": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/redirect-subcommands/override": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/redirect-symbol/append": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/redirect-symbol/overwrite": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/redirect-symbol/with-function-slot": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/virtual/dev-eshell": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/virtual/dev-kill": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/virtual/dev-null": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/virtual/dev-null/multiple": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "esh-io-test/virtual/device-close": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   }
+  },
+  "timed_out": false
+ },
+ "schema": 1,
+ "toplevel_deftests": 39
+}

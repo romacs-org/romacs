@@ -1,0 +1,1527 @@
+{
+  "blob": "0014a0ed555cfa45c786cd97d618383059f097cb",
+  "compiled": {
+    "complete": true,
+    "exit": 0,
+    "garbled_lines": 0,
+    "load_error": "(file-missing \"Cannot open load file\" \"No such file or directory\" \"<recording-home>/.hermes/cache/scratch/gnu-run-elc-1Mughb/bytecomp-tests.elc\")",
+    "load_ok": false,
+    "results": {},
+    "timed_out": false
+  },
+  "file": "lisp/emacs-lisp/bytecomp-tests.el",
+  "gnu": {
+    "emacs": "<recording-path-redacted>/emacs-32.0.50",
+    "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+    "sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+    "version": "32.0.50"
+  },
+  "harness_sha256": "78c20850429a08af22faadf73b5d164c560230e83d7eb88ef60cb995670703ef",
+  "mini": {
+    "complete": true,
+    "exit": 0,
+    "garbled_lines": 0,
+    "load_error": null,
+    "load_ok": null,
+    "results": {
+      "byte-compile-file/no-byte-compile": {
+        "as_expected": null,
+        "detail": "(file-missing \"Opening input file\" \"No such file or directory\" \"<recording-home>/.hermes/cache/scratch/gts-tree-t8p5ta2b/test/lisp/emacs-lisp/no-byte-compile.el\")",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "bytecomp--byte-op-error-backtrace": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp--copy-tree": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp--eq-symbols-with-pos-enabled": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp--fun-value-as-head": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp-condition-case-success": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp-defsubst": {
+        "as_expected": null,
+        "detail": "(file-missing \"Opening input file\" \"No such file or directory\" \"<recording-home>/.hermes/cache/scratch/gts-tree-t8p5ta2b/test/lisp/emacs-lisp/bc-test-alpha.el\")",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "bytecomp-fun-attr-warn": {
+        "as_expected": null,
+        "detail": "(file-missing \"Opening input file\" \"No such file or directory\" \"<recording-home>/.hermes/cache/scratch/gts-tree-t8p5ta2b/test/lisp/emacs-lisp/fun-attr-warn.el\")",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "bytecomp-function-attributes": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp-local-defvar": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp-reify-function": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp-string-vs-docstring": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp-test--switch-duplicates": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp-test--with-suppressed-warnings": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp-test-defcustom-local": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp-test-defcustom-type": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp-test-defface-spec": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp-test-featurep-warnings": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp-tests--dest-mountpoint": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "bytecomp-tests--lexical-binding-cookie": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "bytecomp-tests--not-writable-directory": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "bytecomp-tests--target-file-no-directory": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "bytecomp-tests--test-no-warnings-with-advice": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp-tests--unescaped-char-literals": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "bytecomp-tests--warn-arity-non-compiled-callee": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "bytecomp-tests--warnings": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp-tests-byte-compile--wide-docstring-p/func-arg-list": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp-tests-dynbind": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp-tests-function-put": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "bytecomp-tests-lexbind": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp-warn--ignore": {
+        "as_expected": null,
+        "detail": "(search-failed \"unused\")",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "bytecomp-warn-dodgy-args-eq": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp-warn-dodgy-args-memq": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp-warn-quoted-condition": {
+        "as_expected": null,
+        "detail": "(search-failed \"Warning:[ \n]+`condition-case'[ \n]+condition[ \n]+should[ \n]+not[ \n]+be[ \n]+quoted:[ \n]+'arith-error\")",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "bytecomp-warn-variable-lacks-prefix": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp-warn-wide-docstring/cl-defstruct": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp-warn-wide-docstring/cl-defsubst": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp-warn-wide-docstring/defconst": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp-warn-wide-docstring/defvar": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp-warn-wrong-args": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp-warn-wrong-args-subr": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp/error-lexical-var-with-add-hook.el": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp/error-lexical-var-with-remove-hook.el": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp/error-lexical-var-with-run-hook-with-args-until-failure.el": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp/error-lexical-var-with-run-hook-with-args-until-success.el": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp/error-lexical-var-with-run-hook-with-args.el": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp/error-lexical-var-with-symbol-value.el": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp/macro-warning-position-2.el": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp/macro-warning-position.el": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp/nowarn-inline-after-defvar.el": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp/warn-autoload-not-on-top-level.el": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp/warn-callargs-defsubst.el": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp/warn-callargs.el": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp/warn-defcustom-nogroup.el": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp/warn-defcustom-notype.el": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp/warn-defvar-lacks-prefix.el": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp/warn-format.el": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp/warn-free-setq.el": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp/warn-free-variable-reference.el": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp/warn-interactive-only.el": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp/warn-lambda-malformed-interactive-spec.el": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp/warn-make-process-missing-keyword-arg.el": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp/warn-make-process-missing-keyword-value.el": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp/warn-make-process-repeated-keyword-arg.el": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp/warn-make-process-unknown-keyword-arg.el": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp/warn-make-variable-buffer-local.el": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp/warn-obsolete-defun.el": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp/warn-obsolete-hook.el": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp/warn-obsolete-variable-bound.el": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp/warn-obsolete-variable-same-file.el": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp/warn-obsolete-variable.el": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp/warn-redefine-defun-as-macro.el": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp/warn-redefine-defun.el": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp/warn-redefine-macro-as-defun.el": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp/warn-save-excursion.el": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp/warn-variable-let-bind-constant.el": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp/warn-variable-let-bind-nonvariable.el": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp/warn-variable-set-constant.el": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp/warn-variable-setq-nonvariable.el": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp/warn-variable-setq-odd.el": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp/warn-wide-docstring-autoload.el": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp/warn-wide-docstring-custom-declare-variable.el": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp/warn-wide-docstring-defalias.el": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp/warn-wide-docstring-defconst.el": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp/warn-wide-docstring-define-abbrev-table.el": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp/warn-wide-docstring-define-obsolete-function-alias.el": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp/warn-wide-docstring-define-obsolete-variable-alias.el": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp/warn-wide-docstring-defun.el": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp/warn-wide-docstring-defvar.el": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp/warn-wide-docstring-defvaralias.el": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp/warn-wide-docstring-ignore-fill-column.el": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp/warn-wide-docstring-ignore-function-signature.el": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp/warn-wide-docstring-ignore-override.el": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp/warn-wide-docstring-ignore-substitutions.el": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp/warn-wide-docstring-ignore.el": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp/warn-wide-docstring-multiline-first.el": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "bytecomp/warn-wide-docstring-multiline.el": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "test-byte-comp-macro-expand-lexical-override": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "test-byte-comp-macro-expansion": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "test-byte-comp-macro-expansion-eval-and-compile": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "test-byte-comp-macro-expansion-eval-when-compile": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "test-eager-load-macro-expand-defalias": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "test-eager-load-macro-expand-lexical-override": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "test-eager-load-macro-expansion": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "test-eager-load-macro-expansion-eval-and-compile": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "test-eager-load-macro-expansion-eval-when-compile": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      }
+    },
+    "timed_out": false
+  },
+  "read_error": null,
+  "real": {
+    "complete": true,
+    "exit": 0,
+    "garbled_lines": 0,
+    "load_error": null,
+    "load_ok": true,
+    "results": {
+      "byte-compile-file/no-byte-compile": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp--byte-op-error-backtrace": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp--copy-tree": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp--eq-symbols-with-pos-enabled": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp--fun-value-as-head": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp-condition-case-success": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp-defsubst": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp-fun-attr-warn": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp-function-attributes": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp-local-defvar": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp-reify-function": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp-string-vs-docstring": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp-test--switch-duplicates": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp-test--with-suppressed-warnings": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp-test-defcustom-local": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp-test-defcustom-type": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp-test-defface-spec": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp-test-featurep-warnings": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp-tests--dest-mountpoint": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp-tests--lexical-binding-cookie": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp-tests--not-writable-directory": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp-tests--target-file-no-directory": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp-tests--test-no-warnings-with-advice": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp-tests--unescaped-char-literals": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp-tests--warn-arity-non-compiled-callee": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp-tests--warnings": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp-tests-byte-compile--wide-docstring-p/func-arg-list": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp-tests-dynbind": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp-tests-function-put": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp-tests-lexbind": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp-warn--ignore": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp-warn-dodgy-args-eq": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp-warn-dodgy-args-memq": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp-warn-quoted-condition": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp-warn-variable-lacks-prefix": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp-warn-wide-docstring/cl-defstruct": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp-warn-wide-docstring/cl-defsubst": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp-warn-wide-docstring/defconst": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp-warn-wide-docstring/defvar": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp-warn-wrong-args": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp-warn-wrong-args-subr": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp/error-lexical-var-with-add-hook.el": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp/error-lexical-var-with-remove-hook.el": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp/error-lexical-var-with-run-hook-with-args-until-failure.el": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp/error-lexical-var-with-run-hook-with-args-until-success.el": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp/error-lexical-var-with-run-hook-with-args.el": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp/error-lexical-var-with-symbol-value.el": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp/macro-warning-position-2.el": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp/macro-warning-position.el": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp/nowarn-inline-after-defvar.el": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp/warn-autoload-not-on-top-level.el": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp/warn-callargs-defsubst.el": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp/warn-callargs.el": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp/warn-defcustom-nogroup.el": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp/warn-defcustom-notype.el": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp/warn-defvar-lacks-prefix.el": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp/warn-format.el": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp/warn-free-setq.el": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp/warn-free-variable-reference.el": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp/warn-interactive-only.el": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp/warn-lambda-malformed-interactive-spec.el": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp/warn-make-process-missing-keyword-arg.el": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp/warn-make-process-missing-keyword-value.el": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp/warn-make-process-repeated-keyword-arg.el": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp/warn-make-process-unknown-keyword-arg.el": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp/warn-make-variable-buffer-local.el": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp/warn-obsolete-defun.el": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp/warn-obsolete-hook.el": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp/warn-obsolete-variable-bound.el": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp/warn-obsolete-variable-same-file.el": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp/warn-obsolete-variable.el": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp/warn-redefine-defun-as-macro.el": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp/warn-redefine-defun.el": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp/warn-redefine-macro-as-defun.el": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp/warn-save-excursion.el": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp/warn-variable-let-bind-constant.el": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp/warn-variable-let-bind-nonvariable.el": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp/warn-variable-set-constant.el": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp/warn-variable-setq-nonvariable.el": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp/warn-variable-setq-odd.el": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp/warn-wide-docstring-autoload.el": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp/warn-wide-docstring-custom-declare-variable.el": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp/warn-wide-docstring-defalias.el": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp/warn-wide-docstring-defconst.el": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp/warn-wide-docstring-define-abbrev-table.el": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp/warn-wide-docstring-define-obsolete-function-alias.el": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp/warn-wide-docstring-define-obsolete-variable-alias.el": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp/warn-wide-docstring-defun.el": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp/warn-wide-docstring-defvar.el": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp/warn-wide-docstring-defvaralias.el": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp/warn-wide-docstring-ignore-fill-column.el": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp/warn-wide-docstring-ignore-function-signature.el": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp/warn-wide-docstring-ignore-override.el": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp/warn-wide-docstring-ignore-substitutions.el": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp/warn-wide-docstring-ignore.el": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp/warn-wide-docstring-multiline-first.el": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "bytecomp/warn-wide-docstring-multiline.el": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-byte-comp-macro-expand-lexical-override": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-byte-comp-macro-expansion": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-byte-comp-macro-expansion-eval-and-compile": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-byte-comp-macro-expansion-eval-when-compile": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-eager-load-macro-expand-defalias": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-eager-load-macro-expand-lexical-override": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-eager-load-macro-expansion": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-eager-load-macro-expansion-eval-and-compile": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-eager-load-macro-expansion-eval-when-compile": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      }
+    },
+    "timed_out": false
+  },
+  "schema": 1,
+  "toplevel_deftests": 50
+}

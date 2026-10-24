@@ -1,0 +1,2238 @@
+;;; hermes-chat-render-tests.el --- Chat topic tests -*- lexical-binding: t; -*-
+
+;;; Code:
+
+(require 'ert)
+(require 'hermes-chat-render)
+(require 'delsel)
+(require 'hermes-test-helpers)
+
+(ert-deftest hermes-chat-renders-status-and-progress-events ()
+  (let (callback)
+    (hermes-test-with-chat-buffer
+     (let ((hermes-transport-send-function
+            (lambda (_prompt cb)
+              (setq callback cb)
+              'fake-process)))
+       (insert "hi")
+       (hermes-chat-send)
+       (funcall callback
+                '(:type status
+			:status-key "lifecycle"
+			:status "running"
+			:content "Thinking…"))
+       (funcall callback
+                '(:type progress
+			:tool-call-id "tool-1"
+			:name "terminal"
+			:status "running"
+			:content "running make test"))
+       (let ((text (buffer-string)))
+         (should (string-match-p "Thinking" text))
+         (should (string-match-p "terminal: running make test" text)))
+       (funcall callback
+                '(:type progress
+			:tool-call-id "tool-1"
+			:name "terminal"
+			:status "running"
+			:content "13/13 passed"))
+       (funcall callback
+                '(:type tool
+			:tool-call-id "tool-1"
+			:name "terminal"
+			:status "completed"
+			:args ((command . "make test"))
+			:duration 1.2))
+       (let* ((entries (hermes-chat--entries))
+              (roles (hermes-test--transcript-roles entries))
+              (text (buffer-string)))
+         (should (equal roles '(user status tool assistant)))
+         (should-not (string-match-p "running make test" text))
+         ;; The command survives completion; the status icon shows done.
+         (should (string-match-p "terminal: make test" text))
+         (should (string-match-p "1.2s" text))
+         (should (string-match-p "💻" text))
+         (should (equal (plist-get (nth 1 entries) :content) "Thinking…"))
+         (should (equal (plist-get (nth 2 entries) :status) "completed")))))))
+
+(ert-deftest hermes-chat-collapses-multiline-transient-output ()
+  "A multiline tool/status entry collapses to a one-line toggle, like thinking."
+  (let (callback)
+    (hermes-test-with-chat-buffer
+     (let ((hermes-transport-send-function
+            (lambda (_p cb) (setq callback cb) 'fake-process)))
+       (insert "run script")
+       (hermes-chat-send)
+       (funcall callback
+                '(:type tool :tool-call-id "t1" :name "terminal" :status "running"
+                        :context "set -e\ncd /repo\ngit status"))
+       (let ((text (buffer-string)))
+         (should (string-match-p "▸" text))
+         (should (string-match-p "terminal: set -e" text))
+         (should-not (string-match-p "git status" text)))
+       (hermes-test--push-button-labeled "terminal: set -e")
+       (let ((text (buffer-string)))
+         (should (string-match-p "▾" text))
+         (should (string-match-p "git status" text)))))))
+
+(ert-deftest hermes-chat-collapses-and-toggles-commentary-events ()
+  (let (callback)
+    (hermes-test-with-chat-buffer
+     (let ((hermes-transport-send-function
+            (lambda (_prompt cb)
+              (setq callback cb)
+              'fake-process)))
+       (insert "hi")
+       (hermes-chat-send)
+       (funcall callback
+                '(:type commentary
+                  :event "reasoning.delta"
+                  :content "I"))
+       (funcall callback
+                '(:type commentary
+                  :event "reasoning.delta"
+                  :content " need"))
+       (let ((text (buffer-string))
+             (entries (hermes-chat--entries)))
+         (should (string-match-p "▸ Reasoning" text))
+         (should-not (string-match-p "I need" text))
+         (should (equal (hermes-test--transcript-roles entries)
+                        '(user commentary assistant)))
+         (should (equal (plist-get (nth 1 entries) :content) "I need")))
+       (hermes-test--should-have-face "Reasoning" 'shadow)
+       (hermes-test--push-button-labeled "Reasoning")
+       (let ((text (buffer-string)))
+         (should (string-match-p "▾ Reasoning" text))
+         (should (string-match-p "I need" text)))
+       (hermes-test--should-have-face "I need" 'shadow)
+       (hermes-test--push-button-labeled "Reasoning")
+       (should-not (string-match-p "I need" (buffer-string)))))))
+
+(ert-deftest hermes-chat-cleans-commentary-token-newline-noise ()
+  (let (callback)
+    (hermes-test-with-chat-buffer
+     (let ((hermes-transport-send-function
+            (lambda (_prompt cb)
+              (setq callback cb)
+              'fake-process)))
+       (insert "hi")
+       (hermes-chat-send)
+       (dolist (chunk '("I\n" " need\n" " to\n" " respond\n" " to\n" " \"hello.\""))
+         (funcall callback
+                  (list :type 'commentary
+                        :event "reasoning.delta"
+                        :content chunk)))
+       (hermes-test--push-button-labeled "Reasoning")
+       (let ((text (buffer-string)))
+         (should (string-match-p "I need to respond to \\\"hello\.\\\"" text))
+         (should-not (string-match-p "I\n need\n to" text)))))))
+
+(ert-deftest hermes-chat-empty-thinking-delta-clears-to-running ()
+  "An empty `thinking.delta' clears the spinner instead of showing \"Thinking\"."
+  (should (equal (hermes-chat--turn-header-props
+                  '(:type thinking :event "thinking.delta" :content ""))
+                 '(:status running :activity nil)))
+  (should (equal (hermes-chat--turn-header-props
+                  '(:type thinking :event "thinking.delta"
+                          :content "(◔_◔) pondering..."))
+                 '(:status running :activity "Working"))))
+
+(ert-deftest hermes-chat-commentary-header-labels-reasoning ()
+  "Streamed reasoning drives a \"Reasoning\" header activity, not \"Thinking\"."
+  (should (equal (hermes-chat--turn-header-props
+                  '(:type commentary :event "reasoning.delta" :content "x"))
+                 '(:status running :activity "Reasoning"))))
+
+(ert-deftest hermes-chat-reasoning-available-keeps-streamed-reasoning ()
+  "A `reasoning.available' preview never shrinks already-streamed reasoning."
+  (let ((entry '(:role commentary :content "Step A. Step B. full reasoning"))
+        (event '(:type commentary :event "reasoning.available")))
+    (should (equal (hermes-chat--updated-transport-content entry event "short")
+                   "Step A. Step B. full reasoning")))
+  (let ((entry '(:role commentary :content ""))
+        (event '(:type commentary :event "reasoning.available")))
+    (should (equal (hermes-chat--updated-transport-content entry event "preview")
+                   "preview"))))
+
+(ert-deftest hermes-chat-renders-indexed-tool-events-as-ewoc-entries ()
+  (let (callback)
+    (hermes-test-with-chat-buffer
+     (let ((hermes-transport-send-function
+            (lambda (_prompt cb)
+              (setq callback cb)
+              'fake-process)))
+       (insert "hi")
+       (hermes-chat-send)
+       (funcall callback
+                (hermes-transport-normalize-event
+                 '((type . "ToolCallChunk")
+                   (tool_name . "read_file")
+                   (preview . "AGENTS.md")
+                   (index . 0))))
+       (funcall callback
+                (hermes-transport-normalize-event
+                 '((type . "ToolCallChunk")
+                   (tool_name . "read_file")
+                   (preview . "Makefile")
+                   (index . 1))))
+       (funcall callback
+                (hermes-transport-normalize-event
+                 '((type . "ToolCallFinished")
+                   (tool_name . "read_file")
+                   (duration . 0.4)
+                   (ok . t)
+                   (index . 0))))
+       (let ((tools (cl-remove-if-not
+                     (lambda (entry) (eq (plist-get entry :role) 'tool))
+                     (hermes-chat--entries))))
+         (should (= (length tools) 2))
+         (should (equal (plist-get (car tools) :status) "completed"))
+         (should (equal (plist-get (cadr tools) :status) "running"))
+         (should (string-match-p "📖 read_file  0.4s"
+                                 (buffer-string))))))))
+
+(ert-deftest hermes-chat-session-info-updates-header-and-working-directory ()
+  "`session.info' updates header state but adds no transcript entry."
+  (hermes-test-with-chat-buffer
+   (setq default-directory "/tmp/local-editor/")
+   (let ((before (length (ewoc-collect hermes-chat--ewoc #'identity))))
+     (hermes-chat--handle-transport-event
+       "a1" '(:type status :event "session.info" :status "ready"
+              :model "gpt-5.5" :agent-name "openai-codex" :cwd "/srv/project"
+              :goal (:status "active" :running t
+                             :turns-used 1 :max-turns 20)))
+      (should (string-match-p "gpt-5.5" (hermes-test--header-line-string)))
+      (should-not (string-match-p "Goal" (hermes-test--header-line-string)))
+      (should (equal (plist-get hermes-chat--goal :turns-used) 1))
+      (should (equal hermes-chat--working-directory "/srv/project"))
+      (should (equal default-directory "/tmp/local-editor/"))
+      (should (= before (length (ewoc-collect hermes-chat--ewoc #'identity)))))))
+
+(ert-deftest hermes-chat-goal-status-preserves-turn-header ()
+  "Goal notices preserve turn status and refresh vanilla goal state."
+  (let ((refreshes 0))
+    (cl-letf (((symbol-function 'hermes-chat--dashboard-refresh-goal)
+               (lambda () (setq refreshes (1+ refreshes)))))
+      (hermes-test-with-chat-buffer
+       (setq hermes-chat--status-state '(:status ready :activity "Ready"))
+       (hermes-chat--run-turn-reducer
+        "a1" '(:type status :event "status.update" :status "goal"
+                     :content "Continuing toward goal (1/20)"))
+       (should-not (string-match-p "Ready" (hermes-test--header-line-string)))
+       (should (string-match-p "Continuing toward goal" (buffer-string)))
+       (should (= refreshes 1))))))
+
+(ert-deftest hermes-chat-message-start-status-adds-no-entry ()
+  "Low-value `message.start' status updates do not enter the transcript."
+  (hermes-test-with-chat-buffer
+   (let ((before (length (ewoc-collect hermes-chat--ewoc #'identity))))
+     (dolist (event '(("message.start")
+                     ("message_start")
+                     ("message.start" "started")
+                     ("message_start" "message_start: started")))
+       (pcase-let ((`(,name ,content) event))
+         (hermes-chat--handle-transport-event
+          "a1" `(:type status :event ,name :status "started"
+                         ,@(and content (list :content content))))))
+     (should (= before (length (ewoc-collect hermes-chat--ewoc #'identity))))
+     (should-not (string-match-p "message[ _]start"
+                                 (downcase (buffer-string))))
+     (should-not (string-match-p "message start"
+                                 (downcase (hermes-test--header-line-string)))))))
+
+(ert-deftest hermes-chat-warn-status-reuses-one-transcript-line ()
+  "Repeated compression-blocked warnings replace one status line."
+  (hermes-test-with-chat-buffer
+   (hermes-chat--run-turn-reducer
+    "a1" '(:type status :event "status.update" :status "warn"
+                 :session-id "sid"
+                 :content "Context over threshold (~477,446 tokens >= 425,000) blocked (cooldown:60)."))
+   (hermes-chat--run-turn-reducer
+    "a2" '(:type status :event "status.update" :status "warn"
+                 :session-id "sid"
+                 :content "Context over threshold (~528,669 tokens >= 425,000) blocked (cooldown:60)."))
+   (hermes-chat--run-turn-reducer
+    "a2" '(:type status :event "status.update" :status "loop"
+                 :session-id "sid" :content "Loop set (every 30m)"))
+   (let ((text (buffer-substring-no-properties
+                (point-min) (hermes-chat--input-position)))
+         (warns (ewoc-collect
+                 hermes-chat--ewoc
+                 (lambda (entry)
+                   (and (eq (plist-get entry :role) 'status)
+                        (string-match-p "over threshold"
+                                        (or (plist-get entry :content) "")))))))
+     (should (= 1 (length warns)))
+     (should (string-match-p "528,669" (plist-get (car warns) :content)))
+     (should-not (string-match-p "477,446" text))
+     (should (string-match-p "Loop set" text)))))
+
+(ert-deftest hermes-chat-compressing-status-reuses-one-line ()
+  "Manual compress progress upserts one line; the ready bar-clear is header-only."
+  (hermes-test-with-chat-buffer
+   (setq hermes-chat--status-state '(:status ready :activity "Ready"))
+   (hermes-chat--run-turn-reducer
+    "a1" '(:type status :event "status.update" :status "compressing"
+                 :session-id "sid" :content "compressing 40 messages…"))
+   (hermes-chat--run-turn-reducer
+    "a1" '(:type status :event "status.update" :status "compressing"
+                 :session-id "sid"
+                 :content "compressing 40 messages (~9,000 tok)…"))
+   (hermes-chat--run-turn-reducer
+    "a1" '(:type status :event "status.update" :status "status"
+                 :session-id "sid" :content "ready"))
+   (let ((lines (ewoc-collect
+                 hermes-chat--ewoc
+                 (lambda (entry)
+                   (eq (plist-get entry :role) 'status)))))
+     (should (= 1 (length lines)))
+     (should (string-match-p "9,000" (plist-get (car lines) :content)))
+     (should-not (string-match-p "ready"
+                                 (buffer-substring-no-properties
+                                  (point-min) (hermes-chat--input-position))))
+     (should (eq (plist-get hermes-chat--status-state :status) 'ready))
+     (should (equal (plist-get hermes-chat--status-state :activity) "Ready"))
+     (should-not (string-match-p "Ready" (hermes-test--header-line-string)))
+     (should-not (string-match-p "Idle" (hermes-test--header-line-string))))))
+
+(ert-deftest hermes-chat-control-session-renders-server-originated-turn ()
+  "A slash-created idle session renders a later backend-owned turn."
+  (let ((client (hermes-test--dashboard-client)))
+    (cl-letf (((symbol-function 'hermes-chat--dashboard-refresh-goal) #'ignore)
+              ((symbol-function 'hermes-notifications-notify) #'ignore))
+      (hermes-test-with-chat-buffer
+       (setq hermes-chat--dashboard-client client)
+       (hermes-chat--dashboard-record-session
+        client '((session_id . "sid-loop")
+                 (stored_session_id . "stored-loop")))
+       (should hermes-chat--dashboard-token)
+       (hermes-dashboard-transport--dispatch-event
+        client '(:type status :event "message.start" :status "started"
+                 :session-id "sid-loop"))
+       (hermes-dashboard-transport--dispatch-event
+        client '(:type delta :content "Hello from the loop"
+                 :session-id "sid-loop"))
+       (hermes-dashboard-transport--dispatch-event
+        client '(:type done :session-id "sid-loop"))
+       (hermes-dashboard-transport--dispatch-event
+        client '(:type status :event "message.start" :status "started"
+                 :session-id "sid-loop"))
+       (hermes-dashboard-transport--dispatch-event
+        client '(:type delta :content "Hello again"
+                 :session-id "sid-loop"))
+       (hermes-dashboard-transport--dispatch-event
+        client '(:type done :session-id "sid-loop"))
+       (let ((assistants
+              (cl-remove-if-not
+               (lambda (entry) (eq (plist-get entry :role) 'assistant))
+               (hermes-chat--entries))))
+         (should (equal (mapcar (lambda (entry) (plist-get entry :content))
+                                assistants)
+                        '("Hello from the loop" "Hello again")))
+         (should (cl-every (lambda (entry)
+                            (eq (plist-get entry :status) 'done))
+                          assistants)))
+       (should-not hermes-chat--pending-assistant-id)))))
+
+(ert-deftest hermes-chat-idle-session-renders-background-completion ()
+  "An idle subscriber renders a session-owned `/btw' completion."
+  (let ((client (hermes-test--dashboard-client)))
+    (cl-letf (((symbol-function 'hermes-chat--dashboard-refresh-goal) #'ignore)
+              ((symbol-function 'hermes-notifications-notify) #'ignore))
+      (hermes-test-with-chat-buffer
+       (setq hermes-chat--dashboard-client client
+             hermes-chat--background-tasks
+             '(("bg-idle" :number 1 :preview "idle task")))
+       (hermes-chat--dashboard-record-session
+        client '((session_id . "sid-idle")
+                 (stored_session_id . "stored-idle")))
+       (hermes-dashboard-transport--dispatch-event
+        client '(:type background :task-id "bg-idle"
+                 :content "Idle task finished" :session-id "sid-idle"))
+       (should-not (assoc "bg-idle" hermes-chat--background-tasks))
+       (let ((entry (cl-find-if
+                     (lambda (item) (eq (plist-get item :role) 'background))
+                     (hermes-chat--entries))))
+         (should entry)
+         (should (equal (plist-get entry :content) "Idle task finished")))))))
+
+(ert-deftest hermes-chat-idle-session-reconnected-remains-detached ()
+  "A reconnected status leaves the durable session lazy and detached."
+  (let ((client (hermes-test--dashboard-client)) resumed)
+    (cl-letf (((symbol-function 'hermes-chat--dashboard-refresh-goal) #'ignore)
+              ((symbol-function 'hermes-notifications-notify) #'ignore)
+              ((symbol-function 'hermes-dashboard-transport-session-resume)
+               (lambda (_client stored-id &rest _args)
+                 (setq resumed stored-id))))
+      (let ((hermes-chat-use-dashboard-transport t)
+            (hermes-transport-send-function #'hermes-transport-send))
+        (hermes-test-with-chat-buffer
+         (setq hermes-chat--dashboard-client client)
+         (hermes-chat--dashboard-record-session
+          client '((session_id . "sid-old")
+                   (stored_session_id . "stored-idle")))
+         (hermes-dashboard-transport--dispatch-event
+          client '(:type status :status reconnecting))
+         (should (equal hermes-chat--session-id "stored-idle"))
+         (should-not hermes-chat--dashboard-active-session-id)
+         (should-not hermes-chat--dashboard-session-ready-p)
+         (hermes-dashboard-transport--dispatch-event
+          client '(:type status :status reconnected))
+         (should-not resumed)
+         (should (equal hermes-chat--session-id "stored-idle"))
+         (should-not hermes-chat--dashboard-active-session-id)
+         (should-not hermes-chat--dashboard-session-ready-p)
+         (should (eq (plist-get hermes-chat--status-state :status) 'ready))
+         (should (string-match-p "Dashboard socket reconnected"
+                                 (buffer-string))))))))
+
+(ert-deftest hermes-chat-progress-updates-preserve-draft-and-streaming ()
+  (let (callback)
+    (hermes-test-with-chat-buffer
+     (let ((hermes-transport-send-function
+            (lambda (_prompt cb)
+              (setq callback cb)
+              'fake-process)))
+       (insert "hi")
+       (hermes-chat-send)
+       (funcall callback
+                '(:type progress
+			:tool-call-id "read-1"
+			:name "read_file"
+			:status "running"
+			:content "reading AGENTS.md"))
+       (insert "draft survives")
+       (funcall callback '(:type delta :content "answer"))
+       (funcall callback
+                '(:type progress
+			:tool-call-id "read-1"
+			:name "read_file"
+			:status "running"
+			:content "read 40 lines"))
+       (should (equal (hermes-chat-input-string) "draft survives"))
+       (insert " more")
+       (should (equal (hermes-chat-input-string) "draft survives more"))
+       (let ((assistant (hermes-test--assistant-entry)))
+         (should (equal (plist-get assistant :status) 'streaming))
+         (should (equal (plist-get assistant :content) "answer")))
+       (funcall callback '(:type done))
+       (let* ((entries (hermes-chat--entries))
+              (progress (cl-find 'progress entries
+                                 :key (lambda (entry)
+                                        (plist-get entry :role)))))
+         (should (equal (plist-get progress :status) 'done))
+         (should (string-match-p "✓ 📖 read_file: read 40 lines"
+                                 (buffer-string))))))))
+
+(ert-deftest hermes-chat-progress-keys-are-turn-local ()
+  (let (callback first-callback second-callback)
+    (hermes-test-with-chat-buffer
+     (let ((hermes-transport-send-function
+            (lambda (_prompt cb)
+              (setq callback cb)
+              'fake-process)))
+       (insert "first")
+       (hermes-chat-send)
+       (setq first-callback callback)
+       (funcall first-callback
+                '(:type progress
+			:tool-call-id "same-tool"
+			:name "read_file"
+			:status "running"
+			:content "first turn"))
+       (funcall first-callback '(:type done))
+       (insert "second")
+       (hermes-chat-send)
+       (setq second-callback callback)
+       (funcall second-callback
+                '(:type progress
+			:tool-call-id "same-tool"
+			:name "read_file"
+			:status "running"
+			:content "second turn"))
+       (let* ((entries (hermes-chat--entries))
+              (progress-entries
+               (cl-remove-if-not
+                (lambda (entry) (eq (plist-get entry :role) 'progress))
+                entries))
+              (text (buffer-string)))
+         (should (= (length progress-entries) 2))
+         (should (string-match-p "read_file: first turn" text))
+         (should (string-match-p "read_file: second turn" text))
+         (should-not (equal (hermes-chat--entry-assistant-id
+                             (car progress-entries))
+                            (hermes-chat--entry-assistant-id
+                             (cadr progress-entries)))))))))
+
+(ert-deftest hermes-chat-error-settles-active-progress ()
+  (let (callback)
+    (hermes-test-with-chat-buffer
+     (let ((hermes-transport-send-function
+            (lambda (_prompt cb)
+              (setq callback cb)
+              'fake-process)))
+       (insert "hi")
+       (hermes-chat-send)
+       (funcall callback
+                '(:type progress
+			:tool-call-id "tool-1"
+			:name "terminal"
+			:status "running"
+			:content "running"))
+       (funcall callback '(:type error :content "boom"))
+       (let* ((entries (hermes-chat--entries))
+              (assistant (cadr entries))
+              (progress (cl-find 'progress entries
+                                 :key (lambda (entry)
+                                        (plist-get entry :role)))))
+         (should (equal (plist-get assistant :status) 'error))
+         (should (equal (plist-get progress :status) 'error))
+         (should (string-match-p "! 💻 terminal: running" (buffer-string))))))))
+
+(ert-deftest hermes-chat-done-settles-active-progress-and-clears-process ()
+  "A done event settles active transport entries and clears the process handle."
+  (let (callback)
+    (hermes-test-with-chat-buffer
+     (let ((hermes-transport-send-function
+            (lambda (_prompt cb)
+              (setq callback cb)
+              'fake-process)))
+       (insert "hi")
+       (hermes-chat-send)
+       (should (eq hermes-chat--process 'fake-process))
+       (funcall callback
+                '(:type progress :tool-call-id "tool-1" :name "terminal"
+                        :status "running" :content "running"))
+       (funcall callback '(:type done))
+       (let* ((entries (hermes-chat--entries))
+              (assistant (cadr entries))
+              (progress (cl-find 'progress entries
+                                 :key (lambda (entry) (plist-get entry :role)))))
+         (should (equal (plist-get assistant :status) 'done))
+         (should (equal (plist-get progress :status) 'done)))
+       (should-not hermes-chat--process)
+       (should-not hermes-chat--pending-assistant-id)))))
+
+(ert-deftest hermes-chat-error-clears-process-handle ()
+  "An error event clears the transport process handle and the pending id."
+  (let (callback)
+    (hermes-test-with-chat-buffer
+     (let ((hermes-transport-send-function
+            (lambda (_prompt cb)
+              (setq callback cb)
+              'fake-process)))
+       (insert "hi")
+       (hermes-chat-send)
+       (should (eq hermes-chat--process 'fake-process))
+       (funcall callback '(:type error :content "boom"))
+       (should-not hermes-chat--process)
+       (should-not hermes-chat--pending-assistant-id)))))
+
+(ert-deftest hermes-chat-transport-removes-control-bytes-from-assistant-output ()
+  (let (callback)
+    (hermes-test-with-chat-buffer
+     (let ((hermes-transport-send-function
+            (lambda (_prompt cb)
+              (setq callback cb)
+              'fake-process)))
+       (insert "hi")
+       (hermes-chat-send)
+       (funcall callback (list :type 'delta
+                               :content (concat "\r\0hello"
+                                                (string #x85)
+                                                "\nλ\r")))
+       (let ((assistant (hermes-test--assistant-entry)))
+         (should (equal (plist-get assistant :content) "hello\nλ"))
+         (should-not (string-match-p "\r" (buffer-string))))))))
+
+(ert-deftest hermes-chat-keeps-session-id-lines-in-replies ()
+  "A reply line that starts with session_id: is reply text, not metadata."
+  (let (callback)
+    (hermes-test-with-chat-buffer
+     (let ((hermes-transport-send-function
+            (lambda (_prompt cb)
+              (setq callback cb)
+              'fake-process)))
+       (insert "hi")
+       (hermes-chat-send)
+       (funcall callback
+                (list :type 'delta
+                      :content "```yaml\nsession_id: abc123\ntimeout: 30\n```\n"))
+       (funcall callback '(:type delta :content "session_id: trailing"))
+       (funcall callback '(:type done))
+       (let ((assistant (hermes-test--assistant-entry)))
+         (should (equal (plist-get assistant :content)
+                        (concat "```yaml\nsession_id: abc123\ntimeout: 30\n```\n"
+                                "session_id: trailing"))))))))
+
+(ert-deftest hermes-chat-table-ragged-insertion-and-reflow ()
+  "Narrow insertion and reflow preserve ragged source, EWOC and draft undo."
+  (dolist (initial-width '(12 80))
+    (hermes-test-with-chat-buffer
+     (let ((raw "| A | B | C |\n|---|---|---|\n| x |\n|\n| y | z | q | r |\n")
+           (width initial-width)
+           (kill-ring nil))
+       (cl-letf (((symbol-function 'hermes-chat--table-window-width)
+                  (lambda () width)))
+         (insert "Draft")
+         (undo-boundary)
+         (insert " suffix")
+         (undo-boundary)
+         (let* ((node (hermes-chat--insert-entry
+                       (hermes-chat--make-entry 'assistant raw 'done)))
+                (entry (ewoc-data node)))
+           (dolist (next-width '(12 80 12))
+             (setq width next-width)
+             (hermes-chat--reflow-table-windows)
+             (should (eq node (ewoc-nth hermes-chat--ewoc 0)))
+             (should (eq entry (ewoc-data node)))
+             (should (equal (plist-get entry :content) raw))
+             (should (equal (hermes-chat-input-string) "Draft suffix"))
+             (let* ((start (text-property-not-all
+                            (point-min) (point-max) 'hermes-chat-inline-table nil))
+                    (end (button-start (next-button start)))
+                    (grid (buffer-substring-no-properties start end)))
+               (should (= (get-text-property start 'hermes-chat-table-width) width))
+               (dolist (cell '("A" "B" "C" "x" "y" "z" "q" "r"))
+                 (should (string-match-p cell grid)))
+               (dolist (line (split-string grid "\n" t))
+                 (should (<= (string-width line) width))))
+             (button-activate (next-button (point-min)))
+             (should (equal (current-kill 0 t) raw)))
+           (goto-char (point-max))
+           (undo 1)
+           (should (equal (hermes-chat-input-string) "Draft"))))))))
+
+(ert-deftest hermes-chat-visible-unselected-reply-preserves-input ()
+  "Rendering in an unselected window must not insert at its draft point."
+  (save-window-excursion
+    (delete-other-windows)
+    (with-temp-buffer
+      (hermes-chat-mode)
+      (let ((window (split-window-right)))
+        (set-window-buffer window (current-buffer))
+        (insert "Draft")
+        (set-window-point window (point-max))
+        (hermes-chat--insert-entry
+         (hermes-chat--make-entry 'assistant "Reply" 'done "reply"))
+        (should (equal (hermes-chat-input-string) "Draft"))
+        (should (equal (buffer-substring-no-properties
+                        (point-min) hermes-chat--input-marker)
+                       "Reply\n\n \n"))
+        (hermes-chat--update-entry
+         "reply" (lambda (entry)
+                   (hermes-chat--entry-with entry :content "Updated reply")))
+        (should (equal (hermes-chat-input-string) "Draft"))
+        (should (equal (buffer-substring-no-properties
+                        (point-min) hermes-chat--input-marker)
+                       "Updated reply\n\n \n"))))))
+
+(ert-deftest hermes-chat-table-window-width-excludes-number-gutter ()
+  "Use each window's number gutter and fixed-pitch metrics, not frame columns."
+  (save-window-excursion
+    (with-temp-buffer
+      (switch-to-buffer (current-buffer))
+      (let* ((wide (selected-window))
+             (narrow (split-window-right 30))
+             (body 1404)
+             (gutter 44)
+             (font 11))
+        (set-window-buffer narrow (current-buffer))
+        (cl-letf (((symbol-function 'window-body-width)
+                   (lambda (window pixelwise)
+                     (should pixelwise)
+                     (if (eq window wide) 2808 body)))
+                  ((symbol-function 'window-font-width)
+                   (lambda (window face)
+                     (should (memq window (list wide narrow)))
+                     (should (eq face 'fixed-pitch))
+                     font))
+                  ((symbol-function 'line-number-display-width)
+                   (lambda (pixelwise)
+                     (should pixelwise)
+                     (if (eq (selected-window) narrow) gutter 22))))
+          (setq-local display-line-numbers nil)
+          (should (= (hermes-chat--table-window-width) 125))
+          (setq-local display-line-numbers 'relative)
+          (should (= (hermes-chat--table-window-width) 121))
+          (setq gutter 66)
+          (should (= (hermes-chat--table-window-width) 119))
+          (setq body 682)
+          (should (= (hermes-chat--table-window-width) 54))
+          (setq font 14)
+          (should (= (hermes-chat--table-window-width) 42))
+          (should (eq (selected-window) wide)))))))
+
+(ert-deftest hermes-chat-table-window-width-real-number-geometry ()
+  "Graphical line-number gutters leave the rendered grid inside the text area."
+  (skip-unless (display-graphic-p))
+  (save-window-excursion
+    (with-temp-buffer
+      (switch-to-buffer (current-buffer))
+      (insert (make-string 150 ?\n))
+      (let ((window (selected-window))
+            (raw (concat "| A | B |\n|---|---|\n| "
+                         (make-string 200 ?x) " | value |\n")))
+        ;; Body width already excludes these; do not subtract them twice.
+        (set-window-margins window 2 3)
+        (set-window-fringes window 8 8)
+        (dolist (columns '(nil 3 6))
+          (setq-local display-line-numbers (and columns 'relative))
+          (setq-local display-line-numbers-width columns)
+          (redisplay t)
+          (let* ((gutter (if columns (line-number-display-width t) 0))
+                 (body (window-body-width window t))
+                 (font (window-font-width window 'fixed-pitch))
+                 (width (hermes-chat--table-window-width)))
+            (when columns (should (> gutter 0)))
+            (should (= width (max 6 (- (/ (- body gutter) font) 2))))
+            (dolist (line (split-string (hermes-chat--format-table raw width) "\n" t))
+              (should (<= (string-pixel-width
+                           (propertize line 'face 'fixed-pitch))
+                          (- body gutter))))))))))
+
+(ert-deftest hermes-chat-table-inline-copy-and-navigation ()
+  "Tables are real text; source-copy does not switch buffers or touch drafts."
+  (dolist (hide '(nil t))
+    (let ((markdown-hide-markup hide)
+          (raw "| **bold** | B |\n|---|---|\n| one | two |\n")
+          (kill-ring nil))
+      (hermes-test-with-chat-buffer
+       (insert "Unsent draft")
+       (let* ((node (hermes-chat--insert-entry
+                     (hermes-chat--make-entry 'assistant raw 'done)))
+              (entry (ewoc-data node))
+              (buffer (current-buffer)))
+         (should (equal (plist-get entry :content) raw))
+         (should-not (string-match-p "View Table" (buffer-string)))
+         (goto-char (point-min))
+         (search-forward "one")
+         (backward-char 3)
+         (let ((start (point)))
+           (forward-char 1)
+           (should (= (point) (1+ start)))
+           (should (equal (filter-buffer-substring start (+ start 3)) "one")))
+         (let ((button (next-button (point-min))))
+           (should (equal (button-label button) "[Copy source]"))
+           (button-activate button))
+         (should (eq (current-buffer) buffer))
+         (should (equal (current-kill 0 t) raw))
+         (should (eq entry (ewoc-data node)))
+         (should (equal (hermes-chat-input-string) "Unsent draft"))
+         (should visual-line-mode)
+         (should-not truncate-lines))))))
+
+(ert-deftest hermes-chat-table-resize-preserves-ewoc-draft-and-undo ()
+  "Hidden insertion reflows for the narrowest window without mutating entries."
+  (save-window-excursion
+    (hermes-test-with-chat-buffer
+     (let* ((raw (concat "| A | B |\n|---|---|\n| one | "
+                         (make-string 160 ?x) " |\n"))
+            (node (hermes-chat--insert-entry
+                   (hermes-chat--make-entry 'assistant raw 'done)))
+            (entry (ewoc-data node)))
+       (insert "Draft")
+       (undo-boundary)
+       (insert " suffix")
+       (undo-boundary)
+       (set-window-buffer (selected-window) (current-buffer))
+       (let* ((other (split-window-right 30))
+              (expected (hermes-chat--table-window-width)))
+         (set-window-buffer other (current-buffer))
+         (setq expected (hermes-chat--table-window-width))
+         (narrow-to-region hermes-chat--input-marker (point-max))
+         (hermes-chat--reflow-table-windows)
+         (should (buffer-narrowed-p))
+         (should (equal (buffer-string) "Draft suffix"))
+         (should (= (point) (point-max)))
+         (widen)
+         (should (eq entry (ewoc-data node)))
+         (should (equal (plist-get entry :content) raw))
+         (goto-char (point-min))
+         (let ((start (text-property-not-all (point-min) (point-max)
+                                             'hermes-chat-inline-table nil)))
+           (should (= (get-text-property start 'hermes-chat-table-width) expected)))
+         (goto-char (point-max))
+         (undo 1)
+         (should (equal (hermes-chat-input-string) "Draft"))
+         (let ((before (buffer-chars-modified-tick)))
+           (hermes-chat--reflow-table-windows)
+           (should (= before (buffer-chars-modified-tick))))
+         (should (memq #'hermes-chat--reflow-table-windows
+                       window-configuration-change-hook))
+         (fundamental-mode)
+         (should-not (memq #'hermes-chat--reflow-table-windows
+                           window-configuration-change-hook)))))))
+
+(ert-deftest hermes-chat-table-reflow-preserves-window-anchors-and-node-boundaries ()
+  "Table replacement preserves both reader windows and later EWOC updates."
+  (save-window-excursion
+    (hermes-test-with-chat-buffer
+     (let* ((table (concat "| A | B |\n|---|---|\n| first | "
+                           (make-string 100 ?x) " |\n"))
+            (first (hermes-chat--insert-entry
+                    (hermes-chat--make-entry 'assistant (concat table "\nAfter one\n") 'done)))
+            (second (hermes-chat--insert-entry
+                     (hermes-chat--make-entry 'assistant (concat table "\nAfter two\n") 'done)))
+            (window (selected-window))
+            (other (split-window-right 30)))
+       (set-window-buffer window (current-buffer))
+       (set-window-buffer other (current-buffer))
+       (goto-char (point-min))
+       (search-forward "After one")
+       (beginning-of-line)
+       (set-window-start window (point))
+       (set-window-point window (point))
+       (search-forward "After two")
+       (beginning-of-line)
+       (set-window-start other (point))
+       (set-window-point other (point))
+       (goto-char (window-start window))
+       (hermes-chat--reflow-table-windows)
+       (dolist (pair (list (cons window "After one") (cons other "After two")))
+         (dolist (position (list (window-start (car pair)) (window-point (car pair))))
+           (should (equal (buffer-substring-no-properties position (+ position 9))
+                          (cdr pair)))))
+       (should (= (length (hermes-chat--entries)) 2))
+       (let ((inhibit-read-only t))
+         (hermes-chat--preserve-input-point
+          (ewoc-invalidate hermes-chat--ewoc first second)))
+       (should (= (how-many "After one" (point-min) (point-max)) 1))
+       (should (= (how-many "After two" (point-min) (point-max)) 1))))))
+
+(ert-deftest hermes-chat-shows-inline-diff-as-view-diff-link ()
+  "An inline unified diff is replaced by a View Diff link that opens the diff."
+  (hermes-test-with-chat-buffer
+   (hermes-chat--insert-entry
+    (hermes-chat--make-entry
+     'assistant
+     (concat "Changed:\n"
+             "--- a/file.txt\n"
+             "+++ b/file.txt\n"
+             "@@ -1,2 +1,2 @@\n"
+             " keep\n"
+             "-old-inline\n"
+             "+new-inline\n"
+             "Done.")
+     'done))
+   (should-not (string-match-p "-old-inline" (buffer-string)))
+   (should (string-match-p "Done." (buffer-string)))
+   (hermes-test--should-have-face "View Diff" 'link)
+   (let ((diff (hermes-test--view-diff-content)))
+     (should (string-match-p "-old-inline" diff))
+     (should (string-match-p "+new-inline" diff)))))
+
+(ert-deftest hermes-chat-diff-reuse-adopts-opening-source-directory ()
+  "Each chat opening the shared viewer supplies its own directory and diff."
+  (let (viewer)
+    (save-window-excursion
+      (unwind-protect
+          ;; Preserve remote directory spelling without invoking TRAMP handlers.
+          (let ((file-name-handler-alist nil))
+            (when (get-buffer "*Hermes Diff*")
+              (kill-buffer "*Hermes Diff*"))
+            (dolist (directory '("/tmp/project-a/" "/tmp/project-b/"
+                                 "/ssh:example.invalid:/project-c/"))
+              (hermes-test-with-chat-buffer
+               (setq default-directory directory)
+               (let ((diff (concat "--- a/source.el\n+++ b/source.el\n"
+                                   "@@ -1 +1 @@\n-old\n+" directory "\n")))
+                 (hermes-chat--insert-entry
+                  (hermes-chat--make-entry 'assistant diff 'done))
+                 (let ((source (current-buffer))
+                       (text (buffer-string)))
+                   (hermes-test--push-button-labeled "View Diff")
+                   (let ((opened (get-buffer "*Hermes Diff*")))
+                     (when viewer (should (eq opened viewer)))
+                     (setq viewer opened)
+                     (with-current-buffer opened
+                       (should (equal default-directory directory))
+                       (should (equal (buffer-string) diff))
+                       (should (derived-mode-p 'diff-mode))
+                       (should buffer-read-only)))
+                   (with-current-buffer source
+                     (should (equal default-directory directory))
+                     (should (equal (buffer-string) text))))))))
+        (when (buffer-live-p viewer) (kill-buffer viewer))))))
+
+(ert-deftest hermes-chat-diff-preserves-embedded-data-image-url ()
+  "Diff buttons retain data URLs without lifting them as transcript images."
+  (let ((url (concat "data:image/png;base64," (make-string 80 ?A))))
+    (hermes-test-with-chat-buffer
+     (hermes-chat--insert-entry
+      (hermes-chat--make-entry
+       'assistant
+       (concat "Changed:\n"
+               "--- a/style.css\n"
+               "+++ b/style.css\n"
+               "@@ -0,0 +1 @@\n"
+               "+background: url(" url ");\n")
+       'done))
+     (should (string-match-p (regexp-quote url)
+                             (hermes-test--view-diff-content)))
+     (should-not (string-match-p "\\[image\\]" (buffer-string))))))
+
+(ert-deftest hermes-chat-background-owner-rejects-before-draft-mutation ()
+  "A session owner blocks background submission without consuming its draft."
+  (hermes-test-with-chat-buffer
+   (setq hermes-chat--command-owner 'command-owner)
+   (let (bootstrapped)
+     (cl-letf (((symbol-function 'hermes-chat--with-dashboard-session)
+                (lambda (&rest _) (setq bootstrapped t))))
+       (insert "valuable background draft")
+       (should-error (hermes-chat-background) :type 'user-error)
+       (should (equal (hermes-chat-input-string) "valuable background draft"))
+       (should-not bootstrapped)))))
+
+(ert-deftest hermes-chat-background-reject-restores-input ()
+  "A rejected background launch restores the consumed draft."
+  (let ((client (hermes-test--dashboard-client)))
+    (cl-letf (((symbol-function 'hermes-dashboard-transport-prompt-background)
+               (lambda (_client _text &rest args)
+                 (funcall (plist-get args :reject) "session busy"))))
+      (hermes-test-with-chat-buffer
+        (setq hermes-chat--dashboard-client client
+              hermes-chat--dashboard-active-session-id "sid-bg"
+              hermes-chat--dashboard-session-ready-p t)
+        (insert "valuable background draft")
+        (hermes-chat-background)
+        (should (equal (hermes-chat-input-string) "valuable background draft"))
+        (should-not hermes-chat--background-tasks)))))
+
+(ert-deftest hermes-chat-background-complete-renders-view-result-link ()
+  "A `background' event renders a persistent #N notice with a View Result link."
+  (hermes-test-with-chat-buffer
+   (setq hermes-chat--background-counter 1
+         hermes-chat--background-tasks
+         (list (cons "bg_x" (list :number 1 :preview "do you have x_search?"))))
+   (hermes-chat--handle-background-complete
+    (list :type 'background :task-id "bg_x"
+          :content "Yes, x_search is available."))
+   ;; The launching task is consumed once its result is delivered.
+   (should-not (assoc "bg_x" hermes-chat--background-tasks))
+   (let ((entry (cl-find-if (lambda (e) (eq (plist-get e :role) 'background))
+                            (hermes-chat--entries))))
+     (should entry)
+     (should (equal (plist-get (plist-get entry :metadata) :number) 1))
+     (should (equal (plist-get (plist-get entry :metadata) :preview)
+                    "do you have x_search?")))
+   (should (string-match-p "Background #1 done" (buffer-string)))
+   ;; The full answer is not inline; it opens in a dedicated buffer.
+   (should-not (string-match-p "x_search is available" (buffer-string)))
+   (hermes-test--should-have-face "View Result" 'link)
+   (unwind-protect
+       (progn
+         (hermes-test--push-button-labeled "View Result")
+         (should (get-buffer "*hermes-bg #1*"))
+         (with-current-buffer "*hermes-bg #1*"
+           (should (derived-mode-p 'hermes-chat-background-mode))
+           (should (derived-mode-p 'markdown-mode))
+           (should buffer-read-only)
+           (should (eq (keymap-lookup (current-local-map) "q") 'quit-window))
+           (should (string-match-p
+                    "x_search is available"
+                    (buffer-substring-no-properties (point-min) (point-max))))))
+     (when (get-buffer "*hermes-bg #1*")
+       (kill-buffer "*hermes-bg #1*")))))
+
+(ert-deftest hermes-chat-background-complete-without-record-still-renders ()
+  "A background result with no recorded task still renders with the counter value."
+  (hermes-test-with-chat-buffer
+   (setq hermes-chat--background-counter 1
+         hermes-chat--background-tasks nil)
+   (hermes-chat--handle-background-complete
+    (list :type 'background :task-id "bg_unknown" :content "done"))
+   (should (string-match-p "Background #1 done" (buffer-string)))))
+
+(ert-deftest hermes-chat-background-notification-uses-launch-preview ()
+  "A background result notifies with its prompt preview, not result contents."
+  (let (notice)
+    (cl-letf (((symbol-function 'hermes-notifications-notify)
+               (lambda (&rest arguments) (setq notice arguments))))
+      (hermes-test-with-chat-buffer
+       (setq hermes-chat--background-counter 1
+             hermes-chat--background-tasks
+             (list (cons "bg_private"
+                         (list :number 1 :preview "check the build"))))
+       (hermes-chat--handle-background-complete
+        (list :type 'background :task-id "bg_private"
+              :content "private result contents"))
+       (should (eq (car notice) 'background))
+       (should (string-match-p "check the build" (nth 2 notice)))
+       (should-not (string-match-p "private result" (nth 2 notice)))))))
+
+(ert-deftest hermes-chat-background-complete-stays-above-pending-reply ()
+  "A result arriving mid-turn is inserted above the live assistant reply."
+  (hermes-test-with-chat-buffer
+   (let* ((assistant (hermes-chat--make-entry 'assistant "" 'pending))
+          (assistant-id (plist-get assistant :id)))
+     (hermes-chat--insert-entry assistant)
+     (setq hermes-chat--pending-assistant-id assistant-id)
+     (hermes-chat--handle-background-complete
+      (list :type 'background :task-id "bg_z" :content "side result"))
+     (let ((roles (mapcar (lambda (e) (plist-get e :role))
+                          (hermes-chat--entries))))
+       (should (< (cl-position 'background roles)
+                  (cl-position 'assistant roles)))))))
+
+(ert-deftest hermes-chat-streaming-inserts-only-new-characters ()
+  "Normalized deltas insert linear text, not cumulative prefixes."
+  (dolist (chunks '(256 512 1024))
+    (hermes-test-with-dashboard-prompt-session (client)
+      (let ((chunk (make-string 64 ?x)) (inserted 0) (deleted 0) spans tick)
+        (insert "draft λ")
+        (add-hook 'before-change-functions
+                  (lambda (&rest _) (setq tick (buffer-chars-modified-tick))) nil t)
+        (add-hook 'after-change-functions
+                  (lambda (beg end old)
+                    (unless (= tick (buffer-chars-modified-tick))
+                      (cl-incf inserted (- end beg))
+                      (cl-incf deleted old)
+                      (push (list beg end old) spans))) nil t)
+        (dotimes (_ chunks)
+          (hermes-test--emit-dashboard-prompt
+           client "message.delta" `((text . ,chunk))))
+        (should (equal (hermes-chat--entry-content-by-id
+                        hermes-chat--pending-assistant-id)
+                       (make-string (* chunks 64) ?x)))
+        (should (equal (hermes-chat-input-string) "draft λ"))
+        (message "Streaming spans: chunks=%d inserted=%d deleted=%d max=%d"
+                 chunks inserted deleted
+                 (apply #'max (mapcar (lambda (span) (- (cadr span) (car span))) spans)))
+        ;; Initial placeholder/separator work is constant, not one prefix/chunk.
+        (should (<= inserted (+ (* chunks 64) 32)))
+        (should (<= deleted 32))))))
+
+(defun hermes-test--streaming-hook-failure (failure &optional phase)
+  "Retain accepted deltas when a PHASE observer signals FAILURE.
+PHASE defaults to `after-change-functions'."
+  (setq phase (or phase 'after-change-functions))
+  (hermes-test-with-dashboard-prompt-session (client)
+    (hermes-test--emit-dashboard-prompt client "message.delta" '((text . "prefix")))
+    (let* ((id hermes-chat--pending-assistant-id)
+           (node (gethash id hermes-chat--nodes))
+           (reader (split-window (selected-window) nil 'right))
+           (calls 0)
+           (hook (lambda (beg end &optional old)
+                   (when (and (= calls 0)
+                              (= beg (+ (ewoc-location node) 6))
+                              (if (eq phase 'before-change-functions)
+                                  (= beg end)
+                                (and (= old 0)
+                                     (equal (buffer-substring-no-properties beg end)
+                                            " SUFFIX"))))
+                     (cl-incf calls)
+                     ;; ERT 29's debugger intercepts with-demoted-errors even
+                     ;; inside our handler.  Ignore only this expected fault
+                     ;; for debugger entry; still signal it through the real
+                     ;; native hook and transport error/quit unwind paths.
+                     (let ((debug-ignored-errors
+                            (cons "\\`stream observer\\'" debug-ignored-errors)))
+                       (signal failure '("stream observer")))))))
+      (set-window-buffer reader (current-buffer))
+      (set-window-point reader (+ (ewoc-location node) 2))
+      (set-window-start reader (ewoc-location node) t)
+      (setq buffer-undo-list nil)
+      (insert "draft λ")
+      (undo-boundary)
+      (let ((offset (- (point) (hermes-chat--input-position))))
+        (add-hook phase hook nil t)
+        (unwind-protect
+            (condition-case nil
+                (hermes-test--emit-dashboard-prompt
+                 client "message.delta" '((text . " SUFFIX")))
+              (quit nil))
+          (remove-hook phase hook t))
+        (should (= calls 1))
+        (should (equal (hermes-chat--entry-content-by-id id) "prefix SUFFIX"))
+        (should (equal (buffer-substring-no-properties
+                        (ewoc-location node)
+                        (- (hermes-chat--input-position)
+                           (length (cdr (ewoc-get-hf hermes-chat--ewoc)))))
+                       (if (eq phase 'before-change-functions)
+                           "prefix\n" "prefix SUFFIX\n")))
+        (should (equal (hermes-chat-input-string) "draft λ"))
+        (should (= (window-point reader) (+ (ewoc-location node) 2)))
+        (should (= (window-start reader) (ewoc-location node)))
+        (should (= (- (point) (hermes-chat--input-position)) offset))
+        (hermes-test--emit-dashboard-prompt client "message.delta" '((text . " NEXT")))
+        (hermes-test--emit-dashboard-prompt client "message.complete" '((status . "done")))
+        (should (equal (hermes-chat--entry-content-by-id id) "prefix SUFFIX NEXT"))
+        (should (eq (plist-get (ewoc-data node) :status) 'done))
+        (should (equal (buffer-substring-no-properties
+                        (ewoc-location node)
+                        (- (hermes-chat--input-position)
+                           (length (cdr (ewoc-get-hf hermes-chat--ewoc)))))
+                       "prefix SUFFIX NEXT\n"))
+        (should (= (window-point reader) (+ (ewoc-location node) 2)))
+        (should (= (window-start reader) (ewoc-location node)))
+        (should (equal (hermes-chat-input-string) "draft λ"))
+        (should (= (- (point) (hermes-chat--input-position)) offset)))
+      (should-not (text-property-not-all
+                   (point-min) (hermes-chat--input-position) 'read-only t))
+      (should-not (get-text-property (hermes-chat--input-position) 'read-only))
+      (let ((transcript (buffer-substring-no-properties
+                         (point-min) (hermes-chat--input-position))))
+        (undo-only 1)
+        (should (equal (hermes-chat-input-string) ""))
+        (should (equal (buffer-substring-no-properties
+                        (point-min) (hermes-chat--input-position)) transcript))))))
+
+(ert-deftest hermes-chat-streaming-hook-error-retains-content ()
+  (hermes-test--streaming-hook-failure 'error))
+
+(ert-deftest hermes-chat-streaming-hook-quit-retains-content ()
+  (hermes-test--streaming-hook-failure 'quit))
+
+(ert-deftest hermes-chat-streaming-before-hook-error-retains-content ()
+  (hermes-test--streaming-hook-failure 'error 'before-change-functions))
+
+(ert-deftest hermes-chat-streaming-before-hook-quit-retains-content ()
+  (hermes-test--streaming-hook-failure 'quit 'before-change-functions))
+
+(defun hermes-test--streaming-native-text (id)
+  "Return the exact native EWOC extent for entry ID."
+  (let* ((node (gethash id hermes-chat--nodes))
+         (next (ewoc-next hermes-chat--ewoc node)))
+    (buffer-substring-no-properties
+     (ewoc-location node)
+     (if next (ewoc-location next)
+       (- (hermes-chat--input-position)
+          (length (cdr (ewoc-get-hf hermes-chat--ewoc))))))))
+
+(defun hermes-test--streaming-hook-successor (phase)
+  "Preserve a reentrant interim and successor across a PHASE observer."
+  (hermes-test-with-dashboard-prompt-session (client)
+    (hermes-test--emit-dashboard-prompt client "message.delta" '((text . "prefix")))
+    (let* ((old hermes-chat--pending-assistant-id)
+           (node (gethash old hermes-chat--nodes))
+           (reader (split-window (selected-window) nil 'right))
+           (calls 0)
+           (hook (lambda (beg _end &rest _)
+                   (when (and (= calls 0)
+                              (= beg (+ (ewoc-location (gethash old hermes-chat--nodes)) 6)))
+                     (cl-incf calls)
+                     (hermes-test--emit-dashboard-prompt
+                      client "message.interim" '((text . "sealed") (already_streamed . t)))
+                     (hermes-test--emit-dashboard-prompt
+                      client "message.delta" '((text . "successor")))))))
+      (set-window-buffer reader (current-buffer))
+      (set-window-point reader (+ (ewoc-location node) 2))
+      (set-window-start reader (ewoc-location node) t)
+      (setq buffer-undo-list nil)
+      (insert "draft λ")
+      (undo-boundary)
+      (let ((offset (- (point) (hermes-chat--input-position))))
+        (add-hook phase hook nil t)
+        (unwind-protect
+            (hermes-test--emit-dashboard-prompt client "message.delta" '((text . " SUFFIX")))
+          (remove-hook phase hook t))
+        (should (= calls 1))
+        (let ((successor hermes-chat--pending-assistant-id))
+          (should-not (equal old successor))
+          (should (equal (hermes-chat--entry-content-by-id old) "sealed"))
+          (should (equal (hermes-test--streaming-native-text old) "sealed\n"))
+          (should (= (window-point reader) (+ (ewoc-location node) 2)))
+          (should (= (window-start reader) (ewoc-location node)))
+          (should (eq (plist-get (ewoc-data (gethash old hermes-chat--nodes)) :status) 'done))
+          (should (equal (hermes-chat--entry-content-by-id successor) "successor"))
+          (should (equal (hermes-test--streaming-native-text successor) "successor\n"))
+          (hermes-test--emit-dashboard-prompt client "message.delta" '((text . " NEXT")))
+          (should (equal (hermes-chat--entry-content-by-id successor) "successor NEXT"))
+          (should (equal (hermes-test--streaming-native-text successor) "successor NEXT\n"))
+          (should (equal (hermes-test--streaming-native-text old) "sealed\n"))
+          (should (= (window-point reader) (+ (ewoc-location node) 2)))
+          (should (= (window-start reader) (ewoc-location node)))
+          (hermes-test--emit-dashboard-prompt client "message.complete" '((status . "done")))
+          (should (equal (hermes-chat--entry-content-by-id old) "sealed"))
+          (should (equal (hermes-test--streaming-native-text old) "sealed\n"))
+          (should (= (window-point reader) (+ (ewoc-location node) 2)))
+          (should (= (window-start reader) (ewoc-location node)))
+          (should (equal (hermes-chat--entry-content-by-id successor) "successor NEXT"))
+          (should (equal (hermes-test--streaming-native-text successor) "successor NEXT\n"))
+          (should (eq (plist-get (ewoc-data (gethash successor hermes-chat--nodes)) :status) 'done)))
+        (should (equal (hermes-chat-input-string) "draft λ"))
+        (should (= (- (point) (hermes-chat--input-position)) offset)))
+      (should-not (text-property-not-all
+                   (point-min) (hermes-chat--input-position) 'read-only t))
+      (should-not (get-text-property (hermes-chat--input-position) 'read-only))
+      (let ((transcript (buffer-substring-no-properties
+                         (point-min) (hermes-chat--input-position))))
+        (undo-only 1)
+        (should (equal (hermes-chat-input-string) ""))
+        (should (equal (buffer-substring-no-properties
+                        (point-min) (hermes-chat--input-position)) transcript))))))
+
+(ert-deftest hermes-chat-streaming-hook-successor-keeps-content ()
+  (hermes-test--streaming-hook-successor 'after-change-functions))
+
+(ert-deftest hermes-chat-streaming-before-hook-successor-keeps-content ()
+  (hermes-test--streaming-hook-successor 'before-change-functions))
+
+(ert-deftest hermes-chat-interim-fontifies-once ()
+  "A normalized interim seals once and creates exactly one empty successor."
+  (hermes-test-with-dashboard-prompt-session (client)
+    (hermes-test--emit-dashboard-prompt client "message.delta" '((text . "**candidate**")))
+    (insert "draft")
+    (let ((old hermes-chat--pending-assistant-id)
+          (printer (symbol-function 'hermes-chat--insert-markdown)) (passes 0))
+      (cl-letf (((symbol-function 'hermes-chat--insert-markdown)
+                 (lambda (&rest args) (cl-incf passes) (apply printer args))))
+        (hermes-test--emit-dashboard-prompt
+         client "message.interim" '((text . "**candidate**") (already_streamed . t))))
+      (should (= passes 1))
+      (should (equal hermes-chat--dashboard-interim-assistant-id old))
+      (should-not (equal hermes-chat--pending-assistant-id old))
+      (should (equal hermes-chat--dashboard-stream-assistant-id
+                     hermes-chat--pending-assistant-id))
+      (should (equal (plist-get (ewoc-data (gethash old hermes-chat--nodes))
+                               :interim-content) "**candidate**"))
+      (should (equal (mapcar (lambda (entry) (plist-get entry :content))
+                             (seq-filter (lambda (entry) (eq (plist-get entry :role) 'assistant))
+                                         (hermes-chat--entries)))
+                     '("**candidate**" "")))
+      (should (equal (hermes-chat-input-string) "draft")))))
+
+(ert-deftest hermes-chat-streaming-appends-reply-lines-in-place ()
+  "Split ANSI stays hidden; every reply line, metadata-like or not, appends."
+  (hermes-test-with-dashboard-prompt-session (client)
+    (insert "draft")
+    (let ((inserter (symbol-function 'hermes-chat--insert-entry-content)) (prints 0))
+      (cl-letf (((symbol-function 'hermes-chat--insert-entry-content)
+                 (lambda (&rest args) (cl-incf prints) (apply inserter args))))
+        (dolist (text '("α\e[38;2" ";1;2;3mβ\e[0m\n" "session_" "id: shown"
+                        "\nγ" "δ"))
+          (hermes-test--emit-dashboard-prompt client "message.delta" `((text . ,text))))
+        (should (= prints 1))
+        (should (equal (hermes-chat--entry-content-by-id hermes-chat--pending-assistant-id)
+                       "αβ\nsession_id: shown\nγδ"))
+        (should (string-match-p "session_id: shown" (buffer-string)))
+        (should-not (string-match-p "38;2" (buffer-string))))
+      (should (equal (hermes-chat-input-string) "draft"))
+      (should-not (text-property-not-all (point-min) (hermes-chat--input-position)
+                                         'read-only t))
+      (should-not (get-text-property (hermes-chat--input-position) 'read-only)))))
+
+(ert-deftest hermes-chat-interim-printer-failure-keeps-owner ()
+  "Failed settled printing cannot publish a successor or transfer ownership."
+  (dolist (failure '(error quit))
+    (hermes-test-with-chat-buffer
+      (hermes-chat--insert-entry '(:id "old" :role assistant :status streaming :content "partial"))
+      (setq hermes-chat--pending-assistant-id "old"
+            hermes-chat--dashboard-stream-assistant-id "old")
+      (insert "draft")
+      (let ((passes 0) caught)
+        (cl-letf (((symbol-function 'hermes-chat--insert-markdown)
+                   (lambda (&rest _) (cl-incf passes) (signal failure '("printer")))))
+          (condition-case err
+              (hermes-chat--seal-interim-assistant "old" "settled")
+            ((error quit) (setq caught (car err)))))
+        (should (eq caught failure))
+        (should (= passes 1))
+        (should (equal hermes-chat--pending-assistant-id "old"))
+        (should (equal hermes-chat--dashboard-stream-assistant-id "old"))
+        (should-not hermes-chat--dashboard-interim-assistant-id)
+        (should (= (length (hermes-chat--entries)) 1))
+        (should (equal (hermes-chat-input-string) "draft"))))))
+
+(ert-deftest hermes-chat-ordinary-rotation-still-settles-once ()
+  "Redirect rotation retains its own settlement before creating a successor."
+  (hermes-test-with-chat-buffer
+    (hermes-chat--insert-entry '(:id "old" :role assistant :status streaming :content "**partial**"))
+    (let ((printer (symbol-function 'hermes-chat--insert-markdown)) (passes 0))
+      (cl-letf (((symbol-function 'hermes-chat--insert-markdown)
+                 (lambda (&rest args) (cl-incf passes) (apply printer args))))
+        (hermes-chat--rotate-assistant "old"))
+      (should (= passes 1))
+      (should (eq (plist-get (ewoc-data (gethash "old" hermes-chat--nodes)) :status) 'done))
+      (should (= (length (hermes-chat--entries)) 2)))))
+
+(ert-deftest hermes-chat-streaming-content-skips-markdown-and-diff ()
+  "A streaming entry stays raw; only a settled entry renders diffs/markdown."
+  (hermes-test-with-chat-buffer
+   (hermes-chat--insert-entry
+    (hermes-chat--make-entry
+     'assistant
+     (concat "--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-old\n+new\n")
+     'streaming))
+   (should (string-match-p "-old" (buffer-string)))
+   (should-not (string-match-p "View Diff" (buffer-string)))))
+
+(ert-deftest hermes-chat-shows-inline-diff-without-final-newline-as-link ()
+  (hermes-test-with-chat-buffer
+   (hermes-chat--insert-entry
+    (hermes-chat--make-entry
+     'assistant
+     (concat "Changed:\n"
+             "@@ -1 +1 @@\n"
+             "-old-no-final-newline\n"
+             "+new-no-final-newline")
+     'done))
+   (should-not (string-match-p "-old-no-final-newline" (buffer-string)))
+   (let ((diff (hermes-test--view-diff-content)))
+     (should (string-match-p "-old-no-final-newline" diff))
+     (should (string-match-p "+new-no-final-newline" diff)))))
+
+(ert-deftest hermes-chat-stops-inline-diff-link-at-hunk-counts ()
+  "The trailing non-diff line stays in the transcript, out of the diff."
+  (hermes-test-with-chat-buffer
+   (hermes-chat--insert-entry
+    (hermes-chat--make-entry
+     'assistant
+     (concat "Changed:\n"
+             "@@ -1 +1 @@\n"
+             "-old-counted\n"
+             "+new-counted\n"
+             "+ ordinary follow-up")
+     'done))
+   (should (string-match-p "ordinary follow-up" (buffer-string)))
+   (let ((diff (hermes-test--view-diff-content)))
+     (should (string-match-p "-old-counted" diff))
+     (should-not (string-match-p "ordinary follow-up" diff)))))
+
+(ert-deftest hermes-chat-shows-fenced-diffs-as-view-diff-links ()
+  (hermes-test-with-chat-buffer
+   (hermes-chat--insert-entry
+    (hermes-chat--make-entry
+     'assistant
+     (concat "Fenced changes:\n"
+             "```diff\n"
+             "-old-diff-fence\n"
+             "+new-diff-fence\n"
+             "```\n"
+             "```patch\n"
+             "-old-patch-fence\n"
+             "+new-patch-fence\n"
+             "```\n"
+             "after fences")
+     'done))
+   (should-not (string-match-p "-old-diff-fence" (buffer-string)))
+   (should-not (string-match-p "```" (buffer-string)))
+   (should (string-match-p "after fences" (buffer-string)))
+   (should (= 2 (hermes-test--count-buttons-labeled "View Diff")))
+   (let ((diff (hermes-test--view-diff-content)))
+     (should (string-match-p "-old-diff-fence" diff)))))
+
+(ert-deftest hermes-chat-does-not-linkify-ordinary-plus-minus-lines ()
+  (hermes-test-with-chat-buffer
+   (hermes-chat--insert-entry
+    (hermes-chat--make-entry
+     'assistant
+     "Ordinary chat:\n- remove clutter\n+ add clarity\nNo hunk header."
+     'done))
+   (should-not (string-match-p "View Diff" (buffer-string)))
+   (should (string-match-p "remove clutter" (buffer-string)))
+   (should (string-match-p "add clarity" (buffer-string)))))
+
+(ert-deftest hermes-chat-shows-structured-diff-and-status-events-as-links ()
+  (let (callback)
+    (hermes-test-with-chat-buffer
+     (let ((hermes-transport-send-function
+            (lambda (_prompt cb)
+              (setq callback cb)
+              'fake-process)))
+       (insert "show a patch")
+       (hermes-chat-send)
+       (funcall callback
+                '(:type diff
+			:content "--- a/diff-event\n+++ b/diff-event\n@@ -1 +1 @@\n-diff-event-old\n+diff-event-new\n"))
+       (funcall callback
+                '(:type status
+			:status-key "patch-preview"
+			:status "running"
+			:content "--- a/status-event\n+++ b/status-event\n@@ -1 +1 @@\n-status-event-old\n+status-event-new\n"))
+       (should-not (string-match-p "diff-event-old" (buffer-string)))
+       (should-not (string-match-p "status-event-old" (buffer-string)))
+       (should (= 2 (hermes-test--count-buttons-labeled "View Diff")))
+       (let ((diff (hermes-test--view-diff-content)))
+         (should (string-match-p "diff-event-old" diff)))))))
+
+(ert-deftest hermes-chat-strips-ansi-before-diff-link ()
+  (hermes-test-with-chat-buffer
+   (hermes-chat--insert-entry
+    (hermes-chat--make-entry
+     'assistant
+     (concat "Diff:\n"
+             "\e[38;2;218;165;32m--- a/ansi.txt\e[0m\n"
+             "\e[38;2;218;165;32m+++ b/ansi.txt\e[0m\n"
+             "\e[38;2;139;134;130m@@ -1 +1,2 @@\e[0m\n"
+             "\e[38;2;184;134;11m existing line\e[0m\n"
+             "\e[38;2;255;255;255;48;2;19;87;20m+ansi-added\e[0m")
+     'done))
+   (should-not (string-match-p "38;2" (buffer-string)))
+   (should-not (string-match-p "\\[0m" (buffer-string)))
+   (let ((diff (hermes-test--view-diff-content)))
+     (should (string-match-p "+ansi-added" diff))
+     (should-not (string-match-p "38;2" diff)))))
+
+(ert-deftest hermes-chat-strips-split-ansi-before-diff-link ()
+  (let (callback)
+    (hermes-test-with-chat-buffer
+     (let ((hermes-transport-send-function
+            (lambda (_prompt cb)
+              (setq callback cb)
+              'fake-process)))
+       (insert "show split ansi patch")
+       (hermes-chat-send)
+       (funcall callback
+                '(:type delta
+                  :content "Diff:\n\e[38;2;218;165;32m--- a/split.txt\e[0m\n\e[38;2;218;165;32m+++ b/split.txt\e[0m\n\e[38;2;139;134;130m@@ -1 +1,2 @@\e[0m\n\e[38;2;184;134;11m existing line\e[0m\n\e[38;2;255;255"))
+       (funcall callback
+                '(:type delta
+                  :content ";255;48;2;19;87;20m+split-ansi-added\e[0m"))
+       (funcall callback '(:type done))
+       (should-not (string-match-p "38;2" (buffer-string)))
+       (should-not (string-match-p "\\[0m" (buffer-string)))
+       (let ((diff (hermes-test--view-diff-content)))
+         (should (string-match-p "+split-ansi-added" diff)))))))
+
+(ert-deftest hermes-chat-scopes-split-ansi-to-assistant-stream ()
+  (let (callback)
+    (hermes-test-with-chat-buffer
+     (let ((hermes-transport-send-function
+            (lambda (_prompt cb)
+              (setq callback cb)
+              'fake-process)))
+       (insert "show interleaved ansi patch")
+       (hermes-chat-send)
+       (funcall callback
+                '(:type delta
+                  :content "Diff:\n--- a/interleaved.txt\n+++ b/interleaved.txt\n@@ -1 +1,2 @@\n existing line\n\e[38;2;255;255"))
+       (funcall callback
+                '(:type commentary
+                  :event "reasoning.delta"
+                  :content "Thinking"))
+       (funcall callback
+                '(:type delta
+                  :content ";255;48;2;19;87;20m+interleaved-added\e[0m"))
+       (let ((assistant (hermes-test--assistant-entry))
+             (commentary (cl-find-if
+                          (lambda (entry)
+                            (eq (plist-get entry :role) 'commentary))
+                          (hermes-chat--entries))))
+         (should (string-match-p "+interleaved-added"
+                                 (plist-get assistant :content)))
+         (should-not (string-match-p "38;2" (plist-get assistant :content)))
+         (should (equal (plist-get commentary :content) "Thinking")))
+       (funcall callback '(:type done))
+       (let ((diff (hermes-test--view-diff-content)))
+         (should (string-match-p "+interleaved-added" diff)))))))
+
+(ert-deftest hermes-chat-clears-split-ansi-before-terminal-event ()
+  (let (callback)
+    (hermes-test-with-chat-buffer
+     (let ((hermes-transport-send-function
+            (lambda (_prompt cb)
+              (setq callback cb)
+              'fake-process)))
+       (insert "finish after partial ansi")
+       (hermes-chat-send)
+       (funcall callback '(:type delta :content "\e[38;2;255;255"))
+       (funcall callback '(:type done :content "hello"))
+       (should (equal (plist-get (hermes-test--assistant-entry) :content)
+                      "hello"))))))
+
+(ert-deftest hermes-chat-renders-subagent-events-without-unknown-log ()
+  (let (callback messages)
+    (cl-letf (((symbol-function 'message)
+               (lambda (format-string &rest args)
+                 (push (apply #'format-message format-string args) messages))))
+      (hermes-test-with-chat-buffer
+       (let ((hermes-transport-send-function
+              (lambda (_prompt cb)
+                (setq callback cb)
+                'fake-process)))
+         (insert "inspect branches")
+         (hermes-chat-send)
+         (dolist (event '((:type commentary
+                           :event "subagent.thinking"
+                           :subagent-id "sa-1"
+                           :content "(⌐■_■) synthesizing...")
+                          (:type tool
+                           :event "subagent.tool"
+                           :subagent-id "sa-1"
+                           :name "terminal"
+                           :status "running"
+                           :preview "git status")))
+           (funcall callback event))
+         (let ((entries (hermes-chat--entries)))
+           (should (equal (hermes-test--transcript-roles entries)
+                          '(user commentary tool assistant)))
+           (should (equal (plist-get (nth 1 entries) :content)
+                          "(⌐■_■) synthesizing..."))
+           (should (equal (plist-get (nth 2 entries) :content)
+                          "💻 terminal: git status")))
+         (should-not (cl-some (lambda (line)
+                                (string-match-p "Unknown Hermes transport event"
+                                                line))
+                              messages)))))))
+
+(ert-deftest hermes-chat-surfaces-unknown-transport-events ()
+  (let (callback messages)
+    (cl-letf (((symbol-function 'message)
+               (lambda (format-string &rest args)
+                 (push (apply #'format-message format-string args) messages))))
+      (hermes-test-with-chat-buffer
+       (let ((hermes-transport-send-function
+              (lambda (_prompt cb)
+                (setq callback cb)
+                'fake-process)))
+         (insert "inspect")
+         (hermes-chat-send)
+         (funcall callback '(:type unknown
+                             :event "alien.signal"
+                             :raw ((payload . 1))))
+         (let ((entries (hermes-chat--entries))
+               (header (hermes-test--header-line-string)))
+           (should (equal (hermes-test--transcript-roles entries)
+                          '(user status assistant)))
+           (should (string-match-p "Unknown Hermes transport event: alien.signal"
+                                   (plist-get (nth 1 entries) :content)))
+           (should (eq (plist-get (nth 1 entries) :status) 'error))
+           (should (string-match-p "Error" header))
+           (should (string-match-p "alien.signal" (hermes-chat--session-details-text))))
+         (should (cl-some (lambda (line)
+                            (string-match-p "Unknown Hermes transport event: alien.signal"
+                                            line))
+                          messages)))))))
+
+(ert-deftest hermes-chat-drops-thinking-that-echoes-reply ()
+  "A reasoning block identical to the final reply is dropped on completion."
+  (let (callback)
+    (hermes-test-with-chat-buffer
+     (let ((hermes-transport-send-function
+            (lambda (_p cb) (setq callback cb) 'fake-process)))
+       (insert "hi")
+       (hermes-chat-send)
+       (funcall callback '(:type delta :content "ok"))
+       (funcall callback '(:type commentary :event "reasoning.available" :content "ok"))
+       (funcall callback '(:type done :content "ok"))
+       (let ((roles (mapcar (lambda (e) (plist-get e :role)) (hermes-chat--entries))))
+         (should-not (memq 'commentary roles))
+         (should (memq 'assistant roles)))))))
+
+(ert-deftest hermes-chat-suppresses-thinking-echo-delta ()
+  "Streaming content that only echoes thinking is not shown as assistant text."
+  (let (callback)
+    (hermes-test-with-chat-buffer
+     (let ((hermes-transport-send-function
+            (lambda (_p cb) (setq callback cb) 'fake-process)))
+       (insert "hi")
+       (hermes-chat-send)
+       (funcall callback
+                '(:type commentary :event "reasoning.delta"
+                        :content "I will inspect the repo first."))
+       (funcall callback
+                '(:type delta :content "I will inspect the repo first."))
+       (let ((assistant (hermes-test--assistant-entry)))
+         (should assistant)
+         (should (string-empty-p (or (plist-get assistant :content) ""))))))))
+
+(ert-deftest hermes-chat-suppresses-thinking-only-final-message ()
+  "Final content that only echoes thinking is not promoted to assistant text."
+  (let (callback)
+    (hermes-test-with-chat-buffer
+     (let ((hermes-transport-send-function
+            (lambda (_p cb) (setq callback cb) 'fake-process)))
+       (insert "hi")
+       (hermes-chat-send)
+       (funcall callback
+                '(:type commentary :event "reasoning.available"
+                        :content "I will inspect the repo first."))
+       (funcall callback
+                '(:type done :content "I will inspect the repo first."))
+       (let* ((entries (hermes-chat--entries))
+              (assistant (cl-find-if
+                          (lambda (entry)
+                            (eq (plist-get entry :role) 'assistant))
+                          entries))
+              (commentary (cl-find-if
+                           (lambda (entry)
+                             (eq (plist-get entry :role) 'commentary))
+                           entries)))
+         (should assistant)
+         (should (string-empty-p (or (plist-get assistant :content) "")))
+         (should commentary)
+         (should (equal (plist-get commentary :status) 'done)))))))
+
+(ert-deftest hermes-chat-interim-drops-duplicate-reasoning-and-settles ()
+  "A reasoning preview repeating a pre-tool reply segment does not linger."
+  (hermes-test-with-dashboard-prompt-session (client)
+    (dolist (frame '(("message.start")
+                     ("message.delta" (text . "I'll take care of that now."))
+                     ("reasoning.available" (text . "I'll take care of that now."))
+                     ("message.interim" (text . "I'll take care of that now.")
+                      (already_streamed . t))
+                     ("tool.start" (tool_id . "call_1") (name . "skill_manage")
+                      (context . "demo"))
+                     ("tool.complete" (tool_id . "call_1") (name . "skill_manage")
+                      (result . ((success . t))))
+                     ("message.delta" (text . "Done."))
+                     ("reasoning.available" (text . "Done."))
+                     ("message.complete" (text . "Done.") (status . "complete"))))
+      (hermes-test--emit-dashboard-prompt client (car frame) (cdr frame)))
+    (let ((entries (hermes-chat--entries)))
+      (should-not (cl-find 'commentary entries
+                           :key (lambda (entry) (plist-get entry :role))))
+      (should-not (cl-find-if
+                   (lambda (entry)
+                     (and (hermes-chat--transient-entry-p entry)
+                          (hermes-chat--active-status-p (plist-get entry :status))))
+                   entries))
+      (should (equal (mapcar (lambda (entry) (plist-get entry :content))
+                             (cl-remove-if-not
+                              (lambda (entry) (eq (plist-get entry :role) 'assistant))
+                              entries))
+                     '("I'll take care of that now." "Done."))))))
+
+(ert-deftest hermes-chat-keeps-thinking-that-differs-from-reply ()
+  "Reasoning that genuinely differs from the reply is retained."
+  (let (callback)
+    (hermes-test-with-chat-buffer
+     (let ((hermes-transport-send-function
+            (lambda (_p cb) (setq callback cb) 'fake-process)))
+       (insert "hi")
+       (hermes-chat-send)
+       (funcall callback
+                '(:type commentary :event "reasoning.delta"
+                        :content "Let me weigh the options first."))
+       (funcall callback '(:type delta :content "The answer is 42."))
+       (funcall callback '(:type done :content "The answer is 42."))
+       (let ((roles (mapcar (lambda (e) (plist-get e :role)) (hermes-chat--entries))))
+         (should (memq 'commentary roles))
+         (should (memq 'assistant roles)))))))
+
+(ert-deftest hermes-chat-insert-content-with-images-fail-soft ()
+  "Bad image data still inserts cleaned text without signaling."
+  (with-temp-buffer
+    (cl-letf (((symbol-function 'display-images-p) (lambda () t))
+              ((symbol-function 'create-image)
+               (lambda (&rest _) (error "bad image"))))
+      (hermes-chat--insert-content-with-images
+       (concat "hello "
+               "data:image/png;base64," (make-string 80 ?B)
+               " world")
+       #'insert))
+    (should (string-match-p "hello" (buffer-string)))
+    (should (string-match-p "image unavailable\\|\\[image\\]" (buffer-string)))
+    (should-not (string-match-p "data:image" (buffer-string)))))
+
+(ert-deftest hermes-chat-create-image-from-url-decodes-base64-payload ()
+  "Data URLs are decoded and passed to create-image as raw data."
+  (let* ((payload (base64-encode-string "PNGDATA" t))
+         (url (concat "data:image/png;base64," payload))
+         args)
+    (cl-letf (((symbol-function 'create-image)
+               (lambda (data &optional type data-p &rest props)
+                 (setq args (list data type data-p props))
+                 '(image dummy))))
+      (should (equal (hermes-chat--create-image-from-url url) '(image dummy)))
+      (should (equal (nth 0 args) "PNGDATA"))
+      (should-not (nth 1 args))
+      (should (eq (nth 2 args) t)))))
+
+(ert-deftest hermes-chat-create-image-from-url-rejects-malformed-base64 ()
+  "Malformed base64 fails soft without calling create-image."
+  (let ((url (concat "data:image/png;base64," (make-string 80 ??)))
+        (called nil))
+    (cl-letf (((symbol-function 'create-image)
+               (lambda (&rest _)
+                 (setq called t)
+                 '(image dummy)))
+              ((symbol-function 'base64-decode-string)
+               (lambda (&rest _)
+                 (error "bad base64"))))
+      (should-not (hermes-chat--create-image-from-url url))
+      (should-not called))))
+
+(ert-deftest hermes-chat-create-image-from-url-rejects-oversize-base64 ()
+  "Encoded payload above the hard cap is rejected before decode."
+  (let* ((hermes-chat--max-embedded-image-base64 80)
+         (hermes-chat--max-embedded-image-decoded-bytes 1024)
+         (url (concat "data:image/png;base64," (make-string 81 ?A)))
+         (decoded nil)
+         (called nil))
+    (cl-letf (((symbol-function 'base64-decode-string)
+               (lambda (payload &optional _ignore)
+                 (setq decoded payload)
+                 "x"))
+              ((symbol-function 'create-image)
+               (lambda (&rest _)
+                 (setq called t)
+                 '(image dummy))))
+      (should-not (hermes-chat--create-image-from-url url))
+      (should-not decoded)
+      (should-not called))))
+
+(ert-deftest hermes-chat-create-image-from-url-accepts-exact-base64-limit ()
+  "Encoded payload exactly at the hard cap may still decode."
+  (let* ((hermes-chat--max-embedded-image-base64 80)
+         (hermes-chat--max-embedded-image-decoded-bytes 1024)
+         (payload (make-string 80 ?A))
+         (url (concat "data:image/png;base64," payload))
+         args)
+    (cl-letf (((symbol-function 'base64-decode-string)
+               (lambda (data &optional _ignore)
+                 (should (equal data payload))
+                 "PNGDATA"))
+              ((symbol-function 'create-image)
+               (lambda (data &optional type data-p &rest props)
+                 (setq args (list data type data-p props))
+                 '(image dummy))))
+      (should (equal (hermes-chat--create-image-from-url url) '(image dummy)))
+      (should (equal (nth 0 args) "PNGDATA")))))
+
+(ert-deftest hermes-chat-create-image-from-url-rejects-oversize-decoded ()
+  "Decoded byte count above the hard cap is rejected before create-image."
+  (let* ((hermes-chat--max-embedded-image-base64 256)
+         (hermes-chat--max-embedded-image-decoded-bytes 4)
+         (url (concat "data:image/png;base64,"
+                      (base64-encode-string "ABCDE" t)))
+         (called nil))
+    (cl-letf (((symbol-function 'create-image)
+               (lambda (&rest _)
+                 (setq called t)
+                 '(image dummy))))
+      (should-not (hermes-chat--create-image-from-url url))
+      (should-not called))))
+
+(ert-deftest hermes-chat-create-image-from-url-accepts-exact-decoded-limit ()
+  "Decoded payload exactly at the hard cap is accepted."
+  (let* ((hermes-chat--max-embedded-image-base64 256)
+         (hermes-chat--max-embedded-image-decoded-bytes 4)
+         (raw "ABCD")
+         (url (concat "data:image/png;base64,"
+                      (base64-encode-string raw t)))
+         args)
+    (cl-letf (((symbol-function 'create-image)
+               (lambda (data &optional type data-p &rest props)
+                 (setq args (list data type data-p props))
+                 '(image dummy))))
+      (should (equal (hermes-chat--create-image-from-url url) '(image dummy)))
+      (should (equal (nth 0 args) raw)))))
+
+(ert-deftest hermes-chat-render-expansion-metadata-preserves-explicit-state ()
+  "An absent choice differs from explicit collapse, without losing metadata."
+  (dolist (state '(absent nil t))
+    (let* ((entry (list :metadata (unless (eq state 'absent)
+                                   (list :expanded state))))
+           (metadata (list :expanded 'incoming :detail "literal α" :other 42))
+           (result (hermes-chat--metadata-preserve-expanded entry metadata)))
+      (should (eq (plist-get result :expanded)
+                  (if (eq state 'absent) 'incoming state)))
+      (should (equal (plist-get result :detail) "literal α"))
+      (should (= (plist-get result :other) 42)))))
+
+(ert-deftest hermes-chat-render-diff-label-prefers-standard-headers ()
+  "Prefer +++ then Git then gateway headers; retain literal target paths."
+  (dolist (case '(("a/old → b/arrow α\ndiff --git a/old b/git α\n+++ b/space name α\n"
+                   "space name α")
+                  ("a/old → b/arrow α\ndiff --git a/old b/git α\n" "git α")
+                  ("a/old → b/arrow α\n" "arrow α")
+                  ("+++ a/path α\n" "path α")
+                  ("+++ c/path α\n" "c/path α")
+                  ("@@ -1 +1 @@\n-old\n+new\n" nil)))
+    (should (equal (hermes-chat--diff-label (car case)) (cadr case)))))
+
+(ert-deftest hermes-chat-settled-diff-eof-requires-complete-counts ()
+  "Settled truncated hunks stay literal; complete hunks still disclose."
+  (dolist (complete '(nil t))
+    (dolist (ending '("" "\n" "\n\\ No newline at end of file\n"))
+      (let ((text (concat (if complete "@@ -1 +1 @@" "@@ -1,2 +1,2 @@")
+                          "\n-old α\n+new β" ending)))
+        (hermes-test-with-chat-buffer
+         (insert "DRAFT")
+         (hermes-chat--insert-entry (hermes-chat--make-entry 'assistant text 'done))
+         (should (equal (hermes-chat-input-string) "DRAFT"))
+         (if complete
+             (progn
+               (should (= 1 (hermes-test--count-buttons-labeled "View Diff")))
+               (should (equal (hermes-test--view-diff-content)
+                              (if (string-suffix-p "\n" text) text
+                                (concat text "\n")))))
+           (should (zerop (hermes-test--count-buttons-labeled "View Diff")))
+           (goto-char (point-min))
+           (search-forward text)
+           (should (equal (filter-buffer-substring (- (point) (length text))
+                                                  (point))
+                          text))))))))
+
+(ert-deftest hermes-chat-streaming-echo-check-ignores-reply-length ()
+  "Once a reply has text, the per-delta echo check never rescans the reply."
+  (hermes-test-with-dashboard-prompt-session (client)
+    (let ((normalize (symbol-function 'hermes-chat--normalize-for-dedup))
+          (chunk "word word word word word\n")
+          (longest 0))
+      (cl-letf (((symbol-function 'hermes-chat--normalize-for-dedup)
+                 (lambda (text)
+                   (setq longest (max longest (length (or text ""))))
+                   (funcall normalize text))))
+        (hermes-test--emit-dashboard-prompt client "message.start" nil)
+        (dotimes (_ 40)
+          (hermes-test--emit-dashboard-prompt
+           client "message.delta" `((text . ,chunk)))))
+      (should (> (length (hermes-chat--entry-content-by-id
+                          hermes-chat--pending-assistant-id))
+                 (* 30 (length chunk))))
+      (should (<= longest (length chunk))))))
+
+;;; Running, settled and failed rows
+
+(defun hermes-test--row-face-at (text)
+  "Return the face at the start of the first occurrence of TEXT."
+  (save-excursion
+    (goto-char (point-min))
+    (search-forward text)
+    (get-text-property (match-beginning 0) 'face)))
+
+(ert-deftest hermes-chat-transcript-rows-mark-running-done-and-failed ()
+  "Running rows show a live marker; failures colour the whole head line."
+  (dolist (case '(("running" "●" hermes-chat-tool-running nil)
+                  ("completed" "✓" success shadow)
+                  ("error" "!" error error)
+                  ("interrupted" "!" error shadow)))
+    (pcase-let ((`(,status ,marker ,marker-face ,head-face) case))
+      (with-temp-buffer
+        (hermes-chat--insert-transient-content
+         (list :id status :role 'tool :status status :content "💻 terminal: make"))
+        (should (string-prefix-p (format "  %s 💻 terminal: make" marker) (buffer-string)))
+        (should (eq (hermes-test--row-face-at marker) marker-face))
+        (should (eq (hermes-test--row-face-at "terminal: make") head-face))))))
+
+(ert-deftest hermes-chat-running-delegate-row-uses-running-face ()
+  "A running delegate row reads as alive, then settles without a re-render loop."
+  (let (callback timers)
+    (cl-letf (((symbol-function 'run-at-time)
+               (lambda (&rest args) (push args timers) nil)))
+      (hermes-test-with-chat-buffer
+       (let ((hermes-transport-send-function
+              (lambda (_prompt cb) (setq callback cb) 'fake-process)))
+         (insert "delegate")
+         (hermes-chat-send)
+         (setq timers nil)
+         (funcall callback '(:type tool :event "tool.start" :tool-call-id "d1"
+                             :name "delegate_task" :status "running"
+                             :context "audit"))
+         (should (eq (hermes-test--row-face-at "●") 'hermes-chat-tool-running))
+         (should-not (hermes-test--row-face-at "delegate_task: audit"))
+         ;; The composer status rule owns its own one-second clock tick.
+         (should-not (cl-some (lambda (args) (and (numberp (cadr args)) (> (cadr args) 0)
+                                                  (not (eq (nth 2 args)
+                                                           #'hermes-chat--status-rule-fire))))
+                              timers))
+         (funcall callback '(:type tool :event "tool.complete" :tool-call-id "d1"
+                             :name "delegate_task" :status "failed"
+                             :context "audit" :error "boom"))
+         (should (eq (hermes-test--row-face-at "!") 'error))
+         (should (eq (hermes-test--row-face-at "delegate_task: audit") 'error))
+         (should (eq (hermes-test--row-face-at "boom") 'error)))))))
+
+;;; Unknown events and long notices
+
+(ert-deftest hermes-chat-unknown-event-collapses-with-raw-preserved ()
+  "Unknown events collapse to one line; expanding shows the full raw payload."
+  (let* ((long (make-string 400 ?x))
+         (event (list :type 'unknown :event "tool.foo"
+                      :raw `((payload . ,long) (kind . "alien")))))
+    (hermes-test-with-chat-buffer
+     (hermes-chat--upsert-transport-entry nil event)
+     (let* ((entry (car (last (hermes-chat--entries))))
+            (text (buffer-substring-no-properties (point-min) hermes-chat--input-marker)))
+       (should (string-match-p "▸ Unknown event tool.foo" text))
+       (should-not (string-match-p "raw:" text))
+       (should-not (string-match-p long text))
+       (should (equal (plist-get (plist-get entry :metadata) :event) event))
+       (goto-char (point-min))
+       (search-forward "Unknown event tool.foo")
+       (should (string-match-p "raw: " (get-text-property (1- (point)) 'help-echo)))
+       (push-button (1- (point)))
+       (let ((expanded (buffer-substring-no-properties (point-min) hermes-chat--input-marker)))
+         (should (string-match-p "▾ Unknown event tool.foo" expanded))
+         (should (string-match-p (regexp-quote long) expanded))
+         (should (string-match-p "alien" expanded)))))))
+
+(ert-deftest hermes-chat-unknown-event-detail-is-lazy-and-bounded ()
+  "Collapsed unknown events never pretty-print; expansion formats once, bounded."
+  (let* ((huge (number-sequence 1 100000))
+         (event (list :type 'unknown :event "tool.huge"
+                      :raw `((items . ,huge) (kind . "alien"))))
+         (pp-calls 0)
+         (real-pp (symbol-function 'pp-to-string)))
+    (cl-letf (((symbol-function 'pp-to-string)
+               (lambda (&rest args)
+                 (cl-incf pp-calls)
+                 (apply real-pp args))))
+      (hermes-test-with-chat-buffer
+       (hermes-chat--upsert-transport-entry nil event)
+       (hermes-chat--upsert-transport-entry nil (list :type 'status :content "later"))
+       (should (= pp-calls 0))
+       (goto-char (point-min))
+       (search-forward "Unknown event tool.huge")
+       (push-button (1- (point)))
+       (let ((expanded (buffer-substring-no-properties
+                        (point-min) hermes-chat--input-marker)))
+         (should (string-match-p "▾ Unknown event tool.huge" expanded))
+         (should (string-match-p "(items 1 2 3" expanded))
+         (should-not (string-match-p "99999" expanded))
+         (should (< (length expanded)
+                    (+ hermes-chat--unknown-event-raw-detail-limit 500))))
+       (let ((calls pp-calls))
+         (should (<= calls 1))
+         ;; Repaints of the expanded entry reuse the cached detail.
+         (hermes-chat--upsert-transport-entry nil (list :type 'status :content "again"))
+         (goto-char (point-min))
+         (search-forward "Unknown event tool.huge")
+         (push-button (1- (point)))
+         (goto-char (point-min))
+         (search-forward "Unknown event tool.huge")
+         (push-button (1- (point)))
+         (should (= pp-calls calls)))))))
+
+(ert-deftest hermes-chat-unknown-event-collapsed-preview-printing-is-bounded ()
+  "Collapsed insertion prints only a bounded prefix of a huge raw payload."
+  (let* ((raw (number-sequence 1 100000))
+         (event (list :type 'unknown :event "tool.huge" :raw raw))
+         (printed 0)
+         (real-format (symbol-function 'format))
+         (real-prin1 (symbol-function 'prin1-to-string)))
+    (cl-letf (((symbol-function 'format)
+               (lambda (fmt &rest args)
+                 (let ((text (apply real-format fmt args)))
+                   (when (memq raw args)
+                     (setq printed (max printed (length text))))
+                   text)))
+              ((symbol-function 'prin1-to-string)
+               (lambda (object &rest args)
+                 (let ((text (apply real-prin1 object args)))
+                   (when (eq object raw)
+                     (setq printed (max printed (length text))))
+                   text))))
+      (hermes-test-with-chat-buffer
+       (hermes-chat--upsert-transport-entry nil event)
+       (should-not hermes-chat--unknown-event-detail-cache)
+       (should (< printed 1000))
+       (goto-char (point-min))
+       (search-forward "Unknown event tool.huge")
+       (let ((help (get-text-property (1- (point)) 'help-echo)))
+         (should (string-match-p "raw: (1 2 3" help))
+         (should-not (string-match-p "99999" help))
+         (should (< (length help) 400)))))))
+
+(ert-deftest hermes-chat-unknown-event-nested-huge-string-is-bounded ()
+  "A huge string nested in the raw payload is cut in preview and detail."
+  (let* ((huge (make-string 1000000 ?y))
+         (event (list :type 'unknown :event "tool.blob"
+                      :raw `((kind . "alien") (blob . ,huge))))
+         (printed 0)
+         (real-prin1 (symbol-function 'prin1-to-string))
+         (real-pp (symbol-function 'pp-to-string)))
+    (cl-letf (((symbol-function 'prin1-to-string)
+               (lambda (&rest args)
+                 (let ((text (apply real-prin1 args)))
+                   (setq printed (max printed (length text)))
+                   text)))
+              ((symbol-function 'pp-to-string)
+               (lambda (&rest args)
+                 (let ((text (apply real-pp args)))
+                   (setq printed (max printed (length text)))
+                   text))))
+      (hermes-test-with-chat-buffer
+       (hermes-chat--upsert-transport-entry nil event)
+       (should (< printed 3000))
+       (goto-char (point-min))
+       (search-forward "Unknown event tool.blob")
+       (let ((help (get-text-property (1- (point)) 'help-echo)))
+         (should (string-match-p "alien" help))
+         (should (< (length help) 400)))
+       (push-button (1- (point)))
+       (let ((expanded (buffer-substring-no-properties
+                        (point-min) hermes-chat--input-marker)))
+         (should (string-match-p "▾ Unknown event tool.blob" expanded))
+         (should (string-match-p "alien" expanded))
+         (should (string-match-p "yyyy…" expanded))
+         (should (< (length expanded) 3000)))
+       (should (< printed 3000))
+       (should (equal (plist-get event :raw) `((kind . "alien") (blob . ,huge))))))))
+
+(ert-deftest hermes-chat-unknown-event-bounded-copy-shapes ()
+  "The bounded copy keeps shapes, cuts strings and elides past the limits."
+  (let ((table (make-hash-table :test #'equal)))
+    (dotimes (i 5) (puthash i (make-string 10 ?z) table))
+    (let ((copy (hermes-chat--unknown-event-bounded-copy
+                 (list "abcdef" [1 2 3 4 5] '(a . "bcdefg") '((((deep)))) table)
+                 3 4 3 '(1000 . 1000))))
+      (should (equal (nth 0 copy) "abc…"))
+      (should (equal (nth 1 copy) [1 2 3 4 …]))
+      (should (equal (nth 2 copy) '(a . "bcd…")))
+      (should (equal (nth 3 copy) '((…))))
+      (should (eq (car (last copy)) '…))
+      (should (= (length copy) 5)))
+    (let ((copy (hermes-chat--unknown-event-bounded-copy table 2 3 3 '(1000 . 1000))))
+      (should (hash-table-p copy))
+      (should (= (hash-table-count copy) 3))
+      (should (equal (gethash 0 copy) "zzz…")))))
+
+;; Hostile payload shapes: each must render collapsed and expanded with a
+;; bounded walk and bounded printing.
+
+(defun hermes-test--unknown-event-hostile-run (name raw)
+  "Insert and expand an unknown event NAME carrying RAW.
+Return a plist with the walker :visits per call, the largest flat
+:printed and :pretty strings and the :expanded transcript length."
+  (let* ((visits 0) (max-visits 0) (printed 0) (pretty 0)
+         (real-walk (symbol-function 'hermes-chat--unknown-event-bounded-walk))
+         (real-copy (symbol-function 'hermes-chat--unknown-event-bounded-copy))
+         (real-prin1 (symbol-function 'prin1-to-string))
+         (real-pp (symbol-function 'pp-to-string))
+         expanded)
+    (cl-letf (((symbol-function 'hermes-chat--unknown-event-bounded-walk)
+               (lambda (&rest args)
+                 (cl-incf visits)
+                 (apply real-walk args)))
+              ((symbol-function 'hermes-chat--unknown-event-bounded-copy)
+               (lambda (&rest args)
+                 (setq visits 0)
+                 (prog1 (apply real-copy args)
+                   (setq max-visits (max max-visits visits)))))
+              ((symbol-function 'prin1-to-string)
+               (lambda (&rest args)
+                 (let ((text (apply real-prin1 args)))
+                   (setq printed (max printed (length text)))
+                   text)))
+              ((symbol-function 'pp-to-string)
+               (lambda (&rest args)
+                 (let ((text (apply real-pp args)))
+                   (setq pretty (max pretty (length text)))
+                   text))))
+      (hermes-test-with-chat-buffer
+       (hermes-chat--upsert-transport-entry
+        nil (list :type 'unknown :event name :raw raw))
+       (goto-char (point-min))
+       (search-forward (concat "Unknown event " name))
+       (should (< (length (get-text-property (1- (point)) 'help-echo)) 400))
+       (push-button (1- (point)))
+       (setq expanded (buffer-substring-no-properties
+                       (point-min) hermes-chat--input-marker))
+       (should (string-match-p (concat "▾ Unknown event " name) expanded))))
+    (list :visits max-visits :printed printed :pretty pretty
+          :expanded (length expanded))))
+
+(defun hermes-test--unknown-event-assert-bounded (result)
+  "Assert RESULT from `hermes-test--unknown-event-hostile-run' is bounded."
+  (should (> (plist-get result :visits) 1))
+  (should (<= (plist-get result :visits)
+              (1+ (max (car hermes-chat--unknown-event-preview-budget)
+                       (car hermes-chat--unknown-event-detail-budget)))))
+  (should (< (plist-get result :printed) 5000))
+  ;; Indentation can inflate the pretty form of a deep copy, but its input
+  ;; is the bounded flat form and the shown detail is cut.
+  (should (< (plist-get result :pretty) 30000))
+  (should (< (plist-get result :expanded) 5000)))
+
+(ert-deftest hermes-chat-unknown-event-self-referencing-vector-is-bounded ()
+  "A vector whose slots all hold itself renders with a bounded walk."
+  (let ((raw (make-vector 20 nil)))
+    (dotimes (i 20) (aset raw i raw))
+    (hermes-test--unknown-event-assert-bounded
+     (hermes-test--unknown-event-hostile-run "tool.selfvec" raw))))
+
+(ert-deftest hermes-chat-unknown-event-wide-tree-is-bounded ()
+  "A wide acyclic tree (50 children, depth 6) renders with a bounded walk."
+  (let ((raw (let ((node 42))
+               (dotimes (_ 6) (setq node (make-vector 50 node)))
+               node)))
+    (hermes-test--unknown-event-assert-bounded
+     (hermes-test--unknown-event-hostile-run "tool.wide" raw))))
+
+(ert-deftest hermes-chat-unknown-event-cyclic-hash-is-bounded ()
+  "A hash table containing itself renders with a bounded walk."
+  (let ((raw (make-hash-table :test #'eq)))
+    (dotimes (i 50) (puthash i raw raw))
+    (puthash 'self (list raw raw raw) raw)
+    (hermes-test--unknown-event-assert-bounded
+     (hermes-test--unknown-event-hostile-run "tool.cychash" raw))))
+
+(ert-deftest hermes-chat-unknown-event-record-with-huge-string-is-opaque ()
+  "A record holding a huge string renders as an opaque placeholder."
+  (let* ((raw (list (record 'hostile (make-string 1000000 ?x)) "ok"))
+         (result (hermes-test--unknown-event-hostile-run "tool.record" raw)))
+    (hermes-test--unknown-event-assert-bounded result)
+    (should (< (plist-get result :printed) 200))))
+
+(ert-deftest hermes-chat-unknown-event-bounded-copy-opaque-types ()
+  "Objects outside the walked types become short placeholders."
+  (with-temp-buffer
+    (let ((copy (hermes-chat--unknown-event-bounded-copy
+                 (list (record (make-string 1000 ?t) 1)
+                       (point-marker) (current-buffer)
+                       (make-bool-vector 3 t) (make-char-table 'test)
+                       (lambda (x) x)
+                       (propertize "abc" 'face (make-string 1000 ?f))
+                       :key 1.5 nil t)
+                 4 20 10 '(100 . 100))))
+      (should (eq (nth 0 copy) '\#<record>))
+      (should (eq (nth 1 copy) '\#<marker>))
+      (should (eq (nth 2 copy) '\#<buffer>))
+      (should (eq (nth 3 copy) '\#<bool-vector>))
+      (should (eq (nth 4 copy) '\#<char-table>))
+      (should (string-prefix-p "#<" (symbol-name (nth 5 copy))))
+      (should-not (text-properties-at 0 (nth 6 copy)))
+      (should (equal (nthcdr 7 copy) '(:key 1.5 nil t))))))
+
+(ert-deftest hermes-chat-unknown-event-bounded-copy-shares-budget ()
+  "The node and character budgets are shared across the whole walk."
+  (let ((copy (hermes-chat--unknown-event-bounded-copy
+               (make-list 10 (list 1 2 3)) 4 20 100 '(8 . 100))))
+    (should (equal copy '((1 2 3) (1 2 …) …))))
+  (let ((copy (hermes-chat--unknown-event-bounded-copy
+               (list "abcdef" "ghijkl" "mnopqr") 4 20 100 '(100 . 14))))
+    (should (equal copy '("abcdef" "ghij…" …)))))
+
+(defun hermes-test--unknown-event-format-counting (raw)
+  "Format RAW as preview and detail, counting `maphash' calls.
+Return a plist with :maphash calls, the :preview and :detail strings."
+  (let ((calls 0) (real-maphash (symbol-function 'maphash)) preview detail)
+    (cl-letf (((symbol-function 'maphash)
+               (lambda (function table)
+                 (cl-incf calls)
+                 (funcall real-maphash function table))))
+      (setq preview (hermes-chat--unknown-event-raw-preview raw)
+            detail (hermes-chat--unknown-event-detail (list :raw raw))))
+    (list :maphash calls :preview preview :detail detail)))
+
+(ert-deftest hermes-chat-unknown-event-huge-empty-hash-is-not-scanned ()
+  "A huge empty hash table becomes a placeholder without being iterated."
+  (let* ((raw (make-hash-table :size 3000000))
+         (result (hermes-test--unknown-event-format-counting raw)))
+    (should (= (plist-get result :maphash) 0))
+    (should (equal (plist-get result :preview) "\\#<hash-table:count=0>"))
+    (should (string-match-p "hash-table:count=0" (plist-get result :detail)))))
+
+(ert-deftest hermes-chat-unknown-event-sparse-big-hash-is-not-scanned ()
+  "A sparse hash table with a large capacity is reported by its count."
+  (let ((raw (make-hash-table :test #'equal :size 100000)))
+    (puthash "a" 1 raw)
+    (puthash "b" (make-string 100 ?b) raw)
+    (let ((result (hermes-test--unknown-event-format-counting raw)))
+      (should (= (plist-get result :maphash) 0))
+      (should (string-match-p "hash-table:count=2" (plist-get result :preview)))
+      (should (string-match-p "hash-table:count=2" (plist-get result :detail)))
+      (should-not (string-match-p "bbb" (plist-get result :detail))))))
+
+(ert-deftest hermes-chat-unknown-event-hash-after-budget-is-not-visited ()
+  "A table nested after the budget runs out is elided without iteration."
+  (let* ((big (make-hash-table :size 3000000))
+         (small (make-hash-table)))
+    (puthash 'k 'v small)
+    (let ((calls 0) (real-maphash (symbol-function 'maphash)) copy)
+      (cl-letf (((symbol-function 'maphash)
+                 (lambda (function table)
+                   (cl-incf calls)
+                   (funcall real-maphash function table))))
+        (setq copy (hermes-chat--unknown-event-bounded-copy
+                    (list "abcdef" small big) 4 20 100 '(2 . 100))))
+      (should (= calls 0))
+      (should (equal copy '("abcdef" …))))))
+
+(ert-deftest hermes-chat-unknown-event-big-bignum-is-not-converted ()
+  "A huge bignum becomes a placeholder without decimal conversion."
+  (let ((converted 0) (real (symbol-function 'number-to-string))
+        (raw (list (expt 10 1000) (- (expt 10 1000)) (expt 2 200)))
+        preview detail)
+    (cl-letf (((symbol-function 'number-to-string)
+               (lambda (number)
+                 (let ((text (funcall real number)))
+                   (setq converted (max converted (length text)))
+                   text))))
+      (setq preview (hermes-chat--unknown-event-raw-preview raw)
+            detail (hermes-chat--unknown-event-detail (list :raw raw))))
+    (should (< converted 100))
+    (should (equal preview
+                   (format "(\\#<bignum> \\#<bignum> %d)" (expt 2 200))))
+    (should (< (length detail) 200))
+    (should (string-match-p (regexp-quote (number-to-string (expt 2 200)))
+                            detail))
+    (should-not (string-match-p "0000000000000000000000000000000000000000"
+                                detail))))
+
+(ert-deftest hermes-chat-clear-drops-unknown-event-detail-cache ()
+  "Clearing the transcript discards cached unknown event details."
+  (hermes-test-with-chat-buffer
+   (hermes-chat--upsert-transport-entry
+    nil (list :type 'unknown :event "x" :raw '(1 2 3)))
+   (goto-char (point-min))
+   (search-forward "Unknown event x")
+   (push-button (1- (point)))
+   (should (= (hash-table-count hermes-chat--unknown-event-detail-cache) 1))
+   (cl-letf (((symbol-function 'y-or-n-p) (lambda (&rest _) t)))
+     (call-interactively #'hermes-chat-clear))
+   (should-not hermes-chat--unknown-event-detail-cache)))
+
+(ert-deftest hermes-chat-unknown-event-detail-pretty-prints-small-payloads ()
+  "Small raw payloads are pretty-printed across lines when expanded."
+  (let ((detail (hermes-chat--unknown-event-detail
+                 (list :type 'unknown :event "x"
+                       :raw '((alpha . ((one . 1) (two . 2) (three . 3)))
+                              (beta . ((four . 4) (five . 5) (six . 6)))
+                              (gamma . "a fairly long string value to force wrapping"))))))
+    (should (string-match-p "\n" detail))
+    (should (string-match-p "gamma" detail))
+    (should-not (string-match-p "truncated" detail))))
+
+(ert-deftest hermes-chat-prompt-request-status-never-collapses ()
+  "Keep every batch question and option visible, including settled prompts."
+  (let* ((lines (list
+                 (concat "1. Rewrite roadmap's open questions: "
+                         (make-string 120 ?x) " without truncating this question?")
+                 "   a. Keep startup" "   b. Rewrite startup"
+                 "2. Which build?" "   a. Source" "   b. Binary"
+                 "3. Which editor?" "   a. Emacs" "   b. Neomacs"
+                 "4. Which release?" "   a. Stable" "   b. Development"
+                 "Answer each question in the composer."
+                 "Custom answers are welcome."))
+         (content (string-join lines "\n")))
+    (should (= (length lines) 14))
+    (dolist (status '(running done interrupted))
+      (hermes-test-with-chat-buffer
+       (setq hermes-chat--pending-prompts (make-hash-table :test #'equal))
+       (when (eq status 'running)
+         (puthash "clarify:batch" '(:prompt-type "clarify")
+                  hermes-chat--pending-prompts))
+       (hermes-chat--insert-entry
+        (hermes-chat--make-entry
+         'status content status "batch-prompt"
+         '(:event (:prompt-request-p t :prompt-key "clarify:batch"))))
+       (dolist (line lines)
+         (goto-char (point-min))
+         (should (search-forward line hermes-chat--input-marker t))
+         (cl-loop for position from (- (point) (length line)) below (point)
+                  do (should-not (invisible-p position))))
+       (let ((text (buffer-substring-no-properties
+                    (point-min) hermes-chat--input-marker)))
+         (should-not (string-match-p "▸\\|(14 lines)" text))
+         (when (eq status 'running)
+           (goto-char (point-min))
+           (search-forward (car (last lines)) hermes-chat--input-marker)
+           (search-forward "[Answer]" hermes-chat--input-marker)
+           (should (equal (button-get (button-at (1- (point)))
+                                      'hermes-chat-prompt-key)
+                          "clarify:batch"))))))))
+
+(ert-deftest hermes-chat-long-status-notice-collapses ()
+  "Status notices beyond three lines collapse; short ones stay inline."
+  (hermes-test-with-chat-buffer
+   (hermes-chat--insert-local-status "one\ntwo\nthree" 'done)
+   (hermes-chat--insert-local-status "alpha\nbeta\ngamma\ndelta\nepsilon" 'done)
+   (let ((text (buffer-substring-no-properties (point-min) hermes-chat--input-marker)))
+     (should (string-match-p "one\ntwo\nthree" text))
+     (should (string-match-p "▸ alpha  (5 lines)" text))
+     (should-not (string-match-p "delta" text)))
+   (goto-char (point-min))
+   (search-forward "▸ alpha")
+   (push-button (1- (point)))
+   (should (string-match-p "beta\ngamma\ndelta"
+                           (buffer-substring-no-properties
+                            (point-min) hermes-chat--input-marker)))))
+
+(provide 'hermes-chat-render-tests)
+;;; hermes-chat-render-tests.el ends here

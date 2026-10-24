@@ -1,0 +1,22 @@
+{
+ "name": "substring-no-properties",
+ "arity": [
+  1,
+  3
+ ],
+ "effect": "pure",
+ "gnu_files": [
+  "fns.c"
+ ],
+ "gnu_def": "fns.c:1619",
+ "rust": "src/prims/str.rs:145",
+ "args": [],
+ "probes": [
+  "(let ((s \"\")) (eq s (substring-no-properties s)))",
+  "(substring-no-properties \"aλ雪z\" -3 -1)",
+  "(list (multibyte-string-p (substring-no-properties \"λa\" 1)) (multibyte-string-p (substring-no-properties (unibyte-string 255 65) 1)))",
+  "(string-to-char (substring-no-properties (unibyte-string 255 65) 0 1))",
+  "(substring-no-properties \"abc\" 3 2)",
+  "(substring-no-properties \"abc\" nil 8)"
+ ]
+}

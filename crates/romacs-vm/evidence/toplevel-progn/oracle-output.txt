@@ -1,0 +1,47 @@
+Warning (files): Missing ‘lexical-binding’ cookie in "~/.hermes/cache/scratch/romacs/progn/crates/romacs-vm2/evidence/toplevel-progn/oracle-driver.el".
+You can add one with ‘M-x elisp-enable-lexical-binding RET’.
+See ‘(elisp)Selecting Lisp Dialect’ and ‘(elisp)Converting to Lexical Binding’
+for more information.
+
+
+In toplevel form:
+../../../../romacs-progn-oracle/compile-missing-progn.el:2:2: Error: lr-missing-expanded
+
+
+In toplevel form:
+../../../../romacs-progn-oracle/compile-missing-prog1.el:2:26: Error: lr-missing-expanded
+
+
+In toplevel form:
+../../../../romacs-progn-oracle/generated-constructor.el:3:2: Error: Symbol’s function definition is void: lr-constructor
+PIN=32.0.50 eager=t prog2=(progn a (prog1 b c))
+eager progn status=t result=2 side=nil macro=2
+eager generated status=t result=2 side=nil macro=2
+eager prog1 status=t result=1 side=nil macro=2
+eager prog2-first status=t result=2 side=nil macro=2
+eager prog2-second status=t result=1 side=nil macro=2
+eager missing-progn status=(error "Eager macro-expansion failure: (error \"lr-missing-expanded\")") result=nil side=1 macro=1
+eager missing-prog1 status=(error "Eager macro-expansion failure: (error \"lr-missing-expanded\")") result=nil side=nil macro=1
+lazy progn status=t result=2 side=nil macro=2
+lazy generated status=t result=2 side=nil macro=2
+lazy prog1 status=t result=2 side=nil macro=2
+lazy prog2-first status=t result=2 side=nil macro=2
+lazy prog2-second status=t result=2 side=nil macro=2
+lazy missing-progn status=(error "lr-missing-expanded") result=nil side=1 macro=1
+lazy missing-prog1 status=(error "lr-missing-expanded") result=nil side=1 macro=1
+compile progn status=t result=nil side=nil macro=1
+compiled-load progn result=2 side=nil
+compile generated status=t result=nil side=nil macro=1
+compiled-load generated result=2 side=nil
+compile prog1 status=t result=nil side=nil macro=1
+compiled-load prog1 result=1 side=nil
+compile prog2-first status=t result=nil side=nil macro=1
+compiled-load prog2-first result=2 side=nil
+compile prog2-second status=t result=nil side=nil macro=1
+compiled-load prog2-second result=1 side=nil
+compile missing-progn status=nil result=nil side=nil macro=1
+compile missing-prog1 status=nil result=nil side=nil macro=1
+source-load=t answer=42
+byte-compile=nil answer=nil constructor-bound=nil
+eval-buffer return=nil answer=2
+eval-region return=nil answer=2

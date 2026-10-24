@@ -1,0 +1,29 @@
+{
+ "name": "window-scroll-bar-height",
+ "arity": [
+  0,
+  1
+ ],
+ "effect": "reads",
+ "gnu_files": [
+  "window.c"
+ ],
+ "gnu_def": "window.c:1269",
+ "rust": "src/prims/window.rs:94",
+ "args": [
+  "none"
+ ],
+ "extra": {
+  "0": [
+   "1",
+   "'sym",
+   "(copy-sequence \"s\")"
+  ]
+ },
+ "probes": [
+  "(window-scroll-bar-height)",
+  "(window-scroll-bar-height (minibuffer-window))",
+  "(let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (condition-case e (window-scroll-bar-height p) (error (list (car e) (car (cdr e)) (eq (car (cdr (cdr e))) p)))))",
+  "(let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (progn (set-window-new-pixel p h) (set-window-new-pixel a h) (delete-window-internal b) (condition-case e (window-scroll-bar-height b) (error (list (car e) (car (cdr e)) (eq (car (cdr (cdr e))) b))))))"
+ ]
+}

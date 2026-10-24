@@ -1,0 +1,40 @@
+{
+  "effect": "global",
+  "gnu_files": [
+    "fns.c"
+  ],
+  "args": [
+    "leaf-sequences-probes-only",
+    "leaf-sequences-probes-only",
+    "leaf-sequences-probes-only"
+  ],
+  "name": "mapconcat",
+  "arity": [
+    2,
+    3
+  ],
+  "gnu_def": "fns.c:3484",
+  "rust": "src/prims/leaf_sequences.rs:17",
+  "probes": [
+    "(equal (mapconcat (lambda (x) (list (+ x 64))) '(1 2 3) \"-\") \"A-B-C\")",
+    "(equal (funcall #'mapconcat #'identity [\"a\" \"b\"] '(955)) \"aλb\")",
+    "(equal (mapconcat #'list \"λ雪\" [45]) \"λ-雪\")",
+    "(equal (mapconcat #'identity '(\"a\" nil \"b\")) \"ab\")",
+    "(equal (mapconcat 'invalid nil 'invalid) \"\")",
+    "(multibyte-string-p (mapconcat 'invalid nil 'invalid))",
+    "(equal (mapconcat #'identity '(\"a\") 'invalid) \"a\")",
+    "(let ((n 0)) (condition-case e (mapconcat (lambda (x) (setq n (1+ n)) x) '(1 2) \"-\") (error (list n e))))",
+    "(mapconcat 'invalid '(1 . bad))",
+    "(mapconcat #'identity 1)",
+    "(mapconcat #'identity [\"a\" \"b\"] 9)",
+    "(mapconcat #'identity [\"a\" [99999999]])",
+    "(mapconcat 'missing [1])",
+    "(let ((x (list \"a\" \"b\"))) (setcdr (cdr x) x) (condition-case e (mapconcat #'identity x) (circular-list (car e))))",
+    "(equal (mapconcat (lambda (x) (if x \"T\" \"F\")) (make-bool-vector 3 t) \",\") \"T,T,T\")",
+    "(mapconcat #'identity (make-char-table 'test))",
+    "(let ((f (symbol-function 'concat))) (fset 'concat (lambda (&rest x) \"WRONG\")) (equal (mapconcat #'identity [\"a\" \"b\"]) \"ab\"))",
+    "(list (fboundp 'mapconcat) (functionp #'mapconcat))",
+    "(equal (mapconcat #'identity (vector (unibyte-string 255) (unibyte-string 128)) (unibyte-string 45)) (unibyte-string 255 45 128))",
+    "(get-text-property 0 'face (mapconcat #'identity (list (propertize \"x\" 'face 'bold))))"
+  ]
+}

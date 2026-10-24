@@ -1,0 +1,16 @@
+[package]
+name = "romacs-props"
+version = "0.1.0"
+autobenches = false
+edition.workspace = true
+license.workspace = true
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[dependencies]
+hashbrown.workspace = true
+romacs-chars = { path = "../romacs-chars" }
+
+[dev-dependencies]
+proptest.workspace = true

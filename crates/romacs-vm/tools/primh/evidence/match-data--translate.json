@@ -1,0 +1,440 @@
+{
+ "protocol": "primh-v1",
+ "pinned": {
+  "match-data--translate/0018": "PRINTER",
+  "match-data--translate/0028": "PRINTER",
+  "match-data--translate/0043": "SIGNAL-VS-VALUE",
+  "match-data--translate/0044": "SIGNAL-VS-VALUE",
+  "match-data--translate/0054": "PRINTER"
+ },
+ "primitive": "match-data--translate",
+ "spec_sha256": "b8aaf2cef83362b4a2e0cb5101d7c1f0eb7a459bd64dd70e118e6dabb756759b",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "match-data--translate",
+    "subr",
+    1,
+    1
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "search.c": "3b9dda9f663ba44c64823daac395c38b46cc3cf47b72b370af864be075ef8375"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "match-data--translate/0000",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (match-data--translate nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument fixnump nil))"
+  },
+  {
+   "id": "match-data--translate/0001",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (match-data--translate t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument fixnump t))"
+  },
+  {
+   "id": "match-data--translate/0002",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (match-data--translate 0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "match-data--translate/0003",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (match-data--translate 1)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "match-data--translate/0004",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (match-data--translate 2)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "match-data--translate/0005",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (match-data--translate -1)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "match-data--translate/0006",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (match-data--translate most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "match-data--translate/0007",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (match-data--translate 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument fixnump 1.5))"
+  },
+  {
+   "id": "match-data--translate/0008",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (match-data--translate 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument fixnump sym))"
+  },
+  {
+   "id": "match-data--translate/0009",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (match-data--translate :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument fixnump :kw))"
+  },
+  {
+   "id": "match-data--translate/0010",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (match-data--translate (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument fixnump \"\"))"
+  },
+  {
+   "id": "match-data--translate/0011",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (match-data--translate (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument fixnump \"abc\"))"
+  },
+  {
+   "id": "match-data--translate/0012",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (match-data--translate (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument fixnump \"λx\"))"
+  },
+  {
+   "id": "match-data--translate/0013",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (match-data--translate (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument fixnump (1 2 3)))"
+  },
+  {
+   "id": "match-data--translate/0014",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (match-data--translate (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument fixnump (a (b))))"
+  },
+  {
+   "id": "match-data--translate/0015",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (match-data--translate (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument fixnump (1 . 2)))"
+  },
+  {
+   "id": "match-data--translate/0016",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (match-data--translate (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument fixnump (1 2 . 3)))"
+  },
+  {
+   "id": "match-data--translate/0017",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (match-data--translate (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument fixnump [1 2]))"
+  },
+  {
+   "id": "match-data--translate/0018",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (match-data--translate (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument fixnump (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "match-data--translate/0019",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'match-data--translate '())) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr match-data--translate> 0))"
+  },
+  {
+   "id": "match-data--translate/0020",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'match-data--translate '(1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr match-data--translate> 2))"
+  },
+  {
+   "id": "match-data--translate/0021",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (match-data--translate a0))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument fixnump nil))"
+  },
+  {
+   "id": "match-data--translate/0022",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil)) (let ((r (match-data--translate a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument fixnump nil))"
+  },
+  {
+   "id": "match-data--translate/0023",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1)) (let ((r (match-data--translate a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "match-data--translate/0024",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-positive-fixnum)) (let ((r (match-data--translate a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "match-data--translate/0025",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :kw)) (let ((r (match-data--translate a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument fixnump :kw))"
+  },
+  {
+   "id": "match-data--translate/0026",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\"))) (let ((r (match-data--translate a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument fixnump \"λx\"))"
+  },
+  {
+   "id": "match-data--translate/0027",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 2))) (let ((r (match-data--translate a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument fixnump (1 . 2)))"
+  },
+  {
+   "id": "match-data--translate/0028",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (match-data--translate a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument fixnump (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "match-data--translate/0029",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set-match-data '(0 1)) (let ((i 0)) (while (< i 5) (match-data--translate 2305843009213693951) (setq i (1+ i)))) (match-data t))) (error (list 'sig e))))",
+   "expected": "(ok (0 0))"
+  },
+  {
+   "id": "match-data--translate/0030",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set-match-data '(1 3 nil nil 4 8)) (list (match-data--translate 2) (match-data t)))) (error (list 'sig e))))",
+   "expected": "(ok (nil (3 5 nil nil 6 10)))"
+  },
+  {
+   "id": "match-data--translate/0031",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set-match-data '(1 3 nil nil 4 8)) (match-data--translate -5) (match-data t))) (error (list 'sig e))))",
+   "expected": "(ok (0 0 nil nil 0 3))"
+  },
+  {
+   "id": "match-data--translate/0032",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set-match-data '(2 -1)) (match-data--translate 2) (match-data t))) (error (list 'sig e))))",
+   "expected": "(ok (4 1))"
+  },
+  {
+   "id": "match-data--translate/0033",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (string-match \"é\\\\(λ\\\\)\" \"xéλ\") (match-data--translate 3) (match-data t))) (error (list 'sig e))))",
+   "expected": "(ok (4 6 5 6))"
+  },
+  {
+   "id": "match-data--translate/0034",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set-match-data nil) (list (match-data--translate 4) (match-data t)))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "match-data--translate/0035",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set-match-data '(3 5)) (funcall #'match-data--translate 0) (match-data t))) (error (list 'sig e))))",
+   "expected": "(ok (3 5))"
+  },
+  {
+   "id": "match-data--translate/0036",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set-match-data '(2 4)) (list (condition-case e (match-data--translate nil) (error e)) (match-data t)))) (error (list 'sig e))))",
+   "expected": "(ok ((wrong-type-argument fixnump nil) (2 4)))"
+  },
+  {
+   "id": "match-data--translate/0037",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (erase-buffer) (insert \"aéλz\") (goto-char 2) (looking-at \"éλ\") (let ((saved (match-data))) (match-data--translate 1) (list (match-beginning 0) (match-end 0) (eq (car (cdr (cdr (match-data t)))) (current-buffer)) (marker-position (car saved)))))) (error (list 'sig e))))",
+   "expected": "(ok (3 5 t 2))"
+  },
+  {
+   "id": "match-data--translate/0038",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (erase-buffer) (set-buffer-multibyte nil) (insert \"abcd\") (goto-char 1) (looking-at \"ab\") (match-data--translate 1) (list (match-beginning 0) (match-end 0) (eq (car (cdr (cdr (match-data t)))) (current-buffer))))) (error (list 'sig e))))",
+   "expected": "(ok (2 4 t))"
+  },
+  {
+   "id": "match-data--translate/0039",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (fboundp 'match-data--translate) (functionp #'match-data--translate) (funcall #'match-data--translate 2))) (error (list 'sig e))))",
+   "expected": "(ok (t t nil))"
+  },
+  {
+   "id": "match-data--translate/0040",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set-match-data '(0 1)) (let ((inhibit-changing-match-data t)) (match-data--translate 3)) (match-data t))) (error (list 'sig e))))",
+   "expected": "(ok (3 4))"
+  },
+  {
+   "id": "match-data--translate/0041",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((x (list 1 2))) (setcdr (cdr x) x) (condition-case e (match-data--translate x) (error (list (car e) (car (cdr e)) (eq (car (cdr (cdr e))) x) (car x) (car (cdr x)) (eq (cdr (cdr x)) x) (cdr (cdr (cdr e)))))))) (error (list 'sig e))))",
+   "expected": "(ok (wrong-type-argument fixnump t 1 2 t nil))"
+  },
+  {
+   "id": "match-data--translate/0042",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set-match-data '(1 3 nil nil 4 8)) (match-data--translate 2) (match-data--translate -3) (match-data t))) (error (list 'sig e))))",
+   "expected": "(ok (0 2 nil nil 3 7))"
+  },
+  {
+   "id": "match-data--translate/0043",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set-match-data '(0 1)) (match-data--translate 2305843009213693951) (match-data--translate 1) (match-data t))) (error (list 'sig e))))",
+   "expected": "(ok (-2305843009213693952 -2305843009213693951))"
+  },
+  {
+   "id": "match-data--translate/0044",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set-match-data '(0 1)) (match-data--translate 2305843009213693951) (match-data--translate 1) (list (match-beginning 0) (match-end 0)))) (error (list 'sig e))))",
+   "expected": "(ok (-2305843009213693952 -2305843009213693951))"
+  },
+  {
+   "id": "match-data--translate/0045",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (erase-buffer) (insert \"abc\") (goto-char 1) (looking-at \"ab\") (match-data--translate 10) (list (marker-position (car (match-data))) (marker-position (car (cdr (match-data))))))) (error (list 'sig e))))",
+   "expected": "(ok (4 4))"
+  },
+  {
+   "id": "match-data--translate/0046",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set-match-data '(2 -7)) (match-data--translate 1) (match-data t))) (error (list 'sig e))))",
+   "expected": "(ok (3 0))"
+  },
+  {
+   "id": "match-data--translate/0047",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (string-match \"a\" \"ab\") (string-match \"z\" \"ab\") (match-data--translate 1) (match-data t))) (error (list 'sig e))))",
+   "expected": "(ok (1 2))"
+  },
+  {
+   "id": "match-data--translate/0048",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 'sym) (error (list 'sig e))))",
+   "expected": "(ok sym)"
+  },
+  {
+   "id": "match-data--translate/0049",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (cons 1 (cons 2 3))) (error (list 'sig e))))",
+   "expected": "(ok (1 2 . 3))"
+  },
+  {
+   "id": "match-data--translate/0050",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (cons 1 2)) (error (list 'sig e))))",
+   "expected": "(ok (1 . 2))"
+  },
+  {
+   "id": "match-data--translate/0051",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"\")) (error (list 'sig e))))",
+   "expected": "(ok \"\")"
+  },
+  {
+   "id": "match-data--translate/0052",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"abc\")) (error (list 'sig e))))",
+   "expected": "(ok \"abc\")"
+  },
+  {
+   "id": "match-data--translate/0053",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"λx\")) (error (list 'sig e))))",
+   "expected": "(ok \"λx\")"
+  },
+  {
+   "id": "match-data--translate/0054",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (error (list 'sig e))))",
+   "expected": "(ok (1 2 1 2 . #2))"
+  },
+  {
+   "id": "match-data--translate/0055",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list 'a (list 'b))) (error (list 'sig e))))",
+   "expected": "(ok (a (b)))"
+  },
+  {
+   "id": "match-data--translate/0056",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list 1 2 3)) (error (list 'sig e))))",
+   "expected": "(ok (1 2 3))"
+  },
+  {
+   "id": "match-data--translate/0057",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vector 1 2)) (error (list 'sig e))))",
+   "expected": "(ok [1 2])"
+  },
+  {
+   "id": "match-data--translate/0058",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok -1) (error (list 'sig e))))",
+   "expected": "(ok -1)"
+  },
+  {
+   "id": "match-data--translate/0059",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 0) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "match-data--translate/0060",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1) (error (list 'sig e))))",
+   "expected": "(ok 1)"
+  },
+  {
+   "id": "match-data--translate/0061",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1.5) (error (list 'sig e))))",
+   "expected": "(ok 1.5)"
+  },
+  {
+   "id": "match-data--translate/0062",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 2) (error (list 'sig e))))",
+   "expected": "(ok 2)"
+  },
+  {
+   "id": "match-data--translate/0063",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok :kw) (error (list 'sig e))))",
+   "expected": "(ok :kw)"
+  },
+  {
+   "id": "match-data--translate/0064",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok most-positive-fixnum) (error (list 'sig e))))",
+   "expected": "(ok 2305843009213693951)"
+  },
+  {
+   "id": "match-data--translate/0065",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok nil) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "match-data--translate/0066",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok t) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  }
+ ]
+}

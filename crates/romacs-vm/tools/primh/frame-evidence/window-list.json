@@ -1,0 +1,218 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "window-list",
+ "spec_sha256": "055c35ba489cc8a785b00bec88696d1f83e0c6016a7806ce4898ddcf4bb129db",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "window-list",
+    "subr",
+    0,
+    3
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "window.c": "9bbd2274831c6cee89f1aff0464e0b2695f966d00ff7d1518dc9411cf64b64d8"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "window-list/0000",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (window-list nil nil nil)) (error (list 'sig e))))",
+   "expected": "(ok (#<window 1 on *scratch*>))"
+  },
+  {
+   "id": "window-list/0001",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (window-list nil nil 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument windowp 1))"
+  },
+  {
+   "id": "window-list/0002",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (window-list nil t nil)) (error (list 'sig e))))",
+   "expected": "(ok (#<window 1 on *scratch*> #<window 2 on  *Minibuf-0*>))"
+  },
+  {
+   "id": "window-list/0003",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (window-list nil t 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument windowp 1))"
+  },
+  {
+   "id": "window-list/0004",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (window-list 1 nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (error \"Window is on a different frame\"))"
+  },
+  {
+   "id": "window-list/0005",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (window-list 1 nil 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument windowp 1))"
+  },
+  {
+   "id": "window-list/0006",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (window-list 1 t nil)) (error (list 'sig e))))",
+   "expected": "(sig (error \"Window is on a different frame\"))"
+  },
+  {
+   "id": "window-list/0007",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (window-list 1 t 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument windowp 1))"
+  },
+  {
+   "id": "window-list/0008",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (window-list 'symbol nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (error \"Window is on a different frame\"))"
+  },
+  {
+   "id": "window-list/0009",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (window-list 'symbol nil 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument windowp 1))"
+  },
+  {
+   "id": "window-list/0010",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (window-list 'symbol t nil)) (error (list 'sig e))))",
+   "expected": "(sig (error \"Window is on a different frame\"))"
+  },
+  {
+   "id": "window-list/0011",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (window-list 'symbol t 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument windowp 1))"
+  },
+  {
+   "id": "window-list/0012",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'window-list '(1 1 1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr window-list> 4))"
+  },
+  {
+   "id": "window-list/0013",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 nil) (a2 nil)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (window-list a0 a1 a2))) (error (list 'sig e))))",
+   "expected": "(ok (#<window 1 on *scratch*>))"
+  },
+  {
+   "id": "window-list/0014",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 nil) (a2 nil)) (let ((r (window-list a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil nil))"
+  },
+  {
+   "id": "window-list/0015",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 t) (a2 1)) (let ((r (window-list a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument windowp 1))"
+  },
+  {
+   "id": "window-list/0016",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 t) (a2 nil)) (let ((r (window-list a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (error \"Window is on a different frame\"))"
+  },
+  {
+   "id": "window-list/0017",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'symbol) (a1 nil) (a2 1)) (let ((r (window-list a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument windowp 1))"
+  },
+  {
+   "id": "window-list/0018",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (fboundp 'window-list)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "window-list/0019",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (equal (window-list) (list (selected-window)))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "window-list/0020",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (equal (window-list nil t) (list (selected-window) (minibuffer-window)))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "window-list/0021",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (equal (window-list nil 'never) (list (selected-window)))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "window-list/0022",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (equal (window-list nil t (minibuffer-window)) (list (minibuffer-window) (selected-window)))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "window-list/0023",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eq (window-list) (window-list))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "window-list/0024",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (equal (funcall #'window-list) (window-list))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "window-list/0025",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (list (equal (window-list) (list a b)) (equal (window-list nil nil b) (list b a)) (equal (window-list nil t b) (list b (minibuffer-window) a))))) (error (list 'sig e))))",
+   "expected": "(ok (t t t))",
+   "gnu_regime_variant": "(ok (nil nil nil))"
+  },
+  {
+   "id": "window-list/0026",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (condition-case e (window-list nil nil p) (error (list (car e) (car (cdr e)) (eq (car (cdr (cdr e))) p)))))) (error (list 'sig e))))",
+   "expected": "(ok (wrong-type-argument window-live-p t))"
+  },
+  {
+   "id": "window-list/0027",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 'symbol) (error (list 'sig e))))",
+   "expected": "(ok symbol)"
+  },
+  {
+   "id": "window-list/0028",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1) (error (list 'sig e))))",
+   "expected": "(ok 1)"
+  },
+  {
+   "id": "window-list/0029",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok nil) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "window-list/0030",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok t) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  }
+ ]
+}

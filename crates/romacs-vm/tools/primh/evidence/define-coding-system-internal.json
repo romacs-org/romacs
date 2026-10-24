@@ -1,0 +1,423 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "define-coding-system-internal",
+ "spec_sha256": "1708513650060da13f5948c6ceedfef26115415d05a535851ca60c0457a65cce",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "define-coding-system-internal",
+    "subr",
+    13,
+    "many"
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "coding.c": "3d4158a37d3ae5fe370a6abf49c3d4754fc84efcc2b81543371693065fbbd2cb"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "define-coding-system-internal/0000",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'define-coding-system-internal '(1 1 1 1 1 1 1 1 1 1 1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr define-coding-system-internal> 12))"
+  },
+  {
+   "id": "define-coding-system-internal/0001",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-coding-system-internal)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr define-coding-system-internal> 0))",
+   "gnu_regime_variant": "(sig (wrong-number-of-arguments define-coding-system-internal 0))"
+  },
+  {
+   "id": "define-coding-system-internal/0002",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-coding-system-internal 'oracle-cod)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr define-coding-system-internal> 1))",
+   "gnu_regime_variant": "(sig (wrong-number-of-arguments define-coding-system-internal 1))"
+  },
+  {
+   "id": "define-coding-system-internal/0003",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-coding-system-internal 'oracle-cod 67 'raw-text nil t nil nil nil nil nil nil '(:probe 7) nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "define-coding-system-internal/0004",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (define-coding-system-internal 'oracle-cod 67 'raw-text nil t nil nil nil nil nil nil '(:probe 7) nil) (list (coding-system-base 'oracle-cod-mac) (coding-system-plist 'oracle-cod) (coding-system-eol-type 'oracle-cod) (coding-system-aliases 'oracle-cod)))) (error (list 'sig e))))",
+   "expected": "(ok (oracle-cod (:ascii-compatible-p t :category coding-category-raw-text :probe 7) [oracle-cod-unix oracle-cod-dos oracle-cod-mac] (oracle-cod)))"
+  },
+  {
+   "id": "define-coding-system-internal/0005",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-coding-system-internal 17 67 'raw-text nil t nil nil nil nil nil nil '(:probe 7) nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 17))"
+  },
+  {
+   "id": "define-coding-system-internal/0006",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-coding-system-internal 'oracle-cod -1 'raw-text nil t nil nil nil nil nil nil '(:probe 7) nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument characterp -1))"
+  },
+  {
+   "id": "define-coding-system-internal/0007",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-coding-system-internal 'oracle-cod 4194304 'raw-text nil t nil nil nil nil nil nil '(:probe 7) nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument characterp 4194304))"
+  },
+  {
+   "id": "define-coding-system-internal/0008",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-coding-system-internal 'oracle-cod nil 'raw-text nil t nil nil nil nil nil nil '(:probe 7) nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument characterp nil))"
+  },
+  {
+   "id": "define-coding-system-internal/0009",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-coding-system-internal 'oracle-cod \"many\" 'raw-text nil t nil nil nil nil nil nil '(:probe 7) nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "define-coding-system-internal/0010",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-coding-system-internal 'oracle-cod 67 17 nil t nil nil nil nil nil nil '(:probe 7) nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 17))"
+  },
+  {
+   "id": "define-coding-system-internal/0011",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-coding-system-internal 'oracle-cod 67 'unknown nil t nil nil nil nil nil nil '(:probe 7) nil)) (error (list 'sig e))))",
+   "expected": "(sig (error \"Invalid coding system type: unknown\"))"
+  },
+  {
+   "id": "define-coding-system-internal/0012",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-coding-system-internal 'oracle-cod 67 'raw-text 17 t nil nil nil nil nil nil '(:probe 7) nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 17))"
+  },
+  {
+   "id": "define-coding-system-internal/0013",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-coding-system-internal 'oracle-cod 67 'raw-text '(oracle-missing) t nil nil nil nil nil nil '(:probe 7) nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument charsetp oracle-missing))"
+  },
+  {
+   "id": "define-coding-system-internal/0014",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-coding-system-internal 'oracle-cod 67 'raw-text 'iso-2022 t nil nil nil nil nil nil '(:probe 7) nil)) (error (list 'sig e))))",
+   "expected": "(sig (error \"Invalid charset-list\"))"
+  },
+  {
+   "id": "define-coding-system-internal/0015",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-coding-system-internal 'oracle-cod 67 'raw-text nil t 17 nil nil nil nil nil '(:probe 7) nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 17))"
+  },
+  {
+   "id": "define-coding-system-internal/0016",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-coding-system-internal 'oracle-cod 67 'raw-text nil t nil 17 nil nil nil nil '(:probe 7) nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 17))"
+  },
+  {
+   "id": "define-coding-system-internal/0017",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-coding-system-internal 'oracle-cod 67 'raw-text nil t nil nil 17 nil nil nil '(:probe 7) nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 17))"
+  },
+  {
+   "id": "define-coding-system-internal/0018",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-coding-system-internal 'oracle-cod 67 'raw-text nil t nil nil nil 17 nil nil '(:probe 7) nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 17))"
+  },
+  {
+   "id": "define-coding-system-internal/0019",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-coding-system-internal 'oracle-cod 67 'raw-text nil t nil nil nil nil -1 nil '(:probe 7) nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument characterp -1))"
+  },
+  {
+   "id": "define-coding-system-internal/0020",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-coding-system-internal 'oracle-cod 67 'raw-text nil t nil nil nil nil 4194304 nil '(:probe 7) nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument characterp 4194304))"
+  },
+  {
+   "id": "define-coding-system-internal/0021",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-coding-system-internal 'oracle-cod 67 'raw-text nil t nil nil nil nil \"a\" nil '(:probe 7) nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument characterp \"a\"))"
+  },
+  {
+   "id": "define-coding-system-internal/0022",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-coding-system-internal 'oracle-cod 67 'raw-text nil t nil nil nil nil nil nil 17 nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 17))"
+  },
+  {
+   "id": "define-coding-system-internal/0023",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-coding-system-internal 'oracle-cod 67 'raw-text nil t nil nil nil nil nil nil '(odd) nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "define-coding-system-internal/0024",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-coding-system-internal 'oracle-cod 67 'raw-text nil t nil nil nil nil nil nil '(:x 1 . tail) nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "define-coding-system-internal/0025",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-coding-system-internal 'oracle-cod 67 'raw-text nil t nil nil nil nil nil nil '(:probe 7) 17)) (error (list 'sig e))))",
+   "expected": "(sig (error \"Invalid eol-type\"))"
+  },
+  {
+   "id": "define-coding-system-internal/0026",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-coding-system-internal 'oracle-cod 67 'raw-text nil t nil nil nil nil nil nil '(:probe 7) 'wrong)) (error (list 'sig e))))",
+   "expected": "(sig (error \"Invalid eol-type\"))"
+  },
+  {
+   "id": "define-coding-system-internal/0027",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (define-coding-system-internal 'oracle-cod 67 'charset nil t nil nil nil nil nil nil '(:probe 7) nil) (list (coding-system-plist 'oracle-cod) (coding-system-eol-type 'oracle-cod)))) (error (list 'sig e))))",
+   "expected": "(ok ((:ascii-compatible-p t :category coding-category-charset :probe 7) [oracle-cod-unix oracle-cod-dos oracle-cod-mac]))"
+  },
+  {
+   "id": "define-coding-system-internal/0028",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (define-coding-system-internal 'oracle-cod 67 'emacs-mule nil t nil nil nil nil nil nil '(:probe 7) nil) (list (coding-system-plist 'oracle-cod) (coding-system-eol-type 'oracle-cod)))) (error (list 'sig e))))",
+   "expected": "(ok ((:ascii-compatible-p t :category coding-category-emacs-mule :probe 7) [oracle-cod-unix oracle-cod-dos oracle-cod-mac]))"
+  },
+  {
+   "id": "define-coding-system-internal/0029",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (define-coding-system-internal 'oracle-cod 67 'undecided nil t nil nil nil nil nil nil '(:probe 7) nil 0 0 nil) (list (coding-system-plist 'oracle-cod) (coding-system-eol-type 'oracle-cod)))) (error (list 'sig e))))",
+   "expected": "(ok ((:ascii-compatible-p t :category coding-category-undecided :probe 7) [oracle-cod-unix oracle-cod-dos oracle-cod-mac]))"
+  },
+  {
+   "id": "define-coding-system-internal/0030",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (define-coding-system-internal 'oracle-cod 67 'utf-8 nil t nil nil nil nil nil nil '(:probe 7) nil nil) (list (coding-system-plist 'oracle-cod) (coding-system-eol-type 'oracle-cod)))) (error (list 'sig e))))",
+   "expected": "(ok ((:ascii-compatible-p t :category coding-category-utf-8 :probe 7) [oracle-cod-unix oracle-cod-dos oracle-cod-mac]))"
+  },
+  {
+   "id": "define-coding-system-internal/0031",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (define-coding-system-internal 'oracle-cod 67 'utf-8 nil t nil nil nil nil nil nil '(:probe 7) nil t) (list (coding-system-plist 'oracle-cod) (coding-system-eol-type 'oracle-cod)))) (error (list 'sig e))))",
+   "expected": "(ok ((:ascii-compatible-p t :category coding-category-utf-8-sig :probe 7) [oracle-cod-unix oracle-cod-dos oracle-cod-mac]))"
+  },
+  {
+   "id": "define-coding-system-internal/0032",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (define-coding-system-internal 'oracle-cod 67 'utf-8 nil t nil nil nil nil nil nil '(:probe 7) nil '(no-conversion . no-conversion)) (list (coding-system-plist 'oracle-cod) (coding-system-eol-type 'oracle-cod)))) (error (list 'sig e))))",
+   "expected": "(ok ((:ascii-compatible-p t :category coding-category-utf-8-auto :probe 7) [oracle-cod-unix oracle-cod-dos oracle-cod-mac]))"
+  },
+  {
+   "id": "define-coding-system-internal/0033",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (define-coding-system-internal 'oracle-cod 67 'utf-16 nil t nil nil nil nil nil nil '(:probe 7) nil nil 'little) (list (coding-system-plist 'oracle-cod) (coding-system-eol-type 'oracle-cod)))) (error (list 'sig e))))",
+   "expected": "(ok ((:ascii-compatible-p nil :category coding-category-utf-16-le-nosig :probe 7) [oracle-cod-unix oracle-cod-dos oracle-cod-mac]))"
+  },
+  {
+   "id": "define-coding-system-internal/0034",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (define-coding-system-internal 'oracle-cod 67 'utf-16 nil t nil nil nil nil nil nil '(:probe 7) nil t 'big) (list (coding-system-plist 'oracle-cod) (coding-system-eol-type 'oracle-cod)))) (error (list 'sig e))))",
+   "expected": "(ok ((:ascii-compatible-p nil :category coding-category-utf-16-be :probe 7) [oracle-cod-unix oracle-cod-dos oracle-cod-mac]))"
+  },
+  {
+   "id": "define-coding-system-internal/0035",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (define-coding-system-internal 'oracle-cod 67 'iso-2022 nil t nil nil nil nil nil nil '(:probe 7) nil [nil nil nil nil] '(0 . 0) nil 0) (list (coding-system-plist 'oracle-cod) (coding-system-eol-type 'oracle-cod)))) (error (list 'sig e))))",
+   "expected": "(ok ((:ascii-compatible-p nil :category coding-category-iso-8-else :probe 7) [oracle-cod-unix oracle-cod-dos oracle-cod-mac]))"
+  },
+  {
+   "id": "define-coding-system-internal/0036",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (define-coding-system-internal 'oracle-cod 67 'ccl nil t nil nil nil nil nil nil '(:probe 7) nil [1 2 0] [1 2 0] '(0 (32 . 127) 255)) (list (coding-system-plist 'oracle-cod) (coding-system-eol-type 'oracle-cod)))) (error (list 'sig e))))",
+   "expected": "(ok ((:ascii-compatible-p t :category coding-category-ccl :probe 7) [oracle-cod-unix oracle-cod-dos oracle-cod-mac]))"
+  },
+  {
+   "id": "define-coding-system-internal/0037",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-coding-system-internal 'oracle-cod 67 'undecided nil t nil nil nil nil nil nil '(:probe 7) nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments define-coding-system-internal . 13))"
+  },
+  {
+   "id": "define-coding-system-internal/0038",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-coding-system-internal 'oracle-cod 67 'utf-8 nil t nil nil nil nil nil nil '(:probe 7) nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments define-coding-system-internal . 13))"
+  },
+  {
+   "id": "define-coding-system-internal/0039",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-coding-system-internal 'oracle-cod 67 'utf-8 nil t nil nil nil nil nil nil '(:probe 7) nil 17)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument consp 17))"
+  },
+  {
+   "id": "define-coding-system-internal/0040",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-coding-system-internal 'oracle-cod 67 'utf-8 nil t nil nil nil nil nil nil '(:probe 7) nil '(nil . no-conversion))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument coding-system-p nil))"
+  },
+  {
+   "id": "define-coding-system-internal/0041",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-coding-system-internal 'oracle-cod 67 'utf-8 nil t nil nil nil nil nil nil '(:probe 7) nil '(oracle-missing . no-conversion))) (error (list 'sig e))))",
+   "expected": "(sig (coding-system-error oracle-missing))"
+  },
+  {
+   "id": "define-coding-system-internal/0042",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-coding-system-internal 'oracle-cod 67 'utf-16 nil t nil nil nil nil nil nil '(:probe 7) nil nil 'wrong)) (error (list 'sig e))))",
+   "expected": "(sig (error \"Invalid endian: wrong\"))"
+  },
+  {
+   "id": "define-coding-system-internal/0043",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-coding-system-internal 'oracle-cod 67 'utf-16 nil t nil nil nil nil nil nil '(:probe 7) nil nil 17)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 17))"
+  },
+  {
+   "id": "define-coding-system-internal/0044",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-coding-system-internal 'oracle-cod 67 'shift-jis nil t nil nil nil nil nil nil '(:probe 7) nil)) (error (list 'sig e))))",
+   "expected": "(sig (error \"There should be three or four charsets\"))"
+  },
+  {
+   "id": "define-coding-system-internal/0045",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-coding-system-internal 'oracle-cod 67 'big5 nil t nil nil nil nil nil nil '(:probe 7) nil)) (error (list 'sig e))))",
+   "expected": "(sig (error \"There should be just two charsets\"))"
+  },
+  {
+   "id": "define-coding-system-internal/0046",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-coding-system-internal 'oracle-cod 67 'iso-2022 nil t nil nil nil nil nil nil '(:probe 7) nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments define-coding-system-internal . 13))"
+  },
+  {
+   "id": "define-coding-system-internal/0047",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-coding-system-internal 'oracle-cod 67 'iso-2022 nil t nil nil nil nil nil nil '(:probe 7) nil 17 '(0 . 0) nil 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 17))"
+  },
+  {
+   "id": "define-coding-system-internal/0048",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-coding-system-internal 'oracle-cod 67 'iso-2022 nil t nil nil nil nil nil nil '(:probe 7) nil [nil nil nil nil] '(0 . 0) nil -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument wholenump -1))"
+  },
+  {
+   "id": "define-coding-system-internal/0049",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-coding-system-internal 'oracle-cod 67 'ccl nil t nil nil nil nil nil nil '(:probe 7) nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument cclp nil))"
+  },
+  {
+   "id": "define-coding-system-internal/0050",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-coding-system-internal 'oracle-cod 67 'ccl nil t nil nil nil nil nil nil '(:probe 7) nil [1 2 0] [1 2 0] '(256))) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range 256 0 255))"
+  },
+  {
+   "id": "define-coding-system-internal/0051",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (define-coding-system-internal 'oracle-cod 67 'raw-text nil t nil nil nil nil nil nil '(:probe 7) nil) (define-coding-system-alias 'oracle-a 'oracle-cod) (define-coding-system-internal 'oracle-cod 67 'raw-text nil t nil nil nil nil nil nil '(:replacement t) 'dos) (list (coding-system-plist 'oracle-cod) (coding-system-plist 'oracle-a) (coding-system-eol-type 'oracle-cod) (coding-system-eol-type 'oracle-a) (coding-system-base 'oracle-cod-unix)))) (error (list 'sig e))))",
+   "expected": "(ok ((:ascii-compatible-p t :category coding-category-raw-text :replacement t) (:ascii-compatible-p t :category coding-category-raw-text :probe 7) 1 [oracle-cod-unix oracle-cod-dos oracle-cod-mac] oracle-cod))"
+  },
+  {
+   "id": "define-coding-system-internal/0052",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((p (list :payload (copy-sequence \"kept\")))) (define-coding-system-internal 'oracle-cod 67 'raw-text nil t nil nil nil nil nil nil p nil) (setq p nil) (garbage-collect) (list (coding-system-plist 'oracle-cod) (coding-system-plist 'oracle-cod-dos)))) (error (list 'sig e))))",
+   "expected": "(ok ((:ascii-compatible-p t :category coding-category-raw-text :payload \"kept\") (:ascii-compatible-p t :category coding-category-raw-text :payload \"kept\")))"
+  },
+  {
+   "id": "define-coding-system-internal/0053",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (define-coding-system-internal 'oracle-seq 80 'raw-text [] t nil nil nil nil 0 nil nil 'unix) (list (coding-system-p 'oracle-seq) (coding-system-base 'oracle-seq) (coding-system-eol-type 'oracle-seq)))) (error (list 'sig e))))",
+   "expected": "(ok (t oracle-seq 0))"
+  },
+  {
+   "id": "define-coding-system-internal/0054",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (define-coding-system-internal 'oracle-seq 80 'raw-text [ascii] t nil nil nil nil 0 nil nil 'unix) (list (coding-system-p 'oracle-seq) (coding-system-base 'oracle-seq) (coding-system-eol-type 'oracle-seq)))) (error (list 'sig e))))",
+   "expected": "(ok (t oracle-seq 0))"
+  },
+  {
+   "id": "define-coding-system-internal/0055",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (define-coding-system-internal 'oracle-seq 80 'raw-text \"ascii\" t nil nil nil nil 0 nil nil 'unix) (list (coding-system-p 'oracle-seq) (coding-system-base 'oracle-seq) (coding-system-eol-type 'oracle-seq)))) (error (list 'sig e))))",
+   "expected": "(ok (t oracle-seq 0))"
+  },
+  {
+   "id": "define-coding-system-internal/0056",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-coding-system-internal 'oracle-iso 80 'iso-2022 nil nil nil nil nil nil nil nil nil 'unix [ascii nil nil nil nil] '(0 . 0) nil 0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "define-coding-system-internal/0057",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-coding-system-internal 'oracle-iso 80 'iso-2022 nil nil nil nil nil nil nil nil nil 'unix nil '(0 . 0) nil 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp nil))"
+  },
+  {
+   "id": "define-coding-system-internal/0058",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-coding-system-internal 'oracle-iso 80 'iso-2022 nil nil nil nil nil nil nil nil nil 'unix 17 '(0 . 0) nil 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 17))"
+  },
+  {
+   "id": "define-coding-system-internal/0059",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-coding-system-internal 'oracle-iso 80 'iso-2022 nil nil nil nil nil nil nil nil nil 'unix [nil nil nil nil] '(0 . 0) [] 0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "define-coding-system-internal/0060",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-coding-system-internal 'oracle-iso 80 'iso-2022 nil nil nil nil nil nil nil nil nil 'unix [nil nil nil nil] '(0 . 0) \"ignored\" 0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "define-coding-system-internal/0061",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (define-coding-system-internal nil 78 'raw-text nil t nil nil nil nil 0 nil nil 'unix) (define-coding-system-internal 'oracle-nil-bom 78 'utf-8 nil t nil nil nil nil 0 nil nil 'unix '(nil . nil)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "define-coding-system-internal/0062",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (define-coding-system-internal nil 78 'raw-text nil t nil nil nil nil 0 nil nil 'unix) (define-coding-system-internal 'oracle-nil-bom 78 'utf-16 nil t nil nil nil nil 0 nil nil 'unix '(nil . nil) 'big))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "define-coding-system-internal/0063",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (coding-system-p 'no-conversion) (setq coding-system-alist 5) (condition-case e (define-coding-system-internal 'oracle-alist 78 'raw-text nil t nil nil nil nil 0 nil nil 'unix) (error (list e (coding-system-p 'oracle-alist) (car coding-system-list)))))) (error (list 'sig e))))",
+   "expected": "(ok ((wrong-type-argument listp 5) t oracle-alist))"
+  },
+  {
+   "id": "define-coding-system-internal/0064",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (coding-system-p 'no-conversion) (setq coding-system-alist '(5 . broken)) (define-coding-system-internal 'oracle-alist 78 'raw-text nil t nil nil nil nil 0 nil nil 'unix))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (5 . broken)))"
+  }
+ ]
+}

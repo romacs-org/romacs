@@ -1,0 +1,47 @@
+{
+ "name": "next-window",
+ "arity": [
+  0,
+  3
+ ],
+ "effect": "reads",
+ "gnu_files": [
+  "window.c"
+ ],
+ "gnu_def": "window.c:2941",
+ "rust": "src/prims/window.rs:104",
+ "args": [
+  "none",
+  "none",
+  "none"
+ ],
+ "extra": {
+  "0": [
+   "1",
+   "'sym",
+   "(copy-sequence \"s\")"
+  ],
+  "1": [
+   "nil"
+  ],
+  "2": [
+   "nil"
+  ]
+ },
+ "probes": [
+  "(eq (next-window) (selected-window))",
+  "(eq (next-window nil t) (minibuffer-window))",
+  "(eq (next-window (minibuffer-window)) (selected-window))",
+  "(eq (next-window (minibuffer-window) t) (selected-window))",
+  "(let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (let (r) (dolist (w (list (next-window a) (next-window b) (next-window) (next-window b t) (next-window b 'lambda) (next-window (minibuffer-window)) (next-window (minibuffer-window) t))) (push (funcall (lambda (w) (cond ((eq w a) 'a) ((eq w b) 'b) ((eq w p) 'p) ((eq w (minibuffer-window)) 'm) ((windowp w) 'other) (t w))) w) r)) (nreverse r)))",
+  "(let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (let (r) (dolist (w (list (next-window a nil t) (next-window b nil 'visible) (next-window b nil 0) (next-window b nil (selected-frame)) (next-window b nil 'other) (next-window b t t))) (push (funcall (lambda (w) (cond ((eq w a) 'a) ((eq w b) 'b) ((eq w p) 'p) ((eq w (minibuffer-window)) 'm) ((windowp w) 'other) (t w))) w) r)) (nreverse r)))",
+  "(let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (let (r) (dolist (w (list (next-window a nil a) (next-window b nil b) (next-window b nil (minibuffer-window)) (next-window b t (minibuffer-window)) (next-window a 'lambda (minibuffer-window)))) (push (funcall (lambda (w) (cond ((eq w a) 'a) ((eq w b) 'b) ((eq w p) 'p) ((eq w (minibuffer-window)) 'm) ((windowp w) 'other) (t w))) w) r)) (nreverse r)))",
+  "(let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (let* ((c (progn (set-window-new-pixel b (- (window-pixel-width b) (/ (window-pixel-width b) 2))) (split-window-internal b (/ (window-pixel-width b) 2) t 0.5)))) (let (r) (dolist (w (list (next-window a) (next-window b) (next-window c) (next-window c t) (next-window (minibuffer-window) t))) (push (funcall (lambda (w) (cond ((eq w a) 'a) ((eq w b) 'b) ((eq w c) 'c) ((eq w (minibuffer-window)) 'm) (t w))) w) r)) (nreverse r))))",
+  "(let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (let* ((c (progn (set-window-new-pixel a (- (window-pixel-height a) (/ (window-pixel-height a) 2))) (split-window-internal a (/ (window-pixel-height a) 2) 'above 0.5)))) (let (r) (dolist (w (list (next-window c) (next-window a) (next-window b))) (push (funcall (lambda (w) (cond ((eq w a) 'a) ((eq w b) 'b) ((eq w c) 'c) ((eq w (minibuffer-window)) 'm) (t w))) w) r)) (nreverse r))))",
+  "(let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (condition-case e (next-window p) (error (list (car e) (car (cdr e)) (eq (car (cdr (cdr e))) p)))))",
+  "(let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (progn (set-window-new-pixel p h) (set-window-new-pixel a h) (delete-window-internal b) (condition-case e (next-window b) (error (list (car e) (car (cdr e)) (eq (car (cdr (cdr e))) b))))))",
+  "(let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (progn (set-window-new-pixel p h) (set-window-new-pixel a h) (delete-window-internal b) (let (r) (dolist (w (list (next-window a) (next-window a t))) (push (funcall (lambda (w) (cond ((eq w a) 'a) ((eq w b) 'b) ((eq w p) 'p) ((eq w (minibuffer-window)) 'm) ((windowp w) 'other) (t w))) w) r)) (nreverse r))))",
+  "(condition-case e (next-window (selected-frame)) (error (list (car e) (car (cdr e)) (eq (car (cdr (cdr e))) (selected-frame)))))",
+  "(eq (funcall #'next-window) (selected-window))"
+ ]
+}

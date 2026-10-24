@@ -1,0 +1,312 @@
+{
+ "blob": "28f7740ab32e5c8908f6c380687a8fb294cd5a67",
+ "compiled": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": true,
+  "results": {
+   "deferred-action-complex-tests": {
+    "as_expected": false,
+    "detail": "(ert-test-failed \"Test timed out after 5s\")",
+    "expected": ":passed",
+    "outcome": "failed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "deferred-action-intime": {
+    "as_expected": false,
+    "detail": "(ert-test-failed \"Test timed out after 5s\")",
+    "expected": ":passed",
+    "outcome": "failed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "deferred-action-toolate": {
+    "as_expected": false,
+    "detail": "(ert-test-failed \"Test timed out after 5s\")",
+    "expected": ":passed",
+    "outcome": "failed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "doesnt-time-out": {
+    "as_expected": false,
+    "detail": "(jsonrpc-error \"request id=1 failed:\" (jsonrpc-error-code . -1) (jsonrpc-error-message . \"Server died\") (jsonrpc-error-data))",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "returns-3": {
+    "as_expected": false,
+    "detail": "(jsonrpc-error \"request id=1 failed:\" (jsonrpc-error-code . -1) (jsonrpc-error-message . \"Server died\") (jsonrpc-error-data))",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": []
+   },
+   "scontrol-anxious-nested": {
+    "as_expected": false,
+    "detail": "(jsonrpc-error \"request id=1 failed:\" (jsonrpc-error-code . -1) (jsonrpc-error-message . \"Server died\") (jsonrpc-error-data))",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": []
+   },
+   "scontrol-remote-during-sync-1": {
+    "as_expected": false,
+    "detail": "(jsonrpc-error \"request id=1 failed:\" (jsonrpc-error-code . -1) (jsonrpc-error-message . \"Server died\") (jsonrpc-error-data))",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": []
+   },
+   "scontrol-remote-during-sync-2": {
+    "as_expected": false,
+    "detail": "(jsonrpc-error \"request id=1 failed:\" (jsonrpc-error-code . -1) (jsonrpc-error-message . \"Server died\") (jsonrpc-error-data))",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": []
+   },
+   "scontrol-remote-error": {
+    "as_expected": false,
+    "detail": "(jsonrpc-error \"request id=1 failed:\" (jsonrpc-error-code . -1) (jsonrpc-error-message . \"Server died\") (jsonrpc-error-data))",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": []
+   },
+   "shutdown-clean-after-request": {
+    "as_expected": false,
+    "detail": "(jsonrpc-error \"request id=1 failed:\" (jsonrpc-error-code . -1) (jsonrpc-error-message . \"Server died\") (jsonrpc-error-data))",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": []
+   },
+   "stretching-it-but-works": {
+    "as_expected": false,
+    "detail": "(jsonrpc-error \"request id=1 failed:\" (jsonrpc-error-code . -1) (jsonrpc-error-message . \"Server died\") (jsonrpc-error-data))",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": []
+   },
+   "times-out": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   }
+  },
+  "timed_out": false
+ },
+ "file": "lisp/jsonrpc-tests.el",
+ "gnu": {
+  "emacs": "<recording-path-redacted>/emacs-32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+  "version": "32.0.50"
+ },
+ "harness_sha256": "78c20850429a08af22faadf73b5d164c560230e83d7eb88ef60cb995670703ef",
+ "mini": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": null,
+  "results": {
+   "deferred-action-complex-tests": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "deferred-action-intime": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "deferred-action-toolate": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "doesnt-time-out": {
+    "as_expected": null,
+    "detail": "(jsonrpc-error \"request id=1 failed:\" (jsonrpc-error-message . \"Timed out\"))",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "returns-3": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "scontrol-anxious-nested": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "scontrol-remote-during-sync-1": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "scontrol-remote-during-sync-2": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "scontrol-remote-error": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "shutdown-clean-after-request": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "stretching-it-but-works": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "times-out": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   }
+  },
+  "timed_out": false
+ },
+ "read_error": null,
+ "real": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": true,
+  "results": {
+   "deferred-action-complex-tests": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "deferred-action-intime": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "deferred-action-toolate": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "doesnt-time-out": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "returns-3": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "scontrol-anxious-nested": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "scontrol-remote-during-sync-1": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "scontrol-remote-during-sync-2": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "scontrol-remote-error": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "shutdown-clean-after-request": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "stretching-it-but-works": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "times-out": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   }
+  },
+  "timed_out": false
+ },
+ "schema": 1,
+ "toplevel_deftests": 12
+}

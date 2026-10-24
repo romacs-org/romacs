@@ -1,0 +1,86 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "secure-hash-algorithms",
+ "spec_sha256": "8b8c4915bd3e0432c02c6f661d1fba86007c3841152118ec38ce7c9dde0ca585",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "secure-hash-algorithms",
+    "subr",
+    0,
+    0
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "fns.c": "db81c235d7c63f312128ad84c11d55ae4665a2599099be1229dbaa329afdb3bf"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "secure-hash-algorithms/0000",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (secure-hash-algorithms )) (error (list 'sig e))))",
+   "expected": "(ok (md5 sha1 sha224 sha256 sha384 sha512 sha3-224 sha3-256 sha3-384 sha3-512))"
+  },
+  {
+   "id": "secure-hash-algorithms/0001",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'secure-hash-algorithms '(1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr secure-hash-algorithms> 1))"
+  },
+  {
+   "id": "secure-hash-algorithms/0002",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let () (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (secure-hash-algorithms ))) (error (list 'sig e))))",
+   "expected": "(ok (md5 sha1 sha224 sha256 sha384 sha512 sha3-224 sha3-256 sha3-384 sha3-512))"
+  },
+  {
+   "id": "secure-hash-algorithms/0003",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let () (let ((r (secure-hash-algorithms ))) (list )))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "secure-hash-algorithms/0004",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eq (secure-hash-algorithms) (secure-hash-algorithms))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "secure-hash-algorithms/0005",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (length (secure-hash-algorithms))) (error (list 'sig e))))",
+   "expected": "(ok 10)"
+  },
+  {
+   "id": "secure-hash-algorithms/0006",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((l (secure-hash-algorithms))) (setcar l 'x) (car (secure-hash-algorithms)))) (error (list 'sig e))))",
+   "expected": "(ok md5)"
+  },
+  {
+   "id": "secure-hash-algorithms/0007",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memq 'sha256 (secure-hash-algorithms))) (error (list 'sig e))))",
+   "expected": "(ok (sha256 sha384 sha512 sha3-224 sha3-256 sha3-384 sha3-512))"
+  },
+  {
+   "id": "secure-hash-algorithms/0008",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (funcall #'secure-hash-algorithms)) (error (list 'sig e))))",
+   "expected": "(ok (md5 sha1 sha224 sha256 sha384 sha512 sha3-224 sha3-256 sha3-384 sha3-512))"
+  }
+ ],
+ "pinned": {}
+}

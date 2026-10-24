@@ -1,0 +1,68 @@
+{
+ "name": "integer-or-marker-p",
+ "arity": [
+  1,
+  1
+ ],
+ "effect": "pure",
+ "gnu_files": [
+  "data.c"
+ ],
+ "gnu_def": "data.c:579",
+ "rust": "src/prims/integer_or_marker_p.rs:5",
+ "args": [
+  "data-predicate-curated"
+ ],
+ "extra": {
+  "0": [
+   "nil",
+   "t",
+   "'x",
+   ":key",
+   "0",
+   "1",
+   "-1",
+   "4194303",
+   "4194304",
+   "1152921504606846975",
+   "1152921504606846976",
+   "2305843009213693951",
+   "-2305843009213693952",
+   "#x2000000000000000",
+   "#x-2000000000000001",
+   "#xffffffffffffffffffffffffffffffff",
+   "#x-ffffffffffffffffffffffffffffffff",
+   "0.0",
+   "-0.0",
+   "1.5",
+   "-1.5",
+   "1.0e+INF",
+   "-1.0e+INF",
+   "0.0e+NaN",
+   "\"\"",
+   "\"x\"",
+   "\"\u03bb\"",
+   "'(1 . 2)",
+   "[1]"
+  ]
+ },
+ "probes": [
+  "(integer-or-marker-p (make-marker))",
+  "(integer-or-marker-p (set-marker (make-marker) 1))",
+  "(integer-or-marker-p (current-buffer))",
+  "(integer-or-marker-p (symbol-function 'car))",
+  "(integer-or-marker-p (lambda (x) x))",
+  "(integer-or-marker-p (make-symbol \"x\"))",
+  "(integer-or-marker-p (make-hash-table))",
+  "(integer-or-marker-p (make-char-table 'data-predicate))",
+  "(integer-or-marker-p (standard-syntax-table))",
+  "(integer-or-marker-p (obarray-make 3))",
+  "(integer-or-marker-p (make-overlay 1 1))",
+  "(integer-or-marker-p (selected-window))",
+  "(integer-or-marker-p (selected-frame))",
+  "(integer-or-marker-p (frame-terminal))",
+  "(integer-or-marker-p (unibyte-string 255))",
+  "(funcall #'integer-or-marker-p 0)",
+  "(funcall #'integer-or-marker-p (symbol-function 'car))"
+ ]
+}

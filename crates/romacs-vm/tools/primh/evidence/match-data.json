@@ -1,0 +1,164 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "match-data",
+ "spec_sha256": "618d64e8177e0102f371c2fe736a62454402c2659759f54b218b8250248745db",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "match-data",
+    "subr",
+    0,
+    3
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "search.c": "3b9dda9f663ba44c64823daac395c38b46cc3cf47b72b370af864be075ef8375",
+  "marker.c": "4e566fb4dba1c79afefd24c4282ee2f3057a2af481e8c78bb49ba5749ee162dc"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "match-data/0000",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (match-data (progn (set-match-data nil) nil) nil nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "match-data/0001",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'match-data '(1 1 1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr match-data> 4))"
+  },
+  {
+   "id": "match-data/0002",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (progn (set-match-data nil) nil)) (a1 nil) (a2 nil)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (match-data a0 a1 a2))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "match-data/0003",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (progn (set-match-data nil) nil)) (a1 nil) (a2 nil)) (let ((r (match-data a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(ok (t t t))"
+  },
+  {
+   "id": "match-data/0004",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((b (generate-new-buffer \"md-probe\"))) (set-buffer b) (insert \"abc\") (goto-char 1) (looking-at \"ab\") (let ((m (car (match-data)))) (list (eq (type-of m) 'marker) (marker-position m) (eq (marker-buffer m) b))))) (error (list 'sig e))))",
+   "expected": "(ok (t 1 t))"
+  },
+  {
+   "id": "match-data/0005",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((b (generate-new-buffer \"md-probe\"))) (set-buffer b) (insert \"abc\") (goto-char 1) (looking-at \"ab\") (kill-buffer b) (let ((m (car (match-data)))) (list (eq (type-of m) 'marker) (marker-position m) (marker-buffer m))))) (error (list 'sig e))))",
+   "expected": "(ok (t nil nil))"
+  },
+  {
+   "id": "match-data/0006",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((b (generate-new-buffer \"md-probe\"))) (set-buffer b) (insert \"abc\") (goto-char 1) (looking-at \"ab\") (kill-buffer b) (let ((d (match-data t))) (list (car d) (car (cdr d)) (eq (car (cdr (cdr d))) b))))) (error (list 'sig e))))",
+   "expected": "(ok (1 3 t))"
+  },
+  {
+   "id": "match-data/0007",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((b (generate-new-buffer \"md-probe\"))) (set-buffer b) (insert \"abc\") (goto-char 1) (looking-at \"ab\") (kill-buffer b) (let* ((r (list 8 9 10 11)) (d (match-data nil r))) (list (eq r d) (marker-position (car d)) (marker-buffer (car d)) (cdr (cdr d)))))) (error (list 'sig e))))",
+   "expected": "(ok (t nil nil (nil nil)))"
+  },
+  {
+   "id": "match-data/0008",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((b (generate-new-buffer \"md-probe\"))) (set-buffer b) (insert \"abc\") (goto-char 1) (looking-at \"ab\") (kill-buffer b) (let ((r (list 8))) (eq r (match-data nil r))))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "match-data/0009",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((b (generate-new-buffer \"md-probe\"))) (set-buffer b) (insert \"abc\") (goto-char 1) (looking-at \"ab\") (let ((d (match-data))) (kill-buffer b) (list (marker-position (car d)) (marker-buffer (car d)))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "match-data/0010",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((b (generate-new-buffer \"md-probe\"))) (set-buffer b) (insert \"abc\") (goto-char 1) (looking-at \"ab\") (let ((d (match-data))) (kill-buffer b) (set-match-data d) (match-data t)))) (error (list 'sig e))))",
+   "expected": "(ok (0 0))"
+  },
+  {
+   "id": "match-data/0011",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((b (generate-new-buffer \"md-probe\"))) (set-buffer b) (insert \"abc\") (goto-char 1) (looking-at \"ab\") (let ((d (match-data))) (kill-buffer b) (set-match-data d t) (list d (match-data t))))) (error (list 'sig e))))",
+   "expected": "(ok ((nil nil) (0 0)))"
+  },
+  {
+   "id": "match-data/0012",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((b (generate-new-buffer \"md-probe\"))) (set-buffer b) (insert \"abc\") (goto-char 1) (looking-at \"ab\") (kill-buffer b) (let ((d (match-data t))) (set-match-data d) (let ((m (car (match-data)))) (list (marker-position m) (marker-buffer m)))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "match-data/0013",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((b (generate-new-buffer \"md-probe\"))) (set-buffer b) (insert \"abc\") (goto-char 1) (looking-at \"ab\") (let ((d (match-data))) (set-match-data d) (list (match-beginning 0) (match-end 0))))) (error (list 'sig e))))",
+   "expected": "(ok (1 3))"
+  },
+  {
+   "id": "match-data/0014",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((b (generate-new-buffer \"md-probe\"))) (set-buffer b) (insert \"abc\") (goto-char 1) (looking-at \"ab\") (kill-buffer b) (let ((m (make-marker))) (set-marker m 2 b) (list (marker-position m) (marker-buffer m))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "match-data/0015",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((b (generate-new-buffer \"md-probe\"))) (set-buffer b) (insert \"abc\") (goto-char 1) (looking-at \"ab\") (kill-buffer b) (let ((m (make-marker))) (set-marker m 'bad b) (list (marker-position m) (marker-buffer m))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "match-data/0016",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-match-data '(1 nil))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p nil))"
+  },
+  {
+   "id": "match-data/0017",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-match-data '(1 2 . 3))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 3))"
+  },
+  {
+   "id": "match-data/0018",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-match-data 4)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 4))"
+  },
+  {
+   "id": "match-data/0019",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((m (make-marker))) (set-match-data (list m m)) (match-data t))) (error (list 'sig e))))",
+   "expected": "(ok (0 0))"
+  },
+  {
+   "id": "match-data/0020",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set-match-data nil) nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "match-data/0021",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok nil) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  }
+ ]
+}

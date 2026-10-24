@@ -1,0 +1,34 @@
+[package]
+name = "romacs-diagnostics"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "query"] }
+tokio = { version = "1", default-features = false, features = ["rt", "net", "time", "sync"] }
+tokio-stream = { version = "0.1", default-features = false, features = ["time"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing.workspace = true
+# Pure-Rust flamegraph renderer (folded stacks -> SVG). CLI/nameattr features
+# are off; we only use the library flamegraph::from_lines path.
+inferno = { version = "0.12", default-features = false }
+
+[target.'cfg(unix)'.dependencies]
+# In-process native (Rust) CPU sampling profiler. SIGPROF-based; complements the
+# Lisp poll-sampler (no conflict — the Lisp profiler is not signal-based).
+# backtrace-based unwinding (default) keeps the interpreter/JIT call tree; the
+# "frame-pointer" feature loses it (JIT'd frames omit frame pointers) in exchange
+# for dropping a cosmetic libunwind leaf — not worth it. See project memory.
+pprof = { version = "0.15", default-features = false, features = ["flamegraph", "protobuf-codec"] }
+
+[dev-dependencies]
+tokio = { version = "1", default-features = false, features = ["rt", "net", "time", "sync", "macros", "io-util", "test-util"] }
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
+
+[lints]
+workspace = true

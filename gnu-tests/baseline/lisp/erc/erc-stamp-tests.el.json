@@ -1,0 +1,321 @@
+{
+ "blob": "64a53be510ecbf3fa88ae25e3cc061e000cde8da",
+ "compiled": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": true,
+  "results": {
+   "erc--get-inserted-msg-beg/readonly/stamp": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "erc--get-inserted-msg-beg/stamp": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "erc--get-inserted-msg-bounds/readonly/stamp": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "erc--get-inserted-msg-bounds/stamp": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "erc--get-inserted-msg-end/readonly/stamp": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "erc--get-inserted-msg-end/stamp": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "erc-echo-timestamp": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":unstable"
+    ]
+   },
+   "erc-stamp--dedupe-date-stamps-from-target-buffer": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "erc-stamp--display-margin-mode--right": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "erc-timestamp-intangible--left": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "erc-timestamp-use-align-to--integer": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "erc-timestamp-use-align-to--nil": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "erc-timestamp-use-align-to--t": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   }
+  },
+  "timed_out": false
+ },
+ "file": "lisp/erc/erc-stamp-tests.el",
+ "gnu": {
+  "emacs": "<recording-path-redacted>/emacs-32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+  "version": "32.0.50"
+ },
+ "harness_sha256": "78c20850429a08af22faadf73b5d164c560230e83d7eb88ef60cb995670703ef",
+ "mini": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": null,
+  "results": {
+   "erc--get-inserted-msg-beg/readonly/stamp": {
+    "as_expected": null,
+    "detail": "(cl-assertion-failed (= (point) (point-max)))",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "erc--get-inserted-msg-beg/stamp": {
+    "as_expected": null,
+    "detail": "(cl-assertion-failed (= (point) (point-max)))",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "erc--get-inserted-msg-bounds/readonly/stamp": {
+    "as_expected": null,
+    "detail": "(cl-assertion-failed (= (point) (point-max)))",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "erc--get-inserted-msg-bounds/stamp": {
+    "as_expected": null,
+    "detail": "(cl-assertion-failed (= (point) (point-max)))",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "erc--get-inserted-msg-end/readonly/stamp": {
+    "as_expected": null,
+    "detail": "(cl-assertion-failed (= (point) (point-max)))",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "erc--get-inserted-msg-end/stamp": {
+    "as_expected": null,
+    "detail": "(cl-assertion-failed (= (point) (point-max)))",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "erc-echo-timestamp": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "erc-stamp--dedupe-date-stamps-from-target-buffer": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "erc-stamp--display-margin-mode--right": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "erc-timestamp-intangible--left": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "erc-timestamp-use-align-to--integer": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "erc-timestamp-use-align-to--nil": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "erc-timestamp-use-align-to--t": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   }
+  },
+  "timed_out": false
+ },
+ "read_error": null,
+ "real": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": true,
+  "results": {
+   "erc--get-inserted-msg-beg/readonly/stamp": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "erc--get-inserted-msg-beg/stamp": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "erc--get-inserted-msg-bounds/readonly/stamp": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "erc--get-inserted-msg-bounds/stamp": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "erc--get-inserted-msg-end/readonly/stamp": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "erc--get-inserted-msg-end/stamp": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "erc-echo-timestamp": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":unstable"
+    ]
+   },
+   "erc-stamp--dedupe-date-stamps-from-target-buffer": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "erc-stamp--display-margin-mode--right": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "erc-timestamp-intangible--left": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "erc-timestamp-use-align-to--integer": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "erc-timestamp-use-align-to--nil": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "erc-timestamp-use-align-to--t": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   }
+  },
+  "timed_out": false
+ },
+ "schema": 1,
+ "toplevel_deftests": 13
+}

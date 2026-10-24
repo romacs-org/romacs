@@ -1,0 +1,607 @@
+{
+ "protocol": "fixnums-compiled-source-v1",
+ "regime": "GNU byte-compiled / VM2 source-compiled",
+ "world": "fresh process per case on both sides",
+ "gc": "enabled both: GNU default; VM2 floor 1 (not every short case collects)",
+ "generator_sha256": "1c29e70599a41bf0a40388a686d60819de5cbb5547102e0a1ea1cf00b56e0b49",
+ "gnu_sha256": "20a94ee7abc04960e3296deead030a37866d1d1e1522f3efd818838af7fffbe4",
+ "gnu_sources": {
+  "src/bignum.c": "b1f9fbded50391389b232e384324c91d8a094654c661fd80e503504f916e5c65",
+  "src/data.c": "eca7895a8043cd0a960dfe037a46028374d1a40cc6ee4d0cf6de90ac56c242ae",
+  "src/alloc.c": "b7bbe6972facf1208414a22d803e906cb577c477adaef975d6e7bf63144bc9a1",
+  "src/fns.c": "796fb20e762e383b3e078c54e7ef4185082068e88a0a38ebb2dd52558cafdec8",
+  "src/lisp.h": "7b1349a09486ec6e5637abfb1467005b1ce7db603cfa39c611ab6076a6245166",
+  "src/print.c": "a4d3613dd97297cb4a9b682f0fbe5a86d3ae1ac9a1a07bddaf6da970b28f0a85",
+  "lisp/subr.el": "6eb5746b37ce3db9767d6f67052a07e1586392495f4fc6ce595b053b75b4d656"
+ },
+ "cases": [
+  {
+   "family": "literal",
+   "source": "-2305843009213693952",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "-2305843009213693952"
+  },
+  {
+   "family": "predicate",
+   "source": "(list (integerp -2305843009213693952) (fixnump -2305843009213693952) (bignump -2305843009213693952))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(t t nil)"
+  },
+  {
+   "family": "identity",
+   "source": "(let ((f (lambda (x) (+ -2305843009213693952 x)))) (eq (funcall f 0) (funcall f 0)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "t"
+  },
+  {
+   "family": "hash",
+   "source": "(let ((h (make-hash-table :test 'eq))) (puthash (+ -2305843009213693952 0) 42 h) (list (gethash (+ -2305843009213693952 0) h) (hash-table-count h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(42 1)"
+  },
+  {
+   "family": "hash",
+   "source": "(let ((h (make-hash-table :test 'eql))) (puthash (+ -2305843009213693952 0) 42 h) (list (gethash (+ -2305843009213693952 0) h) (hash-table-count h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(42 1)"
+  },
+  {
+   "family": "hash",
+   "source": "(let ((h (make-hash-table :test 'equal))) (puthash (+ -2305843009213693952 0) 42 h) (list (gethash (+ -2305843009213693952 0) h) (hash-table-count h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(42 1)"
+  },
+  {
+   "family": "literal",
+   "source": "-2305843009213693951",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "-2305843009213693951"
+  },
+  {
+   "family": "predicate",
+   "source": "(list (integerp -2305843009213693951) (fixnump -2305843009213693951) (bignump -2305843009213693951))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(t t nil)"
+  },
+  {
+   "family": "identity",
+   "source": "(let ((f (lambda (x) (+ -2305843009213693951 x)))) (eq (funcall f 0) (funcall f 0)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "t"
+  },
+  {
+   "family": "hash",
+   "source": "(let ((h (make-hash-table :test 'eq))) (puthash (+ -2305843009213693951 0) 42 h) (list (gethash (+ -2305843009213693951 0) h) (hash-table-count h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(42 1)"
+  },
+  {
+   "family": "hash",
+   "source": "(let ((h (make-hash-table :test 'eql))) (puthash (+ -2305843009213693951 0) 42 h) (list (gethash (+ -2305843009213693951 0) h) (hash-table-count h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(42 1)"
+  },
+  {
+   "family": "hash",
+   "source": "(let ((h (make-hash-table :test 'equal))) (puthash (+ -2305843009213693951 0) 42 h) (list (gethash (+ -2305843009213693951 0) h) (hash-table-count h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(42 1)"
+  },
+  {
+   "family": "literal",
+   "source": "-1152921504606846977",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "-1152921504606846977"
+  },
+  {
+   "family": "predicate",
+   "source": "(list (integerp -1152921504606846977) (fixnump -1152921504606846977) (bignump -1152921504606846977))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(t t nil)"
+  },
+  {
+   "family": "identity",
+   "source": "(let ((f (lambda (x) (+ -1152921504606846977 x)))) (eq (funcall f 0) (funcall f 0)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "t"
+  },
+  {
+   "family": "hash",
+   "source": "(let ((h (make-hash-table :test 'eq))) (puthash (+ -1152921504606846977 0) 42 h) (list (gethash (+ -1152921504606846977 0) h) (hash-table-count h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(42 1)"
+  },
+  {
+   "family": "hash",
+   "source": "(let ((h (make-hash-table :test 'eql))) (puthash (+ -1152921504606846977 0) 42 h) (list (gethash (+ -1152921504606846977 0) h) (hash-table-count h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(42 1)"
+  },
+  {
+   "family": "hash",
+   "source": "(let ((h (make-hash-table :test 'equal))) (puthash (+ -1152921504606846977 0) 42 h) (list (gethash (+ -1152921504606846977 0) h) (hash-table-count h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(42 1)"
+  },
+  {
+   "family": "literal",
+   "source": "-1152921504606846976",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "-1152921504606846976"
+  },
+  {
+   "family": "predicate",
+   "source": "(list (integerp -1152921504606846976) (fixnump -1152921504606846976) (bignump -1152921504606846976))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(t t nil)"
+  },
+  {
+   "family": "identity",
+   "source": "(let ((f (lambda (x) (+ -1152921504606846976 x)))) (eq (funcall f 0) (funcall f 0)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "t"
+  },
+  {
+   "family": "hash",
+   "source": "(let ((h (make-hash-table :test 'eq))) (puthash (+ -1152921504606846976 0) 42 h) (list (gethash (+ -1152921504606846976 0) h) (hash-table-count h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(42 1)"
+  },
+  {
+   "family": "hash",
+   "source": "(let ((h (make-hash-table :test 'eql))) (puthash (+ -1152921504606846976 0) 42 h) (list (gethash (+ -1152921504606846976 0) h) (hash-table-count h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(42 1)"
+  },
+  {
+   "family": "hash",
+   "source": "(let ((h (make-hash-table :test 'equal))) (puthash (+ -1152921504606846976 0) 42 h) (list (gethash (+ -1152921504606846976 0) h) (hash-table-count h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(42 1)"
+  },
+  {
+   "family": "literal",
+   "source": "-1152921504606846975",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "-1152921504606846975"
+  },
+  {
+   "family": "predicate",
+   "source": "(list (integerp -1152921504606846975) (fixnump -1152921504606846975) (bignump -1152921504606846975))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(t t nil)"
+  },
+  {
+   "family": "identity",
+   "source": "(let ((f (lambda (x) (+ -1152921504606846975 x)))) (eq (funcall f 0) (funcall f 0)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "t"
+  },
+  {
+   "family": "hash",
+   "source": "(let ((h (make-hash-table :test 'eq))) (puthash (+ -1152921504606846975 0) 42 h) (list (gethash (+ -1152921504606846975 0) h) (hash-table-count h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(42 1)"
+  },
+  {
+   "family": "hash",
+   "source": "(let ((h (make-hash-table :test 'eql))) (puthash (+ -1152921504606846975 0) 42 h) (list (gethash (+ -1152921504606846975 0) h) (hash-table-count h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(42 1)"
+  },
+  {
+   "family": "hash",
+   "source": "(let ((h (make-hash-table :test 'equal))) (puthash (+ -1152921504606846975 0) 42 h) (list (gethash (+ -1152921504606846975 0) h) (hash-table-count h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(42 1)"
+  },
+  {
+   "family": "literal",
+   "source": "-1",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "-1"
+  },
+  {
+   "family": "predicate",
+   "source": "(list (integerp -1) (fixnump -1) (bignump -1))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(t t nil)"
+  },
+  {
+   "family": "identity",
+   "source": "(let ((f (lambda (x) (+ -1 x)))) (eq (funcall f 0) (funcall f 0)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "t"
+  },
+  {
+   "family": "hash",
+   "source": "(let ((h (make-hash-table :test 'eq))) (puthash (+ -1 0) 42 h) (list (gethash (+ -1 0) h) (hash-table-count h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(42 1)"
+  },
+  {
+   "family": "hash",
+   "source": "(let ((h (make-hash-table :test 'eql))) (puthash (+ -1 0) 42 h) (list (gethash (+ -1 0) h) (hash-table-count h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(42 1)"
+  },
+  {
+   "family": "hash",
+   "source": "(let ((h (make-hash-table :test 'equal))) (puthash (+ -1 0) 42 h) (list (gethash (+ -1 0) h) (hash-table-count h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(42 1)"
+  },
+  {
+   "family": "literal",
+   "source": "0",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "0"
+  },
+  {
+   "family": "predicate",
+   "source": "(list (integerp 0) (fixnump 0) (bignump 0))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(t t nil)"
+  },
+  {
+   "family": "identity",
+   "source": "(let ((f (lambda (x) (+ 0 x)))) (eq (funcall f 0) (funcall f 0)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "t"
+  },
+  {
+   "family": "hash",
+   "source": "(let ((h (make-hash-table :test 'eq))) (puthash (+ 0 0) 42 h) (list (gethash (+ 0 0) h) (hash-table-count h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(42 1)"
+  },
+  {
+   "family": "hash",
+   "source": "(let ((h (make-hash-table :test 'eql))) (puthash (+ 0 0) 42 h) (list (gethash (+ 0 0) h) (hash-table-count h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(42 1)"
+  },
+  {
+   "family": "hash",
+   "source": "(let ((h (make-hash-table :test 'equal))) (puthash (+ 0 0) 42 h) (list (gethash (+ 0 0) h) (hash-table-count h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(42 1)"
+  },
+  {
+   "family": "literal",
+   "source": "1",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "1"
+  },
+  {
+   "family": "predicate",
+   "source": "(list (integerp 1) (fixnump 1) (bignump 1))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(t t nil)"
+  },
+  {
+   "family": "identity",
+   "source": "(let ((f (lambda (x) (+ 1 x)))) (eq (funcall f 0) (funcall f 0)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "t"
+  },
+  {
+   "family": "hash",
+   "source": "(let ((h (make-hash-table :test 'eq))) (puthash (+ 1 0) 42 h) (list (gethash (+ 1 0) h) (hash-table-count h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(42 1)"
+  },
+  {
+   "family": "hash",
+   "source": "(let ((h (make-hash-table :test 'eql))) (puthash (+ 1 0) 42 h) (list (gethash (+ 1 0) h) (hash-table-count h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(42 1)"
+  },
+  {
+   "family": "hash",
+   "source": "(let ((h (make-hash-table :test 'equal))) (puthash (+ 1 0) 42 h) (list (gethash (+ 1 0) h) (hash-table-count h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(42 1)"
+  },
+  {
+   "family": "literal",
+   "source": "1152921504606846975",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "1152921504606846975"
+  },
+  {
+   "family": "predicate",
+   "source": "(list (integerp 1152921504606846975) (fixnump 1152921504606846975) (bignump 1152921504606846975))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(t t nil)"
+  },
+  {
+   "family": "identity",
+   "source": "(let ((f (lambda (x) (+ 1152921504606846975 x)))) (eq (funcall f 0) (funcall f 0)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "t"
+  },
+  {
+   "family": "hash",
+   "source": "(let ((h (make-hash-table :test 'eq))) (puthash (+ 1152921504606846975 0) 42 h) (list (gethash (+ 1152921504606846975 0) h) (hash-table-count h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(42 1)"
+  },
+  {
+   "family": "hash",
+   "source": "(let ((h (make-hash-table :test 'eql))) (puthash (+ 1152921504606846975 0) 42 h) (list (gethash (+ 1152921504606846975 0) h) (hash-table-count h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(42 1)"
+  },
+  {
+   "family": "hash",
+   "source": "(let ((h (make-hash-table :test 'equal))) (puthash (+ 1152921504606846975 0) 42 h) (list (gethash (+ 1152921504606846975 0) h) (hash-table-count h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(42 1)"
+  },
+  {
+   "family": "literal",
+   "source": "1152921504606846976",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "1152921504606846976"
+  },
+  {
+   "family": "predicate",
+   "source": "(list (integerp 1152921504606846976) (fixnump 1152921504606846976) (bignump 1152921504606846976))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(t t nil)"
+  },
+  {
+   "family": "identity",
+   "source": "(let ((f (lambda (x) (+ 1152921504606846976 x)))) (eq (funcall f 0) (funcall f 0)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "t"
+  },
+  {
+   "family": "hash",
+   "source": "(let ((h (make-hash-table :test 'eq))) (puthash (+ 1152921504606846976 0) 42 h) (list (gethash (+ 1152921504606846976 0) h) (hash-table-count h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(42 1)"
+  },
+  {
+   "family": "hash",
+   "source": "(let ((h (make-hash-table :test 'eql))) (puthash (+ 1152921504606846976 0) 42 h) (list (gethash (+ 1152921504606846976 0) h) (hash-table-count h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(42 1)"
+  },
+  {
+   "family": "hash",
+   "source": "(let ((h (make-hash-table :test 'equal))) (puthash (+ 1152921504606846976 0) 42 h) (list (gethash (+ 1152921504606846976 0) h) (hash-table-count h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(42 1)"
+  },
+  {
+   "family": "literal",
+   "source": "1152921504606846977",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "1152921504606846977"
+  },
+  {
+   "family": "predicate",
+   "source": "(list (integerp 1152921504606846977) (fixnump 1152921504606846977) (bignump 1152921504606846977))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(t t nil)"
+  },
+  {
+   "family": "identity",
+   "source": "(let ((f (lambda (x) (+ 1152921504606846977 x)))) (eq (funcall f 0) (funcall f 0)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "t"
+  },
+  {
+   "family": "hash",
+   "source": "(let ((h (make-hash-table :test 'eq))) (puthash (+ 1152921504606846977 0) 42 h) (list (gethash (+ 1152921504606846977 0) h) (hash-table-count h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(42 1)"
+  },
+  {
+   "family": "hash",
+   "source": "(let ((h (make-hash-table :test 'eql))) (puthash (+ 1152921504606846977 0) 42 h) (list (gethash (+ 1152921504606846977 0) h) (hash-table-count h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(42 1)"
+  },
+  {
+   "family": "hash",
+   "source": "(let ((h (make-hash-table :test 'equal))) (puthash (+ 1152921504606846977 0) 42 h) (list (gethash (+ 1152921504606846977 0) h) (hash-table-count h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(42 1)"
+  },
+  {
+   "family": "literal",
+   "source": "2305843009213693950",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "2305843009213693950"
+  },
+  {
+   "family": "predicate",
+   "source": "(list (integerp 2305843009213693950) (fixnump 2305843009213693950) (bignump 2305843009213693950))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(t t nil)"
+  },
+  {
+   "family": "identity",
+   "source": "(let ((f (lambda (x) (+ 2305843009213693950 x)))) (eq (funcall f 0) (funcall f 0)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "t"
+  },
+  {
+   "family": "hash",
+   "source": "(let ((h (make-hash-table :test 'eq))) (puthash (+ 2305843009213693950 0) 42 h) (list (gethash (+ 2305843009213693950 0) h) (hash-table-count h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(42 1)"
+  },
+  {
+   "family": "hash",
+   "source": "(let ((h (make-hash-table :test 'eql))) (puthash (+ 2305843009213693950 0) 42 h) (list (gethash (+ 2305843009213693950 0) h) (hash-table-count h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(42 1)"
+  },
+  {
+   "family": "hash",
+   "source": "(let ((h (make-hash-table :test 'equal))) (puthash (+ 2305843009213693950 0) 42 h) (list (gethash (+ 2305843009213693950 0) h) (hash-table-count h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(42 1)"
+  },
+  {
+   "family": "literal",
+   "source": "2305843009213693951",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "2305843009213693951"
+  },
+  {
+   "family": "predicate",
+   "source": "(list (integerp 2305843009213693951) (fixnump 2305843009213693951) (bignump 2305843009213693951))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(t t nil)"
+  },
+  {
+   "family": "identity",
+   "source": "(let ((f (lambda (x) (+ 2305843009213693951 x)))) (eq (funcall f 0) (funcall f 0)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "t"
+  },
+  {
+   "family": "hash",
+   "source": "(let ((h (make-hash-table :test 'eq))) (puthash (+ 2305843009213693951 0) 42 h) (list (gethash (+ 2305843009213693951 0) h) (hash-table-count h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(42 1)"
+  },
+  {
+   "family": "hash",
+   "source": "(let ((h (make-hash-table :test 'eql))) (puthash (+ 2305843009213693951 0) 42 h) (list (gethash (+ 2305843009213693951 0) h) (hash-table-count h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(42 1)"
+  },
+  {
+   "family": "hash",
+   "source": "(let ((h (make-hash-table :test 'equal))) (puthash (+ 2305843009213693951 0) 42 h) (list (gethash (+ 2305843009213693951 0) h) (hash-table-count h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(42 1)"
+  },
+  {
+   "family": "arithmetic",
+   "source": "most-positive-fixnum",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "2305843009213693951"
+  },
+  {
+   "family": "arithmetic",
+   "source": "most-negative-fixnum",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "-2305843009213693952"
+  },
+  {
+   "family": "arithmetic",
+   "source": "(1+ 1152921504606846975)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "1152921504606846976"
+  },
+  {
+   "family": "arithmetic",
+   "source": "(1- -1152921504606846976)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "-1152921504606846977"
+  },
+  {
+   "family": "arithmetic",
+   "source": "(- -2305843009213693952 0)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "-2305843009213693952"
+  },
+  {
+   "family": "arithmetic",
+   "source": "(* 1152921504606846976 1)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "1152921504606846976"
+  }
+ ]
+}

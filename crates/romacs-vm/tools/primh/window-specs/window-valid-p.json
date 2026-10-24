@@ -1,0 +1,34 @@
+{
+ "name": "window-valid-p",
+ "arity": [
+  1,
+  1
+ ],
+ "effect": "reads",
+ "gnu_files": [
+  "window.c"
+ ],
+ "gnu_def": "window.c:323",
+ "rust": "src/prims/window.rs:14",
+ "args": [
+  "none"
+ ],
+ "extra": {
+  "0": [
+   "nil",
+   "t",
+   "1",
+   "'sym",
+   "(copy-sequence \"s\")"
+  ]
+ },
+ "probes": [
+  "(window-valid-p (selected-window))",
+  "(window-valid-p (minibuffer-window))",
+  "(window-valid-p (frame-root-window))",
+  "(window-valid-p (selected-frame))",
+  "(let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (list (window-valid-p p) (window-valid-p a) (window-valid-p b)))",
+  "(let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (progn (set-window-new-pixel p h) (set-window-new-pixel a h) (delete-window-internal b) (list (window-valid-p b) (window-valid-p p) (window-valid-p a))))",
+  "(funcall #'window-valid-p (selected-window))"
+ ]
+}

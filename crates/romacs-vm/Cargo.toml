@@ -1,0 +1,43 @@
+[package]
+name = "romacs-vm"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+description = "Lexical Elisp reader, register compiler and runtime for romacs"
+
+# Deliberately isolated: no inherited evaluator or workspace build graph.
+[dependencies]
+romacs-layout-input = { path = "../romacs-layout-input" }
+romacs-display-protocol = { path = "../romacs-display-protocol" }
+romacs-face = { path = "../romacs-face" }
+romacs-regex-engine = { path = "../romacs-regex-engine" }
+str_indices = "=0.4.4"
+serde_json = "1"
+num-bigint = "0.4"
+stacker.workspace = true
+libc.workspace = true
+sha2 = "0.11"
+unicode-segmentation = "1.13.2"
+unicode-width = "0.2.2"
+# Narrow ICU4X casing provider: simple scalar + contextual full-string Unicode.
+icu_casemap = "=2.3.0"
+icu_locale_core = "=2.3.0"
+ropey_stable = { package = "ropey", version = "=1.6.1", default-features = false, features = ["simd"] }
+
+[build-dependencies]
+sha2 = "0.11"
+
+[dev-dependencies]
+romacs-coordinate-contract = { path = "../../tests/coordinate-contract" }
+# For tests that must drive the REAL producer chain: VM to frame_snapshot to
+# layout_frame to display_apply_layout to (window-end). A dev-dependency keeps
+# this out of the shipped graph. Without it such a test can only live outside
+# the repository, where it rots unrun.
+romacs-layout2 = { path = "../romacs-layout2" }
+# Compile-fail proofs that the heap boundary is a type property (tests/heap_boundary.rs).
+trybuild = "1.0"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1

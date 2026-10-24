@@ -1,0 +1,21 @@
+;;; C redisplay merge oracle.  -*- lexical-binding: t -*-
+;; Always run -Q with a throwaway HOME.
+(require 'cl-lib)
+(defface s102-absolute '((t :height 105)) "")
+(defface s102-relative '((t :height 1.5)) "")
+(defface s102-kid '((t :height 1.5 :inherit (s102-relative s102-absolute))) "")
+(defface s102-chain '((t :height 1.5 :inherit s102-relative)) "")
+(defface s102-fraction '((t :height 1.15 :inherit s102-chain)) "")
+(let ((index (1+ (cl-position :height (mapcar #'car face-attribute-name-alist))))
+      (faces '(s102-relative s102-kid s102-chain s102-fraction))
+      (print-length nil) (print-level nil))
+  (princ "(\n")
+  (dolist (height '(100 113 97 120))
+    (set-face-attribute 'default nil :height height)
+    (dolist (face faces)
+      (prin1 (list height face
+                   (aref (face-attributes-as-vector face) index)
+                   (aref (face-attributes-as-vector (list face 'default)) index)
+                   (face-attribute face :height nil 'default)))
+      (terpri)))
+  (princ ")\n"))

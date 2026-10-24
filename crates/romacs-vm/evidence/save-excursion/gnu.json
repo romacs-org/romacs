@@ -1,0 +1,63 @@
+{
+  "binary": "<recording-path-redacted>/emacs",
+  "sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "version": "GNU Emacs 32.0.50",
+  "cases": [
+    {
+      "key": "SAVE_EXCURSION_BODY_POINT",
+      "source": "(with-temp-buffer (insert \"a\u03bbbc\") (goto-char 3) (list (save-excursion) (save-excursion (goto-char 1) 42) (point)))",
+      "answer": "(nil 42 3)"
+    },
+    {
+      "key": "SAVE_EXCURSION_MOVING_LEFT_MARKER",
+      "source": "(with-temp-buffer (insert \"a\u03bbbc\") (goto-char 3) (save-excursion (goto-char 1) (insert \"\u0416\")) (let ((p (point))) (save-excursion (insert \"Q\")) (list p (point))))",
+      "answer": "(4 4)"
+    },
+    {
+      "key": "SAVE_EXCURSION_BUFFER",
+      "source": "(with-temp-buffer (insert \"abc\") (goto-char 2) (let ((b (current-buffer))) (save-excursion (set-buffer (get-buffer-create \"other\" t)) (insert \"xyz\")) (list (eq b (current-buffer)) (point))))",
+      "answer": "(t 2)"
+    },
+    {
+      "key": "SAVE_EXCURSION_UNWIND",
+      "source": "(with-temp-buffer (insert \"abcdef\") (goto-char 2) (let ((r (catch 'x (save-excursion (goto-char 3) (save-excursion (goto-char 5)) (throw 'x (point)))))) (list r (point) (condition-case nil (save-excursion (goto-char 6) (error \"stop\")) (error (point))))))",
+      "answer": "(3 2 2)"
+    },
+    {
+      "key": "SAVE_EXCURSION_DEAD_BUFFER",
+      "source": "(let* ((b (get-buffer-create \"saved\" t)) (other (get-buffer-create \"survivor\" t))) (set-buffer b) (save-excursion (kill-buffer b) (set-buffer other)) (list (eq other (current-buffer)) (buffer-live-p b)))",
+      "answer": "(t nil)"
+    },
+    {
+      "key": "SAVE_EXCURSION_NARROWING",
+      "source": "(with-temp-buffer (insert \"abcdef\") (goto-char 2) (save-excursion (narrow-to-region 4 6)) (point))",
+      "answer": "4"
+    },
+    {
+      "key": "SAVE_EXCURSION_NATIVE_RESTORE",
+      "source": "(with-temp-buffer (insert \"abc\") (goto-char 2) (save-excursion (fset 'goto-char (lambda (&rest args) 99))) (point))",
+      "answer": "2"
+    },
+    {
+      "key": "SAVE_EXCURSION_WINDOW_POINT",
+      "source": "(progn (set-buffer (get-buffer-create \"shown\" t)) (insert \"abcdef\") (goto-char 2) (set-window-buffer nil (current-buffer)) (let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (w (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5)))) (save-excursion (goto-char 5) (select-window w)) (list (point) (window-point a) (eq w (selected-window)))))",
+      "answer": "(2 2 t)"
+    },
+    {
+      "key": "SAVE_EXCURSION_WINDOW_NOT_SHOWN",
+      "source": "(let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (w (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5)))) (set-buffer (get-buffer-create \"not-shown\" t)) (insert \"abcdef\") (goto-char 2) (save-excursion (goto-char 5) (set-window-buffer a (current-buffer)) (select-window w)) (list (point) (window-point a) (eq w (selected-window))))",
+      "answer": "(2 5 t)"
+    },
+    {
+      "key": "SAVE_EXCURSION_WINDOW_CHANGED",
+      "source": "(progn (set-buffer (get-buffer-create \"shown\" t)) (insert \"abcdef\") (goto-char 2) (set-window-buffer nil (current-buffer)) (let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (w (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5)))) (save-excursion (goto-char 5) (let ((b (get-buffer-create \"replacement\" t))) (with-current-buffer b (insert \"abcdef\")) (set-window-buffer a b) (set-window-point a 4)) (select-window w)) (list (point) (window-point a) (eq w (selected-window)))))",
+      "answer": "(2 4 t)"
+    },
+    {
+      "key": "SAVE_EXCURSION_GC_ROOTS",
+      "source": "(with-temp-buffer (insert \"a\u03bbbc\") (goto-char 3) (save-excursion (let ((n 0)) (while (< n 3000) (cons n n) (setq n (1+ n)))) (goto-char 1) (insert \"\u0416\")) (point))",
+      "answer": "4"
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+;; 32.0.50 b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b section bool
+(list enable-recursive-minibuffers (setq enable-recursive-minibuffers 5) enable-recursive-minibuffers (symbol-value 'enable-recursive-minibuffers))
+  => (ok (nil 5 t t))
+(list (set 'enable-recursive-minibuffers nil) enable-recursive-minibuffers (set-default 'enable-recursive-minibuffers "s") (default-value 'enable-recursive-minibuffers))
+  => (ok (nil nil "s" t))
+(progn (setq enable-recursive-minibuffers nil) (list (let ((enable-recursive-minibuffers 'yes)) enable-recursive-minibuffers) enable-recursive-minibuffers))
+  => (ok (t nil))
+(list (condition-case e (makunbound 'enable-recursive-minibuffers) (error e)) enable-recursive-minibuffers)
+  => (ok ((error "Built-in variable may not be unbound : enable-recursive-minibuffers") nil))

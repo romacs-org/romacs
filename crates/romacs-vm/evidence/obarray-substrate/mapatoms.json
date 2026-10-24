@@ -1,0 +1,169 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "mapatoms",
+ "spec_sha256": "a5d52267b6b8d69b1a6cdcf63f324e4203d3e16223d9e38594ffcff23d0ea877",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "mapatoms",
+    "subr",
+    1,
+    2
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "lread.c": "f343ea2619bd35d4a0a41c15d3143045acd0cecc06ea0e449c65141b4f146c53"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "mapatoms/0000",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapatoms 'ignore (obarray-make))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "mapatoms/0001",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapatoms 'ignore (vector 0))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "mapatoms/0002",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapatoms 'ignore [])) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument obarrayp []))"
+  },
+  {
+   "id": "mapatoms/0003",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapatoms 'ignore 42)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument obarrayp 42))"
+  },
+  {
+   "id": "mapatoms/0004",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapatoms 42 (obarray-make))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "mapatoms/0005",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapatoms 42 (vector 0))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "mapatoms/0006",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapatoms 42 [])) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument obarrayp []))"
+  },
+  {
+   "id": "mapatoms/0007",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapatoms 42 42)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument obarrayp 42))"
+  },
+  {
+   "id": "mapatoms/0008",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'mapatoms '())) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr mapatoms> 0))"
+  },
+  {
+   "id": "mapatoms/0009",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'mapatoms '(1 1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr mapatoms> 3))"
+  },
+  {
+   "id": "mapatoms/0010",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'ignore) (a1 (obarray-make))) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (mapatoms a0 a1))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "mapatoms/0011",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'ignore) (a1 (obarray-make))) (let ((r (mapatoms a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "mapatoms/0012",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'ignore) (a1 42)) (let ((r (mapatoms a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument obarrayp 42))"
+  },
+  {
+   "id": "mapatoms/0013",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 42) (a1 [])) (let ((r (mapatoms a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument obarrayp []))"
+  },
+  {
+   "id": "mapatoms/0014",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a (obarray-make)) (seen nil)) (intern \"map-a\" a) (intern \"map-b\" a) (intern \"map-c\" a) (list (mapatoms (lambda (s) (setq seen (cons (symbol-name s) seen))) a) seen))) (error (list 'sig e))))",
+   "expected": "(ok (nil (\"map-b\" \"map-c\" \"map-a\")))"
+  },
+  {
+   "id": "mapatoms/0015",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a (vector 0)) (seen nil)) (intern \"one\" a) (intern \"two\" a) (intern \"three\" a) (mapatoms (lambda (s) (setq seen (cons (symbol-name s) seen))) a) seen)) (error (list 'sig e))))",
+   "expected": "(ok (\"two\" \"three\" \"one\"))"
+  },
+  {
+   "id": "mapatoms/0016",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a (obarray-make 3)) (seen nil)) (intern \"alpha\" a) (intern \"beta\" a) (intern \"gamma\" a) (intern \"delta\" a) (intern \"epsilon\" a) (mapatoms (lambda (s) (setq seen (cons (symbol-name s) seen))) a) seen)) (error (list 'sig e))))",
+   "expected": "(ok (\"delta\" \"alpha\" \"beta\" \"gamma\" \"epsilon\"))"
+  },
+  {
+   "id": "mapatoms/0017",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (fboundp 'mapatoms) (functionp 'mapatoms))) (error (list 'sig e))))",
+   "expected": "(ok (t t))"
+  },
+  {
+   "id": "mapatoms/0018",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 'ignore) (error (list 'sig e))))",
+   "expected": "(ok ignore)"
+  },
+  {
+   "id": "mapatoms/0019",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (obarray-make)) (error (list 'sig e))))",
+   "expected": "(ok #<obarray n=0>)"
+  },
+  {
+   "id": "mapatoms/0020",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vector 0)) (error (list 'sig e))))",
+   "expected": "(ok [0])"
+  },
+  {
+   "id": "mapatoms/0021",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 42) (error (list 'sig e))))",
+   "expected": "(ok 42)"
+  },
+  {
+   "id": "mapatoms/0022",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok []) (error (list 'sig e))))",
+   "expected": "(ok [])"
+  }
+ ]
+}

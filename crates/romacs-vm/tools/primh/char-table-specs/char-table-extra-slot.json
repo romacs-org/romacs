@@ -1,0 +1,25 @@
+{
+  "name": "char-table-extra-slot",
+  "arity": [
+    2,
+    2
+  ],
+  "effect": "reads",
+  "gnu_files": [
+    "chartab.c"
+  ],
+  "gnu_def": "chartab.c:548",
+  "rust": "src/prims/char_table.rs:9",
+  "args": [
+    "none",
+    "none"
+  ],
+  "probes": [
+    "(char-table-extra-slot nil 'bad)",
+    "(let ((ct (make-char-table nil))) (condition-case e (char-table-extra-slot ct 'bad) (error (list (car e) (if (eq (car e) 'args-out-of-range) (eq (car (cdr e)) ct) (car (cdr e))) (car (cdr (cdr e)))))))",
+    "(let ((ct (make-char-table nil))) (condition-case e (char-table-extra-slot ct 0) (error (list (car e) (if (eq (car e) 'args-out-of-range) (eq (car (cdr e)) ct) (car (cdr e))) (car (cdr (cdr e)))))))",
+    "(let ((p (make-symbol \"purpose\"))) (put p 'char-table-extra-slots 3) (let ((ct (make-char-table p 'initial))) (put p 'char-table-extra-slots 0) (list (char-table-extra-slot ct 0) (char-table-extra-slot ct 2))))",
+    "(let ((ct (make-char-table nil))) (condition-case e (char-table-extra-slot ct -1) (error (list (car e) (if (eq (car e) 'args-out-of-range) (eq (car (cdr e)) ct) (car (cdr e))) (car (cdr (cdr e)))))))",
+    "(list (fboundp 'char-table-extra-slot) (functionp 'char-table-extra-slot))"
+  ]
+}

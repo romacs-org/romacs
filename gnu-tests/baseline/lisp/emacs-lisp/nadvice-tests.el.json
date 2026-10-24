@@ -1,0 +1,317 @@
+{
+ "blob": "addea35f3345d1e14eb0881637023e52843662cc",
+ "compiled": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": true,
+  "results": {
+   "advice-test-bug61179": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "advice-test-call-interactively": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "advice-test-called-interactively-p": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "advice-test-called-interactively-p-around": {
+    "as_expected": true,
+    "detail": "(ert-test-failed ((should (equal (call-interactively 'sm-test7.2) '((1 . t) (1 . t)))) :form (equal ((1 . t) (1)) ((1 . t) (1 . t))) :value nil :explanation (list-elt 1 (one-list-proper-one-improper (1) (1 . t)))))",
+    "expected": ":failed",
+    "outcome": "failed",
+    "tags": []
+   },
+   "advice-test-called-interactively-p-filter-args": {
+    "as_expected": true,
+    "detail": "(wrong-number-of-arguments (0 . 0) 1)",
+    "expected": ":failed",
+    "outcome": "errored",
+    "tags": []
+   },
+   "advice-test-interactive": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "advice-test-multiples": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "advice-test-preactivate": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "advice-test-print": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "advice-tests-advice": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "advice-tests-combination": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "advice-tests-macroaliases": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "advice-tests-nadvice": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   }
+  },
+  "timed_out": false
+ },
+ "file": "lisp/emacs-lisp/nadvice-tests.el",
+ "gnu": {
+  "emacs": "<recording-path-redacted>/emacs-32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+  "version": "32.0.50"
+ },
+ "harness_sha256": "78c20850429a08af22faadf73b5d164c560230e83d7eb88ef60cb995670703ef",
+ "mini": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": null,
+  "results": {
+   "advice-test-bug61179": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "advice-test-call-interactively": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "advice-test-called-interactively-p": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "advice-test-called-interactively-p-around": {
+    "as_expected": null,
+    "detail": "((should (equal (call-interactively 'sm-test7.2) '((1 . t) (1 . t))) :value nil))",
+    "expected": ":failed",
+    "outcome": "failed",
+    "tags": null
+   },
+   "advice-test-called-interactively-p-filter-args": {
+    "as_expected": null,
+    "detail": "(wrong-number-of-arguments #[nil ((cons 1 (called-interactively-p 'any))) (t) nil nil nil] 1)",
+    "expected": ":failed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "advice-test-interactive": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "advice-test-multiples": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "advice-test-preactivate": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "advice-test-print": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "advice-tests-advice": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "advice-tests-combination": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "advice-tests-macroaliases": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "advice-tests-nadvice": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   }
+  },
+  "timed_out": false
+ },
+ "read_error": null,
+ "real": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": true,
+  "results": {
+   "advice-test-bug61179": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "advice-test-call-interactively": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "advice-test-called-interactively-p": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "advice-test-called-interactively-p-around": {
+    "as_expected": true,
+    "detail": "(ert-test-failed ((should (equal (call-interactively 'sm-test7.2) '((1 . t) (1 . t)))) :form (equal ((1 . t) (1)) ((1 . t) (1 . t))) :value nil :explanation (list-elt 1 (one-list-proper-one-improper (1) (1 . t)))))",
+    "expected": ":failed",
+    "outcome": "failed",
+    "tags": []
+   },
+   "advice-test-called-interactively-p-filter-args": {
+    "as_expected": true,
+    "detail": "(wrong-number-of-arguments #[nil ((cons 1 (called-interactively-p 'any))) (t) nil nil nil] 1)",
+    "expected": ":failed",
+    "outcome": "errored",
+    "tags": []
+   },
+   "advice-test-interactive": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "advice-test-multiples": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "advice-test-preactivate": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "advice-test-print": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "advice-tests-advice": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "advice-tests-combination": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "advice-tests-macroaliases": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "advice-tests-nadvice": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   }
+  },
+  "timed_out": false
+ },
+ "schema": 1,
+ "toplevel_deftests": 13
+}

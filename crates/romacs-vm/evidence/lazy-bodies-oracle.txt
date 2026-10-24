@@ -1,0 +1,110 @@
+# R215 oracle transcripts: GNU Emacs 32.0.50 (GNU Emacs 32.0.50), /usr/bin/emacs sha256 20a94ee7abc04960e3296deead030a37866d1d1e1522f3efd818838af7fffbe4
+# Recorded 2026-10-20T00:27:44+03:00 with: env -i PATH=/usr/bin:/bin HOME=<tmp> /usr/bin/emacs -Q --batch ...
+# Regime A ('eval'): each top-level form read and passed to (eval FORM t) -- no eager macroexpansion,
+#   which is GNU's regime while internal-macroexpand-for-load is unbound (src/lread.c:2183-2188).
+# Regime B ('load'): the same file via -l, i.e. readevalloop with macroexp.el loaded: EAGER expansion.
+
+## o1.el
+;;; -*- lexical-binding: t -*-
+;; Oracle: when does GNU expand macros in an interpreted defun body?
+(defvar trace nil)
+(defmacro zork (&rest a) (push (cons 'expanded a) trace) `(list ,@a))
+(defun f1 (x) (if x (zork 1) 'no))   ; evaluated by `eval', not `load': no eager macroexpansion
+(message "after-defun trace=%S" trace)
+(message "f1 nil -> %S trace=%S" (f1 nil) trace)
+(message "f1 t -> %S trace=%S" (f1 t) trace)
+(message "f1 t again -> %S trace=%S" (f1 t) trace)
+(message "interpreted-function-p f1: %S" (interpreted-function-p (symbol-function 'f1)))
+(message "closurep f1: %S compiled-function-p: %S" (closurep (symbol-function 'f1)) (compiled-function-p (symbol-function 'f1)))
+;; macro redefined after first call: is the new definition used?
+(defmacro zork (&rest a) `(vector ,@a))
+(message "f1 t after redefine -> %S" (f1 t))
+;; expansion-time error surfaces at reach time, after earlier side effects
+(defvar side nil)
+(defmacro boom () (error "boom-at-expansion"))
+(defun f2 (go) (setq side 'ran) (when go (boom)) 'done)
+(message "f2 nil -> %S side=%S" (f2 nil) side)
+(setq side nil)
+(message "f2 t -> %S side=%S" (condition-case e (f2 t) (error (list 'caught e))) side)
+;; undefined (void) macro head in an unreached branch
+(defun f3 (go) (if go (setf (no-such-place-fn 1) 2) 'skipped))
+(message "f3 nil -> %S" (f3 nil))
+(message "f3 t -> %S" (condition-case e (f3 t) (error (list 'caught e))))
+(message "aref f1 1: %S" (aref (symbol-function 'f1) 1))
+
+## o1.el under regime A (eval)
+after-defun trace=nil
+f1 nil -> no trace=nil
+f1 t -> (1) trace=((expanded 1))
+f1 t again -> (1) trace=((expanded 1) (expanded 1))
+interpreted-function-p f1: t
+closurep f1: t compiled-function-p: nil
+f1 t after redefine -> [1]
+f2 nil -> done side=ran
+f2 t -> (caught (error "boom-at-expansion")) side=ran
+f3 nil -> skipped
+f3 t -> (caught (void-function \(setf\ no-such-place-fn\)))
+aref f1 1: ((if x (zork 1) 'no))
+
+## o1.el under regime B (load, eager)
+after-defun trace=((expanded 1))
+f1 nil -> no trace=((expanded 1))
+f1 t -> (1) trace=((expanded 1))
+f1 t again -> (1) trace=((expanded 1))
+interpreted-function-p f1: t
+closurep f1: t compiled-function-p: nil
+f1 t after redefine -> (1)
+
+debug-early-backtrace...done
+Eager macro-expansion failure: (error "boom-at-expansion")
+
+Error: error ("Eager macro-expansion failure: (error \"boom-at-expansion\")")
+  error("Eager macro-expansion failure: %S" (error "boom-at-expansion"))
+  internal-macroexpand-for-load((defalias 'f2 #'(lambda (go) (setq side 'ran) (when go (boom)) 'done)) t)
+  load-with-code-conversion("<recording-home>/.hermes/cache/scratch/lazy-oracle/o1.el" "<recording-home>/.hermes/cache/scratch/lazy-oracle/o1.el" nil t)
+  command-line-1(("-l" "./o1.el"))
+  command-line()
+  normal-top-level()
+
+## o2.el
+;;; -*- lexical-binding: t -*-
+(message "ifp car=%S ifp nil=%S ifp lambda=%S ifp byte=%S" (interpreted-function-p (symbol-function 'car)) (interpreted-function-p nil) (interpreted-function-p (lambda (x) x)) (interpreted-function-p (byte-compile (lambda (x) x))))
+(message "ifp macro-cell when=%S" (interpreted-function-p (symbol-function 'when)))
+(condition-case e (message "ifp arity: %S" (interpreted-function-p)) (error (message "ifp no-arg -> %S" e)))
+(message "subr-arity ifp: %S" (func-arity 'interpreted-function-p))
+;; captured lexical environment of a lazily held body
+(let ((x 1)) (defun lz-get () x) (defun lz-set (v) (setq x v)))
+(lz-set 5) (message "shared cell -> %S" (lz-get))
+;; error data when a macro body signals at reach time
+(defmacro boom2 () (signal 'wrong-type-argument '(listp 7)))
+(defun f4 () (boom2))
+(message "f4 -> %S" (condition-case e (f4) (error e)))
+
+## o2.el under regime A (eval)
+ifp car=nil ifp nil=nil ifp lambda=t ifp byte=nil
+ifp macro-cell when=nil
+ifp no-arg -> (wrong-number-of-arguments interpreted-function-p 0)
+subr-arity ifp: (1 . 1)
+shared cell -> 5
+f4 -> (wrong-type-argument listp 7)
+
+## o3.el (exact test sources)
+;;; -*- lexical-binding: t -*-
+(defalias 'lz-retry (function (lambda (go) (if go (lz-later 7) 'skipped))))
+(defalias 'lz-later (cons 'macro (function (lambda (x) (if (boundp 'lz-ready) (list 'quote (list 'ok x)) (error "not yet"))))))
+(message "nil -> %S" (lz-retry nil))
+(message "t before -> %S" (condition-case e (lz-retry t) (error e)))
+(defvar lz-ready t)
+(message "t after -> %S" (lz-retry t))
+(defalias 'lz-f1 (function (lambda (x) (if x (lz-zork 1) 'no))))
+(defalias 'lz-zork (cons 'macro (function (lambda (&rest a) (cons 'list a)))))
+(message "late macro: %S %S" (lz-f1 nil) (lz-f1 t))
+(defalias 'lz-f3 (function (lambda (go) (if go (setf (alist-get 'k lz-place) 2) 'skipped))))
+(message "f3 nil -> %S" (lz-f3 nil))
+
+## o3.el under regime A (eval)
+nil -> skipped
+t before -> (error "not yet")
+t after -> (ok 7)
+late macro: no (1)
+f3 nil -> skipped

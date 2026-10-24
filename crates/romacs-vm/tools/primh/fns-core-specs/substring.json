@@ -1,0 +1,24 @@
+{
+ "name": "substring",
+ "arity": [
+  1,
+  3
+ ],
+ "effect": "pure",
+ "gnu_files": [
+  "fns.c"
+ ],
+ "gnu_def": "fns.c:1579",
+ "rust": "src/prims/fns_core.rs:7",
+ "args": [],
+ "probes": [
+  "(let ((s \"abc\")) (eq (substring s) s))",
+  "(substring \"κόσμε\" 1 3)",
+  "(substring (vector 1 2 3 4) 1 -1)",
+  "(let ((v (vector 1 2))) (eq (substring v) v))",
+  "(let ((s (copy-sequence \"abcd\"))) (put-text-property 1 3 'face 'bold s) (let ((r (substring s 1))) (list (text-properties-at 0 r) (text-properties-at 1 r) (text-properties-at 2 r))))",
+  "(multibyte-string-p (substring (string-to-multibyte \"abc\") 1))",
+  "(multibyte-string-p (substring (unibyte-string 255 65) 1))",
+  "(substring (unibyte-string 255 65) 0 1)"
+ ]
+}

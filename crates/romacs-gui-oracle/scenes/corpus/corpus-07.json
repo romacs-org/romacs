@@ -1,0 +1,233 @@
+{
+ "name": "corpus-07",
+ "frame": {
+  "width": 480,
+  "height": 168,
+  "bg": "#ffffff",
+  "fg": "#000000"
+ },
+ "font": {
+  "family": "Liberation Mono",
+  "pixel_size": 20,
+  "regular": "/usr/share/fonts/liberation/LiberationMono-Regular.ttf",
+  "bold": "/usr/share/fonts/liberation/LiberationMono-Bold.ttf",
+  "italic": "/usr/share/fonts/liberation/LiberationMono-Italic.ttf"
+ },
+ "cursor_color": "#00a000",
+ "buffer": [
+  {
+   "text": "φως"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "jumps"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "Χάος",
+   "fg": "#0000ff",
+   "italic": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "brown",
+   "bold": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "#if",
+   "bg": "#ffff00"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "ήλιος",
+   "bg": "#d0ffd0"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "lazy"
+  },
+  {
+   "text": "\n"
+  },
+  {
+   "text": "brown"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "over"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "frame",
+   "underline": true,
+   "bg": "#d0ffd0"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "λόγος"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "lazy",
+   "fg": "#2e8b57"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "ήλιος",
+   "bg": "#e0e0ff"
+  },
+  {
+   "text": "\n"
+  },
+  {
+   "text": "φως"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "over"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "jumps",
+   "fg": "#0000ff"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "Χάος",
+   "fg": "#a020f0"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "buffer",
+   "fg": "#a020f0"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "jumps",
+   "fg": "#696969",
+   "bold": true
+  },
+  {
+   "text": "\n"
+  }
+ ],
+ "point": 5,
+ "expect": {
+  "origin": [
+   0,
+   0
+  ],
+  "rows": [
+   {
+    "text": "φως jumps Χάος brown #if ήλιος lazy",
+    "runs": [
+     {
+      "start": 10,
+      "end": 14,
+      "fg": "#0000ff",
+      "italic": true
+     },
+     {
+      "start": 15,
+      "end": 20,
+      "bold": true
+     },
+     {
+      "start": 21,
+      "end": 24,
+      "bg": "#ffff00"
+     },
+     {
+      "start": 25,
+      "end": 30,
+      "bg": "#d0ffd0"
+     }
+    ]
+   },
+   {
+    "text": "brown over frame λόγος lazy ήλιος",
+    "runs": [
+     {
+      "start": 11,
+      "end": 16,
+      "underline": true,
+      "bg": "#d0ffd0"
+     },
+     {
+      "start": 23,
+      "end": 27,
+      "fg": "#2e8b57"
+     },
+     {
+      "start": 28,
+      "end": 33,
+      "bg": "#e0e0ff"
+     }
+    ]
+   },
+   {
+    "text": "φως over jumps Χάος buffer jumps",
+    "runs": [
+     {
+      "start": 9,
+      "end": 14,
+      "fg": "#0000ff"
+     },
+     {
+      "start": 15,
+      "end": 19,
+      "fg": "#a020f0"
+     },
+     {
+      "start": 20,
+      "end": 26,
+      "fg": "#a020f0"
+     },
+     {
+      "start": 27,
+      "end": 32,
+      "fg": "#696969",
+      "bold": true
+     }
+    ]
+   }
+  ],
+  "cursor": {
+   "row": 0,
+   "col": 4
+  }
+ }
+}

@@ -1,0 +1,115 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "previous-overlay-change",
+ "spec_sha256": "9b11e2980842674542bcebcd659d90d5d3eb1517f318354818c96e4359b5ed29",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "previous-overlay-change",
+    "subr",
+    1,
+    1
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "buffer.c": "bb93b33042953fab31294645204d46c48c3a3d7b8516f7b923c7d86b9766b91d"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "previous-overlay-change/0000",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'previous-overlay-change '())) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr previous-overlay-change> 0))"
+  },
+  {
+   "id": "previous-overlay-change/0001",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'previous-overlay-change '(1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr previous-overlay-change> 2))"
+  },
+  {
+   "id": "previous-overlay-change/0002",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (insert \"abc\") (set-buffer-multibyte nil) (narrow-to-region 2 3) (previous-overlay-change 3))) (error (list 'sig e))))",
+   "expected": "(ok 2)"
+  },
+  {
+   "id": "previous-overlay-change/0003",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (insert \"aé文def\") (make-overlay 2 5) (make-overlay 3 3) (list (previous-overlay-change 1) (previous-overlay-change 2) (previous-overlay-change 3) (previous-overlay-change 4) (previous-overlay-change 5) (previous-overlay-change 7)))) (error (list 'sig e))))",
+   "expected": "(ok (1 1 2 3 3 5))"
+  },
+  {
+   "id": "previous-overlay-change/0004",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (insert \"abcdef\") (make-overlay 1 3) (make-overlay 4 6) (narrow-to-region 3 5) (list (previous-overlay-change 0) (previous-overlay-change 3) (previous-overlay-change 4) (previous-overlay-change 7) (previous-overlay-change 100)))) (error (list 'sig e))))",
+   "expected": "(ok (3 3 3 6 6))"
+  },
+  {
+   "id": "previous-overlay-change/0005",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (insert \"abc\") (let ((m (copy-marker 3))) (make-overlay 1 2) (previous-overlay-change m)))) (error (list 'sig e))))",
+   "expected": "(ok 2)"
+  },
+  {
+   "id": "previous-overlay-change/0006",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (insert \"abc\") (list (previous-overlay-change -1) (previous-overlay-change 99)))) (error (list 'sig e))))",
+   "expected": "(ok (1 1))"
+  },
+  {
+   "id": "previous-overlay-change/0007",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (condition-case e (previous-overlay-change nil) (error (car e)))) (error (list 'sig e))))",
+   "expected": "(ok wrong-type-argument)"
+  },
+  {
+   "id": "previous-overlay-change/0008",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (condition-case e (previous-overlay-change 1.5) (error (car e)))) (error (list 'sig e))))",
+   "expected": "(ok wrong-type-argument)"
+  },
+  {
+   "id": "previous-overlay-change/0009",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (condition-case e (previous-overlay-change (make-marker)) (error (car e)))) (error (list 'sig e))))",
+   "expected": "(ok error)"
+  },
+  {
+   "id": "previous-overlay-change/0010",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (condition-case e (apply #'previous-overlay-change '()) (error (car e)))) (error (list 'sig e))))",
+   "expected": "(ok wrong-number-of-arguments)"
+  },
+  {
+   "id": "previous-overlay-change/0011",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (condition-case e (apply #'previous-overlay-change '(1 2)) (error (car e)))) (error (list 'sig e))))",
+   "expected": "(ok wrong-number-of-arguments)"
+  },
+  {
+   "id": "previous-overlay-change/0012",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (fboundp 'previous-overlay-change) (functionp 'previous-overlay-change))) (error (list 'sig e))))",
+   "expected": "(ok (t t))"
+  },
+  {
+   "id": "previous-overlay-change/0013",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (funcall 'previous-overlay-change 1))) (error (list 'sig e))))",
+   "expected": "(ok 1)"
+  }
+ ]
+}

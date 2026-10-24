@@ -1,0 +1,79 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "char-table-extra-slot",
+ "spec_sha256": "ce0a0d6b59b2073b4234d961a60f08e610879b880bc4c535973ff946bd4e80f3",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "char-table-extra-slot",
+    "subr",
+    2,
+    2
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "chartab.c": "ee3cc0b6fc04e92281a19ac10493c3db216ab0497c2fe0c12edca33073fe5c51"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "char-table-extra-slot/0000",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'char-table-extra-slot '(1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr char-table-extra-slot> 1))"
+  },
+  {
+   "id": "char-table-extra-slot/0001",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'char-table-extra-slot '(1 1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr char-table-extra-slot> 3))"
+  },
+  {
+   "id": "char-table-extra-slot/0002",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (char-table-extra-slot nil 'bad)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument char-table-p nil))"
+  },
+  {
+   "id": "char-table-extra-slot/0003",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((ct (make-char-table nil))) (condition-case e (char-table-extra-slot ct 'bad) (error (list (car e) (if (eq (car e) 'args-out-of-range) (eq (car (cdr e)) ct) (car (cdr e))) (car (cdr (cdr e)))))))) (error (list 'sig e))))",
+   "expected": "(ok (wrong-type-argument fixnump bad))"
+  },
+  {
+   "id": "char-table-extra-slot/0004",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((ct (make-char-table nil))) (condition-case e (char-table-extra-slot ct 0) (error (list (car e) (if (eq (car e) 'args-out-of-range) (eq (car (cdr e)) ct) (car (cdr e))) (car (cdr (cdr e)))))))) (error (list 'sig e))))",
+   "expected": "(ok (args-out-of-range t 0))"
+  },
+  {
+   "id": "char-table-extra-slot/0005",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((p (make-symbol \"purpose\"))) (put p 'char-table-extra-slots 3) (let ((ct (make-char-table p 'initial))) (put p 'char-table-extra-slots 0) (list (char-table-extra-slot ct 0) (char-table-extra-slot ct 2))))) (error (list 'sig e))))",
+   "expected": "(ok (initial initial))"
+  },
+  {
+   "id": "char-table-extra-slot/0006",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((ct (make-char-table nil))) (condition-case e (char-table-extra-slot ct -1) (error (list (car e) (if (eq (car e) 'args-out-of-range) (eq (car (cdr e)) ct) (car (cdr e))) (car (cdr (cdr e)))))))) (error (list 'sig e))))",
+   "expected": "(ok (args-out-of-range t -1))"
+  },
+  {
+   "id": "char-table-extra-slot/0007",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (fboundp 'char-table-extra-slot) (functionp 'char-table-extra-slot))) (error (list 'sig e))))",
+   "expected": "(ok (t t))"
+  }
+ ]
+}

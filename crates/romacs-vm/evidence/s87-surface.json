@@ -1,0 +1,1561 @@
+{
+  "protocol": "surface-compiled-v1",
+  "regime": "GNU byte-compiled / VM2 compiled",
+  "world": "fresh process per case on both sides",
+  "gc": "VM2 collection floor 1; no timing or speedup claim",
+  "source_sha256": "7d6a4a6397ac77f68041ba82fd2071d39b7a1afd6949ed8ec29590476c72c8a6",
+  "generator_sha256": "a135b04947b97e663fcb5ccc254fc3a4424217c0377d328642742097004ec71a",
+  "protocol_sha256": "56664755130e3ae6a5f798ddc00c2f31aa53294a27fe6bf67e7b8bfd93ed9a5e",
+  "gnu_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+  "gnu_sources": {
+    "data.c": "eca7895a8043cd0a960dfe037a46028374d1a40cc6ee4d0cf6de90ac56c242ae",
+    "eval.c": "db894444b2edc1e7e675d5d8f97cba7e6f77f2beb0e5c3a130afc505c6f387b4",
+    "bytecode.c": "97fb8f41758f88c02684da4f766d7694e3c3274077f4be46a3163949bb6431ab",
+    "lisp.h": "7b1349a09486ec6e5637abfb1467005b1ce7db603cfa39c611ab6076a6245166",
+    "lread.c": "f343ea2619bd35d4a0a41c15d3143045acd0cecc06ea0e449c65141b4f146c53",
+    "print.c": "a4d3613dd97297cb4a9b682f0fbe5a86d3ae1ac9a1a07bddaf6da970b28f0a85"
+  },
+  "compiler_id": "9aefa33c61de036bc85fd1f0ce378df9a328c11c5cfd580ebfe63da8f0cb206f",
+  "binary_sha256": "d27ae715d455ab9c1274dea40d96fc1ec4087b2d6d2c7078f0b2c0283823e03e",
+  "cases": [
+    {
+      "primitive": "consp",
+      "source": "(consp nil)",
+      "version": "32.0.50",
+      "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+      "transport": [
+        "consp",
+        "nil"
+      ],
+      "expected": "nil",
+      "uncaught": {},
+      "condition": {},
+      "actual": "nil",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "primitive": "consp",
+      "source": "(consp t)",
+      "version": "32.0.50",
+      "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+      "transport": [
+        "consp",
+        "t"
+      ],
+      "expected": "nil",
+      "uncaught": {},
+      "condition": {},
+      "actual": "nil",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "primitive": "consp",
+      "source": "(consp 0)",
+      "version": "32.0.50",
+      "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+      "transport": [
+        "consp",
+        0
+      ],
+      "expected": "nil",
+      "uncaught": {},
+      "condition": {},
+      "actual": "nil",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "primitive": "consp",
+      "source": "(consp -1)",
+      "version": "32.0.50",
+      "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+      "transport": [
+        "consp",
+        -1
+      ],
+      "expected": "nil",
+      "uncaught": {},
+      "condition": {},
+      "actual": "nil",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "primitive": "consp",
+      "source": "(consp 3.5)",
+      "version": "32.0.50",
+      "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+      "transport": [
+        "consp",
+        3.5
+      ],
+      "expected": "nil",
+      "uncaught": {},
+      "condition": {},
+      "actual": "nil",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "primitive": "consp",
+      "source": "(consp 'name)",
+      "version": "32.0.50",
+      "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+      "transport": [
+        "consp",
+        [
+          "quote",
+          "name"
+        ]
+      ],
+      "expected": "nil",
+      "uncaught": {},
+      "condition": {},
+      "actual": "nil",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "primitive": "consp",
+      "source": "(consp :keyword)",
+      "version": "32.0.50",
+      "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+      "transport": [
+        "consp",
+        ":keyword"
+      ],
+      "expected": "nil",
+      "uncaught": {},
+      "condition": {},
+      "actual": "nil",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "primitive": "consp",
+      "source": "(consp \"λ\")",
+      "version": "32.0.50",
+      "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+      "transport": [
+        "consp",
+        {
+          "string": "λ"
+        }
+      ],
+      "expected": "nil",
+      "uncaught": {},
+      "condition": {},
+      "actual": "nil",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "primitive": "consp",
+      "source": "(consp (unibyte-string 255))",
+      "version": "32.0.50",
+      "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+      "transport": [
+        "consp",
+        [
+          "unibyte-string",
+          255
+        ]
+      ],
+      "expected": "nil",
+      "uncaught": {},
+      "condition": {},
+      "actual": "nil",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "primitive": "consp",
+      "source": "(consp (vector 1))",
+      "version": "32.0.50",
+      "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+      "transport": [
+        "consp",
+        [
+          "vector",
+          1
+        ]
+      ],
+      "expected": "nil",
+      "uncaught": {},
+      "condition": {},
+      "actual": "nil",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "primitive": "consp",
+      "source": "(consp (cons 7 9))",
+      "version": "32.0.50",
+      "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+      "transport": [
+        "consp",
+        [
+          "cons",
+          7,
+          9
+        ]
+      ],
+      "expected": "t",
+      "uncaught": {},
+      "condition": {},
+      "actual": "t",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "primitive": "consp",
+      "source": "(consp (cons (cons 4 nil) nil))",
+      "version": "32.0.50",
+      "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+      "transport": [
+        "consp",
+        [
+          "cons",
+          [
+            "cons",
+            4,
+            "nil"
+          ],
+          "nil"
+        ]
+      ],
+      "expected": "t",
+      "uncaught": {},
+      "condition": {},
+      "actual": "t",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "primitive": "consp",
+      "source": "(consp '(7 9))",
+      "version": "32.0.50",
+      "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+      "transport": [
+        "consp",
+        [
+          "quote",
+          [
+            7,
+            9
+          ]
+        ]
+      ],
+      "expected": "t",
+      "uncaught": {},
+      "condition": {},
+      "actual": "t",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "primitive": "consp",
+      "source": "(consp '(\"λ\"))",
+      "version": "32.0.50",
+      "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+      "transport": [
+        "consp",
+        [
+          "quote",
+          [
+            {
+              "string": "λ"
+            }
+          ]
+        ]
+      ],
+      "expected": "t",
+      "uncaught": {},
+      "condition": {},
+      "actual": "t",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "primitive": "consp",
+      "source": "(consp (lambda (x) x))",
+      "version": "32.0.50",
+      "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+      "transport": [
+        "consp",
+        [
+          "lambda",
+          [
+            "x"
+          ],
+          "x"
+        ]
+      ],
+      "expected": "nil",
+      "uncaught": {},
+      "condition": {},
+      "actual": "nil",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "primitive": "consp",
+      "source": "(consp #'car)",
+      "version": "32.0.50",
+      "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+      "transport": [
+        "consp",
+        [
+          "function",
+          "car"
+        ]
+      ],
+      "expected": "nil",
+      "uncaught": {},
+      "condition": {},
+      "actual": "nil",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "primitive": "consp",
+      "source": "(consp (get-buffer-create (generate-new-buffer-name \"oracle\")))",
+      "version": "32.0.50",
+      "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+      "transport": [
+        "consp",
+        [
+          "get-buffer-create",
+          [
+            "generate-new-buffer-name",
+            {
+              "string": "oracle"
+            }
+          ]
+        ]
+      ],
+      "expected": "nil",
+      "uncaught": {},
+      "condition": {},
+      "actual": "nil",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "primitive": "consp",
+      "source": "(consp (make-marker))",
+      "version": "32.0.50",
+      "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+      "transport": [
+        "consp",
+        [
+          "make-marker"
+        ]
+      ],
+      "expected": "nil",
+      "uncaught": {},
+      "condition": {},
+      "actual": "nil",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "primitive": "consp",
+      "source": "(consp (make-overlay 1 1))",
+      "version": "32.0.50",
+      "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+      "transport": [
+        "consp",
+        [
+          "make-overlay",
+          1,
+          1
+        ]
+      ],
+      "expected": "nil",
+      "uncaught": {},
+      "condition": {},
+      "actual": "nil",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "primitive": "consp",
+      "source": "(let ((x (cons 1 nil))) (setcdr x x) (consp x))",
+      "version": "32.0.50",
+      "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+      "transport": [
+        "let",
+        [
+          [
+            "x",
+            [
+              "cons",
+              1,
+              "nil"
+            ]
+          ]
+        ],
+        [
+          "setcdr",
+          "x",
+          "x"
+        ],
+        [
+          "consp",
+          "x"
+        ]
+      ],
+      "expected": "t",
+      "uncaught": {},
+      "condition": {},
+      "actual": "t",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "primitive": "consp",
+      "source": "(condition-case e (apply #'consp nil) (error e))",
+      "version": "32.0.50",
+      "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+      "transport": [
+        "condition-case",
+        "e",
+        [
+          "apply",
+          [
+            "function",
+            "consp"
+          ],
+          "nil"
+        ],
+        [
+          "error",
+          "e"
+        ]
+      ],
+      "expected": "(wrong-number-of-arguments #<subr consp> 0)",
+      "uncaught": {},
+      "condition": "(wrong-number-of-arguments #<subr consp> 0)",
+      "actual": "(wrong-number-of-arguments #<subr consp> 0)",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "primitive": "consp",
+      "source": "(condition-case e (apply #'consp '(1 2)) (error e))",
+      "version": "32.0.50",
+      "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+      "transport": [
+        "condition-case",
+        "e",
+        [
+          "apply",
+          [
+            "function",
+            "consp"
+          ],
+          [
+            "quote",
+            [
+              1,
+              2
+            ]
+          ]
+        ],
+        [
+          "error",
+          "e"
+        ]
+      ],
+      "expected": "(wrong-number-of-arguments #<subr consp> 2)",
+      "uncaught": {},
+      "condition": "(wrong-number-of-arguments #<subr consp> 2)",
+      "actual": "(wrong-number-of-arguments #<subr consp> 2)",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "primitive": "consp",
+      "source": "(let ((x (cons 7 nil)) (i 0)) (while (< i 10000) (cons i nil) (setq i (1+ i))) (consp x))",
+      "version": "32.0.50",
+      "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+      "transport": [
+        "let",
+        [
+          [
+            "x",
+            [
+              "cons",
+              7,
+              "nil"
+            ]
+          ],
+          [
+            "i",
+            0
+          ]
+        ],
+        [
+          "while",
+          [
+            "<",
+            "i",
+            10000
+          ],
+          [
+            "cons",
+            "i",
+            "nil"
+          ],
+          [
+            "setq",
+            "i",
+            [
+              "1+",
+              "i"
+            ]
+          ]
+        ],
+        [
+          "consp",
+          "x"
+        ]
+      ],
+      "expected": "t",
+      "uncaught": {},
+      "condition": {},
+      "actual": "t",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "primitive": "car-safe",
+      "source": "(car-safe nil)",
+      "version": "32.0.50",
+      "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+      "transport": [
+        "car-safe",
+        "nil"
+      ],
+      "expected": "nil",
+      "uncaught": {},
+      "condition": {},
+      "actual": "nil",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "primitive": "car-safe",
+      "source": "(car-safe t)",
+      "version": "32.0.50",
+      "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+      "transport": [
+        "car-safe",
+        "t"
+      ],
+      "expected": "nil",
+      "uncaught": {},
+      "condition": {},
+      "actual": "nil",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "primitive": "car-safe",
+      "source": "(car-safe 0)",
+      "version": "32.0.50",
+      "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+      "transport": [
+        "car-safe",
+        0
+      ],
+      "expected": "nil",
+      "uncaught": {},
+      "condition": {},
+      "actual": "nil",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "primitive": "car-safe",
+      "source": "(car-safe -1)",
+      "version": "32.0.50",
+      "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+      "transport": [
+        "car-safe",
+        -1
+      ],
+      "expected": "nil",
+      "uncaught": {},
+      "condition": {},
+      "actual": "nil",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "primitive": "car-safe",
+      "source": "(car-safe 3.5)",
+      "version": "32.0.50",
+      "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+      "transport": [
+        "car-safe",
+        3.5
+      ],
+      "expected": "nil",
+      "uncaught": {},
+      "condition": {},
+      "actual": "nil",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "primitive": "car-safe",
+      "source": "(car-safe 'name)",
+      "version": "32.0.50",
+      "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+      "transport": [
+        "car-safe",
+        [
+          "quote",
+          "name"
+        ]
+      ],
+      "expected": "nil",
+      "uncaught": {},
+      "condition": {},
+      "actual": "nil",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "primitive": "car-safe",
+      "source": "(car-safe :keyword)",
+      "version": "32.0.50",
+      "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+      "transport": [
+        "car-safe",
+        ":keyword"
+      ],
+      "expected": "nil",
+      "uncaught": {},
+      "condition": {},
+      "actual": "nil",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "primitive": "car-safe",
+      "source": "(car-safe \"λ\")",
+      "version": "32.0.50",
+      "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+      "transport": [
+        "car-safe",
+        {
+          "string": "λ"
+        }
+      ],
+      "expected": "nil",
+      "uncaught": {},
+      "condition": {},
+      "actual": "nil",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "primitive": "car-safe",
+      "source": "(car-safe (unibyte-string 255))",
+      "version": "32.0.50",
+      "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+      "transport": [
+        "car-safe",
+        [
+          "unibyte-string",
+          255
+        ]
+      ],
+      "expected": "nil",
+      "uncaught": {},
+      "condition": {},
+      "actual": "nil",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "primitive": "car-safe",
+      "source": "(car-safe (vector 1))",
+      "version": "32.0.50",
+      "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+      "transport": [
+        "car-safe",
+        [
+          "vector",
+          1
+        ]
+      ],
+      "expected": "nil",
+      "uncaught": {},
+      "condition": {},
+      "actual": "nil",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "primitive": "car-safe",
+      "source": "(car-safe (cons 7 9))",
+      "version": "32.0.50",
+      "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+      "transport": [
+        "car-safe",
+        [
+          "cons",
+          7,
+          9
+        ]
+      ],
+      "expected": "7",
+      "uncaught": {},
+      "condition": {},
+      "actual": "7",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "primitive": "car-safe",
+      "source": "(car-safe (cons (cons 4 nil) nil))",
+      "version": "32.0.50",
+      "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+      "transport": [
+        "car-safe",
+        [
+          "cons",
+          [
+            "cons",
+            4,
+            "nil"
+          ],
+          "nil"
+        ]
+      ],
+      "expected": "(4)",
+      "uncaught": {},
+      "condition": {},
+      "actual": "(4)",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "primitive": "car-safe",
+      "source": "(car-safe '(7 9))",
+      "version": "32.0.50",
+      "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+      "transport": [
+        "car-safe",
+        [
+          "quote",
+          [
+            7,
+            9
+          ]
+        ]
+      ],
+      "expected": "7",
+      "uncaught": {},
+      "condition": {},
+      "actual": "7",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "primitive": "car-safe",
+      "source": "(car-safe '(\"λ\"))",
+      "version": "32.0.50",
+      "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+      "transport": [
+        "car-safe",
+        [
+          "quote",
+          [
+            {
+              "string": "λ"
+            }
+          ]
+        ]
+      ],
+      "expected": "\"λ\"",
+      "uncaught": {},
+      "condition": {},
+      "actual": "\"λ\"",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "primitive": "car-safe",
+      "source": "(car-safe (lambda (x) x))",
+      "version": "32.0.50",
+      "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+      "transport": [
+        "car-safe",
+        [
+          "lambda",
+          [
+            "x"
+          ],
+          "x"
+        ]
+      ],
+      "expected": "nil",
+      "uncaught": {},
+      "condition": {},
+      "actual": "nil",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "primitive": "car-safe",
+      "source": "(car-safe #'car)",
+      "version": "32.0.50",
+      "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+      "transport": [
+        "car-safe",
+        [
+          "function",
+          "car"
+        ]
+      ],
+      "expected": "nil",
+      "uncaught": {},
+      "condition": {},
+      "actual": "nil",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "primitive": "car-safe",
+      "source": "(car-safe (get-buffer-create (generate-new-buffer-name \"oracle\")))",
+      "version": "32.0.50",
+      "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+      "transport": [
+        "car-safe",
+        [
+          "get-buffer-create",
+          [
+            "generate-new-buffer-name",
+            {
+              "string": "oracle"
+            }
+          ]
+        ]
+      ],
+      "expected": "nil",
+      "uncaught": {},
+      "condition": {},
+      "actual": "nil",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "primitive": "car-safe",
+      "source": "(car-safe (make-marker))",
+      "version": "32.0.50",
+      "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+      "transport": [
+        "car-safe",
+        [
+          "make-marker"
+        ]
+      ],
+      "expected": "nil",
+      "uncaught": {},
+      "condition": {},
+      "actual": "nil",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "primitive": "car-safe",
+      "source": "(car-safe (make-overlay 1 1))",
+      "version": "32.0.50",
+      "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+      "transport": [
+        "car-safe",
+        [
+          "make-overlay",
+          1,
+          1
+        ]
+      ],
+      "expected": "nil",
+      "uncaught": {},
+      "condition": {},
+      "actual": "nil",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "primitive": "car-safe",
+      "source": "(let ((x (cons 1 nil))) (setcdr x x) (car-safe x))",
+      "version": "32.0.50",
+      "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+      "transport": [
+        "let",
+        [
+          [
+            "x",
+            [
+              "cons",
+              1,
+              "nil"
+            ]
+          ]
+        ],
+        [
+          "setcdr",
+          "x",
+          "x"
+        ],
+        [
+          "car-safe",
+          "x"
+        ]
+      ],
+      "expected": "1",
+      "uncaught": {},
+      "condition": {},
+      "actual": "1",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "primitive": "car-safe",
+      "source": "(condition-case e (apply #'car-safe nil) (error e))",
+      "version": "32.0.50",
+      "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+      "transport": [
+        "condition-case",
+        "e",
+        [
+          "apply",
+          [
+            "function",
+            "car-safe"
+          ],
+          "nil"
+        ],
+        [
+          "error",
+          "e"
+        ]
+      ],
+      "expected": "(wrong-number-of-arguments #<subr car-safe> 0)",
+      "uncaught": {},
+      "condition": "(wrong-number-of-arguments #<subr car-safe> 0)",
+      "actual": "(wrong-number-of-arguments #<subr car-safe> 0)",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "primitive": "car-safe",
+      "source": "(condition-case e (apply #'car-safe '(1 2)) (error e))",
+      "version": "32.0.50",
+      "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+      "transport": [
+        "condition-case",
+        "e",
+        [
+          "apply",
+          [
+            "function",
+            "car-safe"
+          ],
+          [
+            "quote",
+            [
+              1,
+              2
+            ]
+          ]
+        ],
+        [
+          "error",
+          "e"
+        ]
+      ],
+      "expected": "(wrong-number-of-arguments #<subr car-safe> 2)",
+      "uncaught": {},
+      "condition": "(wrong-number-of-arguments #<subr car-safe> 2)",
+      "actual": "(wrong-number-of-arguments #<subr car-safe> 2)",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "primitive": "car-safe",
+      "source": "(let ((x (cons 7 nil)) (i 0)) (while (< i 10000) (cons i nil) (setq i (1+ i))) (car-safe x))",
+      "version": "32.0.50",
+      "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+      "transport": [
+        "let",
+        [
+          [
+            "x",
+            [
+              "cons",
+              7,
+              "nil"
+            ]
+          ],
+          [
+            "i",
+            0
+          ]
+        ],
+        [
+          "while",
+          [
+            "<",
+            "i",
+            10000
+          ],
+          [
+            "cons",
+            "i",
+            "nil"
+          ],
+          [
+            "setq",
+            "i",
+            [
+              "1+",
+              "i"
+            ]
+          ]
+        ],
+        [
+          "car-safe",
+          "x"
+        ]
+      ],
+      "expected": "7",
+      "uncaught": {},
+      "condition": {},
+      "actual": "7",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "primitive": "symbolp",
+      "source": "(symbolp nil)",
+      "version": "32.0.50",
+      "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+      "transport": [
+        "symbolp",
+        "nil"
+      ],
+      "expected": "t",
+      "uncaught": {},
+      "condition": {},
+      "actual": "t",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "primitive": "symbolp",
+      "source": "(symbolp t)",
+      "version": "32.0.50",
+      "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+      "transport": [
+        "symbolp",
+        "t"
+      ],
+      "expected": "t",
+      "uncaught": {},
+      "condition": {},
+      "actual": "t",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "primitive": "symbolp",
+      "source": "(symbolp 0)",
+      "version": "32.0.50",
+      "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+      "transport": [
+        "symbolp",
+        0
+      ],
+      "expected": "nil",
+      "uncaught": {},
+      "condition": {},
+      "actual": "nil",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "primitive": "symbolp",
+      "source": "(symbolp -1)",
+      "version": "32.0.50",
+      "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+      "transport": [
+        "symbolp",
+        -1
+      ],
+      "expected": "nil",
+      "uncaught": {},
+      "condition": {},
+      "actual": "nil",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "primitive": "symbolp",
+      "source": "(symbolp 3.5)",
+      "version": "32.0.50",
+      "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+      "transport": [
+        "symbolp",
+        3.5
+      ],
+      "expected": "nil",
+      "uncaught": {},
+      "condition": {},
+      "actual": "nil",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "primitive": "symbolp",
+      "source": "(symbolp 'name)",
+      "version": "32.0.50",
+      "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+      "transport": [
+        "symbolp",
+        [
+          "quote",
+          "name"
+        ]
+      ],
+      "expected": "t",
+      "uncaught": {},
+      "condition": {},
+      "actual": "t",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "primitive": "symbolp",
+      "source": "(symbolp :keyword)",
+      "version": "32.0.50",
+      "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+      "transport": [
+        "symbolp",
+        ":keyword"
+      ],
+      "expected": "t",
+      "uncaught": {},
+      "condition": {},
+      "actual": "t",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "primitive": "symbolp",
+      "source": "(symbolp \"λ\")",
+      "version": "32.0.50",
+      "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+      "transport": [
+        "symbolp",
+        {
+          "string": "λ"
+        }
+      ],
+      "expected": "nil",
+      "uncaught": {},
+      "condition": {},
+      "actual": "nil",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "primitive": "symbolp",
+      "source": "(symbolp (unibyte-string 255))",
+      "version": "32.0.50",
+      "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+      "transport": [
+        "symbolp",
+        [
+          "unibyte-string",
+          255
+        ]
+      ],
+      "expected": "nil",
+      "uncaught": {},
+      "condition": {},
+      "actual": "nil",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "primitive": "symbolp",
+      "source": "(symbolp (vector 1))",
+      "version": "32.0.50",
+      "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+      "transport": [
+        "symbolp",
+        [
+          "vector",
+          1
+        ]
+      ],
+      "expected": "nil",
+      "uncaught": {},
+      "condition": {},
+      "actual": "nil",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "primitive": "symbolp",
+      "source": "(symbolp (cons 7 9))",
+      "version": "32.0.50",
+      "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+      "transport": [
+        "symbolp",
+        [
+          "cons",
+          7,
+          9
+        ]
+      ],
+      "expected": "nil",
+      "uncaught": {},
+      "condition": {},
+      "actual": "nil",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "primitive": "symbolp",
+      "source": "(symbolp (cons (cons 4 nil) nil))",
+      "version": "32.0.50",
+      "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+      "transport": [
+        "symbolp",
+        [
+          "cons",
+          [
+            "cons",
+            4,
+            "nil"
+          ],
+          "nil"
+        ]
+      ],
+      "expected": "nil",
+      "uncaught": {},
+      "condition": {},
+      "actual": "nil",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "primitive": "symbolp",
+      "source": "(symbolp '(7 9))",
+      "version": "32.0.50",
+      "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+      "transport": [
+        "symbolp",
+        [
+          "quote",
+          [
+            7,
+            9
+          ]
+        ]
+      ],
+      "expected": "nil",
+      "uncaught": {},
+      "condition": {},
+      "actual": "nil",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "primitive": "symbolp",
+      "source": "(symbolp '(\"λ\"))",
+      "version": "32.0.50",
+      "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+      "transport": [
+        "symbolp",
+        [
+          "quote",
+          [
+            {
+              "string": "λ"
+            }
+          ]
+        ]
+      ],
+      "expected": "nil",
+      "uncaught": {},
+      "condition": {},
+      "actual": "nil",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "primitive": "symbolp",
+      "source": "(symbolp (lambda (x) x))",
+      "version": "32.0.50",
+      "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+      "transport": [
+        "symbolp",
+        [
+          "lambda",
+          [
+            "x"
+          ],
+          "x"
+        ]
+      ],
+      "expected": "nil",
+      "uncaught": {},
+      "condition": {},
+      "actual": "nil",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "primitive": "symbolp",
+      "source": "(symbolp #'car)",
+      "version": "32.0.50",
+      "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+      "transport": [
+        "symbolp",
+        [
+          "function",
+          "car"
+        ]
+      ],
+      "expected": "t",
+      "uncaught": {},
+      "condition": {},
+      "actual": "t",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "primitive": "symbolp",
+      "source": "(symbolp (get-buffer-create (generate-new-buffer-name \"oracle\")))",
+      "version": "32.0.50",
+      "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+      "transport": [
+        "symbolp",
+        [
+          "get-buffer-create",
+          [
+            "generate-new-buffer-name",
+            {
+              "string": "oracle"
+            }
+          ]
+        ]
+      ],
+      "expected": "nil",
+      "uncaught": {},
+      "condition": {},
+      "actual": "nil",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "primitive": "symbolp",
+      "source": "(symbolp (make-marker))",
+      "version": "32.0.50",
+      "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+      "transport": [
+        "symbolp",
+        [
+          "make-marker"
+        ]
+      ],
+      "expected": "nil",
+      "uncaught": {},
+      "condition": {},
+      "actual": "nil",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "primitive": "symbolp",
+      "source": "(symbolp (make-overlay 1 1))",
+      "version": "32.0.50",
+      "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+      "transport": [
+        "symbolp",
+        [
+          "make-overlay",
+          1,
+          1
+        ]
+      ],
+      "expected": "nil",
+      "uncaught": {},
+      "condition": {},
+      "actual": "nil",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "primitive": "symbolp",
+      "source": "(let ((x (cons 1 nil))) (setcdr x x) (symbolp x))",
+      "version": "32.0.50",
+      "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+      "transport": [
+        "let",
+        [
+          [
+            "x",
+            [
+              "cons",
+              1,
+              "nil"
+            ]
+          ]
+        ],
+        [
+          "setcdr",
+          "x",
+          "x"
+        ],
+        [
+          "symbolp",
+          "x"
+        ]
+      ],
+      "expected": "nil",
+      "uncaught": {},
+      "condition": {},
+      "actual": "nil",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "primitive": "symbolp",
+      "source": "(condition-case e (apply #'symbolp nil) (error e))",
+      "version": "32.0.50",
+      "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+      "transport": [
+        "condition-case",
+        "e",
+        [
+          "apply",
+          [
+            "function",
+            "symbolp"
+          ],
+          "nil"
+        ],
+        [
+          "error",
+          "e"
+        ]
+      ],
+      "expected": "(wrong-number-of-arguments #<subr symbolp> 0)",
+      "uncaught": {},
+      "condition": "(wrong-number-of-arguments #<subr symbolp> 0)",
+      "actual": "(wrong-number-of-arguments #<subr symbolp> 0)",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "primitive": "symbolp",
+      "source": "(condition-case e (apply #'symbolp '(1 2)) (error e))",
+      "version": "32.0.50",
+      "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+      "transport": [
+        "condition-case",
+        "e",
+        [
+          "apply",
+          [
+            "function",
+            "symbolp"
+          ],
+          [
+            "quote",
+            [
+              1,
+              2
+            ]
+          ]
+        ],
+        [
+          "error",
+          "e"
+        ]
+      ],
+      "expected": "(wrong-number-of-arguments #<subr symbolp> 2)",
+      "uncaught": {},
+      "condition": "(wrong-number-of-arguments #<subr symbolp> 2)",
+      "actual": "(wrong-number-of-arguments #<subr symbolp> 2)",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "primitive": "symbolp",
+      "source": "(let ((x (cons 7 nil)) (i 0)) (while (< i 10000) (cons i nil) (setq i (1+ i))) (symbolp x))",
+      "version": "32.0.50",
+      "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+      "transport": [
+        "let",
+        [
+          [
+            "x",
+            [
+              "cons",
+              7,
+              "nil"
+            ]
+          ],
+          [
+            "i",
+            0
+          ]
+        ],
+        [
+          "while",
+          [
+            "<",
+            "i",
+            10000
+          ],
+          [
+            "cons",
+            "i",
+            "nil"
+          ],
+          [
+            "setq",
+            "i",
+            [
+              "1+",
+              "i"
+            ]
+          ]
+        ],
+        [
+          "symbolp",
+          "x"
+        ]
+      ],
+      "expected": "nil",
+      "uncaught": {},
+      "condition": {},
+      "actual": "nil",
+      "stderr": "",
+      "passed": true
+    }
+  ]
+}

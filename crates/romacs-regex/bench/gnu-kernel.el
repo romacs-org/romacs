@@ -1,0 +1,17 @@
+;;; gnu-kernel.el --- literal kernel diagnostics -*- lexical-binding: t -*-
+(let* ((row (getenv "REGEX_ROW"))
+       (back (equal row "k-literal-back-xdisp"))
+       (miss (equal row "k-literal-miss"))
+       (pattern (if miss "zzqqxx_no_hit!" "glyph_row"))
+       (case-fold-search t) (gc-cons-threshold most-positive-fixnum))
+  (with-temp-buffer
+    (insert-file-contents (getenv "CORE_BENCH_XDISP"))
+    (goto-char (byte-to-position (1+ (/ (position-bytes (point-max)) 2))))
+    (insert "X") (delete-char -1)
+    (let ((answer 0) (start (float-time)))
+      (dotimes (_ (if miss 1 20))
+        (goto-char (if back (point-max) (point-min)))
+        (while (if back (search-backward pattern nil t) (search-forward pattern nil t))
+          (setq answer (1+ answer))))
+      (princ (format "%s ms=%.6f answer=%d\n" row (* 1000 (- (float-time) start)) answer))
+      (unless (= answer (if miss 0 10040)) (error "Wrong literal answer: %d" answer)))))

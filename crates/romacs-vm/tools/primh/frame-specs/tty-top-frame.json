@@ -1,0 +1,32 @@
+{
+ "name": "tty-top-frame",
+ "arity": [
+  0,
+  1
+ ],
+ "effect": "reads",
+ "gnu_files": [
+  "term.c"
+ ],
+ "gnu_def": "term.c:2517",
+ "args": [
+  "none"
+ ],
+ "extra": {
+  "0": [
+   "nil",
+   "t",
+   "1",
+   "'symbol",
+   "\"string\""
+  ]
+ },
+ "probes": [
+  "(fboundp 'tty-top-frame)",
+  "(tty-top-frame)",
+  "(tty-top-frame (selected-frame))",
+  "(tty-top-frame (frame-terminal))",
+  "(funcall #'tty-top-frame nil)"
+ ],
+ "rust": "src/prims/frame.rs:16"
+}

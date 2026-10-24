@@ -1,0 +1,24 @@
+[package]
+name = "romacs-probe"
+version = "0.0.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+publish = false
+description = "Tier P probes: deterministic counters over shipping primitives (see scripts/probe)"
+
+# Its own workspace, so the probe tier never edits the root manifest the gate
+# builds from. Cargo.lock is the root lock pruned to these dependencies.
+[workspace]
+
+[dependencies]
+libc = "0.2"
+romacs-chars = { path = "../../crates/romacs-chars" }
+romacs-mem = { path = "../../crates/romacs-mem" }
+romacs-text = { path = "../../crates/romacs-text" }
+
+# Same code generation as the shipping `release` profile, so instruction
+# counts describe the code users run.
+[profile.release]
+lto = true
+codegen-units = 1
+debug = false

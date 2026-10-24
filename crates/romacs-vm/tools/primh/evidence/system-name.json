@@ -1,0 +1,104 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "system-name",
+ "spec_sha256": "91f36f0907784e874645bcc27a3a92ee44c2c25650cfa5b1ee5a813987a0eb09",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "system-name",
+    "subr",
+    0,
+    0
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "editfns.c": "4ea567918bb8e3ba8bc5d144dce9ee2908bf7a108780cb63a4040daa353217c1",
+  "sysdep.c": "a756960fdbb15330f199bfbac7bbb13344cd342e5ccf9f5125e0b38ca08e8cc7"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "system-name/0000",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (system-name )) (error (list 'sig e))))",
+   "expected": "(ok \"romacs-oracle.example\")"
+  },
+  {
+   "id": "system-name/0001",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'system-name '(1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr system-name> 1))"
+  },
+  {
+   "id": "system-name/0002",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let () (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (system-name ))) (error (list 'sig e))))",
+   "expected": "(ok \"romacs-oracle.example\")"
+  },
+  {
+   "id": "system-name/0003",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let () (let ((r (system-name ))) (list )))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "system-name/0004",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (boundp 'system-name) (fboundp 'system-name) (functionp #'system-name) (eq system-name (system-name)) (eq system-name (funcall #'system-name)) (multibyte-string-p (system-name)))) (error (list 'sig e))))",
+   "expected": "(ok (t t t t t nil))"
+  },
+  {
+   "id": "system-name/0005",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((system-name \"custom-host\")) (list system-name (system-name) (funcall #'system-name)))) (error (list 'sig e))))",
+   "expected": "(ok (\"custom-host\" \"custom-host\" \"custom-host\"))"
+  },
+  {
+   "id": "system-name/0006",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((system-name nil)) (system-name))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "system-name/0007",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((system-name 42)) (system-name))) (error (list 'sig e))))",
+   "expected": "(ok 42)"
+  },
+  {
+   "id": "system-name/0008",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((system-name '(a b))) (eq system-name (system-name)))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "system-name/0009",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((before system-name)) (setq system-name \"assigned-host\") (prog1 (system-name) (setq system-name before)))) (error (list 'sig e))))",
+   "expected": "(ok \"assigned-host\")"
+  },
+  {
+   "id": "system-name/0010",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((before (copy-sequence system-name))) (aset system-name 0 88) (equal (system-name) before))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  }
+ ],
+ "pinned": {
+  "system-name/0010": "VALUE"
+ },
+ "environment": {
+  "hostname": "romacs-oracle.example",
+  "control": "Linux unshare --user --map-root-user --uts; hostname before GNU and VM startup"
+ },
+ "recording_wrapper_sha256": "611d610d009dc5b393a322802d777e8804f85ab80baf95f89f4047d14e8bd152"
+}

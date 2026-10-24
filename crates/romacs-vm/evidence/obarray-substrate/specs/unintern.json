@@ -1,0 +1,35 @@
+{
+  "name": "unintern",
+  "arity": [
+    2,
+    2
+  ],
+  "effect": "global",
+  "gnu_files": [
+    "lread.c"
+  ],
+  "gnu_def": "lread.c:4828",
+  "rust": "src/prims/obarray.rs:15",
+  "args": [
+    "none",
+    "none"
+  ],
+  "extra": {
+    "0": [
+      "\"absent\"",
+      "'absent",
+      "42"
+    ],
+    "1": [
+      "(obarray-make)",
+      "(vector 0)",
+      "[]",
+      "42"
+    ]
+  },
+  "probes": [
+    "(let* ((a (obarray-make)) (b (obarray-make)) (x (intern \"remove-private\" a)) (y (intern \"remove-private\" b))) (list (unintern y a) (eq x (intern-soft \"remove-private\" a)) (unintern x a) (intern-soft \"remove-private\" a) (unintern x a) (eq x (intern \"remove-private\" a))))",
+    "(let ((a (obarray-make))) (intern \"x\" a) (list (unintern \"x\" a) (unintern \"x\" a)))",
+    "(list (fboundp 'unintern) (functionp 'unintern))"
+  ]
+}

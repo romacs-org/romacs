@@ -1,0 +1,25 @@
+{
+ "name": "capitalize", "arity": [1, 1], "effect": "reads",
+ "gnu_files": ["casefiddle.c"], "gnu_def": "casefiddle.c:400",
+ "rust": "src/prims/capitalize.rs:65", "args": ["any"],
+ "extra": {"0": ["97", "453", "454", "64257", "134217825", "536871009", "9999999999", "(unibyte-string 255 97 66)", "(string-to-multibyte \"aBC\")", "\"hELLO-world 123ABC foo_BAR don't\"", "\"ßABC ﬃXYZ ǆABC ΟΣ ΟΣΑ İX\""]},
+ "probes": [
+  "(list (fboundp 'capitalize) (functionp #'capitalize) (funcall #'capitalize \"aBC\"))",
+  "(with-temp-buffer (set-syntax-table (copy-syntax-table)) (modify-syntax-entry 45 \"w\") (capitalize \"a-B_C\"))",
+  "(let ((case-symbols-as-words t)) (capitalize \"foo_BAR\"))",
+  "(let* ((s (propertize (unibyte-string 97 66) 'face 'bold)) (r (capitalize s))) (list (eq s r) (append s nil) (append r nil) (get-text-property 0 'face r) (multibyte-string-p r)))",
+  "(let* ((s (propertize (string-to-multibyte \"aBC\") 'face 'bold)) (r (capitalize s))) (list (eq s r) (append s nil) (append r nil) (get-text-property 0 'face r) (multibyte-string-p r)))",
+  "(let ((s (unibyte-string))) (eq s (capitalize s)))",
+  "(let ((s (string-to-multibyte \"\"))) (eq s (capitalize s)))",
+  "(with-temp-buffer (set-buffer-multibyte nil) (list (capitalize 224) (capitalize 97) (capitalize 454)))",
+  "(let ((s (string-to-multibyte \"ab-CD\"))) (put-text-property 2 3 'syntax-table '(2) s) (capitalize s))",
+  "(list (capitalize \"ΟΣΑ ΟΣ ΑΣ!\") (capitalize \"áBC ǳABC\"))",
+  "(list (append (capitalize (string 4194303 97 66)) nil) (append (capitalize (string 55296 97 66)) nil))",
+  "(let ((table (copy-case-table (current-case-table)))) (set-char-table-range table 97 120) (set-case-table table) (capitalize \"abc\"))",
+  "(capitalize \"a—b «ab» a×b ΑΣ»\")",
+  "(with-temp-buffer (set (make-local-variable 'case-symbols-as-words) t) (capitalize \"foo_BAR\"))",
+  "(with-temp-buffer (local-variable-if-set-p 'case-symbols-as-words))",
+  "(with-temp-buffer (setq case-symbols-as-words 7) (list case-symbols-as-words (capitalize \"foo_BAR\")))",
+  "(list (capitalize 4294967393) (capitalize 4294967361))"
+ ]
+}

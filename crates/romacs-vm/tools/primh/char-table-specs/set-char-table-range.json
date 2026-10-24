@@ -1,0 +1,35 @@
+{
+  "name": "set-char-table-range",
+  "arity": [
+    3,
+    3
+  ],
+  "effect": "mutatesargs",
+  "gnu_files": [
+    "chartab.c"
+  ],
+  "gnu_def": "chartab.c:609",
+  "rust": "src/prims/char_table.rs:29",
+  "args": [
+    "none",
+    "none",
+    "none"
+  ],
+  "probes": [
+    "(let ((ct (make-char-table nil 'init))) (set-char-table-range ct nil 'default) (list (aref ct 65) (progn (aset ct 65 nil) (aref ct 65)) (aref ct 66)))",
+    "(let ((ct (make-char-table nil 'init))) (set-char-table-range ct t 'all) (set-char-table-range ct 65 nil) (list (aref ct 65) (aref ct 66) (aref ct 4194303)))",
+    "(let ((ct (make-char-table nil))) (set-char-table-range ct '(128 . 4194303) 'wide) (set-char-table-range ct '(1000 . 2000) nil) (set-char-table-range ct '(1500 . 2500) 'overlap) (list (aref ct 127) (aref ct 128) (aref ct 999) (aref ct 1000) (aref ct 1500) (aref ct 2500) (aref ct 2501) (aref ct 128512)))",
+    "(let ((ct (make-char-table nil))) (set-char-table-range ct '(90 . 65) t) (list (aref ct 64) (aref ct 65) (aref ct 90)))",
+    "(let ((ct (make-char-table nil))) (eq (set-char-table-range ct 955 'value) 'value))",
+    "(set-char-table-range (make-char-table nil) -1 'value)",
+    "(set-char-table-range (make-char-table nil) 4194304 'value)",
+    "(set-char-table-range (make-char-table nil) 1.5 'value)",
+    "(set-char-table-range (make-char-table nil) 'bad 'value)",
+    "(set-char-table-range (make-char-table nil) '(nil . 1) 'value)",
+    "(set-char-table-range (make-char-table nil) '(1 . nil) 'value)",
+    "(set-char-table-range (make-char-table nil) '(1 . 4194304) 'value)",
+    "(set-char-table-range (make-char-table nil) '(1 2) 'value)",
+    "(set-char-table-range 1 nil nil)",
+    "(list (fboundp 'set-char-table-range) (funcall #'set-char-table-range (make-char-table nil) 128512 'astral))"
+  ]
+}

@@ -1,0 +1,1618 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "set-default",
+ "spec_sha256": "70260e2787b1d4370c046897bfcc53dc7110a9ea47285cf962948740f662f934",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "set-default",
+    "subr",
+    2,
+    2
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "data.c": "eca7895a8043cd0a960dfe037a46028374d1a40cc6ee4d0cf6de90ac56c242ae"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "set-default/0000",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant nil))"
+  },
+  {
+   "id": "set-default/0001",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default nil t)) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant nil))"
+  },
+  {
+   "id": "set-default/0002",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default nil 0)) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant nil))"
+  },
+  {
+   "id": "set-default/0003",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default nil 1)) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant nil))"
+  },
+  {
+   "id": "set-default/0004",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default nil 2)) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant nil))"
+  },
+  {
+   "id": "set-default/0005",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default nil -1)) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant nil))"
+  },
+  {
+   "id": "set-default/0006",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default nil most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant nil))"
+  },
+  {
+   "id": "set-default/0007",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default nil 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant nil))"
+  },
+  {
+   "id": "set-default/0008",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default nil 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant nil))"
+  },
+  {
+   "id": "set-default/0009",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default nil :kw)) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant nil))"
+  },
+  {
+   "id": "set-default/0010",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default nil (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant nil))"
+  },
+  {
+   "id": "set-default/0011",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default nil (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant nil))"
+  },
+  {
+   "id": "set-default/0012",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default nil (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant nil))"
+  },
+  {
+   "id": "set-default/0013",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default nil (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant nil))"
+  },
+  {
+   "id": "set-default/0014",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default nil :kw)) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant nil))"
+  },
+  {
+   "id": "set-default/0015",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default nil (list 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant nil))"
+  },
+  {
+   "id": "set-default/0016",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default t nil)) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant t))"
+  },
+  {
+   "id": "set-default/0017",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default t t)) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant t))"
+  },
+  {
+   "id": "set-default/0018",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default t 0)) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant t))"
+  },
+  {
+   "id": "set-default/0019",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default t 1)) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant t))"
+  },
+  {
+   "id": "set-default/0020",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default t 2)) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant t))"
+  },
+  {
+   "id": "set-default/0021",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default t -1)) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant t))"
+  },
+  {
+   "id": "set-default/0022",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default t most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant t))"
+  },
+  {
+   "id": "set-default/0023",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default t 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant t))"
+  },
+  {
+   "id": "set-default/0024",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default t 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant t))"
+  },
+  {
+   "id": "set-default/0025",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default t :kw)) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant t))"
+  },
+  {
+   "id": "set-default/0026",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default t (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant t))"
+  },
+  {
+   "id": "set-default/0027",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default t (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant t))"
+  },
+  {
+   "id": "set-default/0028",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default t (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant t))"
+  },
+  {
+   "id": "set-default/0029",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default t (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant t))"
+  },
+  {
+   "id": "set-default/0030",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default t :kw)) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant t))"
+  },
+  {
+   "id": "set-default/0031",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default t (list 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant t))"
+  },
+  {
+   "id": "set-default/0032",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default 'sym nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "set-default/0033",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default 'sym t)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "set-default/0034",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default 'sym 0)) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "set-default/0035",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default 'sym 1)) (error (list 'sig e))))",
+   "expected": "(ok 1)"
+  },
+  {
+   "id": "set-default/0036",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default 'sym 2)) (error (list 'sig e))))",
+   "expected": "(ok 2)"
+  },
+  {
+   "id": "set-default/0037",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default 'sym -1)) (error (list 'sig e))))",
+   "expected": "(ok -1)"
+  },
+  {
+   "id": "set-default/0038",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default 'sym most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(ok 2305843009213693951)"
+  },
+  {
+   "id": "set-default/0039",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default 'sym 1.5)) (error (list 'sig e))))",
+   "expected": "(ok 1.5)"
+  },
+  {
+   "id": "set-default/0040",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default 'sym 'sym)) (error (list 'sig e))))",
+   "expected": "(ok sym)"
+  },
+  {
+   "id": "set-default/0041",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default 'sym :kw)) (error (list 'sig e))))",
+   "expected": "(ok :kw)"
+  },
+  {
+   "id": "set-default/0042",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default 'sym (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(ok \"\")"
+  },
+  {
+   "id": "set-default/0043",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default 'sym (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(ok \"abc\")"
+  },
+  {
+   "id": "set-default/0044",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default 'sym (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(ok \"λx\")"
+  },
+  {
+   "id": "set-default/0045",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default 'sym (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(ok [1 2])"
+  },
+  {
+   "id": "set-default/0046",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default 'sym :kw)) (error (list 'sig e))))",
+   "expected": "(ok :kw)"
+  },
+  {
+   "id": "set-default/0047",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default 'sym (list 1 2))) (error (list 'sig e))))",
+   "expected": "(ok (1 2))"
+  },
+  {
+   "id": "set-default/0048",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default :kw nil)) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant :kw))"
+  },
+  {
+   "id": "set-default/0049",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default :kw t)) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant :kw))"
+  },
+  {
+   "id": "set-default/0050",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default :kw 0)) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant :kw))"
+  },
+  {
+   "id": "set-default/0051",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default :kw 1)) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant :kw))"
+  },
+  {
+   "id": "set-default/0052",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default :kw 2)) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant :kw))"
+  },
+  {
+   "id": "set-default/0053",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default :kw -1)) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant :kw))"
+  },
+  {
+   "id": "set-default/0054",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default :kw most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant :kw))"
+  },
+  {
+   "id": "set-default/0055",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default :kw 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant :kw))"
+  },
+  {
+   "id": "set-default/0056",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default :kw 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant :kw))"
+  },
+  {
+   "id": "set-default/0057",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default :kw :kw)) (error (list 'sig e))))",
+   "expected": "(ok :kw)"
+  },
+  {
+   "id": "set-default/0058",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default :kw (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant :kw))"
+  },
+  {
+   "id": "set-default/0059",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default :kw (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant :kw))"
+  },
+  {
+   "id": "set-default/0060",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default :kw (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant :kw))"
+  },
+  {
+   "id": "set-default/0061",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default :kw (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant :kw))"
+  },
+  {
+   "id": "set-default/0062",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default :kw :kw)) (error (list 'sig e))))",
+   "expected": "(ok :kw)"
+  },
+  {
+   "id": "set-default/0063",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default :kw (list 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant :kw))"
+  },
+  {
+   "id": "set-default/0064",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default 1 nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1))"
+  },
+  {
+   "id": "set-default/0065",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default 1 t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1))"
+  },
+  {
+   "id": "set-default/0066",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default 1 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1))"
+  },
+  {
+   "id": "set-default/0067",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default 1 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1))"
+  },
+  {
+   "id": "set-default/0068",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default 1 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1))"
+  },
+  {
+   "id": "set-default/0069",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default 1 -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1))"
+  },
+  {
+   "id": "set-default/0070",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default 1 most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1))"
+  },
+  {
+   "id": "set-default/0071",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default 1 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1))"
+  },
+  {
+   "id": "set-default/0072",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default 1 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1))"
+  },
+  {
+   "id": "set-default/0073",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default 1 :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1))"
+  },
+  {
+   "id": "set-default/0074",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default 1 (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1))"
+  },
+  {
+   "id": "set-default/0075",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default 1 (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1))"
+  },
+  {
+   "id": "set-default/0076",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default 1 (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1))"
+  },
+  {
+   "id": "set-default/0077",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default 1 (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1))"
+  },
+  {
+   "id": "set-default/0078",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default 1 :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1))"
+  },
+  {
+   "id": "set-default/0079",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default 1 (list 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1))"
+  },
+  {
+   "id": "set-default/0080",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default (copy-sequence \"s\") nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"s\"))"
+  },
+  {
+   "id": "set-default/0081",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default (copy-sequence \"s\") t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"s\"))"
+  },
+  {
+   "id": "set-default/0082",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default (copy-sequence \"s\") 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"s\"))"
+  },
+  {
+   "id": "set-default/0083",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default (copy-sequence \"s\") 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"s\"))"
+  },
+  {
+   "id": "set-default/0084",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default (copy-sequence \"s\") 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"s\"))"
+  },
+  {
+   "id": "set-default/0085",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default (copy-sequence \"s\") -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"s\"))"
+  },
+  {
+   "id": "set-default/0086",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default (copy-sequence \"s\") most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"s\"))"
+  },
+  {
+   "id": "set-default/0087",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default (copy-sequence \"s\") 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"s\"))"
+  },
+  {
+   "id": "set-default/0088",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default (copy-sequence \"s\") 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"s\"))"
+  },
+  {
+   "id": "set-default/0089",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default (copy-sequence \"s\") :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"s\"))"
+  },
+  {
+   "id": "set-default/0090",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default (copy-sequence \"s\") (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"s\"))"
+  },
+  {
+   "id": "set-default/0091",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default (copy-sequence \"s\") (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"s\"))"
+  },
+  {
+   "id": "set-default/0092",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default (copy-sequence \"s\") (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"s\"))"
+  },
+  {
+   "id": "set-default/0093",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default (copy-sequence \"s\") (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"s\"))"
+  },
+  {
+   "id": "set-default/0094",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default (copy-sequence \"s\") :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"s\"))"
+  },
+  {
+   "id": "set-default/0095",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default (copy-sequence \"s\") (list 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"s\"))"
+  },
+  {
+   "id": "set-default/0096",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default (list 1 2) nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2)))"
+  },
+  {
+   "id": "set-default/0097",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default (list 1 2) t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2)))"
+  },
+  {
+   "id": "set-default/0098",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default (list 1 2) 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2)))"
+  },
+  {
+   "id": "set-default/0099",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default (list 1 2) 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2)))"
+  },
+  {
+   "id": "set-default/0100",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default (list 1 2) 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2)))"
+  },
+  {
+   "id": "set-default/0101",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default (list 1 2) -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2)))"
+  },
+  {
+   "id": "set-default/0102",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default (list 1 2) most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2)))"
+  },
+  {
+   "id": "set-default/0103",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default (list 1 2) 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2)))"
+  },
+  {
+   "id": "set-default/0104",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default (list 1 2) 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2)))"
+  },
+  {
+   "id": "set-default/0105",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default (list 1 2) :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2)))"
+  },
+  {
+   "id": "set-default/0106",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default (list 1 2) (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2)))"
+  },
+  {
+   "id": "set-default/0107",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default (list 1 2) (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2)))"
+  },
+  {
+   "id": "set-default/0108",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default (list 1 2) (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2)))"
+  },
+  {
+   "id": "set-default/0109",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default (list 1 2) (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2)))"
+  },
+  {
+   "id": "set-default/0110",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default (list 1 2) :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2)))"
+  },
+  {
+   "id": "set-default/0111",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default (list 1 2) (list 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2)))"
+  },
+  {
+   "id": "set-default/0112",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default 'primh-sd-fresh nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "set-default/0113",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default 'primh-sd-fresh t)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "set-default/0114",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default 'primh-sd-fresh 0)) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "set-default/0115",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default 'primh-sd-fresh 1)) (error (list 'sig e))))",
+   "expected": "(ok 1)"
+  },
+  {
+   "id": "set-default/0116",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default 'primh-sd-fresh 2)) (error (list 'sig e))))",
+   "expected": "(ok 2)"
+  },
+  {
+   "id": "set-default/0117",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default 'primh-sd-fresh -1)) (error (list 'sig e))))",
+   "expected": "(ok -1)"
+  },
+  {
+   "id": "set-default/0118",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default 'primh-sd-fresh most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(ok 2305843009213693951)"
+  },
+  {
+   "id": "set-default/0119",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default 'primh-sd-fresh 1.5)) (error (list 'sig e))))",
+   "expected": "(ok 1.5)"
+  },
+  {
+   "id": "set-default/0120",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default 'primh-sd-fresh 'sym)) (error (list 'sig e))))",
+   "expected": "(ok sym)"
+  },
+  {
+   "id": "set-default/0121",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default 'primh-sd-fresh :kw)) (error (list 'sig e))))",
+   "expected": "(ok :kw)"
+  },
+  {
+   "id": "set-default/0122",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default 'primh-sd-fresh (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(ok \"\")"
+  },
+  {
+   "id": "set-default/0123",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default 'primh-sd-fresh (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(ok \"abc\")"
+  },
+  {
+   "id": "set-default/0124",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default 'primh-sd-fresh (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(ok \"λx\")"
+  },
+  {
+   "id": "set-default/0125",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default 'primh-sd-fresh (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(ok [1 2])"
+  },
+  {
+   "id": "set-default/0126",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default 'primh-sd-fresh :kw)) (error (list 'sig e))))",
+   "expected": "(ok :kw)"
+  },
+  {
+   "id": "set-default/0127",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default 'primh-sd-fresh (list 1 2))) (error (list 'sig e))))",
+   "expected": "(ok (1 2))"
+  },
+  {
+   "id": "set-default/0128",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default (make-symbol \":primh-u\") nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "set-default/0129",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default (make-symbol \":primh-u\") t)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "set-default/0130",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default (make-symbol \":primh-u\") 0)) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "set-default/0131",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default (make-symbol \":primh-u\") 1)) (error (list 'sig e))))",
+   "expected": "(ok 1)"
+  },
+  {
+   "id": "set-default/0132",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default (make-symbol \":primh-u\") 2)) (error (list 'sig e))))",
+   "expected": "(ok 2)"
+  },
+  {
+   "id": "set-default/0133",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default (make-symbol \":primh-u\") -1)) (error (list 'sig e))))",
+   "expected": "(ok -1)"
+  },
+  {
+   "id": "set-default/0134",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default (make-symbol \":primh-u\") most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(ok 2305843009213693951)"
+  },
+  {
+   "id": "set-default/0135",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default (make-symbol \":primh-u\") 1.5)) (error (list 'sig e))))",
+   "expected": "(ok 1.5)"
+  },
+  {
+   "id": "set-default/0136",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default (make-symbol \":primh-u\") 'sym)) (error (list 'sig e))))",
+   "expected": "(ok sym)"
+  },
+  {
+   "id": "set-default/0137",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default (make-symbol \":primh-u\") :kw)) (error (list 'sig e))))",
+   "expected": "(ok :kw)"
+  },
+  {
+   "id": "set-default/0138",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default (make-symbol \":primh-u\") (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(ok \"\")"
+  },
+  {
+   "id": "set-default/0139",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default (make-symbol \":primh-u\") (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(ok \"abc\")"
+  },
+  {
+   "id": "set-default/0140",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default (make-symbol \":primh-u\") (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(ok \"λx\")"
+  },
+  {
+   "id": "set-default/0141",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default (make-symbol \":primh-u\") (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(ok [1 2])"
+  },
+  {
+   "id": "set-default/0142",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default (make-symbol \":primh-u\") :kw)) (error (list 'sig e))))",
+   "expected": "(ok :kw)"
+  },
+  {
+   "id": "set-default/0143",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default (make-symbol \":primh-u\") (list 1 2))) (error (list 'sig e))))",
+   "expected": "(ok (1 2))"
+  },
+  {
+   "id": "set-default/0144",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default 'most-positive-fixnum nil)) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant most-positive-fixnum))"
+  },
+  {
+   "id": "set-default/0145",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default 'most-positive-fixnum t)) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant most-positive-fixnum))"
+  },
+  {
+   "id": "set-default/0146",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default 'most-positive-fixnum 0)) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant most-positive-fixnum))"
+  },
+  {
+   "id": "set-default/0147",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default 'most-positive-fixnum 1)) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant most-positive-fixnum))"
+  },
+  {
+   "id": "set-default/0148",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default 'most-positive-fixnum 2)) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant most-positive-fixnum))"
+  },
+  {
+   "id": "set-default/0149",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default 'most-positive-fixnum -1)) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant most-positive-fixnum))"
+  },
+  {
+   "id": "set-default/0150",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default 'most-positive-fixnum most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant most-positive-fixnum))"
+  },
+  {
+   "id": "set-default/0151",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default 'most-positive-fixnum 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant most-positive-fixnum))"
+  },
+  {
+   "id": "set-default/0152",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default 'most-positive-fixnum 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant most-positive-fixnum))"
+  },
+  {
+   "id": "set-default/0153",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default 'most-positive-fixnum :kw)) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant most-positive-fixnum))"
+  },
+  {
+   "id": "set-default/0154",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default 'most-positive-fixnum (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant most-positive-fixnum))"
+  },
+  {
+   "id": "set-default/0155",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default 'most-positive-fixnum (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant most-positive-fixnum))"
+  },
+  {
+   "id": "set-default/0156",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default 'most-positive-fixnum (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant most-positive-fixnum))"
+  },
+  {
+   "id": "set-default/0157",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default 'most-positive-fixnum (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant most-positive-fixnum))"
+  },
+  {
+   "id": "set-default/0158",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default 'most-positive-fixnum :kw)) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant most-positive-fixnum))"
+  },
+  {
+   "id": "set-default/0159",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default 'most-positive-fixnum (list 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant most-positive-fixnum))"
+  },
+  {
+   "id": "set-default/0160",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'set-default '(1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr set-default> 1))"
+  },
+  {
+   "id": "set-default/0161",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'set-default '(1 1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr set-default> 3))"
+  },
+  {
+   "id": "set-default/0162",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 nil)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (set-default a0 a1))) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant nil))"
+  },
+  {
+   "id": "set-default/0163",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'sym) (a1 -1)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (set-default a0 a1))) (error (list 'sig e))))",
+   "expected": "(ok -1)"
+  },
+  {
+   "id": "set-default/0164",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 (copy-sequence \"\"))) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (set-default a0 a1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1))"
+  },
+  {
+   "id": "set-default/0165",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 1 2)) (a1 (list 1 2))) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (set-default a0 a1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2)))"
+  },
+  {
+   "id": "set-default/0166",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'most-positive-fixnum) (a1 2)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (set-default a0 a1))) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant most-positive-fixnum))"
+  },
+  {
+   "id": "set-default/0167",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 nil)) (let ((r (set-default a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant nil))"
+  },
+  {
+   "id": "set-default/0168",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 1)) (let ((r (set-default a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant nil))"
+  },
+  {
+   "id": "set-default/0169",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 most-positive-fixnum)) (let ((r (set-default a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant nil))"
+  },
+  {
+   "id": "set-default/0170",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 :kw)) (let ((r (set-default a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant nil))"
+  },
+  {
+   "id": "set-default/0171",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 (copy-sequence \"λx\"))) (let ((r (set-default a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant nil))"
+  },
+  {
+   "id": "set-default/0172",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 (list 1 2))) (let ((r (set-default a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant nil))"
+  },
+  {
+   "id": "set-default/0173",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 0)) (let ((r (set-default a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant t))"
+  },
+  {
+   "id": "set-default/0174",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 -1)) (let ((r (set-default a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant t))"
+  },
+  {
+   "id": "set-default/0175",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 'sym)) (let ((r (set-default a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant t))"
+  },
+  {
+   "id": "set-default/0176",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 (copy-sequence \"abc\"))) (let ((r (set-default a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant t))"
+  },
+  {
+   "id": "set-default/0177",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 :kw)) (let ((r (set-default a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant t))"
+  },
+  {
+   "id": "set-default/0178",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'sym) (a1 t)) (let ((r (set-default a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "set-default/0179",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'sym) (a1 2)) (let ((r (set-default a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "set-default/0180",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'sym) (a1 1.5)) (let ((r (set-default a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "set-default/0181",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'sym) (a1 (copy-sequence \"\"))) (let ((r (set-default a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "set-default/0182",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'sym) (a1 (vector 1 2))) (let ((r (set-default a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "set-default/0183",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :kw) (a1 nil)) (let ((r (set-default a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant :kw))"
+  },
+  {
+   "id": "set-default/0184",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :kw) (a1 1)) (let ((r (set-default a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant :kw))"
+  },
+  {
+   "id": "set-default/0185",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :kw) (a1 most-positive-fixnum)) (let ((r (set-default a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant :kw))"
+  },
+  {
+   "id": "set-default/0186",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :kw) (a1 :kw)) (let ((r (set-default a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (t t))"
+  },
+  {
+   "id": "set-default/0187",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :kw) (a1 (copy-sequence \"λx\"))) (let ((r (set-default a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant :kw))"
+  },
+  {
+   "id": "set-default/0188",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :kw) (a1 (list 1 2))) (let ((r (set-default a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant :kw))"
+  },
+  {
+   "id": "set-default/0189",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 0)) (let ((r (set-default a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1))"
+  },
+  {
+   "id": "set-default/0190",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 -1)) (let ((r (set-default a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1))"
+  },
+  {
+   "id": "set-default/0191",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 'sym)) (let ((r (set-default a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1))"
+  },
+  {
+   "id": "set-default/0192",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 (copy-sequence \"abc\"))) (let ((r (set-default a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1))"
+  },
+  {
+   "id": "set-default/0193",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 :kw)) (let ((r (set-default a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1))"
+  },
+  {
+   "id": "set-default/0194",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"s\")) (a1 t)) (let ((r (set-default a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"s\"))"
+  },
+  {
+   "id": "set-default/0195",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"s\")) (a1 2)) (let ((r (set-default a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"s\"))"
+  },
+  {
+   "id": "set-default/0196",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"s\")) (a1 1.5)) (let ((r (set-default a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"s\"))"
+  },
+  {
+   "id": "set-default/0197",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"s\")) (a1 (copy-sequence \"\"))) (let ((r (set-default a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"s\"))"
+  },
+  {
+   "id": "set-default/0198",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"s\")) (a1 (vector 1 2))) (let ((r (set-default a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"s\"))"
+  },
+  {
+   "id": "set-default/0199",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 1 2)) (a1 nil)) (let ((r (set-default a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2)))"
+  },
+  {
+   "id": "set-default/0200",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 1 2)) (a1 1)) (let ((r (set-default a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2)))"
+  },
+  {
+   "id": "set-default/0201",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 1 2)) (a1 most-positive-fixnum)) (let ((r (set-default a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2)))"
+  },
+  {
+   "id": "set-default/0202",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 1 2)) (a1 :kw)) (let ((r (set-default a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2)))"
+  },
+  {
+   "id": "set-default/0203",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 1 2)) (a1 (copy-sequence \"λx\"))) (let ((r (set-default a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2)))"
+  },
+  {
+   "id": "set-default/0204",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 1 2)) (a1 (list 1 2))) (let ((r (set-default a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2)))"
+  },
+  {
+   "id": "set-default/0205",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'primh-sd-fresh) (a1 0)) (let ((r (set-default a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "set-default/0206",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'primh-sd-fresh) (a1 -1)) (let ((r (set-default a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "set-default/0207",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'primh-sd-fresh) (a1 'sym)) (let ((r (set-default a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "set-default/0208",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'primh-sd-fresh) (a1 (copy-sequence \"abc\"))) (let ((r (set-default a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "set-default/0209",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'primh-sd-fresh) (a1 :kw)) (let ((r (set-default a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "set-default/0210",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (make-symbol \":primh-u\")) (a1 t)) (let ((r (set-default a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "set-default/0211",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (make-symbol \":primh-u\")) (a1 2)) (let ((r (set-default a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "set-default/0212",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (make-symbol \":primh-u\")) (a1 1.5)) (let ((r (set-default a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "set-default/0213",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (make-symbol \":primh-u\")) (a1 (copy-sequence \"\"))) (let ((r (set-default a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "set-default/0214",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (make-symbol \":primh-u\")) (a1 (vector 1 2))) (let ((r (set-default a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "set-default/0215",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'most-positive-fixnum) (a1 nil)) (let ((r (set-default a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant most-positive-fixnum))"
+  },
+  {
+   "id": "set-default/0216",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'most-positive-fixnum) (a1 1)) (let ((r (set-default a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant most-positive-fixnum))"
+  },
+  {
+   "id": "set-default/0217",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'most-positive-fixnum) (a1 most-positive-fixnum)) (let ((r (set-default a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant most-positive-fixnum))"
+  },
+  {
+   "id": "set-default/0218",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'most-positive-fixnum) (a1 :kw)) (let ((r (set-default a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant most-positive-fixnum))"
+  },
+  {
+   "id": "set-default/0219",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'most-positive-fixnum) (a1 (copy-sequence \"λx\"))) (let ((r (set-default a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant most-positive-fixnum))"
+  },
+  {
+   "id": "set-default/0220",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'most-positive-fixnum) (a1 (list 1 2))) (let ((r (set-default a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant most-positive-fixnum))"
+  },
+  {
+   "id": "set-default/0221",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (set-default 'primh-sd1 5) (symbol-value 'primh-sd1) (default-value 'primh-sd1))) (error (list 'sig e))))",
+   "expected": "(ok (5 5 5))"
+  },
+  {
+   "id": "set-default/0222",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defvar primh-sd2 1) (with-temp-buffer (make-local-variable 'primh-sd2) (set 'primh-sd2 2) (list (set-default 'primh-sd2 3) primh-sd2 (default-value 'primh-sd2))))) (error (list 'sig e))))",
+   "expected": "(ok (3 2 3))"
+  },
+  {
+   "id": "set-default/0223",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defvar primh-sd3 1) (with-temp-buffer (make-local-variable 'primh-sd3) (set 'primh-sd3 2) (set-default 'primh-sd3 3)) primh-sd3)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "set-default/0224",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defvar primh-sd4 1) (list (eval '(let ((primh-sd4 2)) (set-default 'primh-sd4 3) (list primh-sd4 (default-value 'primh-sd4))) t) primh-sd4))) (error (list 'sig e))))",
+   "expected": "(ok ((3 3) 1))"
+  },
+  {
+   "id": "set-default/0225",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defvar primh-sd5 1) (make-variable-buffer-local 'primh-sd5) (with-temp-buffer (set 'primh-sd5 3) (eval '(let ((primh-sd5 4)) (set-default 'primh-sd5 7) (list (default-value 'primh-sd5) primh-sd5)) t)))) (error (list 'sig e))))",
+   "expected": "(ok (7 4))"
+  },
+  {
+   "id": "set-default/0226",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defvar primh-sd6 1) (make-variable-buffer-local 'primh-sd6) (list (with-temp-buffer (eval '(let ((primh-sd6 4)) (set-default 'primh-sd6 8) (list (default-value 'primh-sd6) primh-sd6)) t)) primh-sd6))) (error (list 'sig e))))",
+   "expected": "(ok ((8 8) 1))"
+  },
+  {
+   "id": "set-default/0227",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defvar primh-sd7-b 7) (defvaralias 'primh-sd7-a 'primh-sd7-b) (set-default 'primh-sd7-a 9) (list primh-sd7-b (default-value 'primh-sd7-a)))) (error (list 'sig e))))",
+   "expected": "(ok (9 9))"
+  },
+  {
+   "id": "set-default/0228",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defvaralias 'primh-sd8-a 'primh-sd8-b) (set-default 'primh-sd8-a 1) (list (symbol-value 'primh-sd8-b)))) (error (list 'sig e))))",
+   "expected": "(ok (1))"
+  },
+  {
+   "id": "set-default/0229",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (condition-case e (set-default nil 1) (error e))) (error (list 'sig e))))",
+   "expected": "(ok (setting-constant nil))"
+  },
+  {
+   "id": "set-default/0230",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (condition-case e (set-default nil nil) (error e))) (error (list 'sig e))))",
+   "expected": "(ok (setting-constant nil))"
+  },
+  {
+   "id": "set-default/0231",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (condition-case e (set-default t t) (error e))) (error (list 'sig e))))",
+   "expected": "(ok (setting-constant t))"
+  },
+  {
+   "id": "set-default/0232",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (set-default :primh-sd-kw :primh-sd-kw) (condition-case e (set-default :primh-sd-kw 1) (error e)))) (error (list 'sig e))))",
+   "expected": "(ok (:primh-sd-kw (setting-constant :primh-sd-kw)))"
+  },
+  {
+   "id": "set-default/0233",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((s (make-symbol \":primh-sd-u\"))) (list (set-default s 1) (symbol-value s)))) (error (list 'sig e))))",
+   "expected": "(ok (1 1))"
+  },
+  {
+   "id": "set-default/0234",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defvaralias 'primh-sd9 :primh-sd-kw2) (list (condition-case e (set-default 'primh-sd9 :primh-sd-kw2) (error e)) (condition-case e (set-default 'primh-sd9 1) (error e))))) (error (list 'sig e))))",
+   "expected": "(ok ((setting-constant primh-sd9) (setting-constant primh-sd9)))",
+   "gnu_regime_variant": "(sig (error \"Cannot make a constant an alias: primh-sd9\"))"
+  },
+  {
+   "id": "set-default/0235",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (condition-case e (set-default 'most-positive-fixnum 1) (error e))) (error (list 'sig e))))",
+   "expected": "(ok (setting-constant most-positive-fixnum))"
+  },
+  {
+   "id": "set-default/0236",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((v (list 1 (copy-sequence \"s\")))) (set-default 'primh-sd10 v) (let ((i 0)) (while (< i 5000) (list i i) (setq i (1+ i)))) (list (eq v (default-value 'primh-sd10)) (default-value 'primh-sd10)))) (error (list 'sig e))))",
+   "expected": "(ok (t (1 \"s\")))"
+  },
+  {
+   "id": "set-default/0237",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((s (make-symbol \"primh-sd-v\"))) (set-default s 2) (list (symbol-value s) (default-value s)))) (error (list 'sig e))))",
+   "expected": "(ok (2 2))"
+  },
+  {
+   "id": "set-default/0238",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defvar primh-sd11 1) (make-variable-buffer-local 'primh-sd11) (with-temp-buffer (set 'primh-sd11 5) (set-default 'primh-sd11 6) (with-temp-buffer (list primh-sd11 (default-value 'primh-sd11)))))) (error (list 'sig e))))",
+   "expected": "(ok (6 6))"
+  },
+  {
+   "id": "set-default/0239",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (condition-case e (set-default \"primh-sd\" 1) (error e))) (error (list 'sig e))))",
+   "expected": "(ok (wrong-type-argument symbolp \"primh-sd\"))"
+  },
+  {
+   "id": "set-default/0240",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (funcall #'set-default 'primh-sd12 1) (apply #'set-default '(primh-sd13 2)) primh-sd12 primh-sd13)) (error (list 'sig e))))",
+   "expected": "(ok (1 2 1 2))"
+  },
+  {
+   "id": "set-default/0241",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defvar primh-sd14 nil) (makunbound 'primh-sd14) (with-temp-buffer (make-local-variable 'primh-sd14) (set 'primh-sd14 1) (set-default 'primh-sd14 2) (list primh-sd14 (default-value 'primh-sd14))))) (error (list 'sig e))))",
+   "expected": "(ok (1 2))"
+  },
+  {
+   "id": "set-default/0242",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defvar primh-sd15 1) (list (eval '(let ((primh-sd15 2)) (set-default 'primh-sd15 3)) t) primh-sd15))) (error (list 'sig e))))",
+   "expected": "(ok (3 1))"
+  },
+  {
+   "id": "set-default/0243",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set-default 'primh-sd16 1) (special-variable-p 'primh-sd16))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "set-default/0244",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defvar primh-sd17 (list 0)) (set-default 'primh-sd17 (cons 1 primh-sd17)) primh-sd17)) (error (list 'sig e))))",
+   "expected": "(ok (1 0))",
+   "gnu_regime_variant": "(ok (1 1 0))"
+  },
+  {
+   "id": "set-default/0245",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 'most-positive-fixnum) (error (list 'sig e))))",
+   "expected": "(ok most-positive-fixnum)"
+  },
+  {
+   "id": "set-default/0246",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 'primh-sd-fresh) (error (list 'sig e))))",
+   "expected": "(ok primh-sd-fresh)"
+  },
+  {
+   "id": "set-default/0247",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 'sym) (error (list 'sig e))))",
+   "expected": "(ok sym)"
+  },
+  {
+   "id": "set-default/0248",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"\")) (error (list 'sig e))))",
+   "expected": "(ok \"\")"
+  },
+  {
+   "id": "set-default/0249",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"abc\")) (error (list 'sig e))))",
+   "expected": "(ok \"abc\")"
+  },
+  {
+   "id": "set-default/0250",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"s\")) (error (list 'sig e))))",
+   "expected": "(ok \"s\")"
+  },
+  {
+   "id": "set-default/0251",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"λx\")) (error (list 'sig e))))",
+   "expected": "(ok \"λx\")"
+  },
+  {
+   "id": "set-default/0252",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list 1 2)) (error (list 'sig e))))",
+   "expected": "(ok (1 2))"
+  },
+  {
+   "id": "set-default/0253",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (make-symbol \":primh-u\")) (error (list 'sig e))))",
+   "expected": "(ok :primh-u)"
+  },
+  {
+   "id": "set-default/0254",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vector 1 2)) (error (list 'sig e))))",
+   "expected": "(ok [1 2])"
+  },
+  {
+   "id": "set-default/0255",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok -1) (error (list 'sig e))))",
+   "expected": "(ok -1)"
+  },
+  {
+   "id": "set-default/0256",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 0) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "set-default/0257",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1) (error (list 'sig e))))",
+   "expected": "(ok 1)"
+  },
+  {
+   "id": "set-default/0258",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1.5) (error (list 'sig e))))",
+   "expected": "(ok 1.5)"
+  },
+  {
+   "id": "set-default/0259",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 2) (error (list 'sig e))))",
+   "expected": "(ok 2)"
+  },
+  {
+   "id": "set-default/0260",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok :kw) (error (list 'sig e))))",
+   "expected": "(ok :kw)"
+  },
+  {
+   "id": "set-default/0261",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok most-positive-fixnum) (error (list 'sig e))))",
+   "expected": "(ok 2305843009213693951)"
+  },
+  {
+   "id": "set-default/0262",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok nil) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "set-default/0263",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok t) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  }
+ ],
+ "pinned": {}
+}

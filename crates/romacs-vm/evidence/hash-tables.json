@@ -1,0 +1,6452 @@
+{
+ "protocol": "hash-tables-compiled-v1",
+ "regime": "GNU byte-compiled / VM2 compiled",
+ "world": "fresh process per case on both sides",
+ "gc": "VM2 collection floor 1; GNU default; no timing claim",
+ "generator_sha256": "b8427f8340d6acbe80df6093f36ef4c795edb4c2bc9a2f5e49dfc7ad582d3d8d",
+ "gnu_sha256": "20a94ee7abc04960e3296deead030a37866d1d1e1522f3efd818838af7fffbe4",
+ "gnu_sources": {
+  "fns.c": "796fb20e762e383b3e078c54e7ef4185082068e88a0a38ebb2dd52558cafdec8",
+  "lisp.h": "7b1349a09486ec6e5637abfb1467005b1ce7db603cfa39c611ab6076a6245166",
+  "alloc.c": "b7bbe6972facf1208414a22d803e906cb577c477adaef975d6e7bf63144bc9a1",
+  "print.c": "a4d3613dd97297cb4a9b682f0fbe5a86d3ae1ac9a1a07bddaf6da970b28f0a85",
+  "data.c": "eca7895a8043cd0a960dfe037a46028374d1a40cc6ee4d0cf6de90ac56c242ae"
+ },
+ "binary_sha256": "99c2ff61c6e661b7505397d41c5e4ce4bb169a00a9bedbd9e50b12ee62e252df",
+ "cases": [
+  {
+   "family": "print",
+   "source": "(make-hash-table)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "make-hash-table"
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "#s(hash-table)"
+  },
+  {
+   "family": "print",
+   "source": "(make-hash-table :test 'eq)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "make-hash-table",
+     ":test",
+     [
+      "quote",
+      "eq"
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "#s(hash-table test eq)"
+  },
+  {
+   "family": "print",
+   "source": "(make-hash-table :test 'equal :size 10)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "make-hash-table",
+     ":test",
+     [
+      "quote",
+      "equal"
+     ],
+     ":size",
+     10
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "#s(hash-table test equal)"
+  },
+  {
+   "family": "print",
+   "source": "(make-hash-table :weakness 'key)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "make-hash-table",
+     ":weakness",
+     [
+      "quote",
+      "key"
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "#s(hash-table weakness key)"
+  },
+  {
+   "family": "print",
+   "source": "(make-hash-table :weakness 'value :test 'eq)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "make-hash-table",
+     ":weakness",
+     [
+      "quote",
+      "value"
+     ],
+     ":test",
+     [
+      "quote",
+      "eq"
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "#s(hash-table test eq weakness value)"
+  },
+  {
+   "family": "print",
+   "source": "(make-hash-table :weakness 'key-or-value)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "make-hash-table",
+     ":weakness",
+     [
+      "quote",
+      "key-or-value"
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "#s(hash-table weakness key-or-value)"
+  },
+  {
+   "family": "print",
+   "source": "(make-hash-table :weakness t)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "make-hash-table",
+     ":weakness",
+     "t"
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "#s(hash-table weakness key-and-value)"
+  },
+  {
+   "family": "print",
+   "source": "(let ((h (make-hash-table :test 'equal))) (puthash \"a\" 1 h) (puthash '(1 2) [x] h) h)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "let",
+     [
+      [
+       "h",
+       [
+        "make-hash-table",
+        ":test",
+        [
+         "quote",
+         "equal"
+        ]
+       ]
+      ]
+     ],
+     [
+      "puthash",
+      {
+       "string": "a"
+      },
+      1,
+      "h"
+     ],
+     [
+      "puthash",
+      [
+       "quote",
+       [
+        1,
+        2
+       ]
+      ],
+      {
+       "vector": [
+        "x"
+       ]
+      },
+      "h"
+     ],
+     "h"
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "#s(hash-table test equal data (\"a\" 1 (1 2) [x]))"
+  },
+  {
+   "family": "print",
+   "source": "(let ((h (make-hash-table))) (puthash nil 'n h) (puthash t 'tt h) (list (gethash nil h) (gethash t h) h))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "let",
+     [
+      [
+       "h",
+       [
+        "make-hash-table"
+       ]
+      ]
+     ],
+     [
+      "puthash",
+      "nil",
+      [
+       "quote",
+       "n"
+      ],
+      "h"
+     ],
+     [
+      "puthash",
+      "t",
+      [
+       "quote",
+       "tt"
+      ],
+      "h"
+     ],
+     [
+      "list",
+      [
+       "gethash",
+       "nil",
+       "h"
+      ],
+      [
+       "gethash",
+       "t",
+       "h"
+      ],
+      "h"
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(n tt #s(hash-table data (nil n t tt)))"
+  },
+  {
+   "family": "print",
+   "source": "(let ((h (make-hash-table :test 'eq))) (puthash 'a 1 h) (puthash 'a 2 h) (list (hash-table-count h) h))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "let",
+     [
+      [
+       "h",
+       [
+        "make-hash-table",
+        ":test",
+        [
+         "quote",
+         "eq"
+        ]
+       ]
+      ]
+     ],
+     [
+      "puthash",
+      [
+       "quote",
+       "a"
+      ],
+      1,
+      "h"
+     ],
+     [
+      "puthash",
+      [
+       "quote",
+       "a"
+      ],
+      2,
+      "h"
+     ],
+     [
+      "list",
+      [
+       "hash-table-count",
+       "h"
+      ],
+      "h"
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(1 #s(hash-table test eq data (a 2)))"
+  },
+  {
+   "family": "print",
+   "source": "(let ((h (make-hash-table))) (puthash 1 1 h) (puthash 2 2 h) (remhash 1 h) (list h (hash-table-count h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "let",
+     [
+      [
+       "h",
+       [
+        "make-hash-table"
+       ]
+      ]
+     ],
+     [
+      "puthash",
+      1,
+      1,
+      "h"
+     ],
+     [
+      "puthash",
+      2,
+      2,
+      "h"
+     ],
+     [
+      "remhash",
+      1,
+      "h"
+     ],
+     [
+      "list",
+      "h",
+      [
+       "hash-table-count",
+       "h"
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(#s(hash-table data (2 2)) 1)"
+  },
+  {
+   "family": "args",
+   "source": "(make-hash-table :test)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "make-hash-table",
+     ":test"
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(signal (error \"Odd number of arguments\"))"
+  },
+  {
+   "family": "args",
+   "source": "(make-hash-table :foo 1)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "make-hash-table",
+     ":foo",
+     1
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(signal (error \"Invalid keyword argument\" :foo))"
+  },
+  {
+   "family": "args",
+   "source": "(make-hash-table :foo 1 :bar 2)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "make-hash-table",
+     ":foo",
+     1,
+     ":bar",
+     2
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(signal (error \"Invalid keyword argument\" :bar))"
+  },
+  {
+   "family": "args",
+   "source": "(make-hash-table :test 'foo)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "make-hash-table",
+     ":test",
+     [
+      "quote",
+      "foo"
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(signal (error \"Invalid hash table test\" foo))"
+  },
+  {
+   "family": "args",
+   "source": "(make-hash-table :size -1)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "make-hash-table",
+     ":size",
+     -1
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(signal (error \"Invalid hash table size\" -1))"
+  },
+  {
+   "family": "args",
+   "source": "(make-hash-table :size 1.5)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "make-hash-table",
+     ":size",
+     1.5
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(signal (error \"Invalid hash table size\" 1.5))"
+  },
+  {
+   "family": "args",
+   "source": "(make-hash-table :size 'big)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "make-hash-table",
+     ":size",
+     [
+      "quote",
+      "big"
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(signal (error \"Invalid hash table size\" big))"
+  },
+  {
+   "family": "args",
+   "source": "(make-hash-table :weakness 'bad)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "make-hash-table",
+     ":weakness",
+     [
+      "quote",
+      "bad"
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(signal (error \"Invalid hash table weakness\" bad))"
+  },
+  {
+   "family": "args",
+   "source": "(make-hash-table :weakness 'bad :test 'bad)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "make-hash-table",
+     ":weakness",
+     [
+      "quote",
+      "bad"
+     ],
+     ":test",
+     [
+      "quote",
+      "bad"
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(signal (error \"Invalid hash table test\" bad))"
+  },
+  {
+   "family": "args",
+   "source": "(make-hash-table :weakness 'bad :size -1)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "make-hash-table",
+     ":weakness",
+     [
+      "quote",
+      "bad"
+     ],
+     ":size",
+     -1
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(signal (error \"Invalid hash table size\" -1))"
+  },
+  {
+   "family": "args",
+   "source": "(progn (put 'half-test 'hash-table-test 'oops) (make-hash-table :test 'half-test))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "progn",
+     [
+      "put",
+      [
+       "quote",
+       "half-test"
+      ],
+      [
+       "quote",
+       "hash-table-test"
+      ],
+      [
+       "quote",
+       "oops"
+      ]
+     ],
+     [
+      "make-hash-table",
+      ":test",
+      [
+       "quote",
+       "half-test"
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(signal (error \"Invalid hash table test\" half-test))"
+  },
+  {
+   "family": "args",
+   "source": "(hash-table-test (make-hash-table :test 'eq :test 'equal))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "hash-table-test",
+     [
+      "make-hash-table",
+      ":test",
+      [
+       "quote",
+       "eq"
+      ],
+      ":test",
+      [
+       "quote",
+       "equal"
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "eq"
+  },
+  {
+   "family": "args",
+   "source": "(make-hash-table :rehash-size 2.0 :rehash-threshold 0.5 :purecopy t :test 'eq)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "make-hash-table",
+     ":rehash-size",
+     2.0,
+     ":rehash-threshold",
+     0.5,
+     ":purecopy",
+     "t",
+     ":test",
+     [
+      "quote",
+      "eq"
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "#s(hash-table test eq)"
+  },
+  {
+   "family": "args",
+   "source": "(list (hash-table-test (make-hash-table :test nil)) (hash-table-test (make-hash-table :test 'eql)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "list",
+     [
+      "hash-table-test",
+      [
+       "make-hash-table",
+       ":test",
+       "nil"
+      ]
+     ],
+     [
+      "hash-table-test",
+      [
+       "make-hash-table",
+       ":test",
+       [
+        "quote",
+        "eql"
+       ]
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(eql eql)"
+  },
+  {
+   "family": "args",
+   "source": "(hash-table-weakness (make-hash-table :weakness t))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "hash-table-weakness",
+     [
+      "make-hash-table",
+      ":weakness",
+      "t"
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "key-and-value"
+  },
+  {
+   "family": "args",
+   "source": "(hash-table-weakness (make-hash-table :weakness nil))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "hash-table-weakness",
+     [
+      "make-hash-table",
+      ":weakness",
+      "nil"
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "nil"
+  },
+  {
+   "family": "args",
+   "source": "(list (hash-table-rehash-size (make-hash-table)) (hash-table-rehash-threshold (make-hash-table)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "list",
+     [
+      "hash-table-rehash-size",
+      [
+       "make-hash-table"
+      ]
+     ],
+     [
+      "hash-table-rehash-threshold",
+      [
+       "make-hash-table"
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(1.5 0.8125)"
+  },
+  {
+   "family": "type",
+   "source": "(gethash 1 nil)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "gethash",
+     1,
+     "nil"
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(signal (wrong-type-argument hash-table-p nil))"
+  },
+  {
+   "family": "type",
+   "source": "(gethash 1 (vector 1 2))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "gethash",
+     1,
+     [
+      "vector",
+      1,
+      2
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(signal (wrong-type-argument hash-table-p [1 2]))"
+  },
+  {
+   "family": "type",
+   "source": "(puthash 1 2 'x)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "puthash",
+     1,
+     2,
+     [
+      "quote",
+      "x"
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(signal (wrong-type-argument hash-table-p x))"
+  },
+  {
+   "family": "type",
+   "source": "(remhash 1 \"s\")",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "remhash",
+     1,
+     {
+      "string": "s"
+     }
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(signal (wrong-type-argument hash-table-p \"s\"))"
+  },
+  {
+   "family": "type",
+   "source": "(clrhash (list 1))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "clrhash",
+     [
+      "list",
+      1
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(signal (wrong-type-argument hash-table-p (1)))"
+  },
+  {
+   "family": "type",
+   "source": "(hash-table-count 7)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "hash-table-count",
+     7
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(signal (wrong-type-argument hash-table-p 7))"
+  },
+  {
+   "family": "type",
+   "source": "(hash-table-size 'h)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "hash-table-size",
+     [
+      "quote",
+      "h"
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(signal (wrong-type-argument hash-table-p h))"
+  },
+  {
+   "family": "type",
+   "source": "(hash-table-test nil)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "hash-table-test",
+     "nil"
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(signal (wrong-type-argument hash-table-p nil))"
+  },
+  {
+   "family": "type",
+   "source": "(copy-hash-table [h])",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "copy-hash-table",
+     {
+      "vector": [
+       "h"
+      ]
+     }
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(signal (wrong-type-argument hash-table-p [h]))"
+  },
+  {
+   "family": "type",
+   "source": "(maphash (lambda (k v) k) 'not-a-table)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "maphash",
+     [
+      "lambda",
+      [
+       "k",
+       "v"
+      ],
+      "k"
+     ],
+     [
+      "quote",
+      "not-a-table"
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(signal (wrong-type-argument hash-table-p not-a-table))"
+  },
+  {
+   "family": "type",
+   "source": "(list (hash-table-p (make-hash-table)) (hash-table-p nil) (hash-table-p (vector)) (hash-table-p 'x))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "list",
+     [
+      "hash-table-p",
+      [
+       "make-hash-table"
+      ]
+     ],
+     [
+      "hash-table-p",
+      "nil"
+     ],
+     [
+      "hash-table-p",
+      [
+       "vector"
+      ]
+     ],
+     [
+      "hash-table-p",
+      [
+       "quote",
+       "x"
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(t nil nil nil)"
+  },
+  {
+   "family": "type",
+   "source": "(length (make-hash-table))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "length",
+     [
+      "make-hash-table"
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(signal (wrong-type-argument sequencep #s(hash-table)))"
+  },
+  {
+   "family": "arity",
+   "source": "(apply #'gethash '(1))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "apply",
+     [
+      "function",
+      "gethash"
+     ],
+     [
+      "quote",
+      [
+       1
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(signal (wrong-number-of-arguments #<subr gethash> 1))"
+  },
+  {
+   "family": "arity",
+   "source": "(apply #'gethash '(1 2 3 4))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "apply",
+     [
+      "function",
+      "gethash"
+     ],
+     [
+      "quote",
+      [
+       1,
+       2,
+       3,
+       4
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(signal (wrong-number-of-arguments #<subr gethash> 4))"
+  },
+  {
+   "family": "arity",
+   "source": "(apply #'puthash '(1 2))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "apply",
+     [
+      "function",
+      "puthash"
+     ],
+     [
+      "quote",
+      [
+       1,
+       2
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(signal (wrong-number-of-arguments #<subr puthash> 2))"
+  },
+  {
+   "family": "arity",
+   "source": "(apply #'remhash '(1))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "apply",
+     [
+      "function",
+      "remhash"
+     ],
+     [
+      "quote",
+      [
+       1
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(signal (wrong-number-of-arguments #<subr remhash> 1))"
+  },
+  {
+   "family": "arity",
+   "source": "(apply #'maphash '(car))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "apply",
+     [
+      "function",
+      "maphash"
+     ],
+     [
+      "quote",
+      [
+       "car"
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(signal (wrong-number-of-arguments #<subr maphash> 1))"
+  },
+  {
+   "family": "arity",
+   "source": "(apply #'hash-table-count nil)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "apply",
+     [
+      "function",
+      "hash-table-count"
+     ],
+     "nil"
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(signal (wrong-number-of-arguments #<subr hash-table-count> 0))"
+  },
+  {
+   "family": "arity",
+   "source": "(apply #'clrhash '(1 2))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "apply",
+     [
+      "function",
+      "clrhash"
+     ],
+     [
+      "quote",
+      [
+       1,
+       2
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(signal (wrong-number-of-arguments #<subr clrhash> 2))"
+  },
+  {
+   "family": "arity",
+   "source": "(apply #'hash-table-p nil)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "apply",
+     [
+      "function",
+      "hash-table-p"
+     ],
+     "nil"
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(signal (wrong-number-of-arguments #<subr hash-table-p> 0))"
+  },
+  {
+   "family": "arity",
+   "source": "(apply #'gethash (list 1 (make-hash-table) 'dflt))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "apply",
+     [
+      "function",
+      "gethash"
+     ],
+     [
+      "list",
+      1,
+      [
+       "make-hash-table"
+      ],
+      [
+       "quote",
+       "dflt"
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "dflt"
+  },
+  {
+   "family": "arity",
+   "source": "(funcall #'puthash 'k 'v (make-hash-table))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "funcall",
+     [
+      "function",
+      "puthash"
+     ],
+     [
+      "quote",
+      "k"
+     ],
+     [
+      "quote",
+      "v"
+     ],
+     [
+      "make-hash-table"
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "v"
+  },
+  {
+   "family": "test",
+   "source": "(let ((f (lambda (x) (/ x 2))) (h (make-hash-table :test 'eq))) (puthash (funcall f 3.0) 1 h) (list (gethash (funcall f 3.0) h) (hash-table-count h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "let",
+     [
+      [
+       "f",
+       [
+        "lambda",
+        [
+         "x"
+        ],
+        [
+         "/",
+         "x",
+         2
+        ]
+       ]
+      ],
+      [
+       "h",
+       [
+        "make-hash-table",
+        ":test",
+        [
+         "quote",
+         "eq"
+        ]
+       ]
+      ]
+     ],
+     [
+      "puthash",
+      [
+       "funcall",
+       "f",
+       3.0
+      ],
+      1,
+      "h"
+     ],
+     [
+      "list",
+      [
+       "gethash",
+       [
+        "funcall",
+        "f",
+        3.0
+       ],
+       "h"
+      ],
+      [
+       "hash-table-count",
+       "h"
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(nil 1)"
+  },
+  {
+   "family": "test",
+   "source": "(let ((f (lambda (x) (/ x 2))) (h (make-hash-table :test 'eql))) (puthash (funcall f 3.0) 1 h) (puthash (funcall f 3.0) 2 h) (list (gethash (funcall f 3.0) h) (hash-table-count h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "let",
+     [
+      [
+       "f",
+       [
+        "lambda",
+        [
+         "x"
+        ],
+        [
+         "/",
+         "x",
+         2
+        ]
+       ]
+      ],
+      [
+       "h",
+       [
+        "make-hash-table",
+        ":test",
+        [
+         "quote",
+         "eql"
+        ]
+       ]
+      ]
+     ],
+     [
+      "puthash",
+      [
+       "funcall",
+       "f",
+       3.0
+      ],
+      1,
+      "h"
+     ],
+     [
+      "puthash",
+      [
+       "funcall",
+       "f",
+       3.0
+      ],
+      2,
+      "h"
+     ],
+     [
+      "list",
+      [
+       "gethash",
+       [
+        "funcall",
+        "f",
+        3.0
+       ],
+       "h"
+      ],
+      [
+       "hash-table-count",
+       "h"
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(2 1)"
+  },
+  {
+   "family": "test",
+   "source": "(let ((f (lambda (x) (/ x 2))) (h (make-hash-table :test 'equal))) (puthash (funcall f 3.0) 1 h) (gethash (funcall f 3.0) h))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "let",
+     [
+      [
+       "f",
+       [
+        "lambda",
+        [
+         "x"
+        ],
+        [
+         "/",
+         "x",
+         2
+        ]
+       ]
+      ],
+      [
+       "h",
+       [
+        "make-hash-table",
+        ":test",
+        [
+         "quote",
+         "equal"
+        ]
+       ]
+      ]
+     ],
+     [
+      "puthash",
+      [
+       "funcall",
+       "f",
+       3.0
+      ],
+      1,
+      "h"
+     ],
+     [
+      "gethash",
+      [
+       "funcall",
+       "f",
+       3.0
+      ],
+      "h"
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "1"
+  },
+  {
+   "family": "test",
+   "source": "(let ((f (lambda (x) (/ x 2))) (h (make-hash-table))) (puthash (funcall f 0.0) 'pos h) (puthash (funcall f -0.0) 'neg h) (list (gethash (funcall f 0.0) h) (gethash (funcall f -0.0) h) (hash-table-count h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "let",
+     [
+      [
+       "f",
+       [
+        "lambda",
+        [
+         "x"
+        ],
+        [
+         "/",
+         "x",
+         2
+        ]
+       ]
+      ],
+      [
+       "h",
+       [
+        "make-hash-table"
+       ]
+      ]
+     ],
+     [
+      "puthash",
+      [
+       "funcall",
+       "f",
+       0.0
+      ],
+      [
+       "quote",
+       "pos"
+      ],
+      "h"
+     ],
+     [
+      "puthash",
+      [
+       "funcall",
+       "f",
+       -0.0
+      ],
+      [
+       "quote",
+       "neg"
+      ],
+      "h"
+     ],
+     [
+      "list",
+      [
+       "gethash",
+       [
+        "funcall",
+        "f",
+        0.0
+       ],
+       "h"
+      ],
+      [
+       "gethash",
+       [
+        "funcall",
+        "f",
+        -0.0
+       ],
+       "h"
+      ],
+      [
+       "hash-table-count",
+       "h"
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(pos neg 2)"
+  },
+  {
+   "family": "test",
+   "source": "(let ((f (lambda (x) (/ x 2))) (h (make-hash-table :test 'equal))) (puthash (funcall f 0.0) 'pos h) (list (gethash (funcall f -0.0) h) (gethash (funcall f 0.0) h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "let",
+     [
+      [
+       "f",
+       [
+        "lambda",
+        [
+         "x"
+        ],
+        [
+         "/",
+         "x",
+         2
+        ]
+       ]
+      ],
+      [
+       "h",
+       [
+        "make-hash-table",
+        ":test",
+        [
+         "quote",
+         "equal"
+        ]
+       ]
+      ]
+     ],
+     [
+      "puthash",
+      [
+       "funcall",
+       "f",
+       0.0
+      ],
+      [
+       "quote",
+       "pos"
+      ],
+      "h"
+     ],
+     [
+      "list",
+      [
+       "gethash",
+       [
+        "funcall",
+        "f",
+        -0.0
+       ],
+       "h"
+      ],
+      [
+       "gethash",
+       [
+        "funcall",
+        "f",
+        0.0
+       ],
+       "h"
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(nil pos)"
+  },
+  {
+   "family": "test",
+   "source": "(let ((nan (lambda () (/ 0.0 0.0))) (h (make-hash-table))) (puthash (funcall nan) 'nan h) (list (gethash (funcall nan) h) (gethash (- (funcall nan)) h) (hash-table-count h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "let",
+     [
+      [
+       "nan",
+       [
+        "lambda",
+        "nil",
+        [
+         "/",
+         0.0,
+         0.0
+        ]
+       ]
+      ],
+      [
+       "h",
+       [
+        "make-hash-table"
+       ]
+      ]
+     ],
+     [
+      "puthash",
+      [
+       "funcall",
+       "nan"
+      ],
+      [
+       "quote",
+       "nan"
+      ],
+      "h"
+     ],
+     [
+      "list",
+      [
+       "gethash",
+       [
+        "funcall",
+        "nan"
+       ],
+       "h"
+      ],
+      [
+       "gethash",
+       [
+        "-",
+        [
+         "funcall",
+         "nan"
+        ]
+       ],
+       "h"
+      ],
+      [
+       "hash-table-count",
+       "h"
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(nan nil 1)"
+  },
+  {
+   "family": "test",
+   "source": "(let ((nan (lambda () (/ 0.0 0.0))) (h (make-hash-table :test 'equal))) (puthash (- (funcall nan)) 'pos h) (puthash (funcall nan) 'neg h) (list (gethash (funcall nan) h) (gethash (- (funcall nan)) h) (hash-table-count h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "let",
+     [
+      [
+       "nan",
+       [
+        "lambda",
+        "nil",
+        [
+         "/",
+         0.0,
+         0.0
+        ]
+       ]
+      ],
+      [
+       "h",
+       [
+        "make-hash-table",
+        ":test",
+        [
+         "quote",
+         "equal"
+        ]
+       ]
+      ]
+     ],
+     [
+      "puthash",
+      [
+       "-",
+       [
+        "funcall",
+        "nan"
+       ]
+      ],
+      [
+       "quote",
+       "pos"
+      ],
+      "h"
+     ],
+     [
+      "puthash",
+      [
+       "funcall",
+       "nan"
+      ],
+      [
+       "quote",
+       "neg"
+      ],
+      "h"
+     ],
+     [
+      "list",
+      [
+       "gethash",
+       [
+        "funcall",
+        "nan"
+       ],
+       "h"
+      ],
+      [
+       "gethash",
+       [
+        "-",
+        [
+         "funcall",
+         "nan"
+        ]
+       ],
+       "h"
+      ],
+      [
+       "hash-table-count",
+       "h"
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(neg pos 2)"
+  },
+  {
+   "family": "test",
+   "source": "(let ((inf (lambda (x) (/ x 0.0))) (h (make-hash-table :test 'eql))) (puthash (funcall inf 1.0) 'inf h) (puthash (funcall inf -1.0) 'ninf h) (list (gethash (funcall inf 1.0) h) (gethash (funcall inf -1.0) h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "let",
+     [
+      [
+       "inf",
+       [
+        "lambda",
+        [
+         "x"
+        ],
+        [
+         "/",
+         "x",
+         0.0
+        ]
+       ]
+      ],
+      [
+       "h",
+       [
+        "make-hash-table",
+        ":test",
+        [
+         "quote",
+         "eql"
+        ]
+       ]
+      ]
+     ],
+     [
+      "puthash",
+      [
+       "funcall",
+       "inf",
+       1.0
+      ],
+      [
+       "quote",
+       "inf"
+      ],
+      "h"
+     ],
+     [
+      "puthash",
+      [
+       "funcall",
+       "inf",
+       -1.0
+      ],
+      [
+       "quote",
+       "ninf"
+      ],
+      "h"
+     ],
+     [
+      "list",
+      [
+       "gethash",
+       [
+        "funcall",
+        "inf",
+        1.0
+       ],
+       "h"
+      ],
+      [
+       "gethash",
+       [
+        "funcall",
+        "inf",
+        -1.0
+       ],
+       "h"
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(inf ninf)"
+  },
+  {
+   "family": "test",
+   "source": "(let ((h (make-hash-table :test 'equal))) (puthash 1 'one h) (list (gethash 1.0 h) (gethash 1 h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "let",
+     [
+      [
+       "h",
+       [
+        "make-hash-table",
+        ":test",
+        [
+         "quote",
+         "equal"
+        ]
+       ]
+      ]
+     ],
+     [
+      "puthash",
+      1,
+      [
+       "quote",
+       "one"
+      ],
+      "h"
+     ],
+     [
+      "list",
+      [
+       "gethash",
+       1.0,
+       "h"
+      ],
+      [
+       "gethash",
+       1,
+       "h"
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(nil one)"
+  },
+  {
+   "family": "test",
+   "source": "(let ((h (make-hash-table :test 'eq))) (puthash (copy-sequence \"a\") 1 h) (gethash (copy-sequence \"a\") h))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "let",
+     [
+      [
+       "h",
+       [
+        "make-hash-table",
+        ":test",
+        [
+         "quote",
+         "eq"
+        ]
+       ]
+      ]
+     ],
+     [
+      "puthash",
+      [
+       "copy-sequence",
+       {
+        "string": "a"
+       }
+      ],
+      1,
+      "h"
+     ],
+     [
+      "gethash",
+      [
+       "copy-sequence",
+       {
+        "string": "a"
+       }
+      ],
+      "h"
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "nil"
+  },
+  {
+   "family": "test",
+   "source": "(let ((h (make-hash-table :test 'eql))) (puthash (copy-sequence \"a\") 1 h) (gethash (copy-sequence \"a\") h))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "let",
+     [
+      [
+       "h",
+       [
+        "make-hash-table",
+        ":test",
+        [
+         "quote",
+         "eql"
+        ]
+       ]
+      ]
+     ],
+     [
+      "puthash",
+      [
+       "copy-sequence",
+       {
+        "string": "a"
+       }
+      ],
+      1,
+      "h"
+     ],
+     [
+      "gethash",
+      [
+       "copy-sequence",
+       {
+        "string": "a"
+       }
+      ],
+      "h"
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "nil"
+  },
+  {
+   "family": "test",
+   "source": "(let ((h (make-hash-table :test 'equal))) (puthash (copy-sequence \"a\") 1 h) (puthash (copy-sequence \"a\") 2 h) (list (gethash (copy-sequence \"a\") h) (hash-table-count h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "let",
+     [
+      [
+       "h",
+       [
+        "make-hash-table",
+        ":test",
+        [
+         "quote",
+         "equal"
+        ]
+       ]
+      ]
+     ],
+     [
+      "puthash",
+      [
+       "copy-sequence",
+       {
+        "string": "a"
+       }
+      ],
+      1,
+      "h"
+     ],
+     [
+      "puthash",
+      [
+       "copy-sequence",
+       {
+        "string": "a"
+       }
+      ],
+      2,
+      "h"
+     ],
+     [
+      "list",
+      [
+       "gethash",
+       [
+        "copy-sequence",
+        {
+         "string": "a"
+        }
+       ],
+       "h"
+      ],
+      [
+       "hash-table-count",
+       "h"
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(2 1)"
+  },
+  {
+   "family": "test",
+   "source": "(let ((h (make-hash-table :test 'equal))) (puthash \"λx\" 1 h) (list (gethash (copy-sequence \"λx\") h) (gethash (string-as-unibyte \"λx\") h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "let",
+     [
+      [
+       "h",
+       [
+        "make-hash-table",
+        ":test",
+        [
+         "quote",
+         "equal"
+        ]
+       ]
+      ]
+     ],
+     [
+      "puthash",
+      {
+       "string": "λx"
+      },
+      1,
+      "h"
+     ],
+     [
+      "list",
+      [
+       "gethash",
+       [
+        "copy-sequence",
+        {
+         "string": "λx"
+        }
+       ],
+       "h"
+      ],
+      [
+       "gethash",
+       [
+        "string-as-unibyte",
+        {
+         "string": "λx"
+        }
+       ],
+       "h"
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(1 nil)"
+  },
+  {
+   "family": "test",
+   "source": "(let ((h (make-hash-table :test 'equal))) (puthash \"abc\" 1 h) (gethash (string-to-unibyte \"abc\") h))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "let",
+     [
+      [
+       "h",
+       [
+        "make-hash-table",
+        ":test",
+        [
+         "quote",
+         "equal"
+        ]
+       ]
+      ]
+     ],
+     [
+      "puthash",
+      {
+       "string": "abc"
+      },
+      1,
+      "h"
+     ],
+     [
+      "gethash",
+      [
+       "string-to-unibyte",
+       {
+        "string": "abc"
+       }
+      ],
+      "h"
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "1"
+  },
+  {
+   "family": "test",
+   "source": "(let ((h (make-hash-table :test 'equal))) (puthash (vector 1 (copy-sequence \"a\") (list 2)) 1 h) (list (gethash (vector 1 (copy-sequence \"a\") (list 2)) h) (gethash (vector 1 (copy-sequence \"a\") (list 3)) h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "let",
+     [
+      [
+       "h",
+       [
+        "make-hash-table",
+        ":test",
+        [
+         "quote",
+         "equal"
+        ]
+       ]
+      ]
+     ],
+     [
+      "puthash",
+      [
+       "vector",
+       1,
+       [
+        "copy-sequence",
+        {
+         "string": "a"
+        }
+       ],
+       [
+        "list",
+        2
+       ]
+      ],
+      1,
+      "h"
+     ],
+     [
+      "list",
+      [
+       "gethash",
+       [
+        "vector",
+        1,
+        [
+         "copy-sequence",
+         {
+          "string": "a"
+         }
+        ],
+        [
+         "list",
+         2
+        ]
+       ],
+       "h"
+      ],
+      [
+       "gethash",
+       [
+        "vector",
+        1,
+        [
+         "copy-sequence",
+         {
+          "string": "a"
+         }
+        ],
+        [
+         "list",
+         3
+        ]
+       ],
+       "h"
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(1 nil)"
+  },
+  {
+   "family": "test",
+   "source": "(let ((h (make-hash-table :test 'equal))) (puthash (list 1 (list 2 (list 3 (list 4 (list 5 6 7 8 9 10))))) 'deep h) (list (gethash (list 1 (list 2 (list 3 (list 4 (list 5 6 7 8 9 10))))) h) (gethash (list 1 (list 2 (list 3 (list 4 (list 5 6 7 8 9 11))))) h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "let",
+     [
+      [
+       "h",
+       [
+        "make-hash-table",
+        ":test",
+        [
+         "quote",
+         "equal"
+        ]
+       ]
+      ]
+     ],
+     [
+      "puthash",
+      [
+       "list",
+       1,
+       [
+        "list",
+        2,
+        [
+         "list",
+         3,
+         [
+          "list",
+          4,
+          [
+           "list",
+           5,
+           6,
+           7,
+           8,
+           9,
+           10
+          ]
+         ]
+        ]
+       ]
+      ],
+      [
+       "quote",
+       "deep"
+      ],
+      "h"
+     ],
+     [
+      "list",
+      [
+       "gethash",
+       [
+        "list",
+        1,
+        [
+         "list",
+         2,
+         [
+          "list",
+          3,
+          [
+           "list",
+           4,
+           [
+            "list",
+            5,
+            6,
+            7,
+            8,
+            9,
+            10
+           ]
+          ]
+         ]
+        ]
+       ],
+       "h"
+      ],
+      [
+       "gethash",
+       [
+        "list",
+        1,
+        [
+         "list",
+         2,
+         [
+          "list",
+          3,
+          [
+           "list",
+           4,
+           [
+            "list",
+            5,
+            6,
+            7,
+            8,
+            9,
+            11
+           ]
+          ]
+         ]
+        ]
+       ],
+       "h"
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(deep nil)"
+  },
+  {
+   "family": "test",
+   "source": "(let ((h (make-hash-table :test 'equal))) (puthash (cons 1 2) 'dot h) (list (gethash (cons 1 2) h) (gethash (list 1 2) h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "let",
+     [
+      [
+       "h",
+       [
+        "make-hash-table",
+        ":test",
+        [
+         "quote",
+         "equal"
+        ]
+       ]
+      ]
+     ],
+     [
+      "puthash",
+      [
+       "cons",
+       1,
+       2
+      ],
+      [
+       "quote",
+       "dot"
+      ],
+      "h"
+     ],
+     [
+      "list",
+      [
+       "gethash",
+       [
+        "cons",
+        1,
+        2
+       ],
+       "h"
+      ],
+      [
+       "gethash",
+       [
+        "list",
+        1,
+        2
+       ],
+       "h"
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(dot nil)"
+  },
+  {
+   "family": "test",
+   "source": "(let ((h (make-hash-table :test 'eq))) (puthash (list 1) 'a h) (gethash (list 1) h))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "let",
+     [
+      [
+       "h",
+       [
+        "make-hash-table",
+        ":test",
+        [
+         "quote",
+         "eq"
+        ]
+       ]
+      ]
+     ],
+     [
+      "puthash",
+      [
+       "list",
+       1
+      ],
+      [
+       "quote",
+       "a"
+      ],
+      "h"
+     ],
+     [
+      "gethash",
+      [
+       "list",
+       1
+      ],
+      "h"
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "nil"
+  },
+  {
+   "family": "test",
+   "source": "(let ((h (make-hash-table :test 'equal)) (k (list 1 2))) (puthash k 'v h) (setcar k 9) (list (gethash k h) (gethash (list 1 2) h) (gethash (list 9 2) h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "let",
+     [
+      [
+       "h",
+       [
+        "make-hash-table",
+        ":test",
+        [
+         "quote",
+         "equal"
+        ]
+       ]
+      ],
+      [
+       "k",
+       [
+        "list",
+        1,
+        2
+       ]
+      ]
+     ],
+     [
+      "puthash",
+      "k",
+      [
+       "quote",
+       "v"
+      ],
+      "h"
+     ],
+     [
+      "setcar",
+      "k",
+      9
+     ],
+     [
+      "list",
+      [
+       "gethash",
+       "k",
+       "h"
+      ],
+      [
+       "gethash",
+       [
+        "list",
+        1,
+        2
+       ],
+       "h"
+      ],
+      [
+       "gethash",
+       [
+        "list",
+        9,
+        2
+       ],
+       "h"
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(nil nil nil)"
+  },
+  {
+   "family": "test",
+   "source": "(let ((h (make-hash-table :test 'equal)) (k (list 1))) (setcdr k k) (puthash k 'v h) (gethash k h))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "let",
+     [
+      [
+       "h",
+       [
+        "make-hash-table",
+        ":test",
+        [
+         "quote",
+         "equal"
+        ]
+       ]
+      ],
+      [
+       "k",
+       [
+        "list",
+        1
+       ]
+      ]
+     ],
+     [
+      "setcdr",
+      "k",
+      "k"
+     ],
+     [
+      "puthash",
+      "k",
+      [
+       "quote",
+       "v"
+      ],
+      "h"
+     ],
+     [
+      "gethash",
+      "k",
+      "h"
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "v"
+  },
+  {
+   "family": "test",
+   "source": "(let ((h (make-hash-table :test 'equal)) (k (list 1)) (j (list 1))) (setcdr k k) (setcdr j j) (puthash k 'v h) (gethash j h))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "let",
+     [
+      [
+       "h",
+       [
+        "make-hash-table",
+        ":test",
+        [
+         "quote",
+         "equal"
+        ]
+       ]
+      ],
+      [
+       "k",
+       [
+        "list",
+        1
+       ]
+      ],
+      [
+       "j",
+       [
+        "list",
+        1
+       ]
+      ]
+     ],
+     [
+      "setcdr",
+      "k",
+      "k"
+     ],
+     [
+      "setcdr",
+      "j",
+      "j"
+     ],
+     [
+      "puthash",
+      "k",
+      [
+       "quote",
+       "v"
+      ],
+      "h"
+     ],
+     [
+      "gethash",
+      "j",
+      "h"
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "v"
+  },
+  {
+   "family": "test",
+   "source": "(let ((h (make-hash-table :test 'equal)) (k (list 1 2)) (j (list 1))) (setcdr (cdr k) k) (setcdr j j) (puthash k 'v h) (gethash j h))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "let",
+     [
+      [
+       "h",
+       [
+        "make-hash-table",
+        ":test",
+        [
+         "quote",
+         "equal"
+        ]
+       ]
+      ],
+      [
+       "k",
+       [
+        "list",
+        1,
+        2
+       ]
+      ],
+      [
+       "j",
+       [
+        "list",
+        1
+       ]
+      ]
+     ],
+     [
+      "setcdr",
+      [
+       "cdr",
+       "k"
+      ],
+      "k"
+     ],
+     [
+      "setcdr",
+      "j",
+      "j"
+     ],
+     [
+      "puthash",
+      "k",
+      [
+       "quote",
+       "v"
+      ],
+      "h"
+     ],
+     [
+      "gethash",
+      "j",
+      "h"
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "nil"
+  },
+  {
+   "family": "test",
+   "source": "(let ((h (make-hash-table :test 'equal)) (mk (lambda (y) (lambda (x) (+ x y))))) (puthash (funcall mk 1) 1 h) (list (gethash (funcall mk 1) h) (gethash (funcall mk 2) h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "let",
+     [
+      [
+       "h",
+       [
+        "make-hash-table",
+        ":test",
+        [
+         "quote",
+         "equal"
+        ]
+       ]
+      ],
+      [
+       "mk",
+       [
+        "lambda",
+        [
+         "y"
+        ],
+        [
+         "lambda",
+         [
+          "x"
+         ],
+         [
+          "+",
+          "x",
+          "y"
+         ]
+        ]
+       ]
+      ]
+     ],
+     [
+      "puthash",
+      [
+       "funcall",
+       "mk",
+       1
+      ],
+      1,
+      "h"
+     ],
+     [
+      "list",
+      [
+       "gethash",
+       [
+        "funcall",
+        "mk",
+        1
+       ],
+       "h"
+      ],
+      [
+       "gethash",
+       [
+        "funcall",
+        "mk",
+        2
+       ],
+       "h"
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(1 nil)"
+  },
+  {
+   "family": "test",
+   "source": "(let ((h (make-hash-table :test 'eq)) (k (make-hash-table))) (puthash k 'table h) (list (gethash k h) (gethash (make-hash-table) h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "let",
+     [
+      [
+       "h",
+       [
+        "make-hash-table",
+        ":test",
+        [
+         "quote",
+         "eq"
+        ]
+       ]
+      ],
+      [
+       "k",
+       [
+        "make-hash-table"
+       ]
+      ]
+     ],
+     [
+      "puthash",
+      "k",
+      [
+       "quote",
+       "table"
+      ],
+      "h"
+     ],
+     [
+      "list",
+      [
+       "gethash",
+       "k",
+       "h"
+      ],
+      [
+       "gethash",
+       [
+        "make-hash-table"
+       ],
+       "h"
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(table nil)"
+  },
+  {
+   "family": "test",
+   "source": "(let ((h (make-hash-table :test 'equal))) (puthash :kw 1 h) (puthash 'sym 2 h) (list (gethash :kw h) (gethash 'sym h) (gethash \"sym\" h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "let",
+     [
+      [
+       "h",
+       [
+        "make-hash-table",
+        ":test",
+        [
+         "quote",
+         "equal"
+        ]
+       ]
+      ]
+     ],
+     [
+      "puthash",
+      ":kw",
+      1,
+      "h"
+     ],
+     [
+      "puthash",
+      [
+       "quote",
+       "sym"
+      ],
+      2,
+      "h"
+     ],
+     [
+      "list",
+      [
+       "gethash",
+       ":kw",
+       "h"
+      ],
+      [
+       "gethash",
+       [
+        "quote",
+        "sym"
+       ],
+       "h"
+      ],
+      [
+       "gethash",
+       {
+        "string": "sym"
+       },
+       "h"
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(1 2 nil)"
+  },
+  {
+   "family": "test",
+   "source": "(with-temp-buffer (insert \"abcdef\") (let ((h (make-hash-table :test 'equal)) (m (copy-marker 3))) (puthash m 'm3 h) (list (gethash (copy-marker 3) h) (gethash (copy-marker 4) h) (gethash m h))))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "with-temp-buffer",
+     [
+      "insert",
+      {
+       "string": "abcdef"
+      }
+     ],
+     [
+      "let",
+      [
+       [
+        "h",
+        [
+         "make-hash-table",
+         ":test",
+         [
+          "quote",
+          "equal"
+         ]
+        ]
+       ],
+       [
+        "m",
+        [
+         "copy-marker",
+         3
+        ]
+       ]
+      ],
+      [
+       "puthash",
+       "m",
+       [
+        "quote",
+        "m3"
+       ],
+       "h"
+      ],
+      [
+       "list",
+       [
+        "gethash",
+        [
+         "copy-marker",
+         3
+        ],
+        "h"
+       ],
+       [
+        "gethash",
+        [
+         "copy-marker",
+         4
+        ],
+        "h"
+       ],
+       [
+        "gethash",
+        "m",
+        "h"
+       ]
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(m3 nil m3)"
+  },
+  {
+   "family": "test",
+   "source": "(with-temp-buffer (insert \"abcdef\") (let ((h (make-hash-table :test 'eq)) (m (copy-marker 3))) (puthash m 'm3 h) (list (gethash (copy-marker 3) h) (gethash m h))))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "with-temp-buffer",
+     [
+      "insert",
+      {
+       "string": "abcdef"
+      }
+     ],
+     [
+      "let",
+      [
+       [
+        "h",
+        [
+         "make-hash-table",
+         ":test",
+         [
+          "quote",
+          "eq"
+         ]
+        ]
+       ],
+       [
+        "m",
+        [
+         "copy-marker",
+         3
+        ]
+       ]
+      ],
+      [
+       "puthash",
+       "m",
+       [
+        "quote",
+        "m3"
+       ],
+       "h"
+      ],
+      [
+       "list",
+       [
+        "gethash",
+        [
+         "copy-marker",
+         3
+        ],
+        "h"
+       ],
+       [
+        "gethash",
+        "m",
+        "h"
+       ]
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(nil m3)"
+  },
+  {
+   "family": "order",
+   "source": "(let ((h (make-hash-table)) (r nil)) (dolist (k '(c a b e d)) (puthash k (list k) h)) (maphash (lambda (k v) (push (cons k v) r)) h) (nreverse r))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "let",
+     [
+      [
+       "h",
+       [
+        "make-hash-table"
+       ]
+      ],
+      [
+       "r",
+       "nil"
+      ]
+     ],
+     [
+      "dolist",
+      [
+       "k",
+       [
+        "quote",
+        [
+         "c",
+         "a",
+         "b",
+         "e",
+         "d"
+        ]
+       ]
+      ],
+      [
+       "puthash",
+       "k",
+       [
+        "list",
+        "k"
+       ],
+       "h"
+      ]
+     ],
+     [
+      "maphash",
+      [
+       "lambda",
+       [
+        "k",
+        "v"
+       ],
+       [
+        "push",
+        [
+         "cons",
+         "k",
+         "v"
+        ],
+        "r"
+       ]
+      ],
+      "h"
+     ],
+     [
+      "nreverse",
+      "r"
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "((c c) (a a) (b b) (e e) (d d))"
+  },
+  {
+   "family": "order",
+   "source": "(let ((h (make-hash-table))) (puthash 'a 1 h) (puthash 'b 2 h) (puthash 'c 3 h) (remhash 'b h) (puthash 'd 4 h) (list (hash-table-keys h) (hash-table-values h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "let",
+     [
+      [
+       "h",
+       [
+        "make-hash-table"
+       ]
+      ]
+     ],
+     [
+      "puthash",
+      [
+       "quote",
+       "a"
+      ],
+      1,
+      "h"
+     ],
+     [
+      "puthash",
+      [
+       "quote",
+       "b"
+      ],
+      2,
+      "h"
+     ],
+     [
+      "puthash",
+      [
+       "quote",
+       "c"
+      ],
+      3,
+      "h"
+     ],
+     [
+      "remhash",
+      [
+       "quote",
+       "b"
+      ],
+      "h"
+     ],
+     [
+      "puthash",
+      [
+       "quote",
+       "d"
+      ],
+      4,
+      "h"
+     ],
+     [
+      "list",
+      [
+       "hash-table-keys",
+       "h"
+      ],
+      [
+       "hash-table-values",
+       "h"
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "((c d a) (3 4 1))"
+  },
+  {
+   "family": "order",
+   "source": "(let ((h (make-hash-table))) (dotimes (i 7) (puthash i i h)) (dotimes (i 7) (remhash i h)) (dotimes (i 3) (puthash (+ 10 i) i h)) (list (hash-table-keys h) (hash-table-size h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "let",
+     [
+      [
+       "h",
+       [
+        "make-hash-table"
+       ]
+      ]
+     ],
+     [
+      "dotimes",
+      [
+       "i",
+       7
+      ],
+      [
+       "puthash",
+       "i",
+       "i",
+       "h"
+      ]
+     ],
+     [
+      "dotimes",
+      [
+       "i",
+       7
+      ],
+      [
+       "remhash",
+       "i",
+       "h"
+      ]
+     ],
+     [
+      "dotimes",
+      [
+       "i",
+       3
+      ],
+      [
+       "puthash",
+       [
+        "+",
+        10,
+        "i"
+       ],
+       "i",
+       "h"
+      ]
+     ],
+     [
+      "list",
+      [
+       "hash-table-keys",
+       "h"
+      ],
+      [
+       "hash-table-size",
+       "h"
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "((10 11 12) 24)"
+  },
+  {
+   "family": "order",
+   "source": "(let ((h (make-hash-table))) (puthash 'a 1 h) (puthash 'b 2 h) (remhash 'a h) (remhash 'b h) (clrhash h) (puthash 'x 1 h) (puthash 'y 2 h) (puthash 'z 3 h) (hash-table-keys h))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "let",
+     [
+      [
+       "h",
+       [
+        "make-hash-table"
+       ]
+      ]
+     ],
+     [
+      "puthash",
+      [
+       "quote",
+       "a"
+      ],
+      1,
+      "h"
+     ],
+     [
+      "puthash",
+      [
+       "quote",
+       "b"
+      ],
+      2,
+      "h"
+     ],
+     [
+      "remhash",
+      [
+       "quote",
+       "a"
+      ],
+      "h"
+     ],
+     [
+      "remhash",
+      [
+       "quote",
+       "b"
+      ],
+      "h"
+     ],
+     [
+      "clrhash",
+      "h"
+     ],
+     [
+      "puthash",
+      [
+       "quote",
+       "x"
+      ],
+      1,
+      "h"
+     ],
+     [
+      "puthash",
+      [
+       "quote",
+       "y"
+      ],
+      2,
+      "h"
+     ],
+     [
+      "puthash",
+      [
+       "quote",
+       "z"
+      ],
+      3,
+      "h"
+     ],
+     [
+      "hash-table-keys",
+      "h"
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(z x y)"
+  },
+  {
+   "family": "order",
+   "source": "(let ((h (make-hash-table))) (puthash 'a 1 h) (puthash 'b 2 h) (remhash 'a h) (clrhash h) (puthash 'x 1 h) (puthash 'y 2 h) (hash-table-keys h))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "let",
+     [
+      [
+       "h",
+       [
+        "make-hash-table"
+       ]
+      ]
+     ],
+     [
+      "puthash",
+      [
+       "quote",
+       "a"
+      ],
+      1,
+      "h"
+     ],
+     [
+      "puthash",
+      [
+       "quote",
+       "b"
+      ],
+      2,
+      "h"
+     ],
+     [
+      "remhash",
+      [
+       "quote",
+       "a"
+      ],
+      "h"
+     ],
+     [
+      "clrhash",
+      "h"
+     ],
+     [
+      "puthash",
+      [
+       "quote",
+       "x"
+      ],
+      1,
+      "h"
+     ],
+     [
+      "puthash",
+      [
+       "quote",
+       "y"
+      ],
+      2,
+      "h"
+     ],
+     [
+      "hash-table-keys",
+      "h"
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(y x)"
+  },
+  {
+   "family": "order",
+   "source": "(let ((h (make-hash-table)) (r nil)) (dotimes (i 200) (puthash i i h) (unless (eq (car r) (hash-table-size h)) (push (hash-table-size h) r))) (nreverse r))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "let",
+     [
+      [
+       "h",
+       [
+        "make-hash-table"
+       ]
+      ],
+      [
+       "r",
+       "nil"
+      ]
+     ],
+     [
+      "dotimes",
+      [
+       "i",
+       200
+      ],
+      [
+       "puthash",
+       "i",
+       "i",
+       "h"
+      ],
+      [
+       "unless",
+       [
+        "eq",
+        [
+         "car",
+         "r"
+        ],
+        [
+         "hash-table-size",
+         "h"
+        ]
+       ],
+       [
+        "push",
+        [
+         "hash-table-size",
+         "h"
+        ],
+        "r"
+       ]
+      ]
+     ],
+     [
+      "nreverse",
+      "r"
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(6 24 96 192 384)"
+  },
+  {
+   "family": "order",
+   "source": "(let ((h (make-hash-table :size 3)) (r nil)) (dotimes (i 30) (puthash i i h) (unless (eq (car r) (hash-table-size h)) (push (hash-table-size h) r))) (nreverse r))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "let",
+     [
+      [
+       "h",
+       [
+        "make-hash-table",
+        ":size",
+        3
+       ]
+      ],
+      [
+       "r",
+       "nil"
+      ]
+     ],
+     [
+      "dotimes",
+      [
+       "i",
+       30
+      ],
+      [
+       "puthash",
+       "i",
+       "i",
+       "h"
+      ],
+      [
+       "unless",
+       [
+        "eq",
+        [
+         "car",
+         "r"
+        ],
+        [
+         "hash-table-size",
+         "h"
+        ]
+       ],
+       [
+        "push",
+        [
+         "hash-table-size",
+         "h"
+        ],
+        "r"
+       ]
+      ]
+     ],
+     [
+      "nreverse",
+      "r"
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(3 24 96)"
+  },
+  {
+   "family": "order",
+   "source": "(let ((h (make-hash-table :size 100)) (r nil)) (dotimes (i 101) (puthash i i h)) (list (hash-table-size h) (hash-table-count h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "let",
+     [
+      [
+       "h",
+       [
+        "make-hash-table",
+        ":size",
+        100
+       ]
+      ],
+      [
+       "r",
+       "nil"
+      ]
+     ],
+     [
+      "dotimes",
+      [
+       "i",
+       101
+      ],
+      [
+       "puthash",
+       "i",
+       "i",
+       "h"
+      ]
+     ],
+     [
+      "list",
+      [
+       "hash-table-size",
+       "h"
+      ],
+      [
+       "hash-table-count",
+       "h"
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(200 101)"
+  },
+  {
+   "family": "order",
+   "source": "(let ((h (make-hash-table :size 0))) (list (hash-table-size h) (progn (puthash 1 1 h) (hash-table-size h)) (progn (clrhash h) (hash-table-size h))))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "let",
+     [
+      [
+       "h",
+       [
+        "make-hash-table",
+        ":size",
+        0
+       ]
+      ]
+     ],
+     [
+      "list",
+      [
+       "hash-table-size",
+       "h"
+      ],
+      [
+       "progn",
+       [
+        "puthash",
+        1,
+        1,
+        "h"
+       ],
+       [
+        "hash-table-size",
+        "h"
+       ]
+      ],
+      [
+       "progn",
+       [
+        "clrhash",
+        "h"
+       ],
+       [
+        "hash-table-size",
+        "h"
+       ]
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(0 6 6)"
+  },
+  {
+   "family": "order",
+   "source": "(let ((h (make-hash-table)) (r nil)) (puthash 'a 1 h) (puthash 'b 2 h) (let ((c (copy-hash-table h))) (puthash 'c 3 c) (remhash 'a c) (list (hash-table-keys h) (hash-table-keys c) (hash-table-count h) c)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "let",
+     [
+      [
+       "h",
+       [
+        "make-hash-table"
+       ]
+      ],
+      [
+       "r",
+       "nil"
+      ]
+     ],
+     [
+      "puthash",
+      [
+       "quote",
+       "a"
+      ],
+      1,
+      "h"
+     ],
+     [
+      "puthash",
+      [
+       "quote",
+       "b"
+      ],
+      2,
+      "h"
+     ],
+     [
+      "let",
+      [
+       [
+        "c",
+        [
+         "copy-hash-table",
+         "h"
+        ]
+       ]
+      ],
+      [
+       "puthash",
+       [
+        "quote",
+        "c"
+       ],
+       3,
+       "c"
+      ],
+      [
+       "remhash",
+       [
+        "quote",
+        "a"
+       ],
+       "c"
+      ],
+      [
+       "list",
+       [
+        "hash-table-keys",
+        "h"
+       ],
+       [
+        "hash-table-keys",
+        "c"
+       ],
+       [
+        "hash-table-count",
+        "h"
+       ],
+       "c"
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "((b a) (c b) 2 #s(hash-table data (b 2 c 3)))"
+  },
+  {
+   "family": "mutate",
+   "source": "(let ((h (make-hash-table)) (r nil)) (puthash 'a 1 h) (puthash 'b 2 h) (puthash 'c 3 h) (maphash (lambda (k v) (push k r) (when (eq k 'a) (puthash 'z 26 h) (remhash 'c h))) h) (list (nreverse r) h))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "let",
+     [
+      [
+       "h",
+       [
+        "make-hash-table"
+       ]
+      ],
+      [
+       "r",
+       "nil"
+      ]
+     ],
+     [
+      "puthash",
+      [
+       "quote",
+       "a"
+      ],
+      1,
+      "h"
+     ],
+     [
+      "puthash",
+      [
+       "quote",
+       "b"
+      ],
+      2,
+      "h"
+     ],
+     [
+      "puthash",
+      [
+       "quote",
+       "c"
+      ],
+      3,
+      "h"
+     ],
+     [
+      "maphash",
+      [
+       "lambda",
+       [
+        "k",
+        "v"
+       ],
+       [
+        "push",
+        "k",
+        "r"
+       ],
+       [
+        "when",
+        [
+         "eq",
+         "k",
+         [
+          "quote",
+          "a"
+         ]
+        ],
+        [
+         "puthash",
+         [
+          "quote",
+          "z"
+         ],
+         26,
+         "h"
+        ],
+        [
+         "remhash",
+         [
+          "quote",
+          "c"
+         ],
+         "h"
+        ]
+       ]
+      ],
+      "h"
+     ],
+     [
+      "list",
+      [
+       "nreverse",
+       "r"
+      ],
+      "h"
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "((a b z) #s(hash-table data (a 1 b 2 z 26)))"
+  },
+  {
+   "family": "mutate",
+   "source": "(let ((h (make-hash-table)) (r nil)) (dotimes (i 6) (puthash i i h)) (maphash (lambda (k v) (push k r) (when (< k 100) (puthash (+ k 100) 0 h))) h) (list (length r) (hash-table-size h) (hash-table-count h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "let",
+     [
+      [
+       "h",
+       [
+        "make-hash-table"
+       ]
+      ],
+      [
+       "r",
+       "nil"
+      ]
+     ],
+     [
+      "dotimes",
+      [
+       "i",
+       6
+      ],
+      [
+       "puthash",
+       "i",
+       "i",
+       "h"
+      ]
+     ],
+     [
+      "maphash",
+      [
+       "lambda",
+       [
+        "k",
+        "v"
+       ],
+       [
+        "push",
+        "k",
+        "r"
+       ],
+       [
+        "when",
+        [
+         "<",
+         "k",
+         100
+        ],
+        [
+         "puthash",
+         [
+          "+",
+          "k",
+          100
+         ],
+         0,
+         "h"
+        ]
+       ]
+      ],
+      "h"
+     ],
+     [
+      "list",
+      [
+       "length",
+       "r"
+      ],
+      [
+       "hash-table-size",
+       "h"
+      ],
+      [
+       "hash-table-count",
+       "h"
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(12 24 12)"
+  },
+  {
+   "family": "mutate",
+   "source": "(let ((h (make-hash-table)) (r nil)) (dotimes (i 5) (puthash i (* i i) h)) (maphash (lambda (k v) (push v r) (remhash k h)) h) (list (nreverse r) (hash-table-count h) h))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "let",
+     [
+      [
+       "h",
+       [
+        "make-hash-table"
+       ]
+      ],
+      [
+       "r",
+       "nil"
+      ]
+     ],
+     [
+      "dotimes",
+      [
+       "i",
+       5
+      ],
+      [
+       "puthash",
+       "i",
+       [
+        "*",
+        "i",
+        "i"
+       ],
+       "h"
+      ]
+     ],
+     [
+      "maphash",
+      [
+       "lambda",
+       [
+        "k",
+        "v"
+       ],
+       [
+        "push",
+        "v",
+        "r"
+       ],
+       [
+        "remhash",
+        "k",
+        "h"
+       ]
+      ],
+      "h"
+     ],
+     [
+      "list",
+      [
+       "nreverse",
+       "r"
+      ],
+      [
+       "hash-table-count",
+       "h"
+      ],
+      "h"
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "((0 1 4 9 16) 0 #s(hash-table))"
+  },
+  {
+   "family": "mutate",
+   "source": "(let ((h (make-hash-table)) (r nil)) (dotimes (i 5) (puthash i i h)) (maphash (lambda (k v) (push k r) (puthash k (* 10 v) h)) h) (list (nreverse r) (hash-table-values h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "let",
+     [
+      [
+       "h",
+       [
+        "make-hash-table"
+       ]
+      ],
+      [
+       "r",
+       "nil"
+      ]
+     ],
+     [
+      "dotimes",
+      [
+       "i",
+       5
+      ],
+      [
+       "puthash",
+       "i",
+       "i",
+       "h"
+      ]
+     ],
+     [
+      "maphash",
+      [
+       "lambda",
+       [
+        "k",
+        "v"
+       ],
+       [
+        "push",
+        "k",
+        "r"
+       ],
+       [
+        "puthash",
+        "k",
+        [
+         "*",
+         10,
+         "v"
+        ],
+        "h"
+       ]
+      ],
+      "h"
+     ],
+     [
+      "list",
+      [
+       "nreverse",
+       "r"
+      ],
+      [
+       "hash-table-values",
+       "h"
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "((0 1 2 3 4) (40 30 20 10 0))"
+  },
+  {
+   "family": "mutate",
+   "source": "(let ((h (make-hash-table)) (r nil)) (dotimes (i 4) (puthash i i h)) (maphash (lambda (k v) (push k r) (when (= k 1) (clrhash h) (puthash 'x 'y h))) h) (list (nreverse r) h))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "let",
+     [
+      [
+       "h",
+       [
+        "make-hash-table"
+       ]
+      ],
+      [
+       "r",
+       "nil"
+      ]
+     ],
+     [
+      "dotimes",
+      [
+       "i",
+       4
+      ],
+      [
+       "puthash",
+       "i",
+       "i",
+       "h"
+      ]
+     ],
+     [
+      "maphash",
+      [
+       "lambda",
+       [
+        "k",
+        "v"
+       ],
+       [
+        "push",
+        "k",
+        "r"
+       ],
+       [
+        "when",
+        [
+         "=",
+         "k",
+         1
+        ],
+        [
+         "clrhash",
+         "h"
+        ],
+        [
+         "puthash",
+         [
+          "quote",
+          "x"
+         ],
+         [
+          "quote",
+          "y"
+         ],
+         "h"
+        ]
+       ]
+      ],
+      "h"
+     ],
+     [
+      "list",
+      [
+       "nreverse",
+       "r"
+      ],
+      "h"
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "((0 1) #s(hash-table data (x y)))"
+  },
+  {
+   "family": "mutate",
+   "source": "(let ((h (make-hash-table)) (r nil)) (dotimes (i 4) (puthash i i h)) (maphash (lambda (k v) (push k r) (when (eq k 0) (remhash 2 h) (puthash 'new 1 h))) h) (nreverse r))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "let",
+     [
+      [
+       "h",
+       [
+        "make-hash-table"
+       ]
+      ],
+      [
+       "r",
+       "nil"
+      ]
+     ],
+     [
+      "dotimes",
+      [
+       "i",
+       4
+      ],
+      [
+       "puthash",
+       "i",
+       "i",
+       "h"
+      ]
+     ],
+     [
+      "maphash",
+      [
+       "lambda",
+       [
+        "k",
+        "v"
+       ],
+       [
+        "push",
+        "k",
+        "r"
+       ],
+       [
+        "when",
+        [
+         "eq",
+         "k",
+         0
+        ],
+        [
+         "remhash",
+         2,
+         "h"
+        ],
+        [
+         "puthash",
+         [
+          "quote",
+          "new"
+         ],
+         1,
+         "h"
+        ]
+       ]
+      ],
+      "h"
+     ],
+     [
+      "nreverse",
+      "r"
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(0 1 new 3)"
+  },
+  {
+   "family": "mutate",
+   "source": "(let ((h (make-hash-table))) (puthash 1 2 h) (maphash (lambda (k v) (setq k 5)) h))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "let",
+     [
+      [
+       "h",
+       [
+        "make-hash-table"
+       ]
+      ]
+     ],
+     [
+      "puthash",
+      1,
+      2,
+      "h"
+     ],
+     [
+      "maphash",
+      [
+       "lambda",
+       [
+        "k",
+        "v"
+       ],
+       [
+        "setq",
+        "k",
+        5
+       ]
+      ],
+      "h"
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "nil"
+  },
+  {
+   "family": "mutate",
+   "source": "(maphash 42 (make-hash-table))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "maphash",
+     42,
+     [
+      "make-hash-table"
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "nil"
+  },
+  {
+   "family": "mutate",
+   "source": "(let ((h (make-hash-table :test 'equal)) (sum 0)) (dotimes (i 300) (puthash (list i (copy-sequence \"k\")) (vector i) h)) (maphash (lambda (k v) (setq sum (+ sum (aref v 0))) (dotimes (j 20) (cons j k))) h) (list sum (hash-table-count h) (gethash (list 299 \"k\") h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "let",
+     [
+      [
+       "h",
+       [
+        "make-hash-table",
+        ":test",
+        [
+         "quote",
+         "equal"
+        ]
+       ]
+      ],
+      [
+       "sum",
+       0
+      ]
+     ],
+     [
+      "dotimes",
+      [
+       "i",
+       300
+      ],
+      [
+       "puthash",
+       [
+        "list",
+        "i",
+        [
+         "copy-sequence",
+         {
+          "string": "k"
+         }
+        ]
+       ],
+       [
+        "vector",
+        "i"
+       ],
+       "h"
+      ]
+     ],
+     [
+      "maphash",
+      [
+       "lambda",
+       [
+        "k",
+        "v"
+       ],
+       [
+        "setq",
+        "sum",
+        [
+         "+",
+         "sum",
+         [
+          "aref",
+          "v",
+          0
+         ]
+        ]
+       ],
+       [
+        "dotimes",
+        [
+         "j",
+         20
+        ],
+        [
+         "cons",
+         "j",
+         "k"
+        ]
+       ]
+      ],
+      "h"
+     ],
+     [
+      "list",
+      "sum",
+      [
+       "hash-table-count",
+       "h"
+      ],
+      [
+       "gethash",
+       [
+        "list",
+        299,
+        {
+         "string": "k"
+        }
+       ],
+       "h"
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(44850 300 [299])"
+  },
+  {
+   "family": "surface",
+   "source": "(list (gethash 1 (make-hash-table) 'dflt) (gethash 1 (make-hash-table)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "list",
+     [
+      "gethash",
+      1,
+      [
+       "make-hash-table"
+      ],
+      [
+       "quote",
+       "dflt"
+      ]
+     ],
+     [
+      "gethash",
+      1,
+      [
+       "make-hash-table"
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(dflt nil)"
+  },
+  {
+   "family": "surface",
+   "source": "(let ((h (make-hash-table))) (list (puthash 'k 'v h) (remhash 'k h) (remhash 'k h) (hash-table-count h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "let",
+     [
+      [
+       "h",
+       [
+        "make-hash-table"
+       ]
+      ]
+     ],
+     [
+      "list",
+      [
+       "puthash",
+       [
+        "quote",
+        "k"
+       ],
+       [
+        "quote",
+        "v"
+       ],
+       "h"
+      ],
+      [
+       "remhash",
+       [
+        "quote",
+        "k"
+       ],
+       "h"
+      ],
+      [
+       "remhash",
+       [
+        "quote",
+        "k"
+       ],
+       "h"
+      ],
+      [
+       "hash-table-count",
+       "h"
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(v nil nil 0)"
+  },
+  {
+   "family": "surface",
+   "source": "(let ((h (make-hash-table))) (puthash 1 2 h) (eq h (clrhash h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "let",
+     [
+      [
+       "h",
+       [
+        "make-hash-table"
+       ]
+      ]
+     ],
+     [
+      "puthash",
+      1,
+      2,
+      "h"
+     ],
+     [
+      "eq",
+      "h",
+      [
+       "clrhash",
+       "h"
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "t"
+  },
+  {
+   "family": "surface",
+   "source": "(let ((h (make-hash-table))) (puthash 'k nil h) (list (hash-table-contains-p 'k h) (hash-table-contains-p 'j h) (gethash 'k h 'missing)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "let",
+     [
+      [
+       "h",
+       [
+        "make-hash-table"
+       ]
+      ]
+     ],
+     [
+      "puthash",
+      [
+       "quote",
+       "k"
+      ],
+      "nil",
+      "h"
+     ],
+     [
+      "list",
+      [
+       "hash-table-contains-p",
+       [
+        "quote",
+        "k"
+       ],
+       "h"
+      ],
+      [
+       "hash-table-contains-p",
+       [
+        "quote",
+        "j"
+       ],
+       "h"
+      ],
+      [
+       "gethash",
+       [
+        "quote",
+        "k"
+       ],
+       "h",
+       [
+        "quote",
+        "missing"
+       ]
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(t nil nil)"
+  },
+  {
+   "family": "surface",
+   "source": "(let ((h (make-hash-table :test 'equal))) (setf (gethash \"k\" h) 1) (setf (gethash \"k\" h) 2) (list (gethash \"k\" h) (hash-table-count h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "let",
+     [
+      [
+       "h",
+       [
+        "make-hash-table",
+        ":test",
+        [
+         "quote",
+         "equal"
+        ]
+       ]
+      ]
+     ],
+     [
+      "setf",
+      [
+       "gethash",
+       {
+        "string": "k"
+       },
+       "h"
+      ],
+      1
+     ],
+     [
+      "setf",
+      [
+       "gethash",
+       {
+        "string": "k"
+       },
+       "h"
+      ],
+      2
+     ],
+     [
+      "list",
+      [
+       "gethash",
+       {
+        "string": "k"
+       },
+       "h"
+      ],
+      [
+       "hash-table-count",
+       "h"
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(2 1)"
+  },
+  {
+   "family": "surface",
+   "source": "(let ((h (make-hash-table))) (push 1 (gethash 'k h)) (push 2 (gethash 'k h)) (gethash 'k h))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "let",
+     [
+      [
+       "h",
+       [
+        "make-hash-table"
+       ]
+      ]
+     ],
+     [
+      "push",
+      1,
+      [
+       "gethash",
+       [
+        "quote",
+        "k"
+       ],
+       "h"
+      ]
+     ],
+     [
+      "push",
+      2,
+      [
+       "gethash",
+       [
+        "quote",
+        "k"
+       ],
+       "h"
+      ]
+     ],
+     [
+      "gethash",
+      [
+       "quote",
+       "k"
+      ],
+      "h"
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(2 1)"
+  },
+  {
+   "family": "surface",
+   "source": "(let ((h (make-hash-table))) (cl-incf (gethash 'n h 10)) (cl-incf (gethash 'n h 10) 5) (gethash 'n h))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "let",
+     [
+      [
+       "h",
+       [
+        "make-hash-table"
+       ]
+      ]
+     ],
+     [
+      "cl-incf",
+      [
+       "gethash",
+       [
+        "quote",
+        "n"
+       ],
+       "h",
+       10
+      ]
+     ],
+     [
+      "cl-incf",
+      [
+       "gethash",
+       [
+        "quote",
+        "n"
+       ],
+       "h",
+       10
+      ],
+      5
+     ],
+     [
+      "gethash",
+      [
+       "quote",
+       "n"
+      ],
+      "h"
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "16"
+  },
+  {
+   "family": "surface",
+   "source": "(let ((h (make-hash-table)) (r nil)) (dotimes (i 1000) (puthash i (* 2 i) h)) (dotimes (i 1000) (unless (= (gethash i h) (* 2 i)) (push i r))) (dotimes (i 500) (remhash (* 2 i) h)) (list r (hash-table-count h) (gethash 999 h) (gethash 998 h) (hash-table-size h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "let",
+     [
+      [
+       "h",
+       [
+        "make-hash-table"
+       ]
+      ],
+      [
+       "r",
+       "nil"
+      ]
+     ],
+     [
+      "dotimes",
+      [
+       "i",
+       1000
+      ],
+      [
+       "puthash",
+       "i",
+       [
+        "*",
+        2,
+        "i"
+       ],
+       "h"
+      ]
+     ],
+     [
+      "dotimes",
+      [
+       "i",
+       1000
+      ],
+      [
+       "unless",
+       [
+        "=",
+        [
+         "gethash",
+         "i",
+         "h"
+        ],
+        [
+         "*",
+         2,
+         "i"
+        ]
+       ],
+       [
+        "push",
+        "i",
+        "r"
+       ]
+      ]
+     ],
+     [
+      "dotimes",
+      [
+       "i",
+       500
+      ],
+      [
+       "remhash",
+       [
+        "*",
+        2,
+        "i"
+       ],
+       "h"
+      ]
+     ],
+     [
+      "list",
+      "r",
+      [
+       "hash-table-count",
+       "h"
+      ],
+      [
+       "gethash",
+       999,
+       "h"
+      ],
+      [
+       "gethash",
+       998,
+       "h"
+      ],
+      [
+       "hash-table-size",
+       "h"
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(nil 500 1998 nil 1536)"
+  },
+  {
+   "family": "surface",
+   "source": "(let ((h (make-hash-table :test 'equal))) (dotimes (i 200) (puthash (list i (vector i) (copy-sequence \"s\")) i h)) (let ((ok 0)) (dotimes (i 200) (when (eq (gethash (list i (vector i) (copy-sequence \"s\")) h) i) (setq ok (1+ ok)))) ok))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "let",
+     [
+      [
+       "h",
+       [
+        "make-hash-table",
+        ":test",
+        [
+         "quote",
+         "equal"
+        ]
+       ]
+      ]
+     ],
+     [
+      "dotimes",
+      [
+       "i",
+       200
+      ],
+      [
+       "puthash",
+       [
+        "list",
+        "i",
+        [
+         "vector",
+         "i"
+        ],
+        [
+         "copy-sequence",
+         {
+          "string": "s"
+         }
+        ]
+       ],
+       "i",
+       "h"
+      ]
+     ],
+     [
+      "let",
+      [
+       [
+        "ok",
+        0
+       ]
+      ],
+      [
+       "dotimes",
+       [
+        "i",
+        200
+       ],
+       [
+        "when",
+        [
+         "eq",
+         [
+          "gethash",
+          [
+           "list",
+           "i",
+           [
+            "vector",
+            "i"
+           ],
+           [
+            "copy-sequence",
+            {
+             "string": "s"
+            }
+           ]
+          ],
+          "h"
+         ],
+         "i"
+        ],
+        [
+         "setq",
+         "ok",
+         [
+          "1+",
+          "ok"
+         ]
+        ]
+       ]
+      ],
+      "ok"
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "200"
+  },
+  {
+   "family": "surface",
+   "source": "(let ((h (make-hash-table)) (r nil)) (puthash 'a 1 h) (puthash 'b 2 h) (funcall #'maphash (lambda (k v) (push (cons k v) r)) h) r)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "let",
+     [
+      [
+       "h",
+       [
+        "make-hash-table"
+       ]
+      ],
+      [
+       "r",
+       "nil"
+      ]
+     ],
+     [
+      "puthash",
+      [
+       "quote",
+       "a"
+      ],
+      1,
+      "h"
+     ],
+     [
+      "puthash",
+      [
+       "quote",
+       "b"
+      ],
+      2,
+      "h"
+     ],
+     [
+      "funcall",
+      [
+       "function",
+       "maphash"
+      ],
+      [
+       "lambda",
+       [
+        "k",
+        "v"
+       ],
+       [
+        "push",
+        [
+         "cons",
+         "k",
+         "v"
+        ],
+        "r"
+       ]
+      ],
+      "h"
+     ],
+     "r"
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "((b . 2) (a . 1))"
+  },
+  {
+   "family": "surface",
+   "source": "(list (apply #'maphash (list #'car (make-hash-table))) (funcall #'maphash #'car (make-hash-table)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "list",
+     [
+      "apply",
+      [
+       "function",
+       "maphash"
+      ],
+      [
+       "list",
+       [
+        "function",
+        "car"
+       ],
+       [
+        "make-hash-table"
+       ]
+      ]
+     ],
+     [
+      "funcall",
+      [
+       "function",
+       "maphash"
+      ],
+      [
+       "function",
+       "car"
+      ],
+      [
+       "make-hash-table"
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(nil nil)"
+  },
+  {
+   "family": "surface",
+   "source": "(define-hash-table-test 'vm2-oracle-test #'eq #'sxhash-eq)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "define-hash-table-test",
+     [
+      "quote",
+      "vm2-oracle-test"
+     ],
+     [
+      "function",
+      "eq"
+     ],
+     [
+      "function",
+      "sxhash-eq"
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(eq sxhash-eq)"
+  },
+  {
+   "family": "surface",
+   "source": "#'maphash",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "function",
+     "maphash"
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "maphash"
+  },
+  {
+   "family": "surface",
+   "source": "(let ((h (make-hash-table))) (puthash 'f (lambda (x) x) h) (funcall (gethash 'f h) 7))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "let",
+     [
+      [
+       "h",
+       [
+        "make-hash-table"
+       ]
+      ]
+     ],
+     [
+      "puthash",
+      [
+       "quote",
+       "f"
+      ],
+      [
+       "lambda",
+       [
+        "x"
+       ],
+       "x"
+      ],
+      "h"
+     ],
+     [
+      "funcall",
+      [
+       "gethash",
+       [
+        "quote",
+        "f"
+       ],
+       "h"
+      ],
+      7
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "7"
+  }
+ ]
+}

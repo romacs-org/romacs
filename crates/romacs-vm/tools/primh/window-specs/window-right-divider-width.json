@@ -1,0 +1,30 @@
+{
+ "name": "window-right-divider-width",
+ "arity": [
+  0,
+  1
+ ],
+ "effect": "reads",
+ "gnu_files": [
+  "window.c"
+ ],
+ "gnu_def": "window.c:1242",
+ "rust": "src/prims/window.rs:79",
+ "args": [
+  "none"
+ ],
+ "extra": {
+  "0": [
+   "1",
+   "'sym",
+   "(copy-sequence \"s\")"
+  ]
+ },
+ "probes": [
+  "(window-right-divider-width)",
+  "(window-right-divider-width (minibuffer-window))",
+  "(let* ((a (selected-window)) (h (window-pixel-width a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half t 0.5))) (p (window-parent b))) (list (window-right-divider-width a) (window-right-divider-width b)))",
+  "(let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (condition-case e (window-right-divider-width p) (error (list (car e) (car (cdr e)) (eq (car (cdr (cdr e))) p)))))",
+  "(let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (progn (set-window-new-pixel p h) (set-window-new-pixel a h) (delete-window-internal b) (condition-case e (window-right-divider-width b) (error (list (car e) (car (cdr e)) (eq (car (cdr (cdr e))) b))))))"
+ ]
+}

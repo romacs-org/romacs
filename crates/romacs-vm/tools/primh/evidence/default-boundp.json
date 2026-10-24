@@ -1,0 +1,477 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "default-boundp",
+ "spec_sha256": "c3dbff699a62e56dce1c55f979db0d1d4d31529ed2bfeeb87541bf154471ae01",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "default-boundp",
+    "subr",
+    1,
+    1
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "data.c": "eca7895a8043cd0a960dfe037a46028374d1a40cc6ee4d0cf6de90ac56c242ae"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "default-boundp/0000",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (default-boundp nil)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "default-boundp/0001",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (default-boundp t)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "default-boundp/0002",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (default-boundp 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 0))"
+  },
+  {
+   "id": "default-boundp/0003",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (default-boundp 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1))"
+  },
+  {
+   "id": "default-boundp/0004",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (default-boundp 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 2))"
+  },
+  {
+   "id": "default-boundp/0005",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (default-boundp -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp -1))"
+  },
+  {
+   "id": "default-boundp/0006",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (default-boundp most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 2305843009213693951))"
+  },
+  {
+   "id": "default-boundp/0007",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (default-boundp 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1.5))"
+  },
+  {
+   "id": "default-boundp/0008",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (default-boundp 'sym)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "default-boundp/0009",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (default-boundp :kw)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "default-boundp/0010",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (default-boundp (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"\"))"
+  },
+  {
+   "id": "default-boundp/0011",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (default-boundp (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"abc\"))"
+  },
+  {
+   "id": "default-boundp/0012",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (default-boundp (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"λx\"))"
+  },
+  {
+   "id": "default-boundp/0013",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (default-boundp (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 3)))"
+  },
+  {
+   "id": "default-boundp/0014",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (default-boundp (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (a (b))))"
+  },
+  {
+   "id": "default-boundp/0015",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (default-boundp (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 . 2)))"
+  },
+  {
+   "id": "default-boundp/0016",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (default-boundp (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 . 3)))"
+  },
+  {
+   "id": "default-boundp/0017",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (default-boundp (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp [1 2]))"
+  },
+  {
+   "id": "default-boundp/0018",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (default-boundp (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "default-boundp/0019",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (default-boundp 'load-path)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "default-boundp/0020",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (default-boundp (make-symbol \":primh-u\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "default-boundp/0021",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'default-boundp '())) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr default-boundp> 0))"
+  },
+  {
+   "id": "default-boundp/0022",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'default-boundp '(1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr default-boundp> 2))"
+  },
+  {
+   "id": "default-boundp/0023",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (default-boundp a0))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "default-boundp/0024",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil)) (let ((r (default-boundp a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "default-boundp/0025",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1)) (let ((r (default-boundp a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1))"
+  },
+  {
+   "id": "default-boundp/0026",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-positive-fixnum)) (let ((r (default-boundp a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 2305843009213693951))"
+  },
+  {
+   "id": "default-boundp/0027",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :kw)) (let ((r (default-boundp a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "default-boundp/0028",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\"))) (let ((r (default-boundp a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"λx\"))"
+  },
+  {
+   "id": "default-boundp/0029",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 2))) (let ((r (default-boundp a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 . 2)))"
+  },
+  {
+   "id": "default-boundp/0030",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (default-boundp a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "default-boundp/0031",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defvar primh-db1 5) (default-boundp 'primh-db1))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "default-boundp/0032",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (default-boundp 'primh-db2)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "default-boundp/0033",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defvar primh-db3 nil) (makunbound 'primh-db3) (with-temp-buffer (make-local-variable 'primh-db3) (set 'primh-db3 1) (list (default-boundp 'primh-db3) (boundp 'primh-db3))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "default-boundp/0034",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (make-variable-buffer-local 'primh-db4) (with-temp-buffer (set 'primh-db4 2) (list (default-boundp 'primh-db4) (boundp 'primh-db4))))) (error (list 'sig e))))",
+   "expected": "(ok (t t))"
+  },
+  {
+   "id": "default-boundp/0035",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defvar primh-db5 1) (eval '(let ((primh-db5 2)) (default-boundp 'primh-db5)) t))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "default-boundp/0036",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defvar primh-db6 nil) (makunbound 'primh-db6) (list (eval '(let ((primh-db6 2)) (default-boundp 'primh-db6)) t) (default-boundp 'primh-db6)))) (error (list 'sig e))))",
+   "expected": "(ok (t nil))"
+  },
+  {
+   "id": "default-boundp/0037",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defvar primh-db7-b 1) (defvaralias 'primh-db7-a 'primh-db7-b) (default-boundp 'primh-db7-a))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "default-boundp/0038",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defvaralias 'primh-db8-a 'primh-db8-b) (list (default-boundp 'primh-db8-a) (progn (set 'primh-db8-b 1) (default-boundp 'primh-db8-a))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))",
+   "gnu_regime_variant": "(ok (t t))"
+  },
+  {
+   "id": "default-boundp/0039",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (default-boundp nil) (default-boundp t) (default-boundp :primh-db-kw))) (error (list 'sig e))))",
+   "expected": "(ok (t t t))"
+  },
+  {
+   "id": "default-boundp/0040",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (default-boundp (make-symbol \":primh-db-u\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "default-boundp/0041",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defvar primh-db9 1) (makunbound 'primh-db9) (default-boundp 'primh-db9))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "default-boundp/0042",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defvar primh-db10 1) (make-variable-buffer-local 'primh-db10) (with-temp-buffer (set 'primh-db10 3) (list (default-boundp 'primh-db10) primh-db10)))) (error (list 'sig e))))",
+   "expected": "(ok (t 3))"
+  },
+  {
+   "id": "default-boundp/0043",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defvar primh-db11 (list 1 (copy-sequence \"s\"))) (let ((i 0)) (while (< i 5000) (list i i) (setq i (1+ i)))) (default-boundp 'primh-db11))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "default-boundp/0044",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (default-boundp 'load-path) (default-boundp 'most-positive-fixnum) (default-boundp 'case-fold-search))) (error (list 'sig e))))",
+   "expected": "(ok (t t t))"
+  },
+  {
+   "id": "default-boundp/0045",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((s (make-symbol \"primh-db-v\"))) (list (default-boundp s) (progn (set s 1) (default-boundp s))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "default-boundp/0046",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defvar primh-db12 1) (with-temp-buffer (make-local-variable 'primh-db12) (makunbound 'primh-db12) (list (default-boundp 'primh-db12) (boundp 'primh-db12))))) (error (list 'sig e))))",
+   "expected": "(ok (t nil))"
+  },
+  {
+   "id": "default-boundp/0047",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defvaralias 'primh-db13 :primh-db-kw2) (default-boundp 'primh-db13))) (error (list 'sig e))))",
+   "expected": "(ok t)",
+   "gnu_regime_variant": "(sig (error \"Cannot make a constant an alias: primh-db13\"))"
+  },
+  {
+   "id": "default-boundp/0048",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defvar primh-db14 nil) (makunbound 'primh-db14) (with-temp-buffer (make-local-variable 'primh-db14) (list (default-boundp 'primh-db14) (boundp 'primh-db14))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "default-boundp/0049",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defvar primh-db15 1) (make-variable-buffer-local 'primh-db15) (with-temp-buffer (set 'primh-db15 3) (eval '(let ((primh-db15 4)) (default-boundp 'primh-db15)) t)))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "default-boundp/0050",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (condition-case e (default-boundp \"primh-db\") (error e))) (error (list 'sig e))))",
+   "expected": "(ok (wrong-type-argument symbolp \"primh-db\"))"
+  },
+  {
+   "id": "default-boundp/0051",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (funcall #'default-boundp nil) (apply #'default-boundp '(primh-db2)) (funcall 'default-boundp 'load-path))) (error (list 'sig e))))",
+   "expected": "(ok (t nil t))"
+  },
+  {
+   "id": "default-boundp/0052",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 'load-path) (error (list 'sig e))))",
+   "expected": "(ok load-path)"
+  },
+  {
+   "id": "default-boundp/0053",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 'sym) (error (list 'sig e))))",
+   "expected": "(ok sym)"
+  },
+  {
+   "id": "default-boundp/0054",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (cons 1 (cons 2 3))) (error (list 'sig e))))",
+   "expected": "(ok (1 2 . 3))"
+  },
+  {
+   "id": "default-boundp/0055",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (cons 1 2)) (error (list 'sig e))))",
+   "expected": "(ok (1 . 2))"
+  },
+  {
+   "id": "default-boundp/0056",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"\")) (error (list 'sig e))))",
+   "expected": "(ok \"\")"
+  },
+  {
+   "id": "default-boundp/0057",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"abc\")) (error (list 'sig e))))",
+   "expected": "(ok \"abc\")"
+  },
+  {
+   "id": "default-boundp/0058",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"λx\")) (error (list 'sig e))))",
+   "expected": "(ok \"λx\")"
+  },
+  {
+   "id": "default-boundp/0059",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (error (list 'sig e))))",
+   "expected": "(ok (1 2 1 2 . #2))"
+  },
+  {
+   "id": "default-boundp/0060",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list 'a (list 'b))) (error (list 'sig e))))",
+   "expected": "(ok (a (b)))"
+  },
+  {
+   "id": "default-boundp/0061",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list 1 2 3)) (error (list 'sig e))))",
+   "expected": "(ok (1 2 3))"
+  },
+  {
+   "id": "default-boundp/0062",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (make-symbol \":primh-u\")) (error (list 'sig e))))",
+   "expected": "(ok :primh-u)"
+  },
+  {
+   "id": "default-boundp/0063",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vector 1 2)) (error (list 'sig e))))",
+   "expected": "(ok [1 2])"
+  },
+  {
+   "id": "default-boundp/0064",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok -1) (error (list 'sig e))))",
+   "expected": "(ok -1)"
+  },
+  {
+   "id": "default-boundp/0065",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 0) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "default-boundp/0066",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1) (error (list 'sig e))))",
+   "expected": "(ok 1)"
+  },
+  {
+   "id": "default-boundp/0067",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1.5) (error (list 'sig e))))",
+   "expected": "(ok 1.5)"
+  },
+  {
+   "id": "default-boundp/0068",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 2) (error (list 'sig e))))",
+   "expected": "(ok 2)"
+  },
+  {
+   "id": "default-boundp/0069",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok :kw) (error (list 'sig e))))",
+   "expected": "(ok :kw)"
+  },
+  {
+   "id": "default-boundp/0070",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok most-positive-fixnum) (error (list 'sig e))))",
+   "expected": "(ok 2305843009213693951)"
+  },
+  {
+   "id": "default-boundp/0071",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok nil) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "default-boundp/0072",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok t) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  }
+ ],
+ "pinned": {
+  "default-boundp/0018": "PRINTER",
+  "default-boundp/0030": "PRINTER",
+  "default-boundp/0034": "VALUE",
+  "default-boundp/0059": "PRINTER"
+ }
+}

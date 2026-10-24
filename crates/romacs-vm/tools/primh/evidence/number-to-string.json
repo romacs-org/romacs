@@ -1,0 +1,560 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "number-to-string",
+ "spec_sha256": "0911d5d635943443f05dee55218c3638bf8a77001417c1da752ed4bc8a437da3",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "number-to-string",
+    "subr",
+    1,
+    1
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "data.c": "eca7895a8043cd0a960dfe037a46028374d1a40cc6ee4d0cf6de90ac56c242ae",
+  "print.c": "a4d3613dd97297cb4a9b682f0fbe5a86d3ae1ac9a1a07bddaf6da970b28f0a85"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "number-to-string/0000",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (number-to-string nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp nil))"
+  },
+  {
+   "id": "number-to-string/0001",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (number-to-string t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp t))"
+  },
+  {
+   "id": "number-to-string/0002",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (number-to-string 'wrong)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp wrong))"
+  },
+  {
+   "id": "number-to-string/0003",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (number-to-string \"bad\")) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp \"bad\"))"
+  },
+  {
+   "id": "number-to-string/0004",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (number-to-string '(1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp (1)))"
+  },
+  {
+   "id": "number-to-string/0005",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (number-to-string [1])) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp [1]))"
+  },
+  {
+   "id": "number-to-string/0006",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'number-to-string '())) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr number-to-string> 0))"
+  },
+  {
+   "id": "number-to-string/0007",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'number-to-string '(1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr number-to-string> 2))"
+  },
+  {
+   "id": "number-to-string/0008",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (number-to-string a0))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp nil))"
+  },
+  {
+   "id": "number-to-string/0009",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil)) (let ((r (number-to-string a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp nil))"
+  },
+  {
+   "id": "number-to-string/0010",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 \"bad\")) (let ((r (number-to-string a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp \"bad\"))"
+  },
+  {
+   "id": "number-to-string/0011",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (append (number-to-string 1e-4) nil) (multibyte-string-p (number-to-string 1e-4)))) (error (list 'sig e))))",
+   "expected": "(ok ((48 46 48 48 48 49) nil))"
+  },
+  {
+   "id": "number-to-string/0012",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (append (number-to-string 1e-5) nil) (multibyte-string-p (number-to-string 1e-5)))) (error (list 'sig e))))",
+   "expected": "(ok ((49 101 45 48 53) nil))"
+  },
+  {
+   "id": "number-to-string/0013",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (append (number-to-string 1e15) nil) (multibyte-string-p (number-to-string 1e15)))) (error (list 'sig e))))",
+   "expected": "(ok ((49 101 43 49 53) nil))"
+  },
+  {
+   "id": "number-to-string/0014",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (append (number-to-string 1e16) nil) (multibyte-string-p (number-to-string 1e16)))) (error (list 'sig e))))",
+   "expected": "(ok ((49 101 43 49 54) nil))"
+  },
+  {
+   "id": "number-to-string/0015",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (append (number-to-string 1.7976931348623157e308) nil) (multibyte-string-p (number-to-string 1.7976931348623157e308)))) (error (list 'sig e))))",
+   "expected": "(ok ((49 46 55 57 55 54 57 51 49 51 52 56 54 50 51 49 53 55 101 43 51 48 56) nil))"
+  },
+  {
+   "id": "number-to-string/0016",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (append (number-to-string 5e-324) nil) (multibyte-string-p (number-to-string 5e-324)))) (error (list 'sig e))))",
+   "expected": "(ok ((53 101 45 51 50 52) nil))"
+  },
+  {
+   "id": "number-to-string/0017",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (append (number-to-string (car (read-from-string \"#x200000000000000001\"))) nil) (multibyte-string-p (number-to-string (car (read-from-string \"#x200000000000000001\")))))) (error (list 'sig e))))",
+   "expected": "(ok ((53 57 48 50 57 53 56 49 48 51 53 56 55 48 53 54 53 49 55 49 51) nil))"
+  },
+  {
+   "id": "number-to-string/0018",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (append (number-to-string (car (read-from-string \"#x-200000000000000001\"))) nil) (multibyte-string-p (number-to-string (car (read-from-string \"#x-200000000000000001\")))))) (error (list 'sig e))))",
+   "expected": "(ok ((45 53 57 48 50 57 53 56 49 48 51 53 56 55 48 53 54 53 49 55 49 51) nil))"
+  },
+  {
+   "id": "number-to-string/0019",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (multibyte-string-p (number-to-string 1.0))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "number-to-string/0020",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (fboundp 'number-to-string) (functionp #'number-to-string) (append (funcall #'number-to-string 42) nil))) (error (list 'sig e))))",
+   "expected": "(ok (t t (52 50)))"
+  },
+  {
+   "id": "number-to-string/0021",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (append (number-to-string 0) nil) (multibyte-string-p (number-to-string 0)))) (error (list 'sig e))))",
+   "expected": "(ok ((48) nil))"
+  },
+  {
+   "id": "number-to-string/0022",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (append (number-to-string 1) nil) (multibyte-string-p (number-to-string 1)))) (error (list 'sig e))))",
+   "expected": "(ok ((49) nil))"
+  },
+  {
+   "id": "number-to-string/0023",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (append (number-to-string -1) nil) (multibyte-string-p (number-to-string -1)))) (error (list 'sig e))))",
+   "expected": "(ok ((45 49) nil))"
+  },
+  {
+   "id": "number-to-string/0024",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (append (number-to-string 2) nil) (multibyte-string-p (number-to-string 2)))) (error (list 'sig e))))",
+   "expected": "(ok ((50) nil))"
+  },
+  {
+   "id": "number-to-string/0025",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (append (number-to-string -2) nil) (multibyte-string-p (number-to-string -2)))) (error (list 'sig e))))",
+   "expected": "(ok ((45 50) nil))"
+  },
+  {
+   "id": "number-to-string/0026",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (append (number-to-string 0.0) nil) (multibyte-string-p (number-to-string 0.0)))) (error (list 'sig e))))",
+   "expected": "(ok ((48 46 48) nil))"
+  },
+  {
+   "id": "number-to-string/0027",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (append (number-to-string -0.0) nil) (multibyte-string-p (number-to-string -0.0)))) (error (list 'sig e))))",
+   "expected": "(ok ((45 48 46 48) nil))"
+  },
+  {
+   "id": "number-to-string/0028",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (append (number-to-string 0.5) nil) (multibyte-string-p (number-to-string 0.5)))) (error (list 'sig e))))",
+   "expected": "(ok ((48 46 53) nil))"
+  },
+  {
+   "id": "number-to-string/0029",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (append (number-to-string 1.25) nil) (multibyte-string-p (number-to-string 1.25)))) (error (list 'sig e))))",
+   "expected": "(ok ((49 46 50 53) nil))"
+  },
+  {
+   "id": "number-to-string/0030",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (append (number-to-string -3.75) nil) (multibyte-string-p (number-to-string -3.75)))) (error (list 'sig e))))",
+   "expected": "(ok ((45 51 46 55 53) nil))"
+  },
+  {
+   "id": "number-to-string/0031",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (append (number-to-string most-positive-fixnum) nil) (multibyte-string-p (number-to-string most-positive-fixnum)))) (error (list 'sig e))))",
+   "expected": "(ok ((50 51 48 53 56 52 51 48 48 57 50 49 51 54 57 51 57 53 49) nil))"
+  },
+  {
+   "id": "number-to-string/0032",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (append (number-to-string most-negative-fixnum) nil) (multibyte-string-p (number-to-string most-negative-fixnum)))) (error (list 'sig e))))",
+   "expected": "(ok ((45 50 51 48 53 56 52 51 48 48 57 50 49 51 54 57 51 57 53 50) nil))"
+  },
+  {
+   "id": "number-to-string/0033",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (append (number-to-string 1.0e+INF) nil) (multibyte-string-p (number-to-string 1.0e+INF)))) (error (list 'sig e))))",
+   "expected": "(ok ((49 46 48 101 43 73 78 70) nil))"
+  },
+  {
+   "id": "number-to-string/0034",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (append (number-to-string -1.0e+INF) nil) (multibyte-string-p (number-to-string -1.0e+INF)))) (error (list 'sig e))))",
+   "expected": "(ok ((45 49 46 48 101 43 73 78 70) nil))"
+  },
+  {
+   "id": "number-to-string/0035",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (append (number-to-string 0.0e+NaN) nil) (multibyte-string-p (number-to-string 0.0e+NaN)))) (error (list 'sig e))))",
+   "expected": "(ok ((48 46 48 101 43 78 97 78) nil))"
+  },
+  {
+   "id": "number-to-string/0036",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (append (number-to-string (string-to-number \"7.0e+NaN\")) nil)) (error (list 'sig e))))",
+   "expected": "(ok (55 46 48 101 43 78 97 78))"
+  },
+  {
+   "id": "number-to-string/0037",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (append (number-to-string (string-to-number \"-7.0e+NaN\")) nil)) (error (list 'sig e))))",
+   "expected": "(ok (45 55 46 48 101 43 78 97 78))"
+  },
+  {
+   "id": "number-to-string/0038",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq float-output-format \"%.2f\") (let ((r (append (number-to-string 1.2345) nil))) (setq float-output-format nil) r))) (error (list 'sig e))))",
+   "expected": "(ok (49 46 50 51))"
+  },
+  {
+   "id": "number-to-string/0039",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq float-output-format \"%.2f\") (let ((r (append (number-to-string -0.0) nil))) (setq float-output-format nil) r))) (error (list 'sig e))))",
+   "expected": "(ok (45 48 46 48 48))"
+  },
+  {
+   "id": "number-to-string/0040",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq float-output-format \"%.2f\") (let ((r (append (number-to-string 999.9) nil))) (setq float-output-format nil) r))) (error (list 'sig e))))",
+   "expected": "(ok (57 57 57 46 57 48))"
+  },
+  {
+   "id": "number-to-string/0041",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq float-output-format \"%.2f\") (let ((r (append (number-to-string 0.00001234) nil))) (setq float-output-format nil) r))) (error (list 'sig e))))",
+   "expected": "(ok (48 46 48 48))"
+  },
+  {
+   "id": "number-to-string/0042",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq float-output-format \"%.0f\") (let ((r (append (number-to-string 1.2345) nil))) (setq float-output-format nil) r))) (error (list 'sig e))))",
+   "expected": "(ok (49))"
+  },
+  {
+   "id": "number-to-string/0043",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq float-output-format \"%.0f\") (let ((r (append (number-to-string -0.0) nil))) (setq float-output-format nil) r))) (error (list 'sig e))))",
+   "expected": "(ok (45 48))"
+  },
+  {
+   "id": "number-to-string/0044",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq float-output-format \"%.0f\") (let ((r (append (number-to-string 999.9) nil))) (setq float-output-format nil) r))) (error (list 'sig e))))",
+   "expected": "(ok (49 48 48 48))"
+  },
+  {
+   "id": "number-to-string/0045",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq float-output-format \"%.0f\") (let ((r (append (number-to-string 0.00001234) nil))) (setq float-output-format nil) r))) (error (list 'sig e))))",
+   "expected": "(ok (48))"
+  },
+  {
+   "id": "number-to-string/0046",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq float-output-format \"%.f\") (let ((r (append (number-to-string 1.2345) nil))) (setq float-output-format nil) r))) (error (list 'sig e))))",
+   "expected": "(ok (49 46 48))"
+  },
+  {
+   "id": "number-to-string/0047",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq float-output-format \"%.f\") (let ((r (append (number-to-string -0.0) nil))) (setq float-output-format nil) r))) (error (list 'sig e))))",
+   "expected": "(ok (45 48 46 48))"
+  },
+  {
+   "id": "number-to-string/0048",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq float-output-format \"%.f\") (let ((r (append (number-to-string 999.9) nil))) (setq float-output-format nil) r))) (error (list 'sig e))))",
+   "expected": "(ok (49 48 48 48 46 48))"
+  },
+  {
+   "id": "number-to-string/0049",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq float-output-format \"%.f\") (let ((r (append (number-to-string 0.00001234) nil))) (setq float-output-format nil) r))) (error (list 'sig e))))",
+   "expected": "(ok (48 46 48))"
+  },
+  {
+   "id": "number-to-string/0050",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq float-output-format \"%.3e\") (let ((r (append (number-to-string 1.2345) nil))) (setq float-output-format nil) r))) (error (list 'sig e))))",
+   "expected": "(ok (49 46 50 51 52 101 43 48 48))"
+  },
+  {
+   "id": "number-to-string/0051",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq float-output-format \"%.3e\") (let ((r (append (number-to-string -0.0) nil))) (setq float-output-format nil) r))) (error (list 'sig e))))",
+   "expected": "(ok (45 48 46 48 48 48 101 43 48 48))"
+  },
+  {
+   "id": "number-to-string/0052",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq float-output-format \"%.3e\") (let ((r (append (number-to-string 999.9) nil))) (setq float-output-format nil) r))) (error (list 'sig e))))",
+   "expected": "(ok (57 46 57 57 57 101 43 48 50))"
+  },
+  {
+   "id": "number-to-string/0053",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq float-output-format \"%.3e\") (let ((r (append (number-to-string 0.00001234) nil))) (setq float-output-format nil) r))) (error (list 'sig e))))",
+   "expected": "(ok (49 46 50 51 52 101 45 48 53))"
+  },
+  {
+   "id": "number-to-string/0054",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq float-output-format \"%.3g\") (let ((r (append (number-to-string 1.2345) nil))) (setq float-output-format nil) r))) (error (list 'sig e))))",
+   "expected": "(ok (49 46 50 51))"
+  },
+  {
+   "id": "number-to-string/0055",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq float-output-format \"%.3g\") (let ((r (append (number-to-string -0.0) nil))) (setq float-output-format nil) r))) (error (list 'sig e))))",
+   "expected": "(ok (45 48 46 48))"
+  },
+  {
+   "id": "number-to-string/0056",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq float-output-format \"%.3g\") (let ((r (append (number-to-string 999.9) nil))) (setq float-output-format nil) r))) (error (list 'sig e))))",
+   "expected": "(ok (49 101 43 48 51))"
+  },
+  {
+   "id": "number-to-string/0057",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq float-output-format \"%.3g\") (let ((r (append (number-to-string 0.00001234) nil))) (setq float-output-format nil) r))) (error (list 'sig e))))",
+   "expected": "(ok (49 46 50 51 101 45 48 53))"
+  },
+  {
+   "id": "number-to-string/0058",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq float-output-format \"%.0g\") (let ((r (append (number-to-string 1.2345) nil))) (setq float-output-format nil) r))) (error (list 'sig e))))",
+   "expected": "(ok (49 46 50 51 52 53))"
+  },
+  {
+   "id": "number-to-string/0059",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq float-output-format \"%.0g\") (let ((r (append (number-to-string -0.0) nil))) (setq float-output-format nil) r))) (error (list 'sig e))))",
+   "expected": "(ok (45 48 46 48))"
+  },
+  {
+   "id": "number-to-string/0060",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq float-output-format \"%.0g\") (let ((r (append (number-to-string 999.9) nil))) (setq float-output-format nil) r))) (error (list 'sig e))))",
+   "expected": "(ok (57 57 57 46 57))"
+  },
+  {
+   "id": "number-to-string/0061",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq float-output-format \"%.0g\") (let ((r (append (number-to-string 0.00001234) nil))) (setq float-output-format nil) r))) (error (list 'sig e))))",
+   "expected": "(ok (49 46 50 51 52 101 45 48 53))"
+  },
+  {
+   "id": "number-to-string/0062",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq float-output-format \"%.16g\") (let ((r (append (number-to-string 1.2345) nil))) (setq float-output-format nil) r))) (error (list 'sig e))))",
+   "expected": "(ok (49 46 50 51 52 53))"
+  },
+  {
+   "id": "number-to-string/0063",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq float-output-format \"%.16g\") (let ((r (append (number-to-string -0.0) nil))) (setq float-output-format nil) r))) (error (list 'sig e))))",
+   "expected": "(ok (45 48 46 48))"
+  },
+  {
+   "id": "number-to-string/0064",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq float-output-format \"%.16g\") (let ((r (append (number-to-string 999.9) nil))) (setq float-output-format nil) r))) (error (list 'sig e))))",
+   "expected": "(ok (57 57 57 46 57))"
+  },
+  {
+   "id": "number-to-string/0065",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq float-output-format \"%.16g\") (let ((r (append (number-to-string 0.00001234) nil))) (setq float-output-format nil) r))) (error (list 'sig e))))",
+   "expected": "(ok (49 46 50 51 52 101 45 48 53))"
+  },
+  {
+   "id": "number-to-string/0066",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq float-output-format \"%f\") (let ((r (append (number-to-string 1.2345) nil))) (setq float-output-format nil) r))) (error (list 'sig e))))",
+   "expected": "(ok (49 46 50 51 52 53))"
+  },
+  {
+   "id": "number-to-string/0067",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq float-output-format \"%f\") (let ((r (append (number-to-string -0.0) nil))) (setq float-output-format nil) r))) (error (list 'sig e))))",
+   "expected": "(ok (45 48 46 48))"
+  },
+  {
+   "id": "number-to-string/0068",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq float-output-format \"%f\") (let ((r (append (number-to-string 999.9) nil))) (setq float-output-format nil) r))) (error (list 'sig e))))",
+   "expected": "(ok (57 57 57 46 57))"
+  },
+  {
+   "id": "number-to-string/0069",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq float-output-format \"%f\") (let ((r (append (number-to-string 0.00001234) nil))) (setq float-output-format nil) r))) (error (list 'sig e))))",
+   "expected": "(ok (49 46 50 51 52 101 45 48 53))"
+  },
+  {
+   "id": "number-to-string/0070",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq float-output-format \"%.λ\") (let ((r (append (number-to-string 1.2345) nil))) (setq float-output-format nil) r))) (error (list 'sig e))))",
+   "expected": "(ok (49 46 50 51 52 53))"
+  },
+  {
+   "id": "number-to-string/0071",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq float-output-format \"%.λ\") (let ((r (append (number-to-string -0.0) nil))) (setq float-output-format nil) r))) (error (list 'sig e))))",
+   "expected": "(ok (45 48 46 48))"
+  },
+  {
+   "id": "number-to-string/0072",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq float-output-format \"%.λ\") (let ((r (append (number-to-string 999.9) nil))) (setq float-output-format nil) r))) (error (list 'sig e))))",
+   "expected": "(ok (57 57 57 46 57))"
+  },
+  {
+   "id": "number-to-string/0073",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq float-output-format \"%.λ\") (let ((r (append (number-to-string 0.00001234) nil))) (setq float-output-format nil) r))) (error (list 'sig e))))",
+   "expected": "(ok (49 46 50 51 52 101 45 48 53))"
+  },
+  {
+   "id": "number-to-string/0074",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq float-output-format \"%.g\") (let ((r (append (number-to-string 1.2345) nil))) (setq float-output-format nil) r))) (error (list 'sig e))))",
+   "expected": "(ok (49 46 48))"
+  },
+  {
+   "id": "number-to-string/0075",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq float-output-format \"%.g\") (let ((r (append (number-to-string -0.0) nil))) (setq float-output-format nil) r))) (error (list 'sig e))))",
+   "expected": "(ok (45 48 46 48))"
+  },
+  {
+   "id": "number-to-string/0076",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq float-output-format \"%.g\") (let ((r (append (number-to-string 999.9) nil))) (setq float-output-format nil) r))) (error (list 'sig e))))",
+   "expected": "(ok (49 101 43 48 51))"
+  },
+  {
+   "id": "number-to-string/0077",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq float-output-format \"%.g\") (let ((r (append (number-to-string 0.00001234) nil))) (setq float-output-format nil) r))) (error (list 'sig e))))",
+   "expected": "(ok (49 101 45 48 53))"
+  },
+  {
+   "id": "number-to-string/0078",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq float-output-format \"%.2f\\0junk\") (let ((r (append (number-to-string 1.2345) nil))) (setq float-output-format nil) r))) (error (list 'sig e))))",
+   "expected": "(ok (49 46 50 51))"
+  },
+  {
+   "id": "number-to-string/0079",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq float-output-format \"%.2f\\0junk\") (let ((r (append (number-to-string -0.0) nil))) (setq float-output-format nil) r))) (error (list 'sig e))))",
+   "expected": "(ok (45 48 46 48 48))"
+  },
+  {
+   "id": "number-to-string/0080",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq float-output-format \"%.2f\\0junk\") (let ((r (append (number-to-string 999.9) nil))) (setq float-output-format nil) r))) (error (list 'sig e))))",
+   "expected": "(ok (57 57 57 46 57 48))"
+  },
+  {
+   "id": "number-to-string/0081",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq float-output-format \"%.2f\\0junk\") (let ((r (append (number-to-string 0.00001234) nil))) (setq float-output-format nil) r))) (error (list 'sig e))))",
+   "expected": "(ok (48 46 48 48))"
+  },
+  {
+   "id": "number-to-string/0082",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"bad\") (error (list 'sig e))))",
+   "expected": "(ok \"bad\")"
+  },
+  {
+   "id": "number-to-string/0083",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok '(1)) (error (list 'sig e))))",
+   "expected": "(ok (1))"
+  },
+  {
+   "id": "number-to-string/0084",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 'wrong) (error (list 'sig e))))",
+   "expected": "(ok wrong)"
+  },
+  {
+   "id": "number-to-string/0085",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok [1]) (error (list 'sig e))))",
+   "expected": "(ok [1])"
+  },
+  {
+   "id": "number-to-string/0086",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok nil) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "number-to-string/0087",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok t) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  }
+ ]
+}

@@ -1,0 +1,8 @@
+{
+  "expression": "(progn (dolist (s '(\"\" \"abc\" \"a/b\" \"/\" \"a//b\" \"a/\" \"a\\\\b\")) (prin1 (list s (file-name-directory s))) (terpri)) (dolist (s '(2 nil)) (prin1 (condition-case e (file-name-directory s) (error e))) (terpri)) (dolist (v '(\"handled\" 2 nil)) (let ((file-name-handler-alist '((\"remote\" . sj-handler)))) (fset 'sj-handler (lambda (&rest a) v)) (prin1 (file-name-directory \"remote/x\")) (terpri))))",
+  "result": {
+    "output": "(\"\" nil)\n(\"abc\" nil)\n(\"a/b\" \"a/\")\n(\"/\" \"/\")\n(\"a//b\" \"a//\")\n(\"a/\" \"a/\")\n(\"a\\\\b\" nil)\n(wrong-type-argument stringp 2)\n(wrong-type-argument stringp nil)\n\"handled\"\nnil\nnil",
+    "exit_code": 0,
+    "error": null
+  }
+}

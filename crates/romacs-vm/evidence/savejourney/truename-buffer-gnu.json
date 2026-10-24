@@ -1,0 +1,8 @@
+{
+  "expression": "(prin1 (let ((b (generate-new-buffer \" *sj-truename*\"))) (unwind-protect (progn (with-current-buffer b (setq buffer-file-truename \"/sj-proof\")) (list (eq (get-truename-buffer \"/sj-proof\") b) (get-truename-buffer \"/missing\") (condition-case e (get-truename-buffer 2) (error e)))) (kill-buffer b))))",
+  "result": {
+    "output": "(t nil (wrong-type-argument stringp 2))",
+    "exit_code": 0,
+    "error": null
+  }
+}

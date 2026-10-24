@@ -1,0 +1,521 @@
+//! GNU's C mode-line engine: `display_mode_element` (`src/xdisp.c:28458`)
+//! and `decode_mode_spec` (`src/xdisp.c:29429`), for the display target
+//! (`MODE_LINE_DISPLAY`). The format is converted to an owned `Form` before
+//! expansion. Executable object constants own collector-traced roots across
+//! collecting `:eval` forms; window and buffer are re-read from rooted slots.
+use crate::*;
+use std::ops::Range;
+
+/// One painted mode line: text plus face-name runs over its bytes.
+pub(super) struct Band {
+    pub text: String,
+    pub runs: Vec<(Range<usize>, String)>,
+    /// Columns already built, and the most that can ever be shown. GNU's
+    /// display_string stops at the window's last visible column
+    /// (`xdisp.c:30105`); text past it is never produced, so no field width
+    /// can make the band allocate more than this.
+    cols: usize,
+    max_cols: usize,
+}
+
+/// What `decode_mode_spec` reads from the window and its buffer, taken once
+/// when the build starts (char positions are 1-based, as in Lisp).
+pub(super) struct SpecState {
+    pub buffer_name: String,
+    pub start: usize,
+    pub end: usize,
+    pub begv: usize,
+    pub zv: usize,
+    pub z: usize,
+    pub line: usize,
+    pub column: usize,
+    pub modified: bool,
+    pub frame_cols: usize,
+}
+
+/// Field widths and precisions, after GNU's C `int` wrap, are clamped here:
+/// anything wider than the band's `4 * frame columns` is invisible anyway,
+/// and the clamp keeps every column count in this file far from i64 overflow.
+const MAX_FIELD: i64 = 1 << 20;
+
+/// GNU `lots_of_dashes` (`xdisp.c:29426`).
+const LOTS_OF_DASHES: usize = 140;
+
+/// GNU `char_width` as `c_string_width` uses it (`character.h`
+/// `ASCII_CHAR_WIDTH`): TAB is `tab-width` columns, other control characters
+/// and DEL 2 (`ctl-arrow` t, VM2's `^X` form), newline 0.
+fn char_width(c: char, tab: usize) -> usize {
+    match c {
+        '\t' => tab,
+        '\n' => 0,
+        '\u{0}'..='\u{1f}' | '\u{7f}' => 2,
+        _ => unicode_width::UnicodeWidthChar::width(c).unwrap_or(1),
+    }
+}
+
+/// The first `max` characters of `s` (GNU `store_mode_line_string`'s
+/// precision, which counts SCHARS).
+fn char_prefix(s: &str, max: usize) -> &str {
+    s.char_indices().nth(max).map_or(s, |(at, _)| &s[..at])
+}
+
+fn chars(s: &str) -> i64 {
+    s.chars().count() as i64
+}
+
+/// Longest prefix of `s` no wider than `max` columns (GNU `c_string_width`
+/// selecting a format string's literal run).
+fn prefix(s: &str, max: usize, tab: usize) -> &str {
+    let mut used = 0;
+    for (at, c) in s.char_indices() {
+        let w = char_width(c, tab);
+        if used + w > max {
+            return &s[..at];
+        }
+        used += w;
+    }
+    s
+}
+
+/// GNU `pint2str`: right-justified decimal in WIDTH columns.
+fn pint2str(width: i64, d: i64) -> String {
+    format!("{:>1$}", d.max(0), width.max(0) as usize)
+}
+
+/// GNU `pint2hrstr` (`xdisp.c:29234`): 1.7k style, right-justified.
+fn pint2hrstr(width: i64, d: i64) -> String {
+    const POWER: [&str; 11] = ["", "k", "M", "G", "T", "P", "E", "Z", "Y", "R", "Q"];
+    let (mut quotient, mut remainder, mut tenths, mut exponent) = (d.max(0), 0i64, -1i64, 0usize);
+    if quotient >= 1000 {
+        loop {
+            remainder = quotient % 1000;
+            quotient /= 1000;
+            exponent += 1;
+            if quotient < 1000 {
+                break;
+            }
+        }
+        if quotient <= 9 {
+            tenths = remainder / 100;
+            if remainder % 100 >= 50 {
+                if tenths < 9 {
+                    tenths += 1;
+                } else {
+                    quotient += 1;
+                    tenths = if quotient == 10 { -1 } else { 0 };
+                }
+            }
+        } else if remainder >= 500 {
+            if quotient < 999 {
+                quotient += 1;
+            } else {
+                quotient = 1;
+                exponent += 1;
+                tenths = 0;
+            }
+        }
+    }
+    let number = if tenths >= 0 { format!("{quotient}.{tenths}") } else { quotient.to_string() };
+    format!("{number:>0$}{1}", width.max(0) as usize, POWER[exponent.min(10)])
+}
+
+/// GNU `percent99`.
+fn percent99(n: usize, d: usize) -> usize {
+    (((d as f64 - 1.0 + 100.0 * n as f64) / d as f64) as usize).min(99)
+}
+
+fn split(form: &Form) -> Option<(Form, Form)> {
+    match form {
+        Form::List(items) if !items.is_empty() => Some((
+            items[0].clone(),
+            if items.len() == 1 { Form::Sym("nil".into()) } else { Form::List(items[1..].to_vec()) },
+        )),
+        Form::Dotted(items, tail) if !items.is_empty() => Some((
+            items[0].clone(),
+            if items.len() == 1 { (**tail).clone() } else { Form::Dotted(items[1..].to_vec(), tail.clone()) },
+        )),
+        _ => None,
+    }
+}
+
+fn is_nil(form: &Form) -> bool {
+    matches!(form, Form::Sym(s) if s == "nil")
+}
+
+fn is_cons(form: &Form) -> bool {
+    matches!(form, Form::List(items) | Form::Dotted(items, _) if !items.is_empty())
+}
+
+/// The `face` of a `:propertize` plist: a face symbol, or the first symbol of
+/// a face list. Anonymous face specs are not projected (VM2-G1B).
+fn face_of(props: &Form) -> Option<String> {
+    let Form::List(items) = props else { return None };
+    let value = items.chunks(2).find(|pair| matches!(&pair[0], Form::Sym(s) if s == "face"))?.get(1)?;
+    match value {
+        Form::Sym(s) if s != "nil" => Some(s.clone()),
+        Form::List(faces) => faces.iter().find_map(|f| match f {
+            Form::Sym(s) if s != "nil" && !s.starts_with(':') => Some(s.clone()),
+            _ => None,
+        }),
+        _ => None,
+    }
+}
+
+impl Band {
+    /// `n` columns of padding, never more than can still be shown.
+    fn pad(&mut self, n: i64, face: Option<&String>) {
+        let n = usize::try_from(n).unwrap_or(0).min(self.max_cols - self.cols);
+        self.push(&" ".repeat(n), face);
+    }
+
+    /// Append display text, clipped at `max_cols`: control characters show
+    /// as GNU's `^X`.
+    fn push(&mut self, s: &str, face: Option<&String>) {
+        let begin = self.text.len();
+        for c in s.chars() {
+            let (shown, w) = match c {
+                '\u{0}'..='\u{1f}' | '\u{7f}' => ([Some('^'), Some(char::from((c as u8) ^ 0x40))], 2),
+                _ => ([Some(c), None], unicode_width::UnicodeWidthChar::width(c).unwrap_or(1)),
+            };
+            if self.cols + w > self.max_cols {
+                self.cols = self.max_cols;
+                break;
+            }
+            self.cols += w;
+            self.text.extend(shown.into_iter().flatten());
+        }
+        if let Some(face) = face
+            && self.text.len() > begin
+        {
+            self.runs.push((begin..self.text.len(), face.clone()));
+        }
+    }
+}
+
+impl Vm {
+    /// GNU `SANE_TAB_WIDTH (current_buffer)`: `tab-width` if in 1..=1000, else 8.
+    fn ml_tab_width(&mut self) -> Result<usize> {
+        Ok(match self.ml_symbol_value("tab-width")? {
+            Some(Form::Int(n)) if (1..=1000).contains(&n) => n as usize,
+            _ => 8,
+        })
+    }
+
+    fn ml_form_symbol_value(&mut self, symbol: &Form) -> Result<Option<Form>> {
+        let slot = match symbol {
+            Form::Sym(name) => return self.ml_symbol_value(name),
+            Form::Generated(id) => self.generated_symbol(*id).index(7)? - 1,
+            _ => return Ok(None),
+        };
+        let value = self.variable_value(slot)?;
+        Ok((value != Value::UNBOUND).then(|| self.mode_line_form(value)))
+    }
+
+    fn ml_symbol_value(&mut self, name: &str) -> Result<Option<Form>> {
+        // Constants that never live in an ordinary value cell.
+        if name == "nil" || name == "t" || name.starts_with(':') {
+            return Ok(Some(Form::Sym(name.into())));
+        }
+        let slot = self.slot(name);
+        let value = self.variable_value(slot)?;
+        if value == Value::UNBOUND {
+            return Ok(None);
+        }
+        Ok(Some(self.mode_line_form(value)))
+    }
+
+    /// Preserve executable object constants in collector-traced handles.
+    pub(super) fn mode_line_form(&self, value: Value) -> Form {
+        self.expansion_form(value, 0).unwrap_or(Form::Vector(vec![]))
+    }
+
+    fn ml_risky_marked(&mut self, symbol: &Form) -> bool {
+        let quote = |form| Form::List(vec![Form::Sym("quote".into()), form]);
+        let form = Form::List(vec![Form::Sym("get".into()), quote(symbol.clone()), quote(Form::Sym("risky-local-variable".into()))]);
+        self.eval_form_raw(&form).is_ok_and(|v| v != Value::NIL)
+    }
+
+    /// Expand a whole mode-line format for the window whose buffer is current.
+    pub(super) fn mode_line_band(&mut self, format: &Form, state: &SpecState) -> Result<Band> {
+        let mut band = Band { text: String::new(), runs: vec![], cols: 0, max_cols: 4 * state.frame_cols };
+        self.mode_line_element(&mut band, state, 0, 0, 0, format.clone(), None, false)?;
+        Ok(band)
+    }
+
+    #[allow(clippy::too_many_arguments)] // GNU's display_mode_element signature
+    fn mode_line_element(
+        &mut self,
+        band: &mut Band,
+        state: &SpecState,
+        mut depth: usize,
+        mut field_width: i64,
+        mut precision: i64,
+        mut elt: Form,
+        mut props: Option<String>,
+        mut risky: bool,
+    ) -> Result<i64> {
+        if band.text.len() > 1 << 16 {
+            return Err("mode-line expansion limit".into());
+        }
+        let mut n = 0i64;
+        let mut literal = false;
+        loop {
+            if depth > 100 {
+                elt = Form::String("*too-deep*".into());
+            }
+            depth += 1;
+            let string = match &elt {
+                Form::String(s) => Some(s.clone()),
+                Form::Bytes(b) => Some(String::from_utf8_lossy(b).into_owned()),
+                _ => None,
+            };
+            if let Some(s) = string {
+                let tab = self.ml_tab_width()?;
+                // GNU replaces a risky string's properties with PROPS and
+                // otherwise merges PROPS onto the string's own; VM2 does not
+                // project a string's own properties (VM2-G1B), so the face is
+                // PROPS's face either way.
+                if literal {
+                    // GNU `store_mode_line_string`: precision and N count characters.
+                    let shown = if precision - n > 0 { char_prefix(&s, (precision - n) as usize) } else { &s };
+                    n += chars(shown);
+                    band.push(shown, props.as_ref());
+                    break;
+                }
+                let mut rest = s.split('\0').next().unwrap_or_default();
+                while (precision <= 0 || n < precision) && !rest.is_empty() {
+                    if !rest.starts_with('%') {
+                        let percent = rest.find('%').unwrap_or(rest.len());
+                        let segment = &rest[..percent];
+                        // `c_string_width` selects by columns; the selected
+                        // substring then counts its characters (`xdisp.c` MODE_LINE_STRING).
+                        let shown = if precision > 0 { prefix(segment, (precision - n) as usize, tab) } else { segment };
+                        n += chars(shown);
+                        band.push(shown, props.as_ref());
+                        rest = &rest[percent..];
+                        continue;
+                    }
+                    // rest starts with '%'.
+                    rest = &rest[1..];
+                    let digits = rest.bytes().take_while(u8::is_ascii_digit).count();
+                    // GNU accumulates the width in a C `int` (`xdisp.c:28663`);
+                    // 32.0.50 wraps it modulo 2^32 (`gnu/field-wrap.txt`).
+                    let mut field = i64::from(rest[..digits].bytes()
+                        .fold(0i32, |f, d| f.wrapping_mul(10).wrapping_add(i32::from(d - b'0'))))
+                        .min(MAX_FIELD);
+                    rest = &rest[digits..];
+                    if field_width - n > 0 && field > field_width - n {
+                        field = field_width - n;
+                    }
+                    let prec = precision - n;
+                    let Some(c) = rest.chars().next() else { break };
+                    rest = &rest[c.len_utf8()..];
+                    if c == 'M' {
+                        let value = self.ml_symbol_value("global-mode-string")?.unwrap_or(Form::Sym("nil".into()));
+                        n += self.mode_line_element(band, state, depth, field, prec, value, props.clone(), risky)?;
+                        continue;
+                    }
+                    let spec = self.decode_mode_spec(state, c, field)?;
+                    let shown = if prec > 0 { char_prefix(&spec, prec as usize) } else { spec.as_str() };
+                    let mut written = chars(shown);
+                    band.push(shown, props.as_ref());
+                    if field > written {
+                        band.pad(field - written, props.as_ref());
+                        written = field;
+                    }
+                    n += written;
+                }
+                break;
+            }
+            match elt.clone() {
+                symbol @ (Form::Sym(_) | Form::Generated(_)) => {
+                    if !risky && !self.ml_risky_marked(&symbol) {
+                        risky = true;
+                    }
+                    let Some(value) = self.ml_form_symbol_value(&symbol)? else { break };
+                    if matches!(value, Form::String(_) | Form::Bytes(_)) {
+                        literal = true;
+                    }
+                    if value.name().ok().is_some_and(|name| symbol.name().ok() == Some(name)) {
+                        break;
+                    }
+                    elt = value;
+                }
+                form @ (Form::List(_) | Form::Dotted(..)) if is_cons(&form) => {
+                    let (car, cdr) = split(&form).expect("cons");
+                    match car {
+                        Form::Sym(s) if s == ":eval" => {
+                            if risky {
+                                break;
+                            }
+                            if let Some((expression, _)) = split(&cdr) {
+                                // GNU `dsafe_eval`: an error displays as nil.
+                                let spec = match self.eval_form_raw(&expression) {
+                                    Ok(value) => self.mode_line_form(value),
+                                    Err(error) => {
+                                        self.display_state.diagnostics.push(format!(":eval: {error}"));
+                                        Form::Sym("nil".into())
+                                    }
+                                };
+                                n += self.mode_line_element(band, state, depth, field_width - n, precision - n, spec, props.clone(), risky)?;
+                            }
+                            break;
+                        }
+                        Form::Sym(s) if s == ":propertize" => {
+                            if risky {
+                                break;
+                            }
+                            if let Some((inner, plist)) = split(&cdr) {
+                                n += self.mode_line_element(band, state, depth, field_width - n, precision - n, inner, face_of(&plist), risky)?;
+                            }
+                            break;
+                        }
+                        symbol @ (Form::Sym(_) | Form::Generated(_)) => {
+                            let truthy = self.ml_form_symbol_value(&symbol)?.is_some_and(|v| !is_nil(&v));
+                            let Some((then, rest)) = split(&cdr) else {
+                                elt = Form::String("*invalid*".into());
+                                continue;
+                            };
+                            if truthy {
+                                elt = then;
+                                continue;
+                            }
+                            if is_nil(&rest) {
+                                break;
+                            }
+                            let Some((otherwise, _)) = split(&rest) else {
+                                elt = Form::String("*invalid*".into());
+                                continue;
+                            };
+                            elt = otherwise;
+                        }
+                        Form::Int(lim) => {
+                            // `int lim = XFIXNUM (car)` (`xdisp.c:28879`): the low 32 bits.
+                            let lim = i64::from(lim as i32).clamp(-MAX_FIELD, MAX_FIELD);
+                            elt = cdr;
+                            if lim < 0 {
+                                precision = if precision <= 0 { -lim } else { precision.min(-lim) };
+                            } else if lim > 0 {
+                                let lim = if precision > 0 { precision.min(lim) } else { lim };
+                                field_width = field_width.max(lim);
+                            }
+                        }
+                        Form::String(_) | Form::Bytes(_) | Form::List(_) | Form::Dotted(..) => {
+                            let items = match &form {
+                                Form::List(items) | Form::Dotted(items, _) => items.clone(),
+                                _ => unreachable!(),
+                            };
+                            let count = items.len();
+                            for (index, item) in items.into_iter().enumerate() {
+                                if 0 < precision && precision <= n {
+                                    break;
+                                }
+                                let last = index + 1 == count;
+                                n += self.mode_line_element(band, state, depth, if last { field_width - n } else { 0 }, precision - n, item, props.clone(), risky)?;
+                            }
+                            break;
+                        }
+                        _ => break,
+                    }
+                }
+                _ => {
+                    elt = Form::String("*invalid*".into());
+                }
+            }
+        }
+        if field_width > 0 && n < field_width {
+            band.pad(field_width - n, None);
+            n = field_width;
+        }
+        Ok(n)
+    }
+
+    /// GNU `decode_mode_spec` for the current (window's) buffer.
+    fn decode_mode_spec(&mut self, state: &SpecState, c: char, field: i64) -> Result<String> {
+        let width = field.min(4 * state.frame_cols as i64);
+        let read_only = self.ml_symbol_value("buffer-read-only")?.is_some_and(|v| !is_nil(&v));
+        let string_of = |value: Option<Form>| match value {
+            Some(Form::String(s)) => s,
+            // Unibyte characters are bytes, not UTF-8 sequences. Preserve
+            // ASCII and paint high bytes as GNU's default octal glyphs.
+            Some(Form::Bytes(bytes)) => bytes.into_iter().map(|b| {
+                if b.is_ascii() { char::from(b).to_string() } else { format!("\\{b:03o}") }
+            }).collect(),
+            _ => String::new(),
+        };
+        let (top, bottom, begv, zv) = (state.start, state.end, state.begv, state.zv);
+        Ok(match c {
+            '*' if read_only => "%".into(),
+            '*' | '&' => if state.modified { "*" } else { "-" }.into(),
+            '+' => if state.modified { "*" } else if read_only { "%" } else { "-" }.into(),
+            '%' => "%".into(),
+            // command_loop_level: VM2 has no recursive edit.
+            '[' | ']' => String::new(),
+            '-' => "-".repeat(if field <= 0 || field as usize > LOTS_OF_DASHES { 4 * state.frame_cols - 1 } else { LOTS_OF_DASHES }),
+            'b' => state.buffer_name.clone(),
+            'c' => pint2str(width, state.column as i64),
+            'C' => pint2str(width, state.column as i64 + 1),
+            'e' => String::new(),
+            // No frame title or explicit name on a window frame.
+            'F' => "Emacs".into(),
+            'f' => string_of(self.ml_symbol_value("buffer-file-name")?),
+            'i' => pint2str(width, (zv - begv) as i64),
+            'I' => pint2hrstr(width, (zv - begv) as i64),
+            'l' => pint2str(width, state.line as i64),
+            'm' => string_of(self.ml_symbol_value("mode-name")?),
+            'n' => if begv > 1 || zv < state.z { " Narrow" } else { "" }.into(),
+            'o' => if zv <= bottom {
+                if top <= begv { "All" } else { "Bottom" }.into()
+            } else if top <= begv {
+                "Top".into()
+            } else {
+                format!("{:2}%", percent99(top - begv, (top - begv) + (zv - bottom)))
+            },
+            'p' => if bottom >= zv {
+                if top <= begv { "All" } else { "Bottom" }.into()
+            } else if top <= begv {
+                "Top".into()
+            } else {
+                format!("{:2}%", percent99(top - begv, zv - begv))
+            },
+            'P' => if zv <= bottom {
+                if top <= begv { "All" } else { "Bottom" }.into()
+            } else {
+                let percent = percent99(bottom - begv, zv - begv);
+                if begv < top { format!("{percent:2}%") } else { format!("Top{percent:2}%") }
+            },
+            'q' => {
+                if top <= begv && zv <= bottom {
+                    "All   ".into()
+                } else {
+                    let top = if top <= begv { 0 } else { percent99(top - begv, zv - begv) };
+                    let bottom = if zv <= bottom { 100 } else { percent99(bottom - begv, zv - begv) };
+                    if top == bottom { format!("{top}%") } else { format!("{top}-{bottom}%") }
+                }
+            }
+            // No processes in VM2.
+            's' => "no process".into(),
+            '@' => {
+                let form = crate::Form::List(vec![
+                    Form::Sym("and".into()),
+                    Form::List(vec![Form::Sym("stringp".into()), Form::Sym("default-directory".into())]),
+                    Form::List(vec![Form::Sym("fboundp".into()), Form::List(vec![Form::Sym("quote".into()), Form::Sym("file-remote-p".into())])]),
+                    Form::List(vec![Form::Sym("file-remote-p".into()), Form::Sym("default-directory".into())]),
+                ]);
+                if self.eval_form_raw(&form).is_ok_and(|v| v != Value::NIL) { "@" } else { "-" }.into()
+            }
+            // No coding systems in VM2: GNU's "not yet decided" mnemonics
+            // (`decode_mode_spec_coding`, `xdisp.c:29346`).
+            'z' => "-".into(),
+            'Z' => {
+                let mnemonic = self.ml_symbol_value("eol-mnemonic-undecided")?;
+                format!("-{}", if matches!(mnemonic, Some(Form::String(_) | Form::Bytes(_))) {
+                    string_of(mnemonic)
+                } else {
+                    ":".into()
+                })
+            },
+            _ => String::new(),
+        })
+    }
+}

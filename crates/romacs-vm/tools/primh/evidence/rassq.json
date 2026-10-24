@@ -1,0 +1,3842 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "rassq",
+ "spec_sha256": "d91b9d09121f87625852ab40b0029d8e9283496d44ab2343e0ebfefbe35589db",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "rassq",
+    "subr",
+    2,
+    2
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "fns.c": "db81c235d7c63f312128ad84c11d55ae4665a2599099be1229dbaa329afdb3bf"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "rassq/0000",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq nil nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0001",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq nil t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp t))"
+  },
+  {
+   "id": "rassq/0002",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq nil 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 0))"
+  },
+  {
+   "id": "rassq/0003",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq nil 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "rassq/0004",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq nil 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "rassq/0005",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq nil -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp -1))"
+  },
+  {
+   "id": "rassq/0006",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq nil most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "rassq/0007",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq nil 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1.5))"
+  },
+  {
+   "id": "rassq/0008",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq nil 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp sym))"
+  },
+  {
+   "id": "rassq/0009",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq nil :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "rassq/0010",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq nil (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"\"))"
+  },
+  {
+   "id": "rassq/0011",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq nil (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"abc\"))"
+  },
+  {
+   "id": "rassq/0012",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq nil (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "rassq/0013",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq nil (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0014",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq nil (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok (b))"
+  },
+  {
+   "id": "rassq/0015",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq nil (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 . 2)))"
+  },
+  {
+   "id": "rassq/0016",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq nil (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 2 . 3)))"
+  },
+  {
+   "id": "rassq/0017",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq nil (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp [1 2]))"
+  },
+  {
+   "id": "rassq/0018",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq nil (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "rassq/0019",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq nil (list (cons 'a 1) (cons 'b 2) (cons 'c 1)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0020",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq nil (cons (cons 'a 1) 9))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp ((a . 1) . 9)))"
+  },
+  {
+   "id": "rassq/0021",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq nil (let ((x (list (cons 'a 1) (cons 'b 2)))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list ((a . 1) (b . 2) (a . 1) (b . 2) . #2)))"
+  },
+  {
+   "id": "rassq/0022",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq nil (let ((x (list 2 3))) (cons 1 (progn (setcdr (cdr x) x) x))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (3 2 3 2 . #2)))"
+  },
+  {
+   "id": "rassq/0023",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq t nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0024",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq t t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp t))"
+  },
+  {
+   "id": "rassq/0025",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq t 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 0))"
+  },
+  {
+   "id": "rassq/0026",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq t 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "rassq/0027",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq t 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "rassq/0028",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq t -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp -1))"
+  },
+  {
+   "id": "rassq/0029",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq t most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "rassq/0030",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq t 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1.5))"
+  },
+  {
+   "id": "rassq/0031",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq t 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp sym))"
+  },
+  {
+   "id": "rassq/0032",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq t :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "rassq/0033",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq t (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"\"))"
+  },
+  {
+   "id": "rassq/0034",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq t (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"abc\"))"
+  },
+  {
+   "id": "rassq/0035",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq t (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "rassq/0036",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq t (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0037",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq t (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0038",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq t (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 . 2)))"
+  },
+  {
+   "id": "rassq/0039",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq t (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 2 . 3)))"
+  },
+  {
+   "id": "rassq/0040",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq t (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp [1 2]))"
+  },
+  {
+   "id": "rassq/0041",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq t (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "rassq/0042",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq t (list (cons 'a 1) (cons 'b 2) (cons 'c 1)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0043",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq t (cons (cons 'a 1) 9))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp ((a . 1) . 9)))"
+  },
+  {
+   "id": "rassq/0044",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq t (let ((x (list (cons 'a 1) (cons 'b 2)))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list ((a . 1) (b . 2) (a . 1) (b . 2) . #2)))"
+  },
+  {
+   "id": "rassq/0045",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq t (let ((x (list 2 3))) (cons 1 (progn (setcdr (cdr x) x) x))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (3 2 3 2 . #2)))"
+  },
+  {
+   "id": "rassq/0046",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 0 nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0047",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 0 t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp t))"
+  },
+  {
+   "id": "rassq/0048",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 0 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 0))"
+  },
+  {
+   "id": "rassq/0049",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 0 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "rassq/0050",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 0 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "rassq/0051",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 0 -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp -1))"
+  },
+  {
+   "id": "rassq/0052",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 0 most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "rassq/0053",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 0 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1.5))"
+  },
+  {
+   "id": "rassq/0054",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 0 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp sym))"
+  },
+  {
+   "id": "rassq/0055",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 0 :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "rassq/0056",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 0 (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"\"))"
+  },
+  {
+   "id": "rassq/0057",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 0 (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"abc\"))"
+  },
+  {
+   "id": "rassq/0058",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 0 (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "rassq/0059",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 0 (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0060",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 0 (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0061",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 0 (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 . 2)))"
+  },
+  {
+   "id": "rassq/0062",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 0 (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 2 . 3)))"
+  },
+  {
+   "id": "rassq/0063",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 0 (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp [1 2]))"
+  },
+  {
+   "id": "rassq/0064",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 0 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "rassq/0065",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 0 (list (cons 'a 1) (cons 'b 2) (cons 'c 1)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0066",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 0 (cons (cons 'a 1) 9))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp ((a . 1) . 9)))"
+  },
+  {
+   "id": "rassq/0067",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 0 (let ((x (list (cons 'a 1) (cons 'b 2)))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list ((a . 1) (b . 2) (a . 1) (b . 2) . #2)))"
+  },
+  {
+   "id": "rassq/0068",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 0 (let ((x (list 2 3))) (cons 1 (progn (setcdr (cdr x) x) x))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (3 2 3 2 . #2)))"
+  },
+  {
+   "id": "rassq/0069",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 1 nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0070",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 1 t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp t))"
+  },
+  {
+   "id": "rassq/0071",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 1 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 0))"
+  },
+  {
+   "id": "rassq/0072",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 1 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "rassq/0073",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 1 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "rassq/0074",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 1 -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp -1))"
+  },
+  {
+   "id": "rassq/0075",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 1 most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "rassq/0076",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 1 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1.5))"
+  },
+  {
+   "id": "rassq/0077",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 1 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp sym))"
+  },
+  {
+   "id": "rassq/0078",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 1 :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "rassq/0079",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 1 (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"\"))"
+  },
+  {
+   "id": "rassq/0080",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 1 (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"abc\"))"
+  },
+  {
+   "id": "rassq/0081",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 1 (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "rassq/0082",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 1 (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0083",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 1 (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0084",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 1 (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 . 2)))"
+  },
+  {
+   "id": "rassq/0085",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 1 (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 2 . 3)))"
+  },
+  {
+   "id": "rassq/0086",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 1 (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp [1 2]))"
+  },
+  {
+   "id": "rassq/0087",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "rassq/0088",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 1 (list (cons 'a 1) (cons 'b 2) (cons 'c 1)))) (error (list 'sig e))))",
+   "expected": "(ok (a . 1))"
+  },
+  {
+   "id": "rassq/0089",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 1 (cons (cons 'a 1) 9))) (error (list 'sig e))))",
+   "expected": "(ok (a . 1))"
+  },
+  {
+   "id": "rassq/0090",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 1 (let ((x (list (cons 'a 1) (cons 'b 2)))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(ok (a . 1))"
+  },
+  {
+   "id": "rassq/0091",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 1 (let ((x (list 2 3))) (cons 1 (progn (setcdr (cdr x) x) x))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (3 2 3 2 . #2)))"
+  },
+  {
+   "id": "rassq/0092",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 2 nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0093",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 2 t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp t))"
+  },
+  {
+   "id": "rassq/0094",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 2 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 0))"
+  },
+  {
+   "id": "rassq/0095",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 2 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "rassq/0096",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 2 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "rassq/0097",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 2 -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp -1))"
+  },
+  {
+   "id": "rassq/0098",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 2 most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "rassq/0099",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 2 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1.5))"
+  },
+  {
+   "id": "rassq/0100",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 2 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp sym))"
+  },
+  {
+   "id": "rassq/0101",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 2 :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "rassq/0102",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 2 (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"\"))"
+  },
+  {
+   "id": "rassq/0103",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 2 (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"abc\"))"
+  },
+  {
+   "id": "rassq/0104",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 2 (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "rassq/0105",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 2 (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0106",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 2 (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0107",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 2 (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 . 2)))"
+  },
+  {
+   "id": "rassq/0108",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 2 (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 2 . 3)))"
+  },
+  {
+   "id": "rassq/0109",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 2 (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp [1 2]))"
+  },
+  {
+   "id": "rassq/0110",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 2 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "rassq/0111",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 2 (list (cons 'a 1) (cons 'b 2) (cons 'c 1)))) (error (list 'sig e))))",
+   "expected": "(ok (b . 2))"
+  },
+  {
+   "id": "rassq/0112",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 2 (cons (cons 'a 1) 9))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp ((a . 1) . 9)))"
+  },
+  {
+   "id": "rassq/0113",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 2 (let ((x (list (cons 'a 1) (cons 'b 2)))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(ok (b . 2))"
+  },
+  {
+   "id": "rassq/0114",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 2 (let ((x (list 2 3))) (cons 1 (progn (setcdr (cdr x) x) x))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (3 2 3 2 . #2)))"
+  },
+  {
+   "id": "rassq/0115",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq -1 nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0116",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq -1 t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp t))"
+  },
+  {
+   "id": "rassq/0117",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq -1 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 0))"
+  },
+  {
+   "id": "rassq/0118",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq -1 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "rassq/0119",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq -1 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "rassq/0120",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq -1 -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp -1))"
+  },
+  {
+   "id": "rassq/0121",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq -1 most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "rassq/0122",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq -1 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1.5))"
+  },
+  {
+   "id": "rassq/0123",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq -1 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp sym))"
+  },
+  {
+   "id": "rassq/0124",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq -1 :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "rassq/0125",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq -1 (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"\"))"
+  },
+  {
+   "id": "rassq/0126",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq -1 (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"abc\"))"
+  },
+  {
+   "id": "rassq/0127",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq -1 (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "rassq/0128",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq -1 (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0129",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq -1 (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0130",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq -1 (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 . 2)))"
+  },
+  {
+   "id": "rassq/0131",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq -1 (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 2 . 3)))"
+  },
+  {
+   "id": "rassq/0132",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq -1 (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp [1 2]))"
+  },
+  {
+   "id": "rassq/0133",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq -1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "rassq/0134",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq -1 (list (cons 'a 1) (cons 'b 2) (cons 'c 1)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0135",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq -1 (cons (cons 'a 1) 9))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp ((a . 1) . 9)))"
+  },
+  {
+   "id": "rassq/0136",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq -1 (let ((x (list (cons 'a 1) (cons 'b 2)))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list ((a . 1) (b . 2) (a . 1) (b . 2) . #2)))"
+  },
+  {
+   "id": "rassq/0137",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq -1 (let ((x (list 2 3))) (cons 1 (progn (setcdr (cdr x) x) x))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (3 2 3 2 . #2)))"
+  },
+  {
+   "id": "rassq/0138",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq most-positive-fixnum nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0139",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq most-positive-fixnum t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp t))"
+  },
+  {
+   "id": "rassq/0140",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq most-positive-fixnum 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 0))"
+  },
+  {
+   "id": "rassq/0141",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq most-positive-fixnum 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "rassq/0142",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq most-positive-fixnum 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "rassq/0143",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq most-positive-fixnum -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp -1))"
+  },
+  {
+   "id": "rassq/0144",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq most-positive-fixnum most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "rassq/0145",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq most-positive-fixnum 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1.5))"
+  },
+  {
+   "id": "rassq/0146",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq most-positive-fixnum 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp sym))"
+  },
+  {
+   "id": "rassq/0147",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq most-positive-fixnum :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "rassq/0148",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq most-positive-fixnum (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"\"))"
+  },
+  {
+   "id": "rassq/0149",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq most-positive-fixnum (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"abc\"))"
+  },
+  {
+   "id": "rassq/0150",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq most-positive-fixnum (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "rassq/0151",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq most-positive-fixnum (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0152",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq most-positive-fixnum (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0153",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq most-positive-fixnum (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 . 2)))"
+  },
+  {
+   "id": "rassq/0154",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq most-positive-fixnum (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 2 . 3)))"
+  },
+  {
+   "id": "rassq/0155",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq most-positive-fixnum (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp [1 2]))"
+  },
+  {
+   "id": "rassq/0156",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq most-positive-fixnum (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "rassq/0157",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq most-positive-fixnum (list (cons 'a 1) (cons 'b 2) (cons 'c 1)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0158",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq most-positive-fixnum (cons (cons 'a 1) 9))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp ((a . 1) . 9)))"
+  },
+  {
+   "id": "rassq/0159",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq most-positive-fixnum (let ((x (list (cons 'a 1) (cons 'b 2)))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list ((a . 1) (b . 2) (a . 1) (b . 2) . #2)))"
+  },
+  {
+   "id": "rassq/0160",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq most-positive-fixnum (let ((x (list 2 3))) (cons 1 (progn (setcdr (cdr x) x) x))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (3 2 3 2 . #2)))"
+  },
+  {
+   "id": "rassq/0161",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 1.5 nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0162",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 1.5 t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp t))"
+  },
+  {
+   "id": "rassq/0163",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 1.5 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 0))"
+  },
+  {
+   "id": "rassq/0164",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 1.5 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "rassq/0165",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 1.5 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "rassq/0166",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 1.5 -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp -1))"
+  },
+  {
+   "id": "rassq/0167",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 1.5 most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "rassq/0168",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 1.5 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1.5))"
+  },
+  {
+   "id": "rassq/0169",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 1.5 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp sym))"
+  },
+  {
+   "id": "rassq/0170",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 1.5 :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "rassq/0171",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 1.5 (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"\"))"
+  },
+  {
+   "id": "rassq/0172",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 1.5 (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"abc\"))"
+  },
+  {
+   "id": "rassq/0173",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 1.5 (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "rassq/0174",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 1.5 (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0175",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 1.5 (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0176",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 1.5 (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 . 2)))"
+  },
+  {
+   "id": "rassq/0177",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 1.5 (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 2 . 3)))"
+  },
+  {
+   "id": "rassq/0178",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 1.5 (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp [1 2]))"
+  },
+  {
+   "id": "rassq/0179",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 1.5 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "rassq/0180",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 1.5 (list (cons 'a 1) (cons 'b 2) (cons 'c 1)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0181",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 1.5 (cons (cons 'a 1) 9))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp ((a . 1) . 9)))"
+  },
+  {
+   "id": "rassq/0182",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 1.5 (let ((x (list (cons 'a 1) (cons 'b 2)))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list ((a . 1) (b . 2) (a . 1) (b . 2) . #2)))"
+  },
+  {
+   "id": "rassq/0183",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 1.5 (let ((x (list 2 3))) (cons 1 (progn (setcdr (cdr x) x) x))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (3 2 3 2 . #2)))"
+  },
+  {
+   "id": "rassq/0184",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 'sym nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0185",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 'sym t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp t))"
+  },
+  {
+   "id": "rassq/0186",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 'sym 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 0))"
+  },
+  {
+   "id": "rassq/0187",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 'sym 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "rassq/0188",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 'sym 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "rassq/0189",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 'sym -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp -1))"
+  },
+  {
+   "id": "rassq/0190",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 'sym most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "rassq/0191",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 'sym 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1.5))"
+  },
+  {
+   "id": "rassq/0192",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 'sym 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp sym))"
+  },
+  {
+   "id": "rassq/0193",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 'sym :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "rassq/0194",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 'sym (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"\"))"
+  },
+  {
+   "id": "rassq/0195",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 'sym (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"abc\"))"
+  },
+  {
+   "id": "rassq/0196",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 'sym (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "rassq/0197",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 'sym (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0198",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 'sym (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0199",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 'sym (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 . 2)))"
+  },
+  {
+   "id": "rassq/0200",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 'sym (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 2 . 3)))"
+  },
+  {
+   "id": "rassq/0201",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 'sym (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp [1 2]))"
+  },
+  {
+   "id": "rassq/0202",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 'sym (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "rassq/0203",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 'sym (list (cons 'a 1) (cons 'b 2) (cons 'c 1)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0204",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 'sym (cons (cons 'a 1) 9))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp ((a . 1) . 9)))"
+  },
+  {
+   "id": "rassq/0205",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 'sym (let ((x (list (cons 'a 1) (cons 'b 2)))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list ((a . 1) (b . 2) (a . 1) (b . 2) . #2)))"
+  },
+  {
+   "id": "rassq/0206",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq 'sym (let ((x (list 2 3))) (cons 1 (progn (setcdr (cdr x) x) x))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (3 2 3 2 . #2)))"
+  },
+  {
+   "id": "rassq/0207",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq :kw nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0208",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq :kw t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp t))"
+  },
+  {
+   "id": "rassq/0209",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq :kw 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 0))"
+  },
+  {
+   "id": "rassq/0210",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq :kw 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "rassq/0211",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq :kw 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "rassq/0212",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq :kw -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp -1))"
+  },
+  {
+   "id": "rassq/0213",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq :kw most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "rassq/0214",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq :kw 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1.5))"
+  },
+  {
+   "id": "rassq/0215",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq :kw 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp sym))"
+  },
+  {
+   "id": "rassq/0216",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq :kw :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "rassq/0217",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq :kw (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"\"))"
+  },
+  {
+   "id": "rassq/0218",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq :kw (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"abc\"))"
+  },
+  {
+   "id": "rassq/0219",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq :kw (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "rassq/0220",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq :kw (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0221",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq :kw (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0222",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq :kw (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 . 2)))"
+  },
+  {
+   "id": "rassq/0223",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq :kw (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 2 . 3)))"
+  },
+  {
+   "id": "rassq/0224",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq :kw (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp [1 2]))"
+  },
+  {
+   "id": "rassq/0225",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq :kw (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "rassq/0226",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq :kw (list (cons 'a 1) (cons 'b 2) (cons 'c 1)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0227",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq :kw (cons (cons 'a 1) 9))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp ((a . 1) . 9)))"
+  },
+  {
+   "id": "rassq/0228",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq :kw (let ((x (list (cons 'a 1) (cons 'b 2)))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list ((a . 1) (b . 2) (a . 1) (b . 2) . #2)))"
+  },
+  {
+   "id": "rassq/0229",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq :kw (let ((x (list 2 3))) (cons 1 (progn (setcdr (cdr x) x) x))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (3 2 3 2 . #2)))"
+  },
+  {
+   "id": "rassq/0230",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (copy-sequence \"\") nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0231",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (copy-sequence \"\") t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp t))"
+  },
+  {
+   "id": "rassq/0232",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (copy-sequence \"\") 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 0))"
+  },
+  {
+   "id": "rassq/0233",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (copy-sequence \"\") 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "rassq/0234",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (copy-sequence \"\") 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "rassq/0235",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (copy-sequence \"\") -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp -1))"
+  },
+  {
+   "id": "rassq/0236",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (copy-sequence \"\") most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "rassq/0237",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (copy-sequence \"\") 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1.5))"
+  },
+  {
+   "id": "rassq/0238",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (copy-sequence \"\") 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp sym))"
+  },
+  {
+   "id": "rassq/0239",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (copy-sequence \"\") :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "rassq/0240",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (copy-sequence \"\") (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"\"))"
+  },
+  {
+   "id": "rassq/0241",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (copy-sequence \"\") (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"abc\"))"
+  },
+  {
+   "id": "rassq/0242",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (copy-sequence \"\") (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "rassq/0243",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (copy-sequence \"\") (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0244",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (copy-sequence \"\") (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0245",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (copy-sequence \"\") (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 . 2)))"
+  },
+  {
+   "id": "rassq/0246",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (copy-sequence \"\") (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 2 . 3)))"
+  },
+  {
+   "id": "rassq/0247",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (copy-sequence \"\") (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp [1 2]))"
+  },
+  {
+   "id": "rassq/0248",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (copy-sequence \"\") (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "rassq/0249",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (copy-sequence \"\") (list (cons 'a 1) (cons 'b 2) (cons 'c 1)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0250",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (copy-sequence \"\") (cons (cons 'a 1) 9))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp ((a . 1) . 9)))"
+  },
+  {
+   "id": "rassq/0251",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (copy-sequence \"\") (let ((x (list (cons 'a 1) (cons 'b 2)))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list ((a . 1) (b . 2) (a . 1) (b . 2) . #2)))"
+  },
+  {
+   "id": "rassq/0252",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (copy-sequence \"\") (let ((x (list 2 3))) (cons 1 (progn (setcdr (cdr x) x) x))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (3 2 3 2 . #2)))"
+  },
+  {
+   "id": "rassq/0253",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (copy-sequence \"abc\") nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0254",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (copy-sequence \"abc\") t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp t))"
+  },
+  {
+   "id": "rassq/0255",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (copy-sequence \"abc\") 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 0))"
+  },
+  {
+   "id": "rassq/0256",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (copy-sequence \"abc\") 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "rassq/0257",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (copy-sequence \"abc\") 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "rassq/0258",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (copy-sequence \"abc\") -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp -1))"
+  },
+  {
+   "id": "rassq/0259",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (copy-sequence \"abc\") most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "rassq/0260",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (copy-sequence \"abc\") 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1.5))"
+  },
+  {
+   "id": "rassq/0261",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (copy-sequence \"abc\") 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp sym))"
+  },
+  {
+   "id": "rassq/0262",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (copy-sequence \"abc\") :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "rassq/0263",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (copy-sequence \"abc\") (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"\"))"
+  },
+  {
+   "id": "rassq/0264",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (copy-sequence \"abc\") (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"abc\"))"
+  },
+  {
+   "id": "rassq/0265",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (copy-sequence \"abc\") (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "rassq/0266",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (copy-sequence \"abc\") (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0267",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (copy-sequence \"abc\") (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0268",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (copy-sequence \"abc\") (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 . 2)))"
+  },
+  {
+   "id": "rassq/0269",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (copy-sequence \"abc\") (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 2 . 3)))"
+  },
+  {
+   "id": "rassq/0270",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (copy-sequence \"abc\") (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp [1 2]))"
+  },
+  {
+   "id": "rassq/0271",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (copy-sequence \"abc\") (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "rassq/0272",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (copy-sequence \"abc\") (list (cons 'a 1) (cons 'b 2) (cons 'c 1)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0273",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (copy-sequence \"abc\") (cons (cons 'a 1) 9))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp ((a . 1) . 9)))"
+  },
+  {
+   "id": "rassq/0274",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (copy-sequence \"abc\") (let ((x (list (cons 'a 1) (cons 'b 2)))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list ((a . 1) (b . 2) (a . 1) (b . 2) . #2)))"
+  },
+  {
+   "id": "rassq/0275",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (copy-sequence \"abc\") (let ((x (list 2 3))) (cons 1 (progn (setcdr (cdr x) x) x))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (3 2 3 2 . #2)))"
+  },
+  {
+   "id": "rassq/0276",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (copy-sequence \"λx\") nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0277",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (copy-sequence \"λx\") t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp t))"
+  },
+  {
+   "id": "rassq/0278",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (copy-sequence \"λx\") 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 0))"
+  },
+  {
+   "id": "rassq/0279",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (copy-sequence \"λx\") 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "rassq/0280",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (copy-sequence \"λx\") 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "rassq/0281",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (copy-sequence \"λx\") -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp -1))"
+  },
+  {
+   "id": "rassq/0282",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (copy-sequence \"λx\") most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "rassq/0283",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (copy-sequence \"λx\") 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1.5))"
+  },
+  {
+   "id": "rassq/0284",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (copy-sequence \"λx\") 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp sym))"
+  },
+  {
+   "id": "rassq/0285",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (copy-sequence \"λx\") :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "rassq/0286",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (copy-sequence \"λx\") (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"\"))"
+  },
+  {
+   "id": "rassq/0287",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (copy-sequence \"λx\") (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"abc\"))"
+  },
+  {
+   "id": "rassq/0288",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (copy-sequence \"λx\") (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "rassq/0289",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (copy-sequence \"λx\") (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0290",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (copy-sequence \"λx\") (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0291",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (copy-sequence \"λx\") (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 . 2)))"
+  },
+  {
+   "id": "rassq/0292",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (copy-sequence \"λx\") (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 2 . 3)))"
+  },
+  {
+   "id": "rassq/0293",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (copy-sequence \"λx\") (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp [1 2]))"
+  },
+  {
+   "id": "rassq/0294",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (copy-sequence \"λx\") (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "rassq/0295",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (copy-sequence \"λx\") (list (cons 'a 1) (cons 'b 2) (cons 'c 1)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0296",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (copy-sequence \"λx\") (cons (cons 'a 1) 9))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp ((a . 1) . 9)))"
+  },
+  {
+   "id": "rassq/0297",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (copy-sequence \"λx\") (let ((x (list (cons 'a 1) (cons 'b 2)))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list ((a . 1) (b . 2) (a . 1) (b . 2) . #2)))"
+  },
+  {
+   "id": "rassq/0298",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (copy-sequence \"λx\") (let ((x (list 2 3))) (cons 1 (progn (setcdr (cdr x) x) x))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (3 2 3 2 . #2)))"
+  },
+  {
+   "id": "rassq/0299",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (list 1 2 3) nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0300",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (list 1 2 3) t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp t))"
+  },
+  {
+   "id": "rassq/0301",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (list 1 2 3) 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 0))"
+  },
+  {
+   "id": "rassq/0302",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (list 1 2 3) 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "rassq/0303",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (list 1 2 3) 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "rassq/0304",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (list 1 2 3) -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp -1))"
+  },
+  {
+   "id": "rassq/0305",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (list 1 2 3) most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "rassq/0306",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (list 1 2 3) 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1.5))"
+  },
+  {
+   "id": "rassq/0307",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (list 1 2 3) 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp sym))"
+  },
+  {
+   "id": "rassq/0308",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (list 1 2 3) :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "rassq/0309",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (list 1 2 3) (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"\"))"
+  },
+  {
+   "id": "rassq/0310",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (list 1 2 3) (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"abc\"))"
+  },
+  {
+   "id": "rassq/0311",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (list 1 2 3) (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "rassq/0312",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (list 1 2 3) (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0313",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (list 1 2 3) (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0314",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (list 1 2 3) (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 . 2)))"
+  },
+  {
+   "id": "rassq/0315",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (list 1 2 3) (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 2 . 3)))"
+  },
+  {
+   "id": "rassq/0316",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (list 1 2 3) (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp [1 2]))"
+  },
+  {
+   "id": "rassq/0317",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (list 1 2 3) (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "rassq/0318",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (list 1 2 3) (list (cons 'a 1) (cons 'b 2) (cons 'c 1)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0319",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (list 1 2 3) (cons (cons 'a 1) 9))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp ((a . 1) . 9)))"
+  },
+  {
+   "id": "rassq/0320",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (list 1 2 3) (let ((x (list (cons 'a 1) (cons 'b 2)))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list ((a . 1) (b . 2) (a . 1) (b . 2) . #2)))"
+  },
+  {
+   "id": "rassq/0321",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (list 1 2 3) (let ((x (list 2 3))) (cons 1 (progn (setcdr (cdr x) x) x))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (3 2 3 2 . #2)))"
+  },
+  {
+   "id": "rassq/0322",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (list 'a (list 'b)) nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0323",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (list 'a (list 'b)) t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp t))"
+  },
+  {
+   "id": "rassq/0324",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (list 'a (list 'b)) 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 0))"
+  },
+  {
+   "id": "rassq/0325",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (list 'a (list 'b)) 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "rassq/0326",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (list 'a (list 'b)) 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "rassq/0327",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (list 'a (list 'b)) -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp -1))"
+  },
+  {
+   "id": "rassq/0328",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (list 'a (list 'b)) most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "rassq/0329",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (list 'a (list 'b)) 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1.5))"
+  },
+  {
+   "id": "rassq/0330",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (list 'a (list 'b)) 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp sym))"
+  },
+  {
+   "id": "rassq/0331",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (list 'a (list 'b)) :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "rassq/0332",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (list 'a (list 'b)) (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"\"))"
+  },
+  {
+   "id": "rassq/0333",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (list 'a (list 'b)) (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"abc\"))"
+  },
+  {
+   "id": "rassq/0334",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (list 'a (list 'b)) (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "rassq/0335",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (list 'a (list 'b)) (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0336",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (list 'a (list 'b)) (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0337",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (list 'a (list 'b)) (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 . 2)))"
+  },
+  {
+   "id": "rassq/0338",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (list 'a (list 'b)) (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 2 . 3)))"
+  },
+  {
+   "id": "rassq/0339",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (list 'a (list 'b)) (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp [1 2]))"
+  },
+  {
+   "id": "rassq/0340",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (list 'a (list 'b)) (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "rassq/0341",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (list 'a (list 'b)) (list (cons 'a 1) (cons 'b 2) (cons 'c 1)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0342",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (list 'a (list 'b)) (cons (cons 'a 1) 9))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp ((a . 1) . 9)))"
+  },
+  {
+   "id": "rassq/0343",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (list 'a (list 'b)) (let ((x (list (cons 'a 1) (cons 'b 2)))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list ((a . 1) (b . 2) (a . 1) (b . 2) . #2)))"
+  },
+  {
+   "id": "rassq/0344",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (list 'a (list 'b)) (let ((x (list 2 3))) (cons 1 (progn (setcdr (cdr x) x) x))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (3 2 3 2 . #2)))"
+  },
+  {
+   "id": "rassq/0345",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (cons 1 2) nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0346",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (cons 1 2) t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp t))"
+  },
+  {
+   "id": "rassq/0347",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (cons 1 2) 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 0))"
+  },
+  {
+   "id": "rassq/0348",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (cons 1 2) 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "rassq/0349",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (cons 1 2) 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "rassq/0350",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (cons 1 2) -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp -1))"
+  },
+  {
+   "id": "rassq/0351",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (cons 1 2) most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "rassq/0352",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (cons 1 2) 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1.5))"
+  },
+  {
+   "id": "rassq/0353",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (cons 1 2) 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp sym))"
+  },
+  {
+   "id": "rassq/0354",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (cons 1 2) :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "rassq/0355",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (cons 1 2) (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"\"))"
+  },
+  {
+   "id": "rassq/0356",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (cons 1 2) (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"abc\"))"
+  },
+  {
+   "id": "rassq/0357",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (cons 1 2) (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "rassq/0358",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (cons 1 2) (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0359",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (cons 1 2) (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0360",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (cons 1 2) (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 . 2)))"
+  },
+  {
+   "id": "rassq/0361",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (cons 1 2) (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 2 . 3)))"
+  },
+  {
+   "id": "rassq/0362",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (cons 1 2) (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp [1 2]))"
+  },
+  {
+   "id": "rassq/0363",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (cons 1 2) (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "rassq/0364",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (cons 1 2) (list (cons 'a 1) (cons 'b 2) (cons 'c 1)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0365",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (cons 1 2) (cons (cons 'a 1) 9))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp ((a . 1) . 9)))"
+  },
+  {
+   "id": "rassq/0366",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (cons 1 2) (let ((x (list (cons 'a 1) (cons 'b 2)))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list ((a . 1) (b . 2) (a . 1) (b . 2) . #2)))"
+  },
+  {
+   "id": "rassq/0367",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (cons 1 2) (let ((x (list 2 3))) (cons 1 (progn (setcdr (cdr x) x) x))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (3 2 3 2 . #2)))"
+  },
+  {
+   "id": "rassq/0368",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (cons 1 (cons 2 3)) nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0369",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (cons 1 (cons 2 3)) t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp t))"
+  },
+  {
+   "id": "rassq/0370",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (cons 1 (cons 2 3)) 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 0))"
+  },
+  {
+   "id": "rassq/0371",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (cons 1 (cons 2 3)) 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "rassq/0372",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (cons 1 (cons 2 3)) 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "rassq/0373",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (cons 1 (cons 2 3)) -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp -1))"
+  },
+  {
+   "id": "rassq/0374",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (cons 1 (cons 2 3)) most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "rassq/0375",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (cons 1 (cons 2 3)) 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1.5))"
+  },
+  {
+   "id": "rassq/0376",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (cons 1 (cons 2 3)) 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp sym))"
+  },
+  {
+   "id": "rassq/0377",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (cons 1 (cons 2 3)) :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "rassq/0378",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (cons 1 (cons 2 3)) (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"\"))"
+  },
+  {
+   "id": "rassq/0379",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (cons 1 (cons 2 3)) (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"abc\"))"
+  },
+  {
+   "id": "rassq/0380",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (cons 1 (cons 2 3)) (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "rassq/0381",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (cons 1 (cons 2 3)) (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0382",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (cons 1 (cons 2 3)) (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0383",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (cons 1 (cons 2 3)) (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 . 2)))"
+  },
+  {
+   "id": "rassq/0384",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (cons 1 (cons 2 3)) (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 2 . 3)))"
+  },
+  {
+   "id": "rassq/0385",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (cons 1 (cons 2 3)) (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp [1 2]))"
+  },
+  {
+   "id": "rassq/0386",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (cons 1 (cons 2 3)) (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "rassq/0387",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (cons 1 (cons 2 3)) (list (cons 'a 1) (cons 'b 2) (cons 'c 1)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0388",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (cons 1 (cons 2 3)) (cons (cons 'a 1) 9))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp ((a . 1) . 9)))"
+  },
+  {
+   "id": "rassq/0389",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (cons 1 (cons 2 3)) (let ((x (list (cons 'a 1) (cons 'b 2)))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list ((a . 1) (b . 2) (a . 1) (b . 2) . #2)))"
+  },
+  {
+   "id": "rassq/0390",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (cons 1 (cons 2 3)) (let ((x (list 2 3))) (cons 1 (progn (setcdr (cdr x) x) x))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (3 2 3 2 . #2)))"
+  },
+  {
+   "id": "rassq/0391",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (vector 1 2) nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0392",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (vector 1 2) t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp t))"
+  },
+  {
+   "id": "rassq/0393",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (vector 1 2) 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 0))"
+  },
+  {
+   "id": "rassq/0394",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (vector 1 2) 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "rassq/0395",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (vector 1 2) 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "rassq/0396",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (vector 1 2) -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp -1))"
+  },
+  {
+   "id": "rassq/0397",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (vector 1 2) most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "rassq/0398",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (vector 1 2) 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1.5))"
+  },
+  {
+   "id": "rassq/0399",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (vector 1 2) 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp sym))"
+  },
+  {
+   "id": "rassq/0400",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (vector 1 2) :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "rassq/0401",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (vector 1 2) (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"\"))"
+  },
+  {
+   "id": "rassq/0402",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (vector 1 2) (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"abc\"))"
+  },
+  {
+   "id": "rassq/0403",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (vector 1 2) (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "rassq/0404",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (vector 1 2) (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0405",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (vector 1 2) (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0406",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (vector 1 2) (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 . 2)))"
+  },
+  {
+   "id": "rassq/0407",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (vector 1 2) (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 2 . 3)))"
+  },
+  {
+   "id": "rassq/0408",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (vector 1 2) (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp [1 2]))"
+  },
+  {
+   "id": "rassq/0409",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (vector 1 2) (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "rassq/0410",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (vector 1 2) (list (cons 'a 1) (cons 'b 2) (cons 'c 1)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0411",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (vector 1 2) (cons (cons 'a 1) 9))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp ((a . 1) . 9)))"
+  },
+  {
+   "id": "rassq/0412",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (vector 1 2) (let ((x (list (cons 'a 1) (cons 'b 2)))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list ((a . 1) (b . 2) (a . 1) (b . 2) . #2)))"
+  },
+  {
+   "id": "rassq/0413",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (vector 1 2) (let ((x (list 2 3))) (cons 1 (progn (setcdr (cdr x) x) x))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (3 2 3 2 . #2)))"
+  },
+  {
+   "id": "rassq/0414",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (let ((x (list 1 2))) (setcdr (cdr x) x) x) nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0415",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (let ((x (list 1 2))) (setcdr (cdr x) x) x) t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp t))"
+  },
+  {
+   "id": "rassq/0416",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (let ((x (list 1 2))) (setcdr (cdr x) x) x) 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 0))"
+  },
+  {
+   "id": "rassq/0417",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (let ((x (list 1 2))) (setcdr (cdr x) x) x) 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "rassq/0418",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (let ((x (list 1 2))) (setcdr (cdr x) x) x) 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "rassq/0419",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (let ((x (list 1 2))) (setcdr (cdr x) x) x) -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp -1))"
+  },
+  {
+   "id": "rassq/0420",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (let ((x (list 1 2))) (setcdr (cdr x) x) x) most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "rassq/0421",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (let ((x (list 1 2))) (setcdr (cdr x) x) x) 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1.5))"
+  },
+  {
+   "id": "rassq/0422",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (let ((x (list 1 2))) (setcdr (cdr x) x) x) 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp sym))"
+  },
+  {
+   "id": "rassq/0423",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (let ((x (list 1 2))) (setcdr (cdr x) x) x) :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "rassq/0424",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (let ((x (list 1 2))) (setcdr (cdr x) x) x) (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"\"))"
+  },
+  {
+   "id": "rassq/0425",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (let ((x (list 1 2))) (setcdr (cdr x) x) x) (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"abc\"))"
+  },
+  {
+   "id": "rassq/0426",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (let ((x (list 1 2))) (setcdr (cdr x) x) x) (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "rassq/0427",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (let ((x (list 1 2))) (setcdr (cdr x) x) x) (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0428",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (let ((x (list 1 2))) (setcdr (cdr x) x) x) (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0429",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (let ((x (list 1 2))) (setcdr (cdr x) x) x) (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 . 2)))"
+  },
+  {
+   "id": "rassq/0430",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (let ((x (list 1 2))) (setcdr (cdr x) x) x) (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 2 . 3)))"
+  },
+  {
+   "id": "rassq/0431",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (let ((x (list 1 2))) (setcdr (cdr x) x) x) (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp [1 2]))"
+  },
+  {
+   "id": "rassq/0432",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (let ((x (list 1 2))) (setcdr (cdr x) x) x) (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "rassq/0433",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (let ((x (list 1 2))) (setcdr (cdr x) x) x) (list (cons 'a 1) (cons 'b 2) (cons 'c 1)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0434",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (let ((x (list 1 2))) (setcdr (cdr x) x) x) (cons (cons 'a 1) 9))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp ((a . 1) . 9)))"
+  },
+  {
+   "id": "rassq/0435",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (let ((x (list 1 2))) (setcdr (cdr x) x) x) (let ((x (list (cons 'a 1) (cons 'b 2)))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list ((a . 1) (b . 2) (a . 1) (b . 2) . #2)))"
+  },
+  {
+   "id": "rassq/0436",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassq (let ((x (list 1 2))) (setcdr (cdr x) x) x) (let ((x (list 2 3))) (cons 1 (progn (setcdr (cdr x) x) x))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (3 2 3 2 . #2)))"
+  },
+  {
+   "id": "rassq/0437",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'rassq '(1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr rassq> 1))"
+  },
+  {
+   "id": "rassq/0438",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'rassq '(1 1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr rassq> 3))"
+  },
+  {
+   "id": "rassq/0439",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 nil)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (rassq a0 a1))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0440",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 (list 'a (list 'b)))) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (rassq a0 a1))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0441",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 -1)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (rassq a0 a1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp -1))"
+  },
+  {
+   "id": "rassq/0442",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 2) (a1 (list (cons 'a 1) (cons 'b 2) (cons 'c 1)))) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (rassq a0 a1))) (error (list 'sig e))))",
+   "expected": "(ok (b . 2))"
+  },
+  {
+   "id": "rassq/0443",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-positive-fixnum) (a1 (copy-sequence \"\"))) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (rassq a0 a1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"\"))"
+  },
+  {
+   "id": "rassq/0444",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'sym) (a1 t)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (rassq a0 a1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp t))"
+  },
+  {
+   "id": "rassq/0445",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :kw) (a1 (cons 1 2))) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (rassq a0 a1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 . 2)))"
+  },
+  {
+   "id": "rassq/0446",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 most-positive-fixnum)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (rassq a0 a1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "rassq/0447",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 (cons (cons 'a 1) 9))) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (rassq a0 a1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp ((a . 1) . 9)))"
+  },
+  {
+   "id": "rassq/0448",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 'a (list 'b))) (a1 (copy-sequence \"abc\"))) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (rassq a0 a1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"abc\"))"
+  },
+  {
+   "id": "rassq/0449",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 (cons 2 3))) (a1 0)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (rassq a0 a1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 0))"
+  },
+  {
+   "id": "rassq/0450",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (vector 1 2)) (a1 (cons 1 (cons 2 3)))) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (rassq a0 a1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 2 . 3)))"
+  },
+  {
+   "id": "rassq/0451",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 nil)) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (t t))"
+  },
+  {
+   "id": "rassq/0452",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 1)) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "rassq/0453",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 most-positive-fixnum)) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "rassq/0454",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 :kw)) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "rassq/0455",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 (copy-sequence \"λx\"))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "rassq/0456",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 (cons 1 2))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 . 2)))"
+  },
+  {
+   "id": "rassq/0457",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "rassq/0458",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 (let ((x (list (cons 'a 1) (cons 'b 2)))) (setcdr (cdr x) x) x))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list ((a . 1) (b . 2) (a . 1) (b . 2) . #2)))"
+  },
+  {
+   "id": "rassq/0459",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 t)) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp t))"
+  },
+  {
+   "id": "rassq/0460",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 2)) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "rassq/0461",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 1.5)) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1.5))"
+  },
+  {
+   "id": "rassq/0462",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 (copy-sequence \"\"))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"\"))"
+  },
+  {
+   "id": "rassq/0463",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 (list 1 2 3))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "rassq/0464",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 (cons 1 (cons 2 3)))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 2 . 3)))"
+  },
+  {
+   "id": "rassq/0465",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 (list (cons 'a 1) (cons 'b 2) (cons 'c 1)))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "rassq/0466",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 (let ((x (list 2 3))) (cons 1 (progn (setcdr (cdr x) x) x))))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (3 2 3 2 . #2)))"
+  },
+  {
+   "id": "rassq/0467",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0) (a1 0)) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 0))"
+  },
+  {
+   "id": "rassq/0468",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0) (a1 -1)) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp -1))"
+  },
+  {
+   "id": "rassq/0469",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0) (a1 'sym)) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp sym))"
+  },
+  {
+   "id": "rassq/0470",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0) (a1 (copy-sequence \"abc\"))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"abc\"))"
+  },
+  {
+   "id": "rassq/0471",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0) (a1 (list 'a (list 'b)))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "rassq/0472",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0) (a1 (vector 1 2))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp [1 2]))"
+  },
+  {
+   "id": "rassq/0473",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0) (a1 (cons (cons 'a 1) 9))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp ((a . 1) . 9)))"
+  },
+  {
+   "id": "rassq/0474",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 nil)) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "rassq/0475",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 1)) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "rassq/0476",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 most-positive-fixnum)) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "rassq/0477",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 :kw)) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "rassq/0478",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 (copy-sequence \"λx\"))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "rassq/0479",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 (cons 1 2))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 . 2)))"
+  },
+  {
+   "id": "rassq/0480",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "rassq/0481",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 (let ((x (list (cons 'a 1) (cons 'b 2)))) (setcdr (cdr x) x) x))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "rassq/0482",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 2) (a1 t)) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp t))"
+  },
+  {
+   "id": "rassq/0483",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 2) (a1 2)) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "rassq/0484",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 2) (a1 1.5)) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1.5))"
+  },
+  {
+   "id": "rassq/0485",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 2) (a1 (copy-sequence \"\"))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"\"))"
+  },
+  {
+   "id": "rassq/0486",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 2) (a1 (list 1 2 3))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "rassq/0487",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 2) (a1 (cons 1 (cons 2 3)))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 2 . 3)))"
+  },
+  {
+   "id": "rassq/0488",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 2) (a1 (list (cons 'a 1) (cons 'b 2) (cons 'c 1)))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "rassq/0489",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 2) (a1 (let ((x (list 2 3))) (cons 1 (progn (setcdr (cdr x) x) x))))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (3 2 3 2 . #2)))"
+  },
+  {
+   "id": "rassq/0490",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1) (a1 0)) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 0))"
+  },
+  {
+   "id": "rassq/0491",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1) (a1 -1)) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp -1))"
+  },
+  {
+   "id": "rassq/0492",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1) (a1 'sym)) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp sym))"
+  },
+  {
+   "id": "rassq/0493",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1) (a1 (copy-sequence \"abc\"))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"abc\"))"
+  },
+  {
+   "id": "rassq/0494",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1) (a1 (list 'a (list 'b)))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "rassq/0495",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1) (a1 (vector 1 2))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp [1 2]))"
+  },
+  {
+   "id": "rassq/0496",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1) (a1 (cons (cons 'a 1) 9))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp ((a . 1) . 9)))"
+  },
+  {
+   "id": "rassq/0497",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-positive-fixnum) (a1 nil)) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "rassq/0498",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-positive-fixnum) (a1 1)) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "rassq/0499",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-positive-fixnum) (a1 most-positive-fixnum)) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "rassq/0500",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-positive-fixnum) (a1 :kw)) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "rassq/0501",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-positive-fixnum) (a1 (copy-sequence \"λx\"))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "rassq/0502",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-positive-fixnum) (a1 (cons 1 2))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 . 2)))"
+  },
+  {
+   "id": "rassq/0503",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-positive-fixnum) (a1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "rassq/0504",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-positive-fixnum) (a1 (let ((x (list (cons 'a 1) (cons 'b 2)))) (setcdr (cdr x) x) x))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list ((a . 1) (b . 2) (a . 1) (b . 2) . #2)))"
+  },
+  {
+   "id": "rassq/0505",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.5) (a1 t)) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp t))"
+  },
+  {
+   "id": "rassq/0506",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.5) (a1 2)) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "rassq/0507",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.5) (a1 1.5)) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1.5))"
+  },
+  {
+   "id": "rassq/0508",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.5) (a1 (copy-sequence \"\"))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"\"))"
+  },
+  {
+   "id": "rassq/0509",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.5) (a1 (list 1 2 3))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "rassq/0510",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.5) (a1 (cons 1 (cons 2 3)))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 2 . 3)))"
+  },
+  {
+   "id": "rassq/0511",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.5) (a1 (list (cons 'a 1) (cons 'b 2) (cons 'c 1)))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "rassq/0512",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.5) (a1 (let ((x (list 2 3))) (cons 1 (progn (setcdr (cdr x) x) x))))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (3 2 3 2 . #2)))"
+  },
+  {
+   "id": "rassq/0513",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'sym) (a1 0)) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 0))"
+  },
+  {
+   "id": "rassq/0514",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'sym) (a1 -1)) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp -1))"
+  },
+  {
+   "id": "rassq/0515",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'sym) (a1 'sym)) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp sym))"
+  },
+  {
+   "id": "rassq/0516",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'sym) (a1 (copy-sequence \"abc\"))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"abc\"))"
+  },
+  {
+   "id": "rassq/0517",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'sym) (a1 (list 'a (list 'b)))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "rassq/0518",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'sym) (a1 (vector 1 2))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp [1 2]))"
+  },
+  {
+   "id": "rassq/0519",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'sym) (a1 (cons (cons 'a 1) 9))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp ((a . 1) . 9)))"
+  },
+  {
+   "id": "rassq/0520",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :kw) (a1 nil)) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "rassq/0521",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :kw) (a1 1)) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "rassq/0522",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :kw) (a1 most-positive-fixnum)) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "rassq/0523",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :kw) (a1 :kw)) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "rassq/0524",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :kw) (a1 (copy-sequence \"λx\"))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "rassq/0525",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :kw) (a1 (cons 1 2))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 . 2)))"
+  },
+  {
+   "id": "rassq/0526",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :kw) (a1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "rassq/0527",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :kw) (a1 (let ((x (list (cons 'a 1) (cons 'b 2)))) (setcdr (cdr x) x) x))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list ((a . 1) (b . 2) (a . 1) (b . 2) . #2)))"
+  },
+  {
+   "id": "rassq/0528",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\")) (a1 t)) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp t))"
+  },
+  {
+   "id": "rassq/0529",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\")) (a1 2)) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "rassq/0530",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\")) (a1 1.5)) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1.5))"
+  },
+  {
+   "id": "rassq/0531",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\")) (a1 (copy-sequence \"\"))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"\"))"
+  },
+  {
+   "id": "rassq/0532",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\")) (a1 (list 1 2 3))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "rassq/0533",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\")) (a1 (cons 1 (cons 2 3)))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 2 . 3)))"
+  },
+  {
+   "id": "rassq/0534",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\")) (a1 (list (cons 'a 1) (cons 'b 2) (cons 'c 1)))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "rassq/0535",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\")) (a1 (let ((x (list 2 3))) (cons 1 (progn (setcdr (cdr x) x) x))))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (3 2 3 2 . #2)))"
+  },
+  {
+   "id": "rassq/0536",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 0)) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 0))"
+  },
+  {
+   "id": "rassq/0537",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 -1)) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp -1))"
+  },
+  {
+   "id": "rassq/0538",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 'sym)) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp sym))"
+  },
+  {
+   "id": "rassq/0539",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 (copy-sequence \"abc\"))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"abc\"))"
+  },
+  {
+   "id": "rassq/0540",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 (list 'a (list 'b)))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "rassq/0541",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 (vector 1 2))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp [1 2]))"
+  },
+  {
+   "id": "rassq/0542",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 (cons (cons 'a 1) 9))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp ((a . 1) . 9)))"
+  },
+  {
+   "id": "rassq/0543",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 nil)) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "rassq/0544",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 1)) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "rassq/0545",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 most-positive-fixnum)) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "rassq/0546",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 :kw)) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "rassq/0547",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 (copy-sequence \"λx\"))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "rassq/0548",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 (cons 1 2))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 . 2)))"
+  },
+  {
+   "id": "rassq/0549",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "rassq/0550",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 (let ((x (list (cons 'a 1) (cons 'b 2)))) (setcdr (cdr x) x) x))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list ((a . 1) (b . 2) (a . 1) (b . 2) . #2)))"
+  },
+  {
+   "id": "rassq/0551",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 1 2 3)) (a1 t)) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp t))"
+  },
+  {
+   "id": "rassq/0552",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 1 2 3)) (a1 2)) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "rassq/0553",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 1 2 3)) (a1 1.5)) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1.5))"
+  },
+  {
+   "id": "rassq/0554",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 1 2 3)) (a1 (copy-sequence \"\"))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"\"))"
+  },
+  {
+   "id": "rassq/0555",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 1 2 3)) (a1 (list 1 2 3))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "rassq/0556",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 1 2 3)) (a1 (cons 1 (cons 2 3)))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 2 . 3)))"
+  },
+  {
+   "id": "rassq/0557",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 1 2 3)) (a1 (list (cons 'a 1) (cons 'b 2) (cons 'c 1)))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "rassq/0558",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 1 2 3)) (a1 (let ((x (list 2 3))) (cons 1 (progn (setcdr (cdr x) x) x))))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (3 2 3 2 . #2)))"
+  },
+  {
+   "id": "rassq/0559",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 'a (list 'b))) (a1 0)) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 0))"
+  },
+  {
+   "id": "rassq/0560",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 'a (list 'b))) (a1 -1)) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp -1))"
+  },
+  {
+   "id": "rassq/0561",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 'a (list 'b))) (a1 'sym)) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp sym))"
+  },
+  {
+   "id": "rassq/0562",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 'a (list 'b))) (a1 (copy-sequence \"abc\"))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"abc\"))"
+  },
+  {
+   "id": "rassq/0563",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 'a (list 'b))) (a1 (list 'a (list 'b)))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "rassq/0564",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 'a (list 'b))) (a1 (vector 1 2))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp [1 2]))"
+  },
+  {
+   "id": "rassq/0565",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 'a (list 'b))) (a1 (cons (cons 'a 1) 9))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp ((a . 1) . 9)))"
+  },
+  {
+   "id": "rassq/0566",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 2)) (a1 nil)) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "rassq/0567",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 2)) (a1 1)) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "rassq/0568",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 2)) (a1 most-positive-fixnum)) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "rassq/0569",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 2)) (a1 :kw)) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "rassq/0570",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 2)) (a1 (copy-sequence \"λx\"))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "rassq/0571",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 2)) (a1 (cons 1 2))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 . 2)))"
+  },
+  {
+   "id": "rassq/0572",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 2)) (a1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "rassq/0573",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 2)) (a1 (let ((x (list (cons 'a 1) (cons 'b 2)))) (setcdr (cdr x) x) x))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list ((a . 1) (b . 2) (a . 1) (b . 2) . #2)))"
+  },
+  {
+   "id": "rassq/0574",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 (cons 2 3))) (a1 t)) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp t))"
+  },
+  {
+   "id": "rassq/0575",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 (cons 2 3))) (a1 2)) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "rassq/0576",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 (cons 2 3))) (a1 1.5)) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1.5))"
+  },
+  {
+   "id": "rassq/0577",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 (cons 2 3))) (a1 (copy-sequence \"\"))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"\"))"
+  },
+  {
+   "id": "rassq/0578",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 (cons 2 3))) (a1 (list 1 2 3))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "rassq/0579",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 (cons 2 3))) (a1 (cons 1 (cons 2 3)))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 2 . 3)))"
+  },
+  {
+   "id": "rassq/0580",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 (cons 2 3))) (a1 (list (cons 'a 1) (cons 'b 2) (cons 'c 1)))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "rassq/0581",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 (cons 2 3))) (a1 (let ((x (list 2 3))) (cons 1 (progn (setcdr (cdr x) x) x))))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (3 2 3 2 . #2)))"
+  },
+  {
+   "id": "rassq/0582",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (vector 1 2)) (a1 0)) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 0))"
+  },
+  {
+   "id": "rassq/0583",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (vector 1 2)) (a1 -1)) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp -1))"
+  },
+  {
+   "id": "rassq/0584",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (vector 1 2)) (a1 'sym)) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp sym))"
+  },
+  {
+   "id": "rassq/0585",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (vector 1 2)) (a1 (copy-sequence \"abc\"))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"abc\"))"
+  },
+  {
+   "id": "rassq/0586",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (vector 1 2)) (a1 (list 'a (list 'b)))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "rassq/0587",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (vector 1 2)) (a1 (vector 1 2))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp [1 2]))"
+  },
+  {
+   "id": "rassq/0588",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (vector 1 2)) (a1 (cons (cons 'a 1) 9))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp ((a . 1) . 9)))"
+  },
+  {
+   "id": "rassq/0589",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (a1 nil)) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "rassq/0590",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (a1 1)) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "rassq/0591",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (a1 most-positive-fixnum)) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "rassq/0592",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (a1 :kw)) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "rassq/0593",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (a1 (copy-sequence \"λx\"))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "rassq/0594",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (a1 (cons 1 2))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 . 2)))"
+  },
+  {
+   "id": "rassq/0595",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (a1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "rassq/0596",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (a1 (let ((x (list (cons 'a 1) (cons 'b 2)))) (setcdr (cdr x) x) x))) (let ((r (rassq a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list ((a . 1) (b . 2) (a . 1) (b . 2) . #2)))"
+  },
+  {
+   "id": "rassq/0597",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((v (copy-sequence \"a\"))) (let ((p (cons 1 v))) (list (eq (rassq v (list p)) p) (rassq (copy-sequence v) (list p)))))) (error (list 'sig e))))",
+   "expected": "(ok (t nil))"
+  },
+  {
+   "id": "rassq/0598",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((p (cons 1 2))) (eq (rassq 2 (list 'ignored p)) p))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "rassq/0599",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 'sym) (error (list 'sig e))))",
+   "expected": "(ok sym)"
+  },
+  {
+   "id": "rassq/0600",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (cons (cons 'a 1) 9)) (error (list 'sig e))))",
+   "expected": "(ok ((a . 1) . 9))"
+  },
+  {
+   "id": "rassq/0601",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (cons 1 (cons 2 3))) (error (list 'sig e))))",
+   "expected": "(ok (1 2 . 3))"
+  },
+  {
+   "id": "rassq/0602",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (cons 1 2)) (error (list 'sig e))))",
+   "expected": "(ok (1 . 2))"
+  },
+  {
+   "id": "rassq/0603",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"\")) (error (list 'sig e))))",
+   "expected": "(ok \"\")"
+  },
+  {
+   "id": "rassq/0604",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"abc\")) (error (list 'sig e))))",
+   "expected": "(ok \"abc\")"
+  },
+  {
+   "id": "rassq/0605",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"λx\")) (error (list 'sig e))))",
+   "expected": "(ok \"λx\")"
+  },
+  {
+   "id": "rassq/0606",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((x (list (cons 'a 1) (cons 'b 2)))) (setcdr (cdr x) x) x)) (error (list 'sig e))))",
+   "expected": "(ok ((a . 1) (b . 2) (a . 1) (b . 2) . #2))"
+  },
+  {
+   "id": "rassq/0607",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (error (list 'sig e))))",
+   "expected": "(ok (1 2 1 2 . #2))"
+  },
+  {
+   "id": "rassq/0608",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((x (list 2 3))) (cons 1 (progn (setcdr (cdr x) x) x)))) (error (list 'sig e))))",
+   "expected": "(ok (1 2 3 2 . #2))"
+  },
+  {
+   "id": "rassq/0609",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list 'a (list 'b))) (error (list 'sig e))))",
+   "expected": "(ok (a (b)))"
+  },
+  {
+   "id": "rassq/0610",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (cons 'a 1) (cons 'b 2) (cons 'c 1))) (error (list 'sig e))))",
+   "expected": "(ok ((a . 1) (b . 2) (c . 1)))"
+  },
+  {
+   "id": "rassq/0611",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list 1 2 3)) (error (list 'sig e))))",
+   "expected": "(ok (1 2 3))"
+  },
+  {
+   "id": "rassq/0612",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vector 1 2)) (error (list 'sig e))))",
+   "expected": "(ok [1 2])"
+  },
+  {
+   "id": "rassq/0613",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok -1) (error (list 'sig e))))",
+   "expected": "(ok -1)"
+  },
+  {
+   "id": "rassq/0614",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 0) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "rassq/0615",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1) (error (list 'sig e))))",
+   "expected": "(ok 1)"
+  },
+  {
+   "id": "rassq/0616",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1.5) (error (list 'sig e))))",
+   "expected": "(ok 1.5)"
+  },
+  {
+   "id": "rassq/0617",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 2) (error (list 'sig e))))",
+   "expected": "(ok 2)"
+  },
+  {
+   "id": "rassq/0618",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok :kw) (error (list 'sig e))))",
+   "expected": "(ok :kw)"
+  },
+  {
+   "id": "rassq/0619",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok most-positive-fixnum) (error (list 'sig e))))",
+   "expected": "(ok 2305843009213693951)"
+  },
+  {
+   "id": "rassq/0620",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok nil) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassq/0621",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok t) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  }
+ ],
+ "pinned": {
+  "rassq/0018": "PRINTER",
+  "rassq/0021": "PRINTER",
+  "rassq/0022": "PRINTER",
+  "rassq/0041": "PRINTER",
+  "rassq/0044": "PRINTER",
+  "rassq/0045": "PRINTER",
+  "rassq/0064": "PRINTER",
+  "rassq/0067": "PRINTER",
+  "rassq/0068": "PRINTER",
+  "rassq/0087": "PRINTER",
+  "rassq/0091": "PRINTER",
+  "rassq/0110": "PRINTER",
+  "rassq/0114": "PRINTER",
+  "rassq/0133": "PRINTER",
+  "rassq/0136": "PRINTER",
+  "rassq/0137": "PRINTER",
+  "rassq/0156": "PRINTER",
+  "rassq/0159": "PRINTER",
+  "rassq/0160": "PRINTER",
+  "rassq/0179": "PRINTER",
+  "rassq/0182": "PRINTER",
+  "rassq/0183": "PRINTER",
+  "rassq/0202": "PRINTER",
+  "rassq/0205": "PRINTER",
+  "rassq/0206": "PRINTER",
+  "rassq/0225": "PRINTER",
+  "rassq/0228": "PRINTER",
+  "rassq/0229": "PRINTER",
+  "rassq/0248": "PRINTER",
+  "rassq/0251": "PRINTER",
+  "rassq/0252": "PRINTER",
+  "rassq/0271": "PRINTER",
+  "rassq/0274": "PRINTER",
+  "rassq/0275": "PRINTER",
+  "rassq/0294": "PRINTER",
+  "rassq/0297": "PRINTER",
+  "rassq/0298": "PRINTER",
+  "rassq/0317": "PRINTER",
+  "rassq/0320": "PRINTER",
+  "rassq/0321": "PRINTER",
+  "rassq/0340": "PRINTER",
+  "rassq/0343": "PRINTER",
+  "rassq/0344": "PRINTER",
+  "rassq/0363": "PRINTER",
+  "rassq/0366": "PRINTER",
+  "rassq/0367": "PRINTER",
+  "rassq/0386": "PRINTER",
+  "rassq/0389": "PRINTER",
+  "rassq/0390": "PRINTER",
+  "rassq/0409": "PRINTER",
+  "rassq/0412": "PRINTER",
+  "rassq/0413": "PRINTER",
+  "rassq/0432": "PRINTER",
+  "rassq/0435": "PRINTER",
+  "rassq/0436": "PRINTER",
+  "rassq/0457": "PRINTER",
+  "rassq/0458": "PRINTER",
+  "rassq/0466": "PRINTER",
+  "rassq/0480": "PRINTER",
+  "rassq/0489": "PRINTER",
+  "rassq/0503": "PRINTER",
+  "rassq/0504": "PRINTER",
+  "rassq/0512": "PRINTER",
+  "rassq/0526": "PRINTER",
+  "rassq/0527": "PRINTER",
+  "rassq/0535": "PRINTER",
+  "rassq/0549": "PRINTER",
+  "rassq/0550": "PRINTER",
+  "rassq/0558": "PRINTER",
+  "rassq/0572": "PRINTER",
+  "rassq/0573": "PRINTER",
+  "rassq/0581": "PRINTER",
+  "rassq/0595": "PRINTER",
+  "rassq/0596": "PRINTER",
+  "rassq/0606": "PRINTER",
+  "rassq/0607": "PRINTER",
+  "rassq/0608": "PRINTER"
+ }
+}

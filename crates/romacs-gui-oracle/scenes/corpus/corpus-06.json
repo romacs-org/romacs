@@ -1,0 +1,318 @@
+{
+ "name": "corpus-06",
+ "frame": {
+  "width": 480,
+  "height": 168,
+  "bg": "#ffffff",
+  "fg": "#000000"
+ },
+ "font": {
+  "family": "Liberation Mono",
+  "pixel_size": 20,
+  "regular": "/usr/share/fonts/liberation/LiberationMono-Regular.ttf",
+  "bold": "/usr/share/fonts/liberation/LiberationMono-Bold.ttf",
+  "italic": "/usr/share/fonts/liberation/LiberationMono-Italic.ttf"
+ },
+ "cursor_color": "#00a000",
+ "buffer": [
+  {
+   "text": "50%",
+   "fg": "#696969"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "θάλασσα",
+   "fg": "#ff0000"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "κόσμε",
+   "fg": "#a020f0"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "Χάος",
+   "italic": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "Ωμέγα",
+   "underline": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "Αθήνα",
+   "fg": "#a020f0",
+   "italic": true
+  },
+  {
+   "text": "\n"
+  },
+  {
+   "text": "Ωμέγα"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "a&b"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "θάλασσα",
+   "bg": "#ffe4e1"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "ζωή",
+   "bold": true,
+   "underline": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "ξένος",
+   "fg": "#1e90ff",
+   "italic": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "Ωμέγα",
+   "fg": "#696969"
+  },
+  {
+   "text": "\n"
+  },
+  {
+   "text": "window"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "R2D2",
+   "fg": "#b8860b"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "ΔΕΛΤΑ",
+   "fg": "#1e90ff"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "λόγος",
+   "fg": "#a020f0"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "Quick",
+   "fg": "#2e8b57"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "ψυχή",
+   "fg": "#b8860b"
+  },
+  {
+   "text": "\n"
+  },
+  {
+   "text": "world"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "window",
+   "italic": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "glyph",
+   "fg": "#696969",
+   "italic": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "dog"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "Quick",
+   "underline": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "R2D2",
+   "fg": "#ff8c00"
+  },
+  {
+   "text": "\n"
+  }
+ ],
+ "point": 102,
+ "expect": {
+  "origin": [
+   0,
+   0
+  ],
+  "rows": [
+   {
+    "text": "50% θάλασσα κόσμε Χάος Ωμέγα Αθήνα",
+    "runs": [
+     {
+      "start": 0,
+      "end": 3,
+      "fg": "#696969"
+     },
+     {
+      "start": 4,
+      "end": 11,
+      "fg": "#ff0000"
+     },
+     {
+      "start": 12,
+      "end": 17,
+      "fg": "#a020f0"
+     },
+     {
+      "start": 18,
+      "end": 22,
+      "italic": true
+     },
+     {
+      "start": 23,
+      "end": 28,
+      "underline": true
+     },
+     {
+      "start": 29,
+      "end": 34,
+      "fg": "#a020f0",
+      "italic": true
+     }
+    ]
+   },
+   {
+    "text": "Ωμέγα a&b θάλασσα ζωή ξένος Ωμέγα",
+    "runs": [
+     {
+      "start": 10,
+      "end": 17,
+      "bg": "#ffe4e1"
+     },
+     {
+      "start": 18,
+      "end": 21,
+      "bold": true,
+      "underline": true
+     },
+     {
+      "start": 22,
+      "end": 27,
+      "fg": "#1e90ff",
+      "italic": true
+     },
+     {
+      "start": 28,
+      "end": 33,
+      "fg": "#696969"
+     }
+    ]
+   },
+   {
+    "text": "window R2D2 ΔΕΛΤΑ λόγος Quick ψυχή",
+    "runs": [
+     {
+      "start": 7,
+      "end": 11,
+      "fg": "#b8860b"
+     },
+     {
+      "start": 12,
+      "end": 17,
+      "fg": "#1e90ff"
+     },
+     {
+      "start": 18,
+      "end": 23,
+      "fg": "#a020f0"
+     },
+     {
+      "start": 24,
+      "end": 29,
+      "fg": "#2e8b57"
+     },
+     {
+      "start": 30,
+      "end": 34,
+      "fg": "#b8860b"
+     }
+    ]
+   },
+   {
+    "text": "world window glyph dog Quick R2D2",
+    "runs": [
+     {
+      "start": 6,
+      "end": 12,
+      "italic": true
+     },
+     {
+      "start": 13,
+      "end": 18,
+      "fg": "#696969",
+      "italic": true
+     },
+     {
+      "start": 23,
+      "end": 28,
+      "underline": true
+     },
+     {
+      "start": 29,
+      "end": 33,
+      "fg": "#ff8c00"
+     }
+    ]
+   }
+  ],
+  "cursor": {
+   "row": 2,
+   "col": 32
+  }
+ }
+}

@@ -1,0 +1,102 @@
+#!/usr/bin/env python3
+"""Explicit local setup, recovery and source-first merge of derived artifacts."""
+import argparse
+from pathlib import Path
+import subprocess
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
+from derived_artifacts import ARTIFACTS, regenerate, validate
+
+
+def git(root, *args, check=True):
+    return subprocess.run(['git', '-C', str(root), *args], check=check,
+                          stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+
+
+def setup(root):
+    git(root, 'config', '--local', 'merge.romacs-derived.name', 'Defer derived JSON until sources are merged')
+    git(root, 'config', '--local', 'merge.romacs-derived.driver', 'python3 scripts/derived driver %A %B')
+    git(root, 'config', '--local', 'merge.romacs-derived.recursive', 'binary')
+    git(root, 'config', '--local', 'alias.merge-derived', '!python3 scripts/derived merge')
+    print('Installed local driver and git merge-derived alias; no global config or hooks changed.')
+
+
+def require_staged_sources(root):
+    unstaged = set(git(root, 'diff', '--name-only').stdout.splitlines()) - set(ARTIFACTS)
+    untracked = git(root, 'ls-files', '--others', '--exclude-standard').stdout
+    ignored_inputs = [name for name in git(
+        root, 'ls-files', '--others', '--ignored', '--exclude-standard', '--',
+        'crates/*/src', 'crates/*/GNU-DIVERGENCES.md', 'tools', 'lisp', 'test').stdout.splitlines()
+        if Path(name).suffix in {'.rs', '.py', '.md', '.el', '.toml'}]
+    if unstaged or untracked or ignored_inputs:
+        raise ValueError('stage all source resolutions and remove untracked inputs before finishing')
+
+
+def finish(root):
+    unresolved = set(git(root, 'diff', '--name-only', '--diff-filter=U').stdout.splitlines())
+    source_conflicts = unresolved - set(ARTIFACTS)
+    if source_conflicts:
+        raise ValueError('resolve and stage source conflicts first: ' + ', '.join(sorted(source_conflicts)))
+    if git(root, 'rev-parse', '--verify', 'MERGE_HEAD', check=False).returncode:
+        raise ValueError('no pending merge to finish')
+    require_staged_sources(root)
+    regenerate(root)
+    validate(root)
+    require_staged_sources(root)
+    git(root, 'add', '--', *ARTIFACTS)
+    if git(root, 'diff', '--name-only', '--diff-filter=U').stdout:
+        raise ValueError('unmerged paths remain; refusing merge commit')
+    print(git(root, 'commit', '--no-edit').stdout, end='')
+
+
+def merge(root, ref):
+    if git(root, 'status', '--porcelain').stdout:
+        raise ValueError('merge-derived requires a clean worktree and index')
+    result = git(root, 'merge', '--no-ff', '--no-commit', '--', ref, check=False)
+    print(result.stdout, end='')
+    print(result.stderr, end='', file=sys.stderr)
+    if git(root, 'rev-parse', '--verify', 'MERGE_HEAD', check=False).returncode:
+        if result.returncode:
+            raise ValueError('git merge failed before a merge could be finalized')
+        return
+    finish(root)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('action', choices=('setup', 'driver', 'merge', 'finish', 'regenerate'))
+    parser.add_argument('argument', nargs='?')
+    parser.add_argument('driver_other', nargs='?')
+    args = parser.parse_args()
+    if args.action == 'driver':
+        if not args.argument or not args.driver_other:
+            parser.error('driver requires the temporary result and other-side paths')
+        output = Path(args.argument)
+        ours = output.read_bytes()
+        theirs = Path(args.driver_other).read_bytes()
+        output.write_bytes(b'<<<<<<< derived\n' + ours + b'\n=======\n' + theirs + b'\n>>>>>>> regeneration-required\n')
+        print('Derived merge deferred: scripts/derived finish for merges; for rebase/cherry-pick, regenerate, git add artifacts, then continue.', file=sys.stderr)
+        return 1
+    root = Path(git(Path.cwd(), 'rev-parse', '--show-toplevel').stdout.strip())
+    try:
+        if args.action == 'setup':
+            setup(root)
+        elif args.action == 'regenerate':
+            regenerate(root)
+        elif args.action == 'finish':
+            finish(root)
+        else:
+            if not args.argument:
+                parser.error('merge requires one branch or commit')
+            merge(root, args.argument)
+    except (OSError, ValueError, subprocess.CalledProcessError) as exc:
+        print(f'derived: {exc}', file=sys.stderr)
+        if isinstance(exc, subprocess.CalledProcessError):
+            print(exc.stderr, file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

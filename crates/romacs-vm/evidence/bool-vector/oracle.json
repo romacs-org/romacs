@@ -1,0 +1,1164 @@
+{
+  "pin": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "binary": "<recording-path-redacted>/emacs-32.0.50",
+  "sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+  "rows": [
+    {
+      "primitive": "make-bool-vector",
+      "id": "make-bool-vector/0",
+      "form": "(bool-vector-count-population (make-bool-vector 0 'x))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-count-population (make-bool-vector 0 'x))) (error (list 'sig e))))",
+      "expected": "(ok 0)"
+    },
+    {
+      "primitive": "make-bool-vector",
+      "id": "make-bool-vector/1",
+      "form": "(bool-vector-count-population (make-bool-vector 1 'x))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-count-population (make-bool-vector 1 'x))) (error (list 'sig e))))",
+      "expected": "(ok 1)"
+    },
+    {
+      "primitive": "make-bool-vector",
+      "id": "make-bool-vector/7",
+      "form": "(bool-vector-count-population (make-bool-vector 7 'x))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-count-population (make-bool-vector 7 'x))) (error (list 'sig e))))",
+      "expected": "(ok 7)"
+    },
+    {
+      "primitive": "make-bool-vector",
+      "id": "make-bool-vector/8",
+      "form": "(bool-vector-count-population (make-bool-vector 8 'x))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-count-population (make-bool-vector 8 'x))) (error (list 'sig e))))",
+      "expected": "(ok 8)"
+    },
+    {
+      "primitive": "make-bool-vector",
+      "id": "make-bool-vector/9",
+      "form": "(bool-vector-count-population (make-bool-vector 9 'x))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-count-population (make-bool-vector 9 'x))) (error (list 'sig e))))",
+      "expected": "(ok 9)"
+    },
+    {
+      "primitive": "make-bool-vector",
+      "id": "make-bool-vector/63",
+      "form": "(bool-vector-count-population (make-bool-vector 63 'x))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-count-population (make-bool-vector 63 'x))) (error (list 'sig e))))",
+      "expected": "(ok 63)"
+    },
+    {
+      "primitive": "make-bool-vector",
+      "id": "make-bool-vector/64",
+      "form": "(bool-vector-count-population (make-bool-vector 64 'x))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-count-population (make-bool-vector 64 'x))) (error (list 'sig e))))",
+      "expected": "(ok 64)"
+    },
+    {
+      "primitive": "make-bool-vector",
+      "id": "make-bool-vector/65",
+      "form": "(bool-vector-count-population (make-bool-vector 65 'x))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-count-population (make-bool-vector 65 'x))) (error (list 'sig e))))",
+      "expected": "(ok 65)"
+    },
+    {
+      "primitive": "make-bool-vector",
+      "id": "make-bool-vector/nil",
+      "form": "(bool-vector-count-population (make-bool-vector 9 nil))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-count-population (make-bool-vector 9 nil))) (error (list 'sig e))))",
+      "expected": "(ok 0)"
+    },
+    {
+      "primitive": "make-bool-vector",
+      "id": "make-bool-vector/negative",
+      "form": "(make-bool-vector -1 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (make-bool-vector -1 t)) (error (list 'sig e))))",
+      "expected": "(sig (wrong-type-argument wholenump -1))"
+    },
+    {
+      "primitive": "make-bool-vector",
+      "id": "make-bool-vector/type",
+      "form": "(make-bool-vector 1.5 nil)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (make-bool-vector 1.5 nil)) (error (list 'sig e))))",
+      "expected": "(sig (wrong-type-argument wholenump 1.5))"
+    },
+    {
+      "primitive": "make-bool-vector",
+      "id": "make-bool-vector/shape",
+      "form": "(let ((b (make-bool-vector 9 t))) (list (length b) (type-of b) (arrayp b) (sequencep b) (vectorp b)))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (let ((b (make-bool-vector 9 t))) (list (length b) (type-of b) (arrayp b) (sequencep b) (vectorp b)))) (error (list 'sig e))))",
+      "expected": "(ok (9 bool-vector t t nil))"
+    },
+    {
+      "primitive": "make-bool-vector",
+      "id": "make-bool-vector/huge",
+      "form": "(make-bool-vector most-positive-fixnum nil)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (make-bool-vector most-positive-fixnum nil)) (error (list 'sig e))))",
+      "expected": "(sig (error #(\"Memory exhausted--use C-x s then exit and restart Emacs\" 22 27 (font-lock-face help-key-binding face help-key-binding))))",
+      "replay": false,
+      "reason": "GNU memory-full text is keybinding-substituted and propertized; VM2 inherited plain memory-full fault differs."
+    },
+    {
+      "primitive": "bool-vector",
+      "id": "bool-vector/truth",
+      "form": "(let ((r (bool-vector nil 0 'x t))) (list (aref r 0) (aref r 1) (aref r 2) (aref r 3)))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (let ((r (bool-vector nil 0 'x t))) (list (aref r 0) (aref r 1) (aref r 2) (aref r 3)))) (error (list 'sig e))))",
+      "expected": "(ok (nil t t t))"
+    },
+    {
+      "primitive": "bool-vector",
+      "id": "bool-vector/empty",
+      "form": "(length (bool-vector))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (length (bool-vector))) (error (list 'sig e))))",
+      "expected": "(ok 0)"
+    },
+    {
+      "primitive": "bool-vector",
+      "id": "bool-vector/print",
+      "form": "(append (prin1-to-string (bool-vector t nil t)) nil)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (append (prin1-to-string (bool-vector t nil t)) nil)) (error (list 'sig e))))",
+      "expected": "(ok (35 38 51 34 5 34))"
+    },
+    {
+      "primitive": "bool-vector",
+      "id": "bool-vector/print-high",
+      "form": "(append (prin1-to-string (make-bool-vector 9 t)) nil)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (append (prin1-to-string (make-bool-vector 9 t)) nil)) (error (list 'sig e))))",
+      "expected": "(ok (35 38 57 34 92 51 55 55 1 34))"
+    },
+    {
+      "primitive": "bool-vector",
+      "id": "bool-vector/mutation",
+      "form": "(let ((b (bool-vector nil nil))) (list (aset b 1 7) (aref b 0) (aref b 1)))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (let ((b (bool-vector nil nil))) (list (aset b 1 7) (aref b 0) (aref b 1)))) (error (list 'sig e))))",
+      "expected": "(ok (7 nil t))"
+    },
+    {
+      "primitive": "bool-vector",
+      "id": "bool-vector/equality",
+      "form": "(list (equal (bool-vector t nil) (bool-vector t nil)) (equal (bool-vector t) (bool-vector nil)))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (list (equal (bool-vector t nil) (bool-vector t nil)) (equal (bool-vector t) (bool-vector nil)))) (error (list 'sig e))))",
+      "expected": "(ok (t nil))"
+    },
+    {
+      "primitive": "bool-vector-p",
+      "id": "bool-vector-p/19",
+      "form": "(bool-vector-p nil)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-p nil)) (error (list 'sig e))))",
+      "expected": "(ok nil)"
+    },
+    {
+      "primitive": "bool-vector-p",
+      "id": "bool-vector-p/20",
+      "form": "(bool-vector-p t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-p t)) (error (list 'sig e))))",
+      "expected": "(ok nil)"
+    },
+    {
+      "primitive": "bool-vector-p",
+      "id": "bool-vector-p/21",
+      "form": "(bool-vector-p [])",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-p [])) (error (list 'sig e))))",
+      "expected": "(ok nil)"
+    },
+    {
+      "primitive": "bool-vector-p",
+      "id": "bool-vector-p/22",
+      "form": "(bool-vector-p \"x\")",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-p \"x\")) (error (list 'sig e))))",
+      "expected": "(ok nil)"
+    },
+    {
+      "primitive": "bool-vector-p",
+      "id": "bool-vector-p/23",
+      "form": "(bool-vector-p (bool-vector))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-p (bool-vector))) (error (list 'sig e))))",
+      "expected": "(ok t)"
+    },
+    {
+      "primitive": "bool-vector-p",
+      "id": "bool-vector-p/24",
+      "form": "(bool-vector-p (bool-vector nil))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-p (bool-vector nil))) (error (list 'sig e))))",
+      "expected": "(ok t)"
+    },
+    {
+      "primitive": "bool-vector-exclusive-or",
+      "id": "bool-vector-exclusive-or/truth-table",
+      "form": "(let ((r (bool-vector-exclusive-or (bool-vector t t nil nil) (bool-vector t nil t nil)))) (list (aref r 0) (aref r 1) (aref r 2) (aref r 3)))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (let ((r (bool-vector-exclusive-or (bool-vector t t nil nil) (bool-vector t nil t nil)))) (list (aref r 0) (aref r 1) (aref r 2) (aref r 3)))) (error (list 'sig e))))",
+      "expected": "(ok (nil t t nil))"
+    },
+    {
+      "primitive": "bool-vector-exclusive-or",
+      "id": "bool-vector-exclusive-or/empty",
+      "form": "(length (bool-vector-exclusive-or (bool-vector) (bool-vector)))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (length (bool-vector-exclusive-or (bool-vector) (bool-vector)))) (error (list 'sig e))))",
+      "expected": "(ok 0)"
+    },
+    {
+      "primitive": "bool-vector-exclusive-or",
+      "id": "bool-vector-exclusive-or/changed-and-stable",
+      "form": "(let ((a (bool-vector t t nil nil)) (b (bool-vector t nil t nil)) (d (bool-vector nil nil nil t))) (list (eq (bool-vector-exclusive-or a b d) d) (bool-vector-exclusive-or a b d) (aref d 0) (aref d 1) (aref d 2) (aref d 3)))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a (bool-vector t t nil nil)) (b (bool-vector t nil t nil)) (d (bool-vector nil nil nil t))) (list (eq (bool-vector-exclusive-or a b d) d) (bool-vector-exclusive-or a b d) (aref d 0) (aref d 1) (aref d 2) (aref d 3)))) (error (list 'sig e))))",
+      "expected": "(ok (t nil nil t t nil))"
+    },
+    {
+      "primitive": "bool-vector-exclusive-or",
+      "id": "bool-vector-exclusive-or/alias-a",
+      "form": "(let ((a (bool-vector t t nil nil)) (b (bool-vector t nil t nil))) (bool-vector-exclusive-or a b a) (list (aref a 0) (aref a 1) (aref a 2) (aref a 3)))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a (bool-vector t t nil nil)) (b (bool-vector t nil t nil))) (bool-vector-exclusive-or a b a) (list (aref a 0) (aref a 1) (aref a 2) (aref a 3)))) (error (list 'sig e))))",
+      "expected": "(ok (nil t t nil))"
+    },
+    {
+      "primitive": "bool-vector-exclusive-or",
+      "id": "bool-vector-exclusive-or/alias-b",
+      "form": "(let ((a (bool-vector t t nil nil)) (b (bool-vector t nil t nil))) (bool-vector-exclusive-or a b b) (list (aref b 0) (aref b 1) (aref b 2) (aref b 3)))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a (bool-vector t t nil nil)) (b (bool-vector t nil t nil))) (bool-vector-exclusive-or a b b) (list (aref b 0) (aref b 1) (aref b 2) (aref b 3)))) (error (list 'sig e))))",
+      "expected": "(ok (nil t t nil))"
+    },
+    {
+      "primitive": "bool-vector-exclusive-or",
+      "id": "bool-vector-exclusive-or/length",
+      "form": "(bool-vector-exclusive-or (bool-vector t) (bool-vector nil nil))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-exclusive-or (bool-vector t) (bool-vector nil nil))) (error (list 'sig e))))",
+      "expected": "(sig (wrong-length-argument 1 2))"
+    },
+    {
+      "primitive": "bool-vector-exclusive-or",
+      "id": "bool-vector-exclusive-or/dest-length",
+      "form": "(bool-vector-exclusive-or (bool-vector t t nil nil) (bool-vector t nil t nil) (bool-vector nil))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-exclusive-or (bool-vector t t nil nil) (bool-vector t nil t nil) (bool-vector nil))) (error (list 'sig e))))",
+      "expected": "(sig (wrong-length-argument 4 4 1))"
+    },
+    {
+      "primitive": "bool-vector-exclusive-or",
+      "id": "bool-vector-exclusive-or/type-a",
+      "form": "(bool-vector-exclusive-or nil (bool-vector t nil t nil))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-exclusive-or nil (bool-vector t nil t nil))) (error (list 'sig e))))",
+      "expected": "(sig (wrong-type-argument bool-vector-p nil))"
+    },
+    {
+      "primitive": "bool-vector-exclusive-or",
+      "id": "bool-vector-exclusive-or/type-b",
+      "form": "(bool-vector-exclusive-or (bool-vector t t nil nil) nil)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-exclusive-or (bool-vector t t nil nil) nil)) (error (list 'sig e))))",
+      "expected": "(sig (wrong-type-argument bool-vector-p nil))"
+    },
+    {
+      "primitive": "bool-vector-exclusive-or",
+      "id": "bool-vector-exclusive-or/type-dest",
+      "form": "(bool-vector-exclusive-or (bool-vector t t nil nil) (bool-vector t nil t nil) t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-exclusive-or (bool-vector t t nil nil) (bool-vector t nil t nil) t)) (error (list 'sig e))))",
+      "expected": "(sig (wrong-type-argument bool-vector-p t))"
+    },
+    {
+      "primitive": "bool-vector-union",
+      "id": "bool-vector-union/truth-table",
+      "form": "(let ((r (bool-vector-union (bool-vector t t nil nil) (bool-vector t nil t nil)))) (list (aref r 0) (aref r 1) (aref r 2) (aref r 3)))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (let ((r (bool-vector-union (bool-vector t t nil nil) (bool-vector t nil t nil)))) (list (aref r 0) (aref r 1) (aref r 2) (aref r 3)))) (error (list 'sig e))))",
+      "expected": "(ok (t t t nil))"
+    },
+    {
+      "primitive": "bool-vector-union",
+      "id": "bool-vector-union/empty",
+      "form": "(length (bool-vector-union (bool-vector) (bool-vector)))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (length (bool-vector-union (bool-vector) (bool-vector)))) (error (list 'sig e))))",
+      "expected": "(ok 0)"
+    },
+    {
+      "primitive": "bool-vector-union",
+      "id": "bool-vector-union/changed-and-stable",
+      "form": "(let ((a (bool-vector t t nil nil)) (b (bool-vector t nil t nil)) (d (bool-vector nil nil nil t))) (list (eq (bool-vector-union a b d) d) (bool-vector-union a b d) (aref d 0) (aref d 1) (aref d 2) (aref d 3)))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a (bool-vector t t nil nil)) (b (bool-vector t nil t nil)) (d (bool-vector nil nil nil t))) (list (eq (bool-vector-union a b d) d) (bool-vector-union a b d) (aref d 0) (aref d 1) (aref d 2) (aref d 3)))) (error (list 'sig e))))",
+      "expected": "(ok (t nil t t t nil))"
+    },
+    {
+      "primitive": "bool-vector-union",
+      "id": "bool-vector-union/alias-a",
+      "form": "(let ((a (bool-vector t t nil nil)) (b (bool-vector t nil t nil))) (bool-vector-union a b a) (list (aref a 0) (aref a 1) (aref a 2) (aref a 3)))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a (bool-vector t t nil nil)) (b (bool-vector t nil t nil))) (bool-vector-union a b a) (list (aref a 0) (aref a 1) (aref a 2) (aref a 3)))) (error (list 'sig e))))",
+      "expected": "(ok (t t t nil))"
+    },
+    {
+      "primitive": "bool-vector-union",
+      "id": "bool-vector-union/alias-b",
+      "form": "(let ((a (bool-vector t t nil nil)) (b (bool-vector t nil t nil))) (bool-vector-union a b b) (list (aref b 0) (aref b 1) (aref b 2) (aref b 3)))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a (bool-vector t t nil nil)) (b (bool-vector t nil t nil))) (bool-vector-union a b b) (list (aref b 0) (aref b 1) (aref b 2) (aref b 3)))) (error (list 'sig e))))",
+      "expected": "(ok (t t t nil))"
+    },
+    {
+      "primitive": "bool-vector-union",
+      "id": "bool-vector-union/length",
+      "form": "(bool-vector-union (bool-vector t) (bool-vector nil nil))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-union (bool-vector t) (bool-vector nil nil))) (error (list 'sig e))))",
+      "expected": "(sig (wrong-length-argument 1 2))"
+    },
+    {
+      "primitive": "bool-vector-union",
+      "id": "bool-vector-union/dest-length",
+      "form": "(bool-vector-union (bool-vector t t nil nil) (bool-vector t nil t nil) (bool-vector nil))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-union (bool-vector t t nil nil) (bool-vector t nil t nil) (bool-vector nil))) (error (list 'sig e))))",
+      "expected": "(sig (wrong-length-argument 4 4 1))"
+    },
+    {
+      "primitive": "bool-vector-union",
+      "id": "bool-vector-union/type-a",
+      "form": "(bool-vector-union nil (bool-vector t nil t nil))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-union nil (bool-vector t nil t nil))) (error (list 'sig e))))",
+      "expected": "(sig (wrong-type-argument bool-vector-p nil))"
+    },
+    {
+      "primitive": "bool-vector-union",
+      "id": "bool-vector-union/type-b",
+      "form": "(bool-vector-union (bool-vector t t nil nil) nil)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-union (bool-vector t t nil nil) nil)) (error (list 'sig e))))",
+      "expected": "(sig (wrong-type-argument bool-vector-p nil))"
+    },
+    {
+      "primitive": "bool-vector-union",
+      "id": "bool-vector-union/type-dest",
+      "form": "(bool-vector-union (bool-vector t t nil nil) (bool-vector t nil t nil) t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-union (bool-vector t t nil nil) (bool-vector t nil t nil) t)) (error (list 'sig e))))",
+      "expected": "(sig (wrong-type-argument bool-vector-p t))"
+    },
+    {
+      "primitive": "bool-vector-intersection",
+      "id": "bool-vector-intersection/truth-table",
+      "form": "(let ((r (bool-vector-intersection (bool-vector t t nil nil) (bool-vector t nil t nil)))) (list (aref r 0) (aref r 1) (aref r 2) (aref r 3)))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (let ((r (bool-vector-intersection (bool-vector t t nil nil) (bool-vector t nil t nil)))) (list (aref r 0) (aref r 1) (aref r 2) (aref r 3)))) (error (list 'sig e))))",
+      "expected": "(ok (t nil nil nil))"
+    },
+    {
+      "primitive": "bool-vector-intersection",
+      "id": "bool-vector-intersection/empty",
+      "form": "(length (bool-vector-intersection (bool-vector) (bool-vector)))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (length (bool-vector-intersection (bool-vector) (bool-vector)))) (error (list 'sig e))))",
+      "expected": "(ok 0)"
+    },
+    {
+      "primitive": "bool-vector-intersection",
+      "id": "bool-vector-intersection/changed-and-stable",
+      "form": "(let ((a (bool-vector t t nil nil)) (b (bool-vector t nil t nil)) (d (bool-vector nil nil nil t))) (list (eq (bool-vector-intersection a b d) d) (bool-vector-intersection a b d) (aref d 0) (aref d 1) (aref d 2) (aref d 3)))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a (bool-vector t t nil nil)) (b (bool-vector t nil t nil)) (d (bool-vector nil nil nil t))) (list (eq (bool-vector-intersection a b d) d) (bool-vector-intersection a b d) (aref d 0) (aref d 1) (aref d 2) (aref d 3)))) (error (list 'sig e))))",
+      "expected": "(ok (t nil t nil nil nil))"
+    },
+    {
+      "primitive": "bool-vector-intersection",
+      "id": "bool-vector-intersection/alias-a",
+      "form": "(let ((a (bool-vector t t nil nil)) (b (bool-vector t nil t nil))) (bool-vector-intersection a b a) (list (aref a 0) (aref a 1) (aref a 2) (aref a 3)))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a (bool-vector t t nil nil)) (b (bool-vector t nil t nil))) (bool-vector-intersection a b a) (list (aref a 0) (aref a 1) (aref a 2) (aref a 3)))) (error (list 'sig e))))",
+      "expected": "(ok (t nil nil nil))"
+    },
+    {
+      "primitive": "bool-vector-intersection",
+      "id": "bool-vector-intersection/alias-b",
+      "form": "(let ((a (bool-vector t t nil nil)) (b (bool-vector t nil t nil))) (bool-vector-intersection a b b) (list (aref b 0) (aref b 1) (aref b 2) (aref b 3)))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a (bool-vector t t nil nil)) (b (bool-vector t nil t nil))) (bool-vector-intersection a b b) (list (aref b 0) (aref b 1) (aref b 2) (aref b 3)))) (error (list 'sig e))))",
+      "expected": "(ok (t nil nil nil))"
+    },
+    {
+      "primitive": "bool-vector-intersection",
+      "id": "bool-vector-intersection/length",
+      "form": "(bool-vector-intersection (bool-vector t) (bool-vector nil nil))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-intersection (bool-vector t) (bool-vector nil nil))) (error (list 'sig e))))",
+      "expected": "(sig (wrong-length-argument 1 2))"
+    },
+    {
+      "primitive": "bool-vector-intersection",
+      "id": "bool-vector-intersection/dest-length",
+      "form": "(bool-vector-intersection (bool-vector t t nil nil) (bool-vector t nil t nil) (bool-vector nil))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-intersection (bool-vector t t nil nil) (bool-vector t nil t nil) (bool-vector nil))) (error (list 'sig e))))",
+      "expected": "(sig (wrong-length-argument 4 4 1))"
+    },
+    {
+      "primitive": "bool-vector-intersection",
+      "id": "bool-vector-intersection/type-a",
+      "form": "(bool-vector-intersection nil (bool-vector t nil t nil))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-intersection nil (bool-vector t nil t nil))) (error (list 'sig e))))",
+      "expected": "(sig (wrong-type-argument bool-vector-p nil))"
+    },
+    {
+      "primitive": "bool-vector-intersection",
+      "id": "bool-vector-intersection/type-b",
+      "form": "(bool-vector-intersection (bool-vector t t nil nil) nil)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-intersection (bool-vector t t nil nil) nil)) (error (list 'sig e))))",
+      "expected": "(sig (wrong-type-argument bool-vector-p nil))"
+    },
+    {
+      "primitive": "bool-vector-intersection",
+      "id": "bool-vector-intersection/type-dest",
+      "form": "(bool-vector-intersection (bool-vector t t nil nil) (bool-vector t nil t nil) t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-intersection (bool-vector t t nil nil) (bool-vector t nil t nil) t)) (error (list 'sig e))))",
+      "expected": "(sig (wrong-type-argument bool-vector-p t))"
+    },
+    {
+      "primitive": "bool-vector-set-difference",
+      "id": "bool-vector-set-difference/truth-table",
+      "form": "(let ((r (bool-vector-set-difference (bool-vector t t nil nil) (bool-vector t nil t nil)))) (list (aref r 0) (aref r 1) (aref r 2) (aref r 3)))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (let ((r (bool-vector-set-difference (bool-vector t t nil nil) (bool-vector t nil t nil)))) (list (aref r 0) (aref r 1) (aref r 2) (aref r 3)))) (error (list 'sig e))))",
+      "expected": "(ok (nil t nil nil))"
+    },
+    {
+      "primitive": "bool-vector-set-difference",
+      "id": "bool-vector-set-difference/empty",
+      "form": "(length (bool-vector-set-difference (bool-vector) (bool-vector)))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (length (bool-vector-set-difference (bool-vector) (bool-vector)))) (error (list 'sig e))))",
+      "expected": "(ok 0)"
+    },
+    {
+      "primitive": "bool-vector-set-difference",
+      "id": "bool-vector-set-difference/changed-and-stable",
+      "form": "(let ((a (bool-vector t t nil nil)) (b (bool-vector t nil t nil)) (d (bool-vector nil nil nil t))) (list (eq (bool-vector-set-difference a b d) d) (bool-vector-set-difference a b d) (aref d 0) (aref d 1) (aref d 2) (aref d 3)))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a (bool-vector t t nil nil)) (b (bool-vector t nil t nil)) (d (bool-vector nil nil nil t))) (list (eq (bool-vector-set-difference a b d) d) (bool-vector-set-difference a b d) (aref d 0) (aref d 1) (aref d 2) (aref d 3)))) (error (list 'sig e))))",
+      "expected": "(ok (t nil nil t nil nil))"
+    },
+    {
+      "primitive": "bool-vector-set-difference",
+      "id": "bool-vector-set-difference/alias-a",
+      "form": "(let ((a (bool-vector t t nil nil)) (b (bool-vector t nil t nil))) (bool-vector-set-difference a b a) (list (aref a 0) (aref a 1) (aref a 2) (aref a 3)))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a (bool-vector t t nil nil)) (b (bool-vector t nil t nil))) (bool-vector-set-difference a b a) (list (aref a 0) (aref a 1) (aref a 2) (aref a 3)))) (error (list 'sig e))))",
+      "expected": "(ok (nil t nil nil))"
+    },
+    {
+      "primitive": "bool-vector-set-difference",
+      "id": "bool-vector-set-difference/alias-b",
+      "form": "(let ((a (bool-vector t t nil nil)) (b (bool-vector t nil t nil))) (bool-vector-set-difference a b b) (list (aref b 0) (aref b 1) (aref b 2) (aref b 3)))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a (bool-vector t t nil nil)) (b (bool-vector t nil t nil))) (bool-vector-set-difference a b b) (list (aref b 0) (aref b 1) (aref b 2) (aref b 3)))) (error (list 'sig e))))",
+      "expected": "(ok (nil t nil nil))"
+    },
+    {
+      "primitive": "bool-vector-set-difference",
+      "id": "bool-vector-set-difference/length",
+      "form": "(bool-vector-set-difference (bool-vector t) (bool-vector nil nil))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-set-difference (bool-vector t) (bool-vector nil nil))) (error (list 'sig e))))",
+      "expected": "(sig (wrong-length-argument 1 2))"
+    },
+    {
+      "primitive": "bool-vector-set-difference",
+      "id": "bool-vector-set-difference/dest-length",
+      "form": "(bool-vector-set-difference (bool-vector t t nil nil) (bool-vector t nil t nil) (bool-vector nil))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-set-difference (bool-vector t t nil nil) (bool-vector t nil t nil) (bool-vector nil))) (error (list 'sig e))))",
+      "expected": "(sig (wrong-length-argument 4 4 1))"
+    },
+    {
+      "primitive": "bool-vector-set-difference",
+      "id": "bool-vector-set-difference/type-a",
+      "form": "(bool-vector-set-difference nil (bool-vector t nil t nil))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-set-difference nil (bool-vector t nil t nil))) (error (list 'sig e))))",
+      "expected": "(sig (wrong-type-argument bool-vector-p nil))"
+    },
+    {
+      "primitive": "bool-vector-set-difference",
+      "id": "bool-vector-set-difference/type-b",
+      "form": "(bool-vector-set-difference (bool-vector t t nil nil) nil)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-set-difference (bool-vector t t nil nil) nil)) (error (list 'sig e))))",
+      "expected": "(sig (wrong-type-argument bool-vector-p nil))"
+    },
+    {
+      "primitive": "bool-vector-set-difference",
+      "id": "bool-vector-set-difference/type-dest",
+      "form": "(bool-vector-set-difference (bool-vector t t nil nil) (bool-vector t nil t nil) t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-set-difference (bool-vector t t nil nil) (bool-vector t nil t nil) t)) (error (list 'sig e))))",
+      "expected": "(sig (wrong-type-argument bool-vector-p t))"
+    },
+    {
+      "primitive": "bool-vector-subsetp",
+      "id": "bool-vector-subsetp/65",
+      "form": "(bool-vector-subsetp (bool-vector nil nil) (bool-vector nil nil))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-subsetp (bool-vector nil nil) (bool-vector nil nil))) (error (list 'sig e))))",
+      "expected": "(ok t)"
+    },
+    {
+      "primitive": "bool-vector-subsetp",
+      "id": "bool-vector-subsetp/66",
+      "form": "(bool-vector-subsetp (bool-vector t nil) (bool-vector t t))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-subsetp (bool-vector t nil) (bool-vector t t))) (error (list 'sig e))))",
+      "expected": "(ok t)"
+    },
+    {
+      "primitive": "bool-vector-subsetp",
+      "id": "bool-vector-subsetp/67",
+      "form": "(bool-vector-subsetp (bool-vector t t) (bool-vector t nil))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-subsetp (bool-vector t t) (bool-vector t nil))) (error (list 'sig e))))",
+      "expected": "(ok nil)"
+    },
+    {
+      "primitive": "bool-vector-subsetp",
+      "id": "bool-vector-subsetp/68",
+      "form": "(bool-vector-subsetp (bool-vector ) (bool-vector ))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-subsetp (bool-vector ) (bool-vector ))) (error (list 'sig e))))",
+      "expected": "(ok t)"
+    },
+    {
+      "primitive": "bool-vector-subsetp",
+      "id": "bool-vector-subsetp/length",
+      "form": "(bool-vector-subsetp (bool-vector) (bool-vector t))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-subsetp (bool-vector) (bool-vector t))) (error (list 'sig e))))",
+      "expected": "(sig (wrong-length-argument 0 1 1))"
+    },
+    {
+      "primitive": "bool-vector-subsetp",
+      "id": "bool-vector-subsetp/type",
+      "form": "(bool-vector-subsetp nil (bool-vector))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-subsetp nil (bool-vector))) (error (list 'sig e))))",
+      "expected": "(sig (wrong-type-argument bool-vector-p nil))"
+    },
+    {
+      "primitive": "bool-vector-not",
+      "id": "bool-vector-not/truth",
+      "form": "(let ((r (bool-vector-not (bool-vector t nil t nil)))) (list (aref r 0) (aref r 1) (aref r 2) (aref r 3)))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (let ((r (bool-vector-not (bool-vector t nil t nil)))) (list (aref r 0) (aref r 1) (aref r 2) (aref r 3)))) (error (list 'sig e))))",
+      "expected": "(ok (nil t nil t))"
+    },
+    {
+      "primitive": "bool-vector-not",
+      "id": "bool-vector-not/padding",
+      "form": "(bool-vector-count-population (bool-vector-not (make-bool-vector 65 nil)))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-count-population (bool-vector-not (make-bool-vector 65 nil)))) (error (list 'sig e))))",
+      "expected": "(ok 65)"
+    },
+    {
+      "primitive": "bool-vector-not",
+      "id": "bool-vector-not/dest",
+      "form": "(let ((a (bool-vector t nil)) (d (bool-vector nil nil))) (list (eq (bool-vector-not a d) d) (eq (bool-vector-not a d) d) (aref d 0) (aref d 1)))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a (bool-vector t nil)) (d (bool-vector nil nil))) (list (eq (bool-vector-not a d) d) (eq (bool-vector-not a d) d) (aref d 0) (aref d 1)))) (error (list 'sig e))))",
+      "expected": "(ok (t t nil t))"
+    },
+    {
+      "primitive": "bool-vector-not",
+      "id": "bool-vector-not/alias",
+      "form": "(let ((a (bool-vector t nil))) (bool-vector-not a a) (list (aref a 0) (aref a 1)))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a (bool-vector t nil))) (bool-vector-not a a) (list (aref a 0) (aref a 1)))) (error (list 'sig e))))",
+      "expected": "(ok (nil t))"
+    },
+    {
+      "primitive": "bool-vector-not",
+      "id": "bool-vector-not/length",
+      "form": "(bool-vector-not (bool-vector t) (bool-vector))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-not (bool-vector t) (bool-vector))) (error (list 'sig e))))",
+      "expected": "(sig (wrong-length-argument 1 0))"
+    },
+    {
+      "primitive": "bool-vector-not",
+      "id": "bool-vector-not/type",
+      "form": "(bool-vector-not nil)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-not nil)) (error (list 'sig e))))",
+      "expected": "(sig (wrong-type-argument bool-vector-p nil))"
+    },
+    {
+      "primitive": "bool-vector-not",
+      "id": "bool-vector-not/dest-type",
+      "form": "(bool-vector-not (bool-vector) t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-not (bool-vector) t)) (error (list 'sig e))))",
+      "expected": "(sig (wrong-type-argument bool-vector-p t))"
+    },
+    {
+      "primitive": "bool-vector-count-population",
+      "id": "bool-vector-count-population/0",
+      "form": "(bool-vector-count-population (make-bool-vector 0 t))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-count-population (make-bool-vector 0 t))) (error (list 'sig e))))",
+      "expected": "(ok 0)"
+    },
+    {
+      "primitive": "bool-vector-count-population",
+      "id": "bool-vector-count-population/1",
+      "form": "(bool-vector-count-population (make-bool-vector 1 t))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-count-population (make-bool-vector 1 t))) (error (list 'sig e))))",
+      "expected": "(ok 1)"
+    },
+    {
+      "primitive": "bool-vector-count-population",
+      "id": "bool-vector-count-population/7",
+      "form": "(bool-vector-count-population (make-bool-vector 7 t))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-count-population (make-bool-vector 7 t))) (error (list 'sig e))))",
+      "expected": "(ok 7)"
+    },
+    {
+      "primitive": "bool-vector-count-population",
+      "id": "bool-vector-count-population/8",
+      "form": "(bool-vector-count-population (make-bool-vector 8 t))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-count-population (make-bool-vector 8 t))) (error (list 'sig e))))",
+      "expected": "(ok 8)"
+    },
+    {
+      "primitive": "bool-vector-count-population",
+      "id": "bool-vector-count-population/9",
+      "form": "(bool-vector-count-population (make-bool-vector 9 t))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-count-population (make-bool-vector 9 t))) (error (list 'sig e))))",
+      "expected": "(ok 9)"
+    },
+    {
+      "primitive": "bool-vector-count-population",
+      "id": "bool-vector-count-population/63",
+      "form": "(bool-vector-count-population (make-bool-vector 63 t))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-count-population (make-bool-vector 63 t))) (error (list 'sig e))))",
+      "expected": "(ok 63)"
+    },
+    {
+      "primitive": "bool-vector-count-population",
+      "id": "bool-vector-count-population/64",
+      "form": "(bool-vector-count-population (make-bool-vector 64 t))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-count-population (make-bool-vector 64 t))) (error (list 'sig e))))",
+      "expected": "(ok 64)"
+    },
+    {
+      "primitive": "bool-vector-count-population",
+      "id": "bool-vector-count-population/65",
+      "form": "(bool-vector-count-population (make-bool-vector 65 t))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-count-population (make-bool-vector 65 t))) (error (list 'sig e))))",
+      "expected": "(ok 65)"
+    },
+    {
+      "primitive": "bool-vector-count-population",
+      "id": "bool-vector-count-population/type",
+      "form": "(bool-vector-count-population [])",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-count-population [])) (error (list 'sig e))))",
+      "expected": "(sig (wrong-type-argument bool-vector-p []))"
+    },
+    {
+      "primitive": "bool-vector-count-consecutive",
+      "id": "bool-vector-count-consecutive/nil0",
+      "form": "(bool-vector-count-consecutive (bool-vector t t nil nil) nil 0)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-count-consecutive (bool-vector t t nil nil) nil 0)) (error (list 'sig e))))",
+      "expected": "(ok 0)"
+    },
+    {
+      "primitive": "bool-vector-count-consecutive",
+      "id": "bool-vector-count-consecutive/nil1",
+      "form": "(bool-vector-count-consecutive (bool-vector t t nil nil) nil 1)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-count-consecutive (bool-vector t t nil nil) nil 1)) (error (list 'sig e))))",
+      "expected": "(ok 0)"
+    },
+    {
+      "primitive": "bool-vector-count-consecutive",
+      "id": "bool-vector-count-consecutive/nil2",
+      "form": "(bool-vector-count-consecutive (bool-vector t t nil nil) nil 2)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-count-consecutive (bool-vector t t nil nil) nil 2)) (error (list 'sig e))))",
+      "expected": "(ok 2)"
+    },
+    {
+      "primitive": "bool-vector-count-consecutive",
+      "id": "bool-vector-count-consecutive/nil3",
+      "form": "(bool-vector-count-consecutive (bool-vector t t nil nil) nil 3)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-count-consecutive (bool-vector t t nil nil) nil 3)) (error (list 'sig e))))",
+      "expected": "(ok 1)"
+    },
+    {
+      "primitive": "bool-vector-count-consecutive",
+      "id": "bool-vector-count-consecutive/nil4",
+      "form": "(bool-vector-count-consecutive (bool-vector t t nil nil) nil 4)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-count-consecutive (bool-vector t t nil nil) nil 4)) (error (list 'sig e))))",
+      "expected": "(ok 0)"
+    },
+    {
+      "primitive": "bool-vector-count-consecutive",
+      "id": "bool-vector-count-consecutive/t0",
+      "form": "(bool-vector-count-consecutive (bool-vector t t nil nil) t 0)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-count-consecutive (bool-vector t t nil nil) t 0)) (error (list 'sig e))))",
+      "expected": "(ok 2)"
+    },
+    {
+      "primitive": "bool-vector-count-consecutive",
+      "id": "bool-vector-count-consecutive/t1",
+      "form": "(bool-vector-count-consecutive (bool-vector t t nil nil) t 1)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-count-consecutive (bool-vector t t nil nil) t 1)) (error (list 'sig e))))",
+      "expected": "(ok 1)"
+    },
+    {
+      "primitive": "bool-vector-count-consecutive",
+      "id": "bool-vector-count-consecutive/t2",
+      "form": "(bool-vector-count-consecutive (bool-vector t t nil nil) t 2)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-count-consecutive (bool-vector t t nil nil) t 2)) (error (list 'sig e))))",
+      "expected": "(ok 0)"
+    },
+    {
+      "primitive": "bool-vector-count-consecutive",
+      "id": "bool-vector-count-consecutive/t3",
+      "form": "(bool-vector-count-consecutive (bool-vector t t nil nil) t 3)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-count-consecutive (bool-vector t t nil nil) t 3)) (error (list 'sig e))))",
+      "expected": "(ok 0)"
+    },
+    {
+      "primitive": "bool-vector-count-consecutive",
+      "id": "bool-vector-count-consecutive/t4",
+      "form": "(bool-vector-count-consecutive (bool-vector t t nil nil) t 4)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-count-consecutive (bool-vector t t nil nil) t 4)) (error (list 'sig e))))",
+      "expected": "(ok 0)"
+    },
+    {
+      "primitive": "bool-vector-count-consecutive",
+      "id": "bool-vector-count-consecutive/'truth0",
+      "form": "(bool-vector-count-consecutive (bool-vector t t nil nil) 'truth 0)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-count-consecutive (bool-vector t t nil nil) 'truth 0)) (error (list 'sig e))))",
+      "expected": "(ok 2)"
+    },
+    {
+      "primitive": "bool-vector-count-consecutive",
+      "id": "bool-vector-count-consecutive/'truth1",
+      "form": "(bool-vector-count-consecutive (bool-vector t t nil nil) 'truth 1)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-count-consecutive (bool-vector t t nil nil) 'truth 1)) (error (list 'sig e))))",
+      "expected": "(ok 1)"
+    },
+    {
+      "primitive": "bool-vector-count-consecutive",
+      "id": "bool-vector-count-consecutive/'truth2",
+      "form": "(bool-vector-count-consecutive (bool-vector t t nil nil) 'truth 2)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-count-consecutive (bool-vector t t nil nil) 'truth 2)) (error (list 'sig e))))",
+      "expected": "(ok 0)"
+    },
+    {
+      "primitive": "bool-vector-count-consecutive",
+      "id": "bool-vector-count-consecutive/'truth3",
+      "form": "(bool-vector-count-consecutive (bool-vector t t nil nil) 'truth 3)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-count-consecutive (bool-vector t t nil nil) 'truth 3)) (error (list 'sig e))))",
+      "expected": "(ok 0)"
+    },
+    {
+      "primitive": "bool-vector-count-consecutive",
+      "id": "bool-vector-count-consecutive/'truth4",
+      "form": "(bool-vector-count-consecutive (bool-vector t t nil nil) 'truth 4)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-count-consecutive (bool-vector t t nil nil) 'truth 4)) (error (list 'sig e))))",
+      "expected": "(ok 0)"
+    },
+    {
+      "primitive": "bool-vector-count-consecutive",
+      "id": "bool-vector-count-consecutive/boundary0",
+      "form": "(bool-vector-count-consecutive (make-bool-vector 0 t) t 0)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-count-consecutive (make-bool-vector 0 t) t 0)) (error (list 'sig e))))",
+      "expected": "(ok 0)"
+    },
+    {
+      "primitive": "bool-vector-count-consecutive",
+      "id": "bool-vector-count-consecutive/boundary7",
+      "form": "(bool-vector-count-consecutive (make-bool-vector 7 t) t 0)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-count-consecutive (make-bool-vector 7 t) t 0)) (error (list 'sig e))))",
+      "expected": "(ok 7)"
+    },
+    {
+      "primitive": "bool-vector-count-consecutive",
+      "id": "bool-vector-count-consecutive/boundary8",
+      "form": "(bool-vector-count-consecutive (make-bool-vector 8 t) t 0)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-count-consecutive (make-bool-vector 8 t) t 0)) (error (list 'sig e))))",
+      "expected": "(ok 8)"
+    },
+    {
+      "primitive": "bool-vector-count-consecutive",
+      "id": "bool-vector-count-consecutive/boundary9",
+      "form": "(bool-vector-count-consecutive (make-bool-vector 9 t) t 0)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-count-consecutive (make-bool-vector 9 t) t 0)) (error (list 'sig e))))",
+      "expected": "(ok 9)"
+    },
+    {
+      "primitive": "bool-vector-count-consecutive",
+      "id": "bool-vector-count-consecutive/boundary63",
+      "form": "(bool-vector-count-consecutive (make-bool-vector 63 t) t 0)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-count-consecutive (make-bool-vector 63 t) t 0)) (error (list 'sig e))))",
+      "expected": "(ok 63)"
+    },
+    {
+      "primitive": "bool-vector-count-consecutive",
+      "id": "bool-vector-count-consecutive/boundary64",
+      "form": "(bool-vector-count-consecutive (make-bool-vector 64 t) t 0)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-count-consecutive (make-bool-vector 64 t) t 0)) (error (list 'sig e))))",
+      "expected": "(ok 64)"
+    },
+    {
+      "primitive": "bool-vector-count-consecutive",
+      "id": "bool-vector-count-consecutive/boundary65",
+      "form": "(bool-vector-count-consecutive (make-bool-vector 65 t) t 0)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-count-consecutive (make-bool-vector 65 t) t 0)) (error (list 'sig e))))",
+      "expected": "(ok 65)"
+    },
+    {
+      "primitive": "bool-vector-count-consecutive",
+      "id": "bool-vector-count-consecutive/index-1",
+      "form": "(bool-vector-count-consecutive (bool-vector t) nil -1)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-count-consecutive (bool-vector t) nil -1)) (error (list 'sig e))))",
+      "expected": "(sig (wrong-type-argument wholenump -1))"
+    },
+    {
+      "primitive": "bool-vector-count-consecutive",
+      "id": "bool-vector-count-consecutive/index5",
+      "form": "(bool-vector-count-consecutive (bool-vector t) nil 5)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-count-consecutive (bool-vector t) nil 5)) (error (list 'sig e))))",
+      "expected": "(sig (args-out-of-range #&1\"\u0001\" 5))"
+    },
+    {
+      "primitive": "bool-vector-count-consecutive",
+      "id": "bool-vector-count-consecutive/indexnil",
+      "form": "(bool-vector-count-consecutive (bool-vector t) nil nil)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-count-consecutive (bool-vector t) nil nil)) (error (list 'sig e))))",
+      "expected": "(sig (wrong-type-argument wholenump nil))"
+    },
+    {
+      "primitive": "bool-vector-count-consecutive",
+      "id": "bool-vector-count-consecutive/type",
+      "form": "(bool-vector-count-consecutive nil t 0)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (bool-vector-count-consecutive nil t 0)) (error (list 'sig e))))",
+      "expected": "(sig (wrong-type-argument bool-vector-p nil))"
+    },
+    {
+      "primitive": "bool-vector",
+      "id": "bool-vector/integration-append",
+      "form": "(append (bool-vector t nil) nil)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (append (bool-vector t nil) nil)) (error (list 'sig e))))",
+      "expected": "(ok (t nil))"
+    },
+    {
+      "primitive": "bool-vector",
+      "id": "bool-vector/integration-append-final-identity",
+      "form": "(let ((b (bool-vector t nil))) (list (eq b (append b)) (eq b (append nil b)) (eq b (cdr (append (bool-vector t) b)))))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (let ((b (bool-vector t nil))) (list (eq b (append b)) (eq b (append nil b)) (eq b (cdr (append (bool-vector t) b)))))) (error (list 'sig e))))",
+      "expected": "(ok (t t t))"
+    },
+    {
+      "primitive": "bool-vector",
+      "id": "bool-vector/integration-append-independent",
+      "form": "(let* ((b (bool-vector t nil)) (r (append b nil))) (aset b 0 nil) (list r (vconcat b)))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (let* ((b (bool-vector t nil)) (r (append b nil))) (aset b 0 nil) (list r (vconcat b)))) (error (list 'sig e))))",
+      "expected": "(ok ((t nil) [nil nil]))"
+    },
+    {
+      "primitive": "bool-vector",
+      "id": "bool-vector/integration-append-empty",
+      "form": "(append (bool-vector) (bool-vector nil t) nil)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (append (bool-vector) (bool-vector nil t) nil)) (error (list 'sig e))))",
+      "expected": "(ok (nil t))"
+    },
+    {
+      "primitive": "bool-vector",
+      "id": "bool-vector/integration-nreverse",
+      "form": "(let* ((b (bool-vector t nil)) (r (nreverse b))) (list (eq b r) (vconcat b)))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (let* ((b (bool-vector t nil)) (r (nreverse b))) (list (eq b r) (vconcat b)))) (error (list 'sig e))))",
+      "expected": "(ok (t [nil t]))"
+    },
+    {
+      "primitive": "bool-vector",
+      "id": "bool-vector/integration-nreverse-alias",
+      "form": "(let* ((b (bool-vector t nil nil)) (r (nreverse b))) (aset r 1 t) (list (vconcat b) (eq b (nreverse r)) (vconcat b)))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (let* ((b (bool-vector t nil nil)) (r (nreverse b))) (aset r 1 t) (list (vconcat b) (eq b (nreverse r)) (vconcat b)))) (error (list 'sig e))))",
+      "expected": "(ok ([nil t t] t [t t nil]))"
+    },
+    {
+      "primitive": "bool-vector",
+      "id": "bool-vector/integration-nreverse-boundary",
+      "form": "(let ((b (make-bool-vector 65 nil))) (aset b 0 t) (aset b 7 t) (nreverse b) (list (length b) (aref b 64) (aref b 57) (aref b 0) (bool-vector-count-population b)))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (let ((b (make-bool-vector 65 nil))) (aset b 0 t) (aset b 7 t) (nreverse b) (list (length b) (aref b 64) (aref b 57) (aref b 0) (bool-vector-count-population b)))) (error (list 'sig e))))",
+      "expected": "(ok (65 t t nil 2))"
+    },
+    {
+      "primitive": "bool-vector",
+      "id": "bool-vector/integration-nreverse-empty",
+      "form": "(let ((b (bool-vector))) (list (eq b (nreverse b)) (length b)))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (let ((b (bool-vector))) (list (eq b (nreverse b)) (length b)))) (error (list 'sig e))))",
+      "expected": "(ok (t 0))"
+    },
+    {
+      "primitive": "bool-vector",
+      "id": "bool-vector/integration-fillarray",
+      "form": "(let ((b (bool-vector t nil))) (list (eq b (fillarray b t)) (vconcat b)))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (let ((b (bool-vector t nil))) (list (eq b (fillarray b t)) (vconcat b)))) (error (list 'sig e))))",
+      "expected": "(ok (t [t t]))"
+    },
+    {
+      "primitive": "bool-vector",
+      "id": "bool-vector/integration-fillarray-truth",
+      "form": "(let ((b (make-bool-vector 9 nil))) (list (eq b (fillarray b 0)) (bool-vector-count-population b) (eq b (fillarray b nil)) (bool-vector-count-population b)))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (let ((b (make-bool-vector 9 nil))) (list (eq b (fillarray b 0)) (bool-vector-count-population b) (eq b (fillarray b nil)) (bool-vector-count-population b)))) (error (list 'sig e))))",
+      "expected": "(ok (t 9 t 0))"
+    },
+    {
+      "primitive": "bool-vector",
+      "id": "bool-vector/integration-fillarray-empty",
+      "form": "(let ((b (bool-vector))) (list (eq b (fillarray b 'x)) (length b)))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (let ((b (bool-vector))) (list (eq b (fillarray b 'x)) (length b)))) (error (list 'sig e))))",
+      "expected": "(ok (t 0))"
+    },
+    {
+      "primitive": "bool-vector",
+      "id": "bool-vector/integration-elt",
+      "form": "(list (elt (bool-vector t nil) 0) (elt (bool-vector t nil) 1))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (list (elt (bool-vector t nil) 0) (elt (bool-vector t nil) 1))) (error (list 'sig e))))",
+      "expected": "(ok (t nil))"
+    },
+    {
+      "primitive": "bool-vector",
+      "id": "bool-vector/integration-elt-range",
+      "form": "(elt (bool-vector t) 1)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (elt (bool-vector t) 1)) (error (list 'sig e))))",
+      "expected": "(sig (args-out-of-range #&1\"\u0001\" 1))"
+    },
+    {
+      "primitive": "bool-vector",
+      "id": "bool-vector/integration-reverse",
+      "form": "(vconcat (reverse (bool-vector t nil nil t nil nil nil nil t)))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (vconcat (reverse (bool-vector t nil nil t nil nil nil nil t)))) (error (list 'sig e))))",
+      "expected": "(ok [t nil nil nil nil t nil nil t])"
+    },
+    {
+      "primitive": "bool-vector",
+      "id": "bool-vector/integration-reverse-independent",
+      "form": "(let* ((b (bool-vector t nil)) (r (reverse b))) (aset r 0 t) (list (aref b 1) (aref r 0) (eq b r)))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (let* ((b (bool-vector t nil)) (r (reverse b))) (aset r 0 t) (list (aref b 1) (aref r 0) (eq b r)))) (error (list 'sig e))))",
+      "expected": "(ok (nil t nil))"
+    },
+    {
+      "primitive": "bool-vector",
+      "id": "bool-vector/integration-vconcat",
+      "form": "(vconcat [a] (bool-vector t nil) \"A\")",
+      "source": "(prin1-to-string (condition-case e (list 'ok (vconcat [a] (bool-vector t nil) \"A\")) (error (list 'sig e))))",
+      "expected": "(ok [a t nil 65])"
+    },
+    {
+      "primitive": "bool-vector",
+      "id": "bool-vector/integration-mapc-mutation",
+      "form": "(let ((b (bool-vector t nil)) (seen nil)) (list (eq b (mapc (lambda (v) (setq seen (cons v seen)) (aset b 1 t)) b)) (nreverse seen)))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (let ((b (bool-vector t nil)) (seen nil)) (list (eq b (mapc (lambda (v) (setq seen (cons v seen)) (aset b 1 t)) b)) (nreverse seen)))) (error (list 'sig e))))",
+      "expected": "(ok (t (t t)))"
+    },
+    {
+      "primitive": "bool-vector",
+      "id": "bool-vector/integration-mapcan",
+      "form": "(mapcan (lambda (v) (list v)) (bool-vector nil t))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda (v) (list v)) (bool-vector nil t))) (error (list 'sig e))))",
+      "expected": "(ok (nil t))"
+    },
+    {
+      "primitive": "bool-vector",
+      "id": "bool-vector/integration-make-vector",
+      "form": "(let* ((b (bool-vector t nil)) (v (make-vector 2 b))) (aset b 1 t) (list (eq (aref v 0) (aref v 1)) (vconcat (aref v 1))))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (let* ((b (bool-vector t nil)) (v (make-vector 2 b))) (aset b 1 t) (list (eq (aref v 0) (aref v 1)) (vconcat (aref v 1))))) (error (list 'sig e))))",
+      "expected": "(ok (t [t t]))"
+    },
+    {
+      "primitive": "bool-vector",
+      "id": "bool-vector/integration-aref-range",
+      "form": "(aref (bool-vector t) 1)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (aref (bool-vector t) 1)) (error (list 'sig e))))",
+      "expected": "(sig (args-out-of-range #&1\"\u0001\" 1))"
+    },
+    {
+      "primitive": "bool-vector",
+      "id": "bool-vector/integration-aset-range",
+      "form": "(aset (bool-vector t) 1 nil)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (aset (bool-vector t) 1 nil)) (error (list 'sig e))))",
+      "expected": "(sig (args-out-of-range #&1\"\u0001\" 1))"
+    },
+    {
+      "primitive": "bool-vector",
+      "id": "bool-vector/callable",
+      "form": "(list (fboundp 'bool-vector) (functionp #'bool-vector))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (list (fboundp 'bool-vector) (functionp #'bool-vector))) (error (list 'sig e))))",
+      "expected": "(ok (t t))"
+    },
+    {
+      "primitive": "bool-vector-count-consecutive",
+      "id": "bool-vector-count-consecutive/arity",
+      "form": "(apply #'bool-vector-count-consecutive nil)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (apply #'bool-vector-count-consecutive nil)) (error (list 'sig e))))",
+      "expected": "(sig (wrong-number-of-arguments #<subr bool-vector-count-consecutive> 0))"
+    },
+    {
+      "primitive": "bool-vector-count-consecutive",
+      "id": "bool-vector-count-consecutive/arity-high",
+      "form": "(apply #'bool-vector-count-consecutive '(nil nil nil nil))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (apply #'bool-vector-count-consecutive '(nil nil nil nil))) (error (list 'sig e))))",
+      "expected": "(sig (wrong-number-of-arguments #<subr bool-vector-count-consecutive> 4))"
+    },
+    {
+      "primitive": "bool-vector-count-consecutive",
+      "id": "bool-vector-count-consecutive/callable",
+      "form": "(list (fboundp 'bool-vector-count-consecutive) (functionp #'bool-vector-count-consecutive))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (list (fboundp 'bool-vector-count-consecutive) (functionp #'bool-vector-count-consecutive))) (error (list 'sig e))))",
+      "expected": "(ok (t t))"
+    },
+    {
+      "primitive": "bool-vector-count-population",
+      "id": "bool-vector-count-population/arity",
+      "form": "(apply #'bool-vector-count-population nil)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (apply #'bool-vector-count-population nil)) (error (list 'sig e))))",
+      "expected": "(sig (wrong-number-of-arguments #<subr bool-vector-count-population> 0))"
+    },
+    {
+      "primitive": "bool-vector-count-population",
+      "id": "bool-vector-count-population/arity-high",
+      "form": "(apply #'bool-vector-count-population '(nil nil nil nil))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (apply #'bool-vector-count-population '(nil nil nil nil))) (error (list 'sig e))))",
+      "expected": "(sig (wrong-number-of-arguments #<subr bool-vector-count-population> 4))"
+    },
+    {
+      "primitive": "bool-vector-count-population",
+      "id": "bool-vector-count-population/callable",
+      "form": "(list (fboundp 'bool-vector-count-population) (functionp #'bool-vector-count-population))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (list (fboundp 'bool-vector-count-population) (functionp #'bool-vector-count-population))) (error (list 'sig e))))",
+      "expected": "(ok (t t))"
+    },
+    {
+      "primitive": "bool-vector-exclusive-or",
+      "id": "bool-vector-exclusive-or/arity",
+      "form": "(apply #'bool-vector-exclusive-or nil)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (apply #'bool-vector-exclusive-or nil)) (error (list 'sig e))))",
+      "expected": "(sig (wrong-number-of-arguments #<subr bool-vector-exclusive-or> 0))"
+    },
+    {
+      "primitive": "bool-vector-exclusive-or",
+      "id": "bool-vector-exclusive-or/arity-high",
+      "form": "(apply #'bool-vector-exclusive-or '(nil nil nil nil))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (apply #'bool-vector-exclusive-or '(nil nil nil nil))) (error (list 'sig e))))",
+      "expected": "(sig (wrong-number-of-arguments #<subr bool-vector-exclusive-or> 4))"
+    },
+    {
+      "primitive": "bool-vector-exclusive-or",
+      "id": "bool-vector-exclusive-or/callable",
+      "form": "(list (fboundp 'bool-vector-exclusive-or) (functionp #'bool-vector-exclusive-or))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (list (fboundp 'bool-vector-exclusive-or) (functionp #'bool-vector-exclusive-or))) (error (list 'sig e))))",
+      "expected": "(ok (t t))"
+    },
+    {
+      "primitive": "bool-vector-intersection",
+      "id": "bool-vector-intersection/arity",
+      "form": "(apply #'bool-vector-intersection nil)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (apply #'bool-vector-intersection nil)) (error (list 'sig e))))",
+      "expected": "(sig (wrong-number-of-arguments #<subr bool-vector-intersection> 0))"
+    },
+    {
+      "primitive": "bool-vector-intersection",
+      "id": "bool-vector-intersection/arity-high",
+      "form": "(apply #'bool-vector-intersection '(nil nil nil nil))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (apply #'bool-vector-intersection '(nil nil nil nil))) (error (list 'sig e))))",
+      "expected": "(sig (wrong-number-of-arguments #<subr bool-vector-intersection> 4))"
+    },
+    {
+      "primitive": "bool-vector-intersection",
+      "id": "bool-vector-intersection/callable",
+      "form": "(list (fboundp 'bool-vector-intersection) (functionp #'bool-vector-intersection))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (list (fboundp 'bool-vector-intersection) (functionp #'bool-vector-intersection))) (error (list 'sig e))))",
+      "expected": "(ok (t t))"
+    },
+    {
+      "primitive": "bool-vector-not",
+      "id": "bool-vector-not/arity",
+      "form": "(apply #'bool-vector-not nil)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (apply #'bool-vector-not nil)) (error (list 'sig e))))",
+      "expected": "(sig (wrong-number-of-arguments #<subr bool-vector-not> 0))"
+    },
+    {
+      "primitive": "bool-vector-not",
+      "id": "bool-vector-not/arity-high",
+      "form": "(apply #'bool-vector-not '(nil nil nil nil))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (apply #'bool-vector-not '(nil nil nil nil))) (error (list 'sig e))))",
+      "expected": "(sig (wrong-number-of-arguments #<subr bool-vector-not> 4))"
+    },
+    {
+      "primitive": "bool-vector-not",
+      "id": "bool-vector-not/callable",
+      "form": "(list (fboundp 'bool-vector-not) (functionp #'bool-vector-not))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (list (fboundp 'bool-vector-not) (functionp #'bool-vector-not))) (error (list 'sig e))))",
+      "expected": "(ok (t t))"
+    },
+    {
+      "primitive": "bool-vector-p",
+      "id": "bool-vector-p/arity",
+      "form": "(apply #'bool-vector-p nil)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (apply #'bool-vector-p nil)) (error (list 'sig e))))",
+      "expected": "(sig (wrong-number-of-arguments #<subr bool-vector-p> 0))"
+    },
+    {
+      "primitive": "bool-vector-p",
+      "id": "bool-vector-p/arity-high",
+      "form": "(apply #'bool-vector-p '(nil nil nil nil))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (apply #'bool-vector-p '(nil nil nil nil))) (error (list 'sig e))))",
+      "expected": "(sig (wrong-number-of-arguments #<subr bool-vector-p> 4))"
+    },
+    {
+      "primitive": "bool-vector-p",
+      "id": "bool-vector-p/callable",
+      "form": "(list (fboundp 'bool-vector-p) (functionp #'bool-vector-p))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (list (fboundp 'bool-vector-p) (functionp #'bool-vector-p))) (error (list 'sig e))))",
+      "expected": "(ok (t t))"
+    },
+    {
+      "primitive": "bool-vector-set-difference",
+      "id": "bool-vector-set-difference/arity",
+      "form": "(apply #'bool-vector-set-difference nil)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (apply #'bool-vector-set-difference nil)) (error (list 'sig e))))",
+      "expected": "(sig (wrong-number-of-arguments #<subr bool-vector-set-difference> 0))"
+    },
+    {
+      "primitive": "bool-vector-set-difference",
+      "id": "bool-vector-set-difference/arity-high",
+      "form": "(apply #'bool-vector-set-difference '(nil nil nil nil))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (apply #'bool-vector-set-difference '(nil nil nil nil))) (error (list 'sig e))))",
+      "expected": "(sig (wrong-number-of-arguments #<subr bool-vector-set-difference> 4))"
+    },
+    {
+      "primitive": "bool-vector-set-difference",
+      "id": "bool-vector-set-difference/callable",
+      "form": "(list (fboundp 'bool-vector-set-difference) (functionp #'bool-vector-set-difference))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (list (fboundp 'bool-vector-set-difference) (functionp #'bool-vector-set-difference))) (error (list 'sig e))))",
+      "expected": "(ok (t t))"
+    },
+    {
+      "primitive": "bool-vector-subsetp",
+      "id": "bool-vector-subsetp/arity",
+      "form": "(apply #'bool-vector-subsetp nil)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (apply #'bool-vector-subsetp nil)) (error (list 'sig e))))",
+      "expected": "(sig (wrong-number-of-arguments #<subr bool-vector-subsetp> 0))"
+    },
+    {
+      "primitive": "bool-vector-subsetp",
+      "id": "bool-vector-subsetp/arity-high",
+      "form": "(apply #'bool-vector-subsetp '(nil nil nil nil))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (apply #'bool-vector-subsetp '(nil nil nil nil))) (error (list 'sig e))))",
+      "expected": "(sig (wrong-number-of-arguments #<subr bool-vector-subsetp> 4))"
+    },
+    {
+      "primitive": "bool-vector-subsetp",
+      "id": "bool-vector-subsetp/callable",
+      "form": "(list (fboundp 'bool-vector-subsetp) (functionp #'bool-vector-subsetp))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (list (fboundp 'bool-vector-subsetp) (functionp #'bool-vector-subsetp))) (error (list 'sig e))))",
+      "expected": "(ok (t t))"
+    },
+    {
+      "primitive": "bool-vector-union",
+      "id": "bool-vector-union/arity",
+      "form": "(apply #'bool-vector-union nil)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (apply #'bool-vector-union nil)) (error (list 'sig e))))",
+      "expected": "(sig (wrong-number-of-arguments #<subr bool-vector-union> 0))"
+    },
+    {
+      "primitive": "bool-vector-union",
+      "id": "bool-vector-union/arity-high",
+      "form": "(apply #'bool-vector-union '(nil nil nil nil))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (apply #'bool-vector-union '(nil nil nil nil))) (error (list 'sig e))))",
+      "expected": "(sig (wrong-number-of-arguments #<subr bool-vector-union> 4))"
+    },
+    {
+      "primitive": "bool-vector-union",
+      "id": "bool-vector-union/callable",
+      "form": "(list (fboundp 'bool-vector-union) (functionp #'bool-vector-union))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (list (fboundp 'bool-vector-union) (functionp #'bool-vector-union))) (error (list 'sig e))))",
+      "expected": "(ok (t t))"
+    },
+    {
+      "primitive": "make-bool-vector",
+      "id": "make-bool-vector/arity",
+      "form": "(apply #'make-bool-vector nil)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (apply #'make-bool-vector nil)) (error (list 'sig e))))",
+      "expected": "(sig (wrong-number-of-arguments #<subr make-bool-vector> 0))"
+    },
+    {
+      "primitive": "make-bool-vector",
+      "id": "make-bool-vector/arity-high",
+      "form": "(apply #'make-bool-vector '(nil nil nil nil))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (apply #'make-bool-vector '(nil nil nil nil))) (error (list 'sig e))))",
+      "expected": "(sig (wrong-number-of-arguments #<subr make-bool-vector> 4))"
+    },
+    {
+      "primitive": "make-bool-vector",
+      "id": "make-bool-vector/callable",
+      "form": "(list (fboundp 'make-bool-vector) (functionp #'make-bool-vector))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (list (fboundp 'make-bool-vector) (functionp #'make-bool-vector))) (error (list 'sig e))))",
+      "expected": "(ok (t t))"
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+# GNU Emacs 31.0.90 `tty-color-alist' on TERM=xterm.  MEASURED, not derived:
+# `emacs -Q -nw' driven through a real pty with COLORTERM unset, dumping every
+# (NAME INDEX R G B) row in the order the list holds them -- which is the order
+# `tty-color-approximate' consults, and therefore what decides an exact tie.
+#
+# Format: NAME INDEX R G B, with R G B the 16-bit components tty-color-alist
+# stores.  CELLS is `display-color-cells'.
+# CELLS 8
+black 0 0 0 0
+red 1 52685 0 0
+green 2 0 52685 0
+yellow 3 52685 52685 0
+blue 4 0 0 61166
+magenta 5 52685 0 52685
+cyan 6 0 52685 52685
+white 7 58853 58853 58853

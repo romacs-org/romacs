@@ -1,0 +1,32 @@
+{
+  "name": "kill-all-local-variables",
+  "arity": [
+    0,
+    1
+  ],
+  "effect": "global",
+  "gnu_files": [
+    "buffer.c"
+  ],
+  "gnu_def": "buffer.c:3031",
+  "rust": "src/prims/buffer_locals.rs:19",
+  "args": [
+    "projected-buffer-locals"
+  ],
+  "probes": [
+    "(with-temp-buffer (setq major-mode 'other mode-name \"Other\") (put 'major-mode 'permanent-local t) (kill-local-variable 'major-mode) (kill-all-local-variables) (list major-mode (equal mode-name \"Fundamental\")))",
+    "(with-temp-buffer (setq bl-global 7) (set (make-local-variable 'bl-plain) 3) (set (make-local-variable 'bl-permanent) 5) (put 'bl-permanent 'permanent-local t) (setq buffer-file-name \"visit\" fill-column 31) (kill-all-local-variables) (list (local-variable-p 'bl-plain) bl-permanent (local-variable-p 'bl-permanent) bl-global fill-column buffer-file-name))",
+    "(with-temp-buffer (set (make-local-variable 'bl-p) 8) (put 'bl-p 'permanent-local t) (setq bl-seen nil) (let ((change-major-mode-hook (list (lambda () (setq bl-seen (local-variable-p 'bl-p)))))) (kill-all-local-variables t)) (list bl-seen (local-variable-p 'bl-p)))",
+    "(let ((b (get-buffer-create \"untouched\"))) (with-current-buffer b (setq fill-column 43)) (with-temp-buffer (setq fill-column 32) (kill-all-local-variables)) (buffer-local-value 'fill-column b))",
+    "(condition-case e (with-temp-buffer (make-local-variable 'bl-h) (makunbound 'bl-h) (put 'bl-h 'permanent-local 'permanent-local-hook) (kill-all-local-variables)) (error (list (car e) (car (cdr e)) (equal (symbol-name (car (cdr (cdr e)))) \"unbound\") (eq (car (cdr (cdr e))) 'unbound))))",
+    "(with-temp-buffer (let ((s (make-symbol \"truncate-lines\"))) (set s 1) (make-local-variable s) (set s 2) (kill-all-local-variables) (symbol-value s)))",
+    "(with-temp-buffer (set (make-local-variable 'buffer-file-coding-system) 'raw-text) (kill-all-local-variables) (list buffer-file-coding-system (local-variable-p 'buffer-file-coding-system)))",
+    "(with-temp-buffer (let ((name mode-name)) (kill-all-local-variables) (list (eq name mode-name) (eq mode-name (default-value 'mode-name)))))",
+    "(with-temp-buffer (setq buffer-file-name \"visit\" buffer-read-only t buffer-file-format '(plain)) (kill-all-local-variables t) (list buffer-file-name buffer-read-only buffer-file-format))",
+    "(with-temp-buffer (setq buffer-file-name \"visit\") (kill-all-local-variables 'reset) buffer-file-name)",
+    "(with-temp-buffer (setq fill-column 33) (put 'fill-column 'permanent-local t) (kill-all-local-variables) (list fill-column (local-variable-p 'fill-column)))",
+    "(with-temp-buffer (setq bl-h '(a b t)) (make-local-variable 'bl-h) (put 'bl-h 'permanent-local 'permanent-local-hook) (put 'b 'permanent-local-hook t) (kill-all-local-variables) bl-h)",
+    "(list (fboundp 'kill-all-local-variables) (functionp 'kill-all-local-variables))",
+    "(with-temp-buffer (funcall 'kill-all-local-variables))"
+  ]
+}

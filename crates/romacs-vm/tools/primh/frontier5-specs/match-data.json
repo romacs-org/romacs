@@ -1,0 +1,48 @@
+{
+ "name": "match-data",
+ "arity": [
+  0,
+  3
+ ],
+ "effect": "reads",
+ "gnu_files": [
+  "search.c",
+  "marker.c"
+ ],
+ "gnu_def": "search.c:2816",
+ "rust": "src/regexp.rs:321",
+ "args": [
+  "md-empty",
+  "md-empty",
+  "md-empty"
+ ],
+ "extra": {
+  "0": [
+   "(progn (set-match-data nil) nil)"
+  ],
+  "1": [
+   "nil"
+  ],
+  "2": [
+   "nil"
+  ]
+ },
+ "probes": [
+  "(let ((b (generate-new-buffer \"md-probe\"))) (set-buffer b) (insert \"abc\") (goto-char 1) (looking-at \"ab\") (let ((m (car (match-data)))) (list (eq (type-of m) 'marker) (marker-position m) (eq (marker-buffer m) b))))",
+  "(let ((b (generate-new-buffer \"md-probe\"))) (set-buffer b) (insert \"abc\") (goto-char 1) (looking-at \"ab\") (kill-buffer b) (let ((m (car (match-data)))) (list (eq (type-of m) 'marker) (marker-position m) (marker-buffer m))))",
+  "(let ((b (generate-new-buffer \"md-probe\"))) (set-buffer b) (insert \"abc\") (goto-char 1) (looking-at \"ab\") (kill-buffer b) (let ((d (match-data t))) (list (car d) (car (cdr d)) (eq (car (cdr (cdr d))) b))))",
+  "(let ((b (generate-new-buffer \"md-probe\"))) (set-buffer b) (insert \"abc\") (goto-char 1) (looking-at \"ab\") (kill-buffer b) (let* ((r (list 8 9 10 11)) (d (match-data nil r))) (list (eq r d) (marker-position (car d)) (marker-buffer (car d)) (cdr (cdr d)))))",
+  "(let ((b (generate-new-buffer \"md-probe\"))) (set-buffer b) (insert \"abc\") (goto-char 1) (looking-at \"ab\") (kill-buffer b) (let ((r (list 8))) (eq r (match-data nil r))))",
+  "(let ((b (generate-new-buffer \"md-probe\"))) (set-buffer b) (insert \"abc\") (goto-char 1) (looking-at \"ab\") (let ((d (match-data))) (kill-buffer b) (list (marker-position (car d)) (marker-buffer (car d)))))",
+  "(let ((b (generate-new-buffer \"md-probe\"))) (set-buffer b) (insert \"abc\") (goto-char 1) (looking-at \"ab\") (let ((d (match-data))) (kill-buffer b) (set-match-data d) (match-data t)))",
+  "(let ((b (generate-new-buffer \"md-probe\"))) (set-buffer b) (insert \"abc\") (goto-char 1) (looking-at \"ab\") (let ((d (match-data))) (kill-buffer b) (set-match-data d t) (list d (match-data t))))",
+  "(let ((b (generate-new-buffer \"md-probe\"))) (set-buffer b) (insert \"abc\") (goto-char 1) (looking-at \"ab\") (kill-buffer b) (let ((d (match-data t))) (set-match-data d) (let ((m (car (match-data)))) (list (marker-position m) (marker-buffer m)))))",
+  "(let ((b (generate-new-buffer \"md-probe\"))) (set-buffer b) (insert \"abc\") (goto-char 1) (looking-at \"ab\") (let ((d (match-data))) (set-match-data d) (list (match-beginning 0) (match-end 0))))",
+  "(let ((b (generate-new-buffer \"md-probe\"))) (set-buffer b) (insert \"abc\") (goto-char 1) (looking-at \"ab\") (kill-buffer b) (let ((m (make-marker))) (set-marker m 2 b) (list (marker-position m) (marker-buffer m))))",
+  "(let ((b (generate-new-buffer \"md-probe\"))) (set-buffer b) (insert \"abc\") (goto-char 1) (looking-at \"ab\") (kill-buffer b) (let ((m (make-marker))) (set-marker m 'bad b) (list (marker-position m) (marker-buffer m))))",
+  "(set-match-data '(1 nil))",
+  "(set-match-data '(1 2 . 3))",
+  "(set-match-data 4)",
+  "(let ((m (make-marker))) (set-match-data (list m m)) (match-data t))"
+ ]
+}

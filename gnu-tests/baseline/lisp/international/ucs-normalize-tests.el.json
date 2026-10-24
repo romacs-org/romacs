@@ -1,0 +1,199 @@
+{
+ "blob": "dcaa10ce012a66034417a0b1bf80ab0d3a4f70bc",
+ "compiled": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": true,
+  "results": {
+   "ucs-normalize-part0": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ucs-normalize-part1": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "ucs-normalize-part1-failing": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless ucs-normalize-tests--failing-lines-part1) :form ucs-normalize-tests--failing-lines-part1 :value nil))",
+    "expected": ":failed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "ucs-normalize-part2": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "ucs-normalize-part2-failing": {
+    "as_expected": true,
+    "detail": "(ert-test-failed ((should-not (ucs-normalize-tests--rule1-failing-for-lines ucs-normalize-tests--failing-lines-part2)) :form (ucs-normalize-tests--rule1-failing-for-lines (17941 17942 17953 17954 17959 17960 17963 17964 17967 17968 17973 17974 17981 17982 18059 18060 18243 18244 18269 18270 ...)) :value (17941 17942 17953 17954 17959 17960 17963 17964 17967 17968 17973 17974 17981 17982 18059 18060 18243 18244 18269 18270 ...)))",
+    "expected": ":failed",
+    "outcome": "failed",
+    "tags": []
+   },
+   "ucs-normalize-part3": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ucs-normalize-save-match-data": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   }
+  },
+  "timed_out": false
+ },
+ "file": "lisp/international/ucs-normalize-tests.el",
+ "gnu": {
+  "emacs": "<recording-path-redacted>/emacs-32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+  "version": "32.0.50"
+ },
+ "harness_sha256": "78c20850429a08af22faadf73b5d164c560230e83d7eb88ef60cb995670703ef",
+ "mini": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": null,
+  "results": {
+   "ucs-normalize-part0": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "ucs-normalize-part1": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "ucs-normalize-part1-failing": {
+    "as_expected": null,
+    "detail": "((skip-unless ucs-normalize-tests--failing-lines-part1))",
+    "expected": ":failed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "ucs-normalize-part2": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "ucs-normalize-part2-failing": {
+    "as_expected": null,
+    "detail": "((should-not (ucs-normalize-tests--rule1-failing-for-lines ucs-normalize-tests--failing-lines-part2) :value (17941 17942 17953 17954 17959 17960 17963 17964 17967 17968 17973 17974 17981 17982 18059 18060 18243 18244 18269 18270 ...)))",
+    "expected": ":failed",
+    "outcome": "failed",
+    "tags": null
+   },
+   "ucs-normalize-part3": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "ucs-normalize-save-match-data": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   }
+  },
+  "timed_out": false
+ },
+ "read_error": null,
+ "real": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": true,
+  "results": {
+   "ucs-normalize-part0": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ucs-normalize-part1": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "ucs-normalize-part1-failing": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless ucs-normalize-tests--failing-lines-part1) :form ucs-normalize-tests--failing-lines-part1 :value nil))",
+    "expected": ":failed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "ucs-normalize-part2": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "ucs-normalize-part2-failing": {
+    "as_expected": true,
+    "detail": "(ert-test-failed ((should-not (ucs-normalize-tests--rule1-failing-for-lines ucs-normalize-tests--failing-lines-part2)) :form (ucs-normalize-tests--rule1-failing-for-lines (17941 17942 17953 17954 17959 17960 17963 17964 17967 17968 17973 17974 17981 17982 18059 18060 18243 18244 18269 18270 ...)) :value (17941 17942 17953 17954 17959 17960 17963 17964 17967 17968 17973 17974 17981 17982 18059 18060 18243 18244 18269 18270 ...)))",
+    "expected": ":failed",
+    "outcome": "failed",
+    "tags": []
+   },
+   "ucs-normalize-part3": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ucs-normalize-save-match-data": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   }
+  },
+  "timed_out": false
+ },
+ "schema": 1,
+ "toplevel_deftests": 7
+}

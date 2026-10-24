@@ -1,0 +1,35 @@
+{
+ "name": "write-char",
+ "arity": [
+  1,
+  2
+ ],
+ "effect": "global",
+ "gnu_files": [
+  "print.c"
+ ],
+ "gnu_def": "print.c:553",
+ "rust": "src/prims/printing.rs:32",
+ "args": [
+  "printing-probe-only",
+  "printing-probe-only"
+ ],
+ "probes": [
+  "(let ((out nil)) (list (write-char 0 (lambda (c) (setq out (cons c out)))) (nreverse out)))",
+  "(let ((out nil)) (list (write-char 7 (lambda (c) (setq out (cons c out)))) (nreverse out)))",
+  "(let ((out nil)) (list (write-char 10 (lambda (c) (setq out (cons c out)))) (nreverse out)))",
+  "(let ((out nil)) (list (write-char 32 (lambda (c) (setq out (cons c out)))) (nreverse out)))",
+  "(let ((out nil)) (list (write-char 127 (lambda (c) (setq out (cons c out)))) (nreverse out)))",
+  "(let ((out nil)) (list (write-char 128 (lambda (c) (setq out (cons c out)))) (nreverse out)))",
+  "(let ((out nil)) (list (write-char 255 (lambda (c) (setq out (cons c out)))) (nreverse out)))",
+  "(let ((out nil)) (list (write-char 955 (lambda (c) (setq out (cons c out)))) (nreverse out)))",
+  "(let ((out nil)) (list (write-char 128512 (lambda (c) (setq out (cons c out)))) (nreverse out)))",
+  "(let ((out nil)) (list (write-char 4194303 (lambda (c) (setq out (cons c out)))) (nreverse out)))",
+  "(let ((out nil)) (list (write-char 4194304 (lambda (c) (setq out (cons c out)))) (nreverse out)))",
+  "(let ((out nil)) (list (write-char -1 (lambda (c) (setq out (cons c out)))) (nreverse out)))",
+  "(let ((out nil)) (list (write-char most-positive-fixnum (lambda (c) (setq out (cons c out)))) (nreverse out)))",
+  "(let ((out nil)) (list (write-char 'bad (lambda (c) (setq out (cons c out)))) (nreverse out)))",
+  "(let ((out nil)) (list (write-char 1.0 (lambda (c) (setq out (cons c out)))) (nreverse out)))",
+  "(let ((out nil)) (list (write-char nil (lambda (c) (setq out (cons c out)))) (nreverse out)))"
+ ]
+}

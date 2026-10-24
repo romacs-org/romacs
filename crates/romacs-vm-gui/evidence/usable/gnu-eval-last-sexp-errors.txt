@@ -1,0 +1,6 @@
+# GNU 32.0.50 (/usr/bin/emacs -Q --batch): eval-last-sexp error messages via error-message-string
+(/ 1 0)              -> "Arithmetic error"
+(car 1)              -> "Wrong type argument: listp, 1"
+(error "Boom")       -> "Boom"
+(undefined-fn 1)     -> "Symbol’s function definition is void: undefined-fn"
+undefined-var        -> "Symbol’s value as variable is void: undefined-var"

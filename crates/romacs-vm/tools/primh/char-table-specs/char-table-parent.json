@@ -1,0 +1,21 @@
+{
+  "name": "char-table-parent",
+  "arity": [
+    1,
+    1
+  ],
+  "effect": "reads",
+  "gnu_files": [
+    "chartab.c"
+  ],
+  "gnu_def": "chartab.c:510",
+  "rust": "src/prims/char_table.rs:19",
+  "args": [
+    "none"
+  ],
+  "probes": [
+    "(char-table-parent (make-char-table nil 'init))",
+    "(char-table-parent 1)",
+    "(let ((a (make-char-table nil 'grand)) (b (make-char-table nil)) (c (make-char-table nil))) (set-char-table-parent b a) (set-char-table-parent c b) (list (eq (char-table-parent c) b) (aref c 65) (progn (set-char-table-range b '(65 . 90) 'parent) (aref c 65)) (progn (set-char-table-range c nil 'default) (aref c 65)) (progn (set-char-table-parent c nil) (char-table-parent c))))"
+  ]
+}

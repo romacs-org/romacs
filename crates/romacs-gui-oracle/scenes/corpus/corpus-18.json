@@ -1,0 +1,344 @@
+{
+ "name": "corpus-18",
+ "frame": {
+  "width": 480,
+  "height": 168,
+  "bg": "#ffffff",
+  "fg": "#000000"
+ },
+ "font": {
+  "family": "Liberation Mono",
+  "pixel_size": 20,
+  "regular": "/usr/share/fonts/liberation/LiberationMono-Regular.ttf",
+  "bold": "/usr/share/fonts/liberation/LiberationMono-Bold.ttf",
+  "italic": "/usr/share/fonts/liberation/LiberationMono-Italic.ttf"
+ },
+ "cursor_color": "#00a000",
+ "buffer": [
+  {
+   "text": "κόσμε",
+   "fg": "#b8860b"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "q?",
+   "fg": "#8b0000"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "@user",
+   "italic": true,
+   "underline": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "Αθήνα",
+   "fg": "#696969"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "a&b",
+   "bold": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "x=42;"
+  },
+  {
+   "text": "\n"
+  },
+  {
+   "text": "fox"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "q?",
+   "italic": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "φως",
+   "bold": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "λόγος"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "ζωή"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "ΣΟΦΙΑ",
+   "italic": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "#if",
+   "underline": true,
+   "bg": "#ffff00"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "jumps",
+   "fg": "#ff8c00"
+  },
+  {
+   "text": "\n"
+  },
+  {
+   "text": "Χάος",
+   "fg": "#1e90ff"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "θάλασσα",
+   "fg": "#0000ff",
+   "bold": true,
+   "bg": "#e0e0ff"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "Hello",
+   "fg": "#b8860b"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "Ωμέγα"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "a&b",
+   "fg": "#0000ff",
+   "italic": true,
+   "bg": "#d0ffd0"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "ξένος",
+   "fg": "#ff0000",
+   "bold": true
+  },
+  {
+   "text": "\n"
+  },
+  {
+   "text": "window"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "Ωμέγα",
+   "fg": "#ff8c00"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "C:\\tmp",
+   "italic": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "dog",
+   "fg": "#ff8c00",
+   "italic": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "glyph",
+   "fg": "#b8860b"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "frame",
+   "italic": true
+  },
+  {
+   "text": "\n"
+  }
+ ],
+ "point": 108,
+ "expect": {
+  "origin": [
+   0,
+   0
+  ],
+  "rows": [
+   {
+    "text": "κόσμε q? @user Αθήνα a&b x=42;",
+    "runs": [
+     {
+      "start": 0,
+      "end": 5,
+      "fg": "#b8860b"
+     },
+     {
+      "start": 6,
+      "end": 8,
+      "fg": "#8b0000"
+     },
+     {
+      "start": 9,
+      "end": 14,
+      "italic": true,
+      "underline": true
+     },
+     {
+      "start": 15,
+      "end": 20,
+      "fg": "#696969"
+     },
+     {
+      "start": 21,
+      "end": 24,
+      "bold": true
+     }
+    ]
+   },
+   {
+    "text": "fox q? φως λόγος ζωή ΣΟΦΙΑ #if jumps",
+    "runs": [
+     {
+      "start": 4,
+      "end": 6,
+      "italic": true
+     },
+     {
+      "start": 7,
+      "end": 10,
+      "bold": true
+     },
+     {
+      "start": 21,
+      "end": 26,
+      "italic": true
+     },
+     {
+      "start": 27,
+      "end": 30,
+      "underline": true,
+      "bg": "#ffff00"
+     },
+     {
+      "start": 31,
+      "end": 36,
+      "fg": "#ff8c00"
+     }
+    ]
+   },
+   {
+    "text": "Χάος θάλασσα Hello Ωμέγα a&b ξένος",
+    "runs": [
+     {
+      "start": 0,
+      "end": 4,
+      "fg": "#1e90ff"
+     },
+     {
+      "start": 5,
+      "end": 12,
+      "fg": "#0000ff",
+      "bold": true,
+      "bg": "#e0e0ff"
+     },
+     {
+      "start": 13,
+      "end": 18,
+      "fg": "#b8860b"
+     },
+     {
+      "start": 25,
+      "end": 28,
+      "fg": "#0000ff",
+      "italic": true,
+      "bg": "#d0ffd0"
+     },
+     {
+      "start": 29,
+      "end": 34,
+      "fg": "#ff0000",
+      "bold": true
+     }
+    ]
+   },
+   {
+    "text": "window Ωμέγα C:\\tmp dog glyph frame",
+    "runs": [
+     {
+      "start": 7,
+      "end": 12,
+      "fg": "#ff8c00"
+     },
+     {
+      "start": 13,
+      "end": 19,
+      "italic": true
+     },
+     {
+      "start": 20,
+      "end": 23,
+      "fg": "#ff8c00",
+      "italic": true
+     },
+     {
+      "start": 24,
+      "end": 29,
+      "fg": "#b8860b"
+     },
+     {
+      "start": 30,
+      "end": 35,
+      "italic": true
+     }
+    ]
+   }
+  ],
+  "cursor": {
+   "row": 3,
+   "col": 4
+  }
+ }
+}

@@ -1,0 +1,22 @@
+[package]
+name = "romacs-face"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Evaluator-free face and theme model for Romacs: immutable faces, themes as values, inheritance resolved once"
+
+# This crate must never depend on an evaluator or the layout engine. A face is
+# plain data; the Lisp API converts Lisp values into it at the boundary, so the
+# dependency graph, not discipline, keeps Lisp objects out of resolved faces.
+
+[dependencies]
+rustc-hash.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+trybuild = "1.0"
+
+[lints]
+workspace = true

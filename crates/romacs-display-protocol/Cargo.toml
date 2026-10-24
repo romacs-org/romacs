@@ -1,0 +1,33 @@
+[package]
+name = "romacs-display-protocol"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Shared display protocol types for Romacs layout/render/runtime"
+
+[features]
+default = []
+romacs-term = []
+
+[dependencies]
+rustc-hash.workspace = true
+bitflags.workspace = true
+num_enum.workspace = true
+serde.workspace = true
+nutype.workspace = true
+serde_json = "1"
+strum.workspace = true
+tracing.workspace = true
+crossbeam-channel.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc.workspace = true
+
+[dev-dependencies]
+romacs-infra.workspace = true
+proptest.workspace = true
+
+[lints]
+workspace = true

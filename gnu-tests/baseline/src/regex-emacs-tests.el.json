@@ -1,0 +1,660 @@
+{
+  "blob": "d54a5cb665ac1c64ef60008bdd31ef1f08c90916",
+  "compiled": {
+    "complete": true,
+    "exit": 0,
+    "garbled_lines": 0,
+    "load_error": null,
+    "load_ok": true,
+    "results": {
+      "regex-emacs-syntax-properties": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "regex-repeat-limit": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "regex-tests-BOOST": {
+        "as_expected": false,
+        "detail": "(file-missing \"Opening input file\" \"No such file or directory\" \"<recording-home>/.hermes/cache/scratch/gnu-run-elc-wIqLuw/regex-resources/BOOST.tests\")",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": []
+      },
+      "regex-tests-PCRE": {
+        "as_expected": false,
+        "detail": "(file-missing \"Opening input file\" \"No such file or directory\" \"<recording-home>/.hermes/cache/scratch/gnu-run-elc-wIqLuw/regex-resources/PCRE.tests\")",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": []
+      },
+      "regex-tests-PTESTS": {
+        "as_expected": false,
+        "detail": "(file-missing \"Opening input file\" \"No such file or directory\" \"<recording-home>/.hermes/cache/scratch/gnu-run-elc-wIqLuw/regex-resources/PTESTS\")",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": []
+      },
+      "regex-tests-TESTS": {
+        "as_expected": false,
+        "detail": "(file-missing \"Opening input file\" \"No such file or directory\" \"<recording-home>/.hermes/cache/scratch/gnu-run-elc-wIqLuw/regex-resources/TESTS\")",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": []
+      },
+      "regex-tests-mutual-exclusive-inf-rec": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "regex-tests-posix": {
+        "as_expected": false,
+        "detail": "(file-missing \"Opening input file\" \"No such file or directory\" \"<recording-home>/.hermes/cache/scratch/gnu-run-elc-wIqLuw/regex-resources/TESTS\")",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": []
+      },
+      "regex-word-cc-fallback-test": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "regexp-atomic-failure": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "regexp-case-fold": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "regexp-eszett": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "regexp-multibyte-multibyte": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "regexp-multibyte-unibyte": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "regexp-tests-backtrack-optimization": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "regexp-tests-zero-width-assertion-repetition": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "regexp-unibyte-multibyte": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "regexp-unibyte-unibyte": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      }
+    },
+    "timed_out": false
+  },
+  "file": "src/regex-emacs-tests.el",
+  "gnu": {
+    "emacs": "<recording-path-redacted>/emacs-32.0.50",
+    "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+    "sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+    "version": "32.0.50"
+  },
+  "harness_sha256": "78c20850429a08af22faadf73b5d164c560230e83d7eb88ef60cb995670703ef",
+  "mini": {
+    "complete": true,
+    "exit": 0,
+    "garbled_lines": 0,
+    "load_error": null,
+    "load_ok": null,
+    "results": {
+      "regex-emacs-syntax-properties": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "regex-repeat-limit": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "regex-tests-BOOST": {
+        "as_expected": null,
+        "detail": "(error \"Format specifier doesn't match argument type\")",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "regex-tests-PCRE": {
+        "as_expected": null,
+        "detail": "(void-function cl-loop)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "regex-tests-PTESTS": {
+        "as_expected": null,
+        "detail": "((should-not (regex-tests-PTESTS) :value (\"line number 341: Regex '^[a-zA-Z0-9]*$': Have expected match, but mismatch in group 0: beginning/end positions: 0/0 and 4/9\" \"line number 338: Regex '^abc$': Have expected match, but mismatch in group 0: beginning/end positions: 0/0 and 4/3\" \"line number 337: Regex '^$': Have expected match, but mismatch in group 0: beginning/end positions: 0/0 and 4/0\" \"line number 329: Regex '\\\\(def$\\\\)': Have expected match, but mismatch in group 0: beginning/end positions: 0/3 and 4/6\" \"line number 328: Regex '\\\\(ab$\\\\)': Have expected match, but mismatch in group 0: beginning/end positions: 0/0 and 4/2\" \"line number 323: Regex '\\\\$$': Have expected match, but mismatch in group 0: beginning/end positions: 0/2 and 4/3\" \"line number 321: Regex '$$': Have expected match, but mismatch in group 0: beginning/end positions: 0/2 and 4/3\" \"line number 320: Regex '[a-z]*$': Have expected match, but mismatch in group 0: beginning/end positions: 0/9 and 4/9\" \"line number 318: Regex '[a-z]*$': Have expected match, but mismatch in group 0: beginning/end positions: 0/4 and 4/7\" \"line number 316: Regex 'a$': Have expected match, but mismatch in group 0: beginning/end positions: 0/2 and 4/3\" \"line number 308: Regex '\\\\(^abc\\\\)': Have expected match, but mismatch in group 0: beginning/end positions: 0/0 and 4/3\" \"line number 307: Regex '\\\\(^^\\\\)': Have expected match, but mismatch in group 0: beginning/end positions: 0/0 and 4/1\" \"line number 306: Regex '\\\\(^^a\\\\)': Have expected match, but mismatch in group 0: beginning/end positions: 0/0 and 4/2\" \"line number 304: Regex '\\\\(^a\\\\)\\\\1': Have expected match, but mismatch in group 0: beginning/end positions: 0/0 and 4/2\" \"line number 299: Regex '^a': Have expected match, but mismatch in group 0: beginning/end positions: 0/0 and 4/1\" \"line number 295: Regex 'ab*': Have expected match, but mismatch in group 0: beginning/end positions: 0/0 and 4/3\" \"line number 294: Regex '\\\\(a\\\\)\\\\1$': Have expected match, b",
+        "expected": ":passed",
+        "outcome": "failed",
+        "tags": null
+      },
+      "regex-tests-TESTS": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "regex-tests-alnum-character-class": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "regex-tests-alpha-character-class": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "regex-tests-ascii-character-class": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "regex-tests-blank-character-class": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "regex-tests-cntrl-character-class": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "regex-tests-digit-character-class": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "regex-tests-graph-character-class": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "regex-tests-lower-character-class": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "regex-tests-multibyte-character-class": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "regex-tests-mutual-exclusive-inf-rec": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "regex-tests-nonascii-character-class": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "regex-tests-posix": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "regex-tests-print-character-class": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "regex-tests-punct-character-class": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "regex-tests-space-character-class": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "regex-tests-unibyte-character-class": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "regex-tests-upper-character-class": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "regex-tests-word-character-class": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "regex-tests-xdigit-character-class": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "regex-word-cc-fallback-test": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "regexp-atomic-failure": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "regexp-case-fold": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "regexp-eszett": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "regexp-multibyte-multibyte": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "regexp-multibyte-unibyte": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "regexp-tests-backtrack-optimization": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "regexp-tests-zero-width-assertion-repetition": {
+        "as_expected": null,
+        "detail": "(void-function cl-flet)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "regexp-unibyte-multibyte": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "regexp-unibyte-unibyte": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      }
+    },
+    "timed_out": false
+  },
+  "read_error": null,
+  "real": {
+    "complete": true,
+    "exit": 0,
+    "garbled_lines": 0,
+    "load_error": null,
+    "load_ok": true,
+    "results": {
+      "regex-emacs-syntax-properties": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "regex-repeat-limit": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "regex-tests-BOOST": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "regex-tests-PCRE": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "regex-tests-PTESTS": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "regex-tests-TESTS": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "regex-tests-alnum-character-class": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "regex-tests-alpha-character-class": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "regex-tests-ascii-character-class": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "regex-tests-blank-character-class": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "regex-tests-cntrl-character-class": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "regex-tests-digit-character-class": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "regex-tests-graph-character-class": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "regex-tests-lower-character-class": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "regex-tests-multibyte-character-class": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "regex-tests-mutual-exclusive-inf-rec": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "regex-tests-nonascii-character-class": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "regex-tests-posix": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "regex-tests-print-character-class": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "regex-tests-punct-character-class": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "regex-tests-space-character-class": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "regex-tests-unibyte-character-class": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "regex-tests-upper-character-class": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "regex-tests-word-character-class": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "regex-tests-xdigit-character-class": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "regex-word-cc-fallback-test": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "regexp-atomic-failure": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "regexp-case-fold": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "regexp-eszett": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "regexp-multibyte-multibyte": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "regexp-multibyte-unibyte": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "regexp-tests-backtrack-optimization": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "regexp-tests-zero-width-assertion-repetition": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "regexp-unibyte-multibyte": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "regexp-unibyte-unibyte": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      }
+    },
+    "timed_out": false
+  },
+  "schema": 1,
+  "toplevel_deftests": 18
+}

@@ -1,0 +1,422 @@
+;;; jabber-receipts.el --- Delivery receipts and chat markers  -*- lexical-binding: t; -*-
+
+;; Copyright (C) 2026  Thanos Apollo
+
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
+
+;; This file is a part of jabber.el.
+
+;; This program is free software; you can redistribute it and/or modify
+;; it under the terms of the GNU General Public License as published by
+;; the Free Software Foundation; either version 2 of the License, or
+;; (at your option) any later version.
+
+;; This program is distributed in the hope that it will be useful,
+;; but WITHOUT ANY WARRANTY; without even the implied warranty of
+;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+;; GNU General Public License for more details.
+
+;; You should have received a copy of the GNU General Public License
+;; along with this program; if not, write to the Free Software
+;; Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+
+;;; Commentary:
+
+;; XEP-0184 Message Delivery Receipts and XEP-0333 Chat Markers for
+;; 1:1 chats.  Outgoing messages get <request/> and <markable/>
+;; elements.  Incoming receipts update the DB and header-line.
+;; Optionally sends <received/> and <displayed/> back.
+
+;;; Code:
+
+(require 'jabber-xml)
+(require 'jabber-util)
+(require 'jabber-core)
+(require 'jabber-chat)
+(require 'jabber-muc)
+(require 'jabber-db)
+(require 'jabber-disco)
+(require 'jabber-message-thread)
+(defvar jabber-chat-ewoc)               ; jabber-chatbuffer.el
+
+(defgroup jabber-receipts nil
+  "Message delivery receipts (XEP-0184) and chat markers (XEP-0333)."
+  :group 'jabber-chat)
+
+(defconst jabber-receipts-xmlns "urn:xmpp:receipts"
+  "XML namespace for XEP-0184 Message Delivery Receipts.")
+
+(defconst jabber-chat-markers-xmlns "urn:xmpp:chat-markers:0"
+  "XML namespace for XEP-0333 Chat Markers.")
+
+(defcustom jabber-chat-send-receipts t
+  "Send delivery receipts and read markers to peers.
+When non-nil, send <received/> on message delivery and
+<displayed/> when a chat buffer becomes visible.
+Incoming receipts are always processed regardless of this setting."
+  :type 'boolean)
+
+(defface jabber-chat-delivered
+  '((t :inherit shadow :slant italic))
+  "Face for delivery receipt status in header-line.")
+
+(defface jabber-chat-seen
+  '((t :inherit success :slant italic))
+  "Face for seen/displayed status in header-line.")
+
+(defvar-local jabber-chat-receipt-message ""
+  "Header-line string showing receipt status for current chat.")
+
+(defvar-local jabber-receipts--pending-displayed-id nil
+  "Stanza ID of latest unread markable message in this buffer.")
+
+(defun jabber-receipts--sender-authorized-p (jc from)
+  "Return non-nil when FROM may observe presence for JC."
+  (let ((bare-jid (jabber-jid-user from)))
+    (or (and (jabber-jid-resource from)
+             (jabber-muc-joined-p bare-jid jc))
+        (when-let* ((contact (jabber-jid-symbol bare-jid jc))
+                    ((memq contact
+                           (plist-get (fsm-get-state-data jc) :roster))))
+          (member (get contact 'subscription) '("from" "both"))))))
+
+;;; Send hook
+
+(defun jabber-receipts--send-hook (_body _id)
+  "Add receipt request and markable elements to outgoing messages.
+Added to `jabber-chat-send-hooks'.
+Per XEP-0184, receipt requests are NOT RECOMMENDED in MUC
+groupchat because every occupant would respond.  MUC chat markers
+need per-occupant tracking, so do not request them from groupchat
+messages until that state exists."
+  (if (bound-and-true-p jabber-group)
+      nil
+    `((request ((xmlns . ,jabber-receipts-xmlns)))
+      (markable ((xmlns . ,jabber-chat-markers-xmlns))))))
+
+(add-hook 'jabber-chat-send-hooks #'jabber-receipts--send-hook)
+
+;;; Receive handler
+
+(defun jabber-receipts--find-buffer (from jc)
+  "Find the chat buffer for FROM on connection JC.
+For MUC participant JIDs, look up the MUC private buffer.
+For regular JIDs, look up the 1:1 chat buffer."
+  (if (and (jabber-jid-resource from)
+           (jabber-muc-joined-p (jabber-jid-user from) jc))
+      (get-buffer (jabber-muc-private-get-buffer
+                   (jabber-jid-user from) (jabber-jid-resource from) jc))
+    (get-buffer (jabber-chat-get-buffer from jc))))
+
+(defun jabber-receipts--display-buffer (jc effective from)
+  "Return the buffer that can mark EFFECTIVE from FROM displayed on JC.
+Return nil when a dedicated thread owns the message but is closed."
+  (let* ((peer (jabber-jid-user from))
+         (parent (jabber-receipts--find-buffer from jc))
+         (private-p (and (jabber-jid-resource from)
+                         (jabber-muc-joined-p peer jc)))
+         (msg (jabber-chat--msg-plist-from-stanza effective)))
+    (if (or private-p (not (plist-get msg :thread-id)))
+        parent
+      (pcase (jabber-message-thread-display-target jc peer "chat" msg)
+        ('parent parent)
+        ((and target (pred buffer-live-p)) target)))))
+
+(defun jabber-receipts--effective-stanza (jc xml-data)
+  "Return (EFFECTIVE-XML . CARBON-TYPE) for XML-DATA on JC.
+CARBON-TYPE is nil (not a carbon), `received', or `sent'.  For carbons,
+EFFECTIVE-XML is the inner forwarded message; for non-carbons it is
+XML-DATA unchanged.  Returns (nil . invalid) for forged carbons whose
+outer from does not match our bare JID (CVE-2017-5589)."
+  (let ((carbon (jabber-chat--extract-carbon xml-data)))
+    (if (not carbon)
+        (cons xml-data nil)
+      (let ((outer-from-bare
+             (jabber-jid-user (jabber-xml-get-attribute xml-data 'from)))
+            (our-bare (jabber-connection-bare-jid jc)))
+        (if (string= outer-from-bare our-bare)
+            (cons (cdr carbon) (car carbon))
+          (warn "Jabber: dropping forged carbon receipts from %s"
+                outer-from-bare)
+          (cons nil 'invalid))))))
+
+(defun jabber-receipts--process-incoming-markers (jc effective from)
+  "Dispatch incoming markers in EFFECTIVE stanza from FROM.
+Handles XEP-0184 <received/>, XEP-0333 <received/> and <displayed/>.
+JC is the connection."
+  ;; XEP-0184: <received xmlns='urn:xmpp:receipts' id='...'/>
+  (when-let* ((received (jabber-xml-child-with-xmlns
+                         effective jabber-receipts-xmlns))
+              ((eq (jabber-xml-node-name received) 'received))
+              (ref-id (jabber-xml-get-attribute received 'id)))
+    (jabber-receipts--update-status jc from ref-id "delivered_at"))
+  ;; XEP-0333: <received xmlns='urn:xmpp:chat-markers:0' id='...'/>
+  ;; Some clients send XEP-0333 received instead of XEP-0184.
+  (when-let* ((marker (jabber-xml-child-with-xmlns
+                       effective jabber-chat-markers-xmlns))
+              ((eq (jabber-xml-node-name marker) 'received))
+              (ref-id (jabber-xml-get-attribute marker 'id)))
+    (jabber-receipts--update-status jc from ref-id "delivered_at"))
+  ;; XEP-0333: <displayed xmlns='urn:xmpp:chat-markers:0' id='...'/>
+  (when-let* ((marker (jabber-xml-child-with-xmlns
+                       effective jabber-chat-markers-xmlns))
+              ((eq (jabber-xml-node-name marker) 'displayed))
+              (ref-id (jabber-xml-get-attribute marker 'id)))
+    (jabber-receipts--update-status jc from ref-id "displayed_at")))
+
+(defun jabber-receipts--maybe-send-receipt (jc effective from carbon-type)
+  "Send XEP-0184 <received/> reply if EFFECTIVE requests it.
+Suppressed for carbons (primary resource owns the receipt) and
+MAM-replayed messages.  JC is the connection, FROM is the sender,
+CARBON-TYPE is nil, `received', or `sent'."
+  (let ((id (jabber-xml-get-attribute effective 'id)))
+    (when (and jabber-chat-send-receipts
+               id
+               (null carbon-type)
+               (jabber-receipts--sender-authorized-p jc from)
+               (not (jabber-xml-get-attribute effective 'jabber-mam--origin))
+               (jabber-xml-get-children effective 'body)
+               (let ((req (jabber-xml-child-with-xmlns
+                           effective jabber-receipts-xmlns)))
+                 (and req (eq (jabber-xml-node-name req) 'request))))
+      (jabber-send-sexp-if-connected
+       jc `(message ((to . ,from) (type . "chat"))
+                    (received ((xmlns . ,jabber-receipts-xmlns)
+                               (id . ,id))))))))
+
+(defun jabber-receipts--track-displayed (jc effective from carbon-type)
+  "Queue or send <displayed/> for the markable message in EFFECTIVE.
+If the chat buffer is visible, send immediately; otherwise queue the
+id for `jabber-receipts--on-window-change' to flush later.
+Skipped for `sent' carbons (we are the sender) and MAM replays.
+JC is the connection, FROM is the sender, CARBON-TYPE is nil,
+`received', or `sent'."
+  (when-let* ((id (jabber-xml-get-attribute effective 'id))
+              ((not (eq carbon-type 'sent)))
+              ((jabber-receipts--sender-authorized-p jc from))
+              ((not (jabber-xml-get-attribute effective 'jabber-mam--origin)))
+              ((jabber-xml-get-children effective 'body))
+              (marker (jabber-xml-child-with-xmlns
+                       effective jabber-chat-markers-xmlns))
+              ((eq (jabber-xml-node-name marker) 'markable)))
+    (when-let* ((buffer (jabber-receipts--display-buffer jc effective from)))
+      (with-current-buffer buffer
+        (when jabber-chat-send-receipts
+          (if (get-buffer-window buffer 'visible)
+              (progn
+                (jabber-send-sexp-if-connected
+                 jc `(message ((to . ,from) (type . "chat"))
+                              (displayed ((xmlns . ,jabber-chat-markers-xmlns)
+                                          (id . ,id)))))
+                (setq jabber-receipts--pending-displayed-id nil))
+            (setq jabber-receipts--pending-displayed-id id)))))))
+
+(defun jabber-receipts--handle-message (jc xml-data)
+  "Process incoming delivery receipts and chat markers in XML-DATA.
+JC is the connection.  Added to `jabber-message-chain'.
+Unwraps XEP-0280 Message Carbons before dispatching to sub-handlers."
+  (let* ((eff (jabber-receipts--effective-stanza jc xml-data))
+         (effective (car eff))
+         (carbon-type (cdr eff)))
+    (when (and effective (not (eq carbon-type 'invalid)))
+      (let* ((from (jabber-xml-get-attribute effective 'from))
+             (type (jabber-xml-get-attribute effective 'type))
+             (groupchat-p (equal type "groupchat")))
+        (unless (or (null from) groupchat-p)
+          ;; Incoming markers: skip for `sent' carbons (those carry our
+          ;; own-device outgoing markers, not peer-to-us markers).
+          ;; TODO: cross-device read-sync could use sent-carbon markers
+          ;; to locally mark peer messages as read.
+          (unless (eq carbon-type 'sent)
+            (jabber-receipts--process-incoming-markers jc effective from))
+          (jabber-receipts--maybe-send-receipt jc effective from carbon-type)
+          (jabber-receipts--track-displayed jc effective from carbon-type))))))
+
+(defvar-local jabber-receipts--latest-displayed-ts 0
+  "Timestamp of the most recently displayed outgoing message.
+Used to enforce XEP-0333 forward-only rule: displayed markers
+referencing older messages are redundant and MUST be ignored.")
+
+(defun jabber-receipts--status-upgrades-p (current new)
+  "Return non-nil if NEW is a higher status than CURRENT.
+Status progression: :sent < :delivered < :displayed.
+A late-arriving `<received/>' from a second resource must not
+overwrite an earlier `<displayed/>' from another resource."
+  (let ((order '(:sent 0 :delivered 1 :displayed 2)))
+    (< (or (plist-get order current) -1)
+       (or (plist-get order new) -1))))
+
+(defun jabber-receipts--latest-local-node ()
+  "Return the most recent outgoing message node in the current buffer."
+  (let ((node (and jabber-chat-ewoc (ewoc-nth jabber-chat-ewoc -1))))
+    (while (and node (not (eq (car (ewoc-data node)) :local)))
+      (setq node (ewoc-prev jabber-chat-ewoc node)))
+    node))
+
+(defun jabber-receipts--displayed-after-p (node)
+  "Return non-nil if an outgoing message after NODE is already displayed."
+  (let ((next (ewoc-next jabber-chat-ewoc node))
+        found)
+    (while (and next (not found))
+      (setq found (and (eq (car (ewoc-data next)) :local)
+                       (eq (plist-get (cadr (ewoc-data next)) :status)
+                           :displayed))
+            next (ewoc-next jabber-chat-ewoc next)))
+    found))
+
+(defun jabber-receipts--update-buffer-status
+    (buffer ref-id column timestamp status)
+  "Update REF-ID's visible status in BUFFER.
+COLUMN, TIMESTAMP, and STATUS describe the receipt.  Return the
+pair (ACCEPTED . CASCADE-EPOCH)."
+  (with-current-buffer buffer
+    (when-let* ((node (jabber-chat-ewoc-find-by-id ref-id)))
+      (let* ((msg (cadr (ewoc-data node)))
+             (current-status (plist-get msg :status))
+             (msg-ts (plist-get msg :timestamp))
+             (msg-epoch (and msg-ts (float-time msg-ts)))
+             (displayed-p (string= column "displayed_at"))
+             (forward-p
+              (or (not displayed-p)
+                  (and (or (not msg-epoch)
+                           (>= msg-epoch jabber-receipts--latest-displayed-ts))
+                       (not (jabber-receipts--displayed-after-p node)))))
+             (inhibit-read-only t))
+        (when (and forward-p
+                   (or (null current-status)
+                       (jabber-receipts--status-upgrades-p
+                        current-status status)))
+          (jabber-receipts--restore-on-rollback node)
+          (jabber-chat--restore-on-rollback
+           'jabber-receipts--latest-displayed-ts 'jabber-chat-receipt-message)
+          (plist-put msg :status status)
+          (jabber-chat-ewoc-invalidate node)
+          (when (eq node (jabber-receipts--latest-local-node))
+            (jabber-receipts--update-header-line column timestamp))
+          (when displayed-p
+            (when msg-epoch
+              (setq jabber-receipts--latest-displayed-ts msg-epoch))
+            (jabber-receipts--cascade-displayed node))
+          (cons t (and displayed-p msg-epoch)))))))
+
+(defun jabber-receipts--restore-on-rollback (node)
+  "Restore NODE's current status if archive storage rolls back.
+Otherwise a retry sees the status as current and skips the durable write."
+  (let ((buffer (current-buffer))
+        (msg (cadr (ewoc-data node)))
+        (status (plist-get (cadr (ewoc-data node)) :status)))
+    (jabber-chat--on-decrypt-rollback
+     (lambda ()
+       (when (buffer-live-p buffer)
+         (with-current-buffer buffer
+           (plist-put msg :status status)
+           (let ((inhibit-read-only t))
+             (jabber-chat-ewoc-invalidate node))))))))
+
+(defun jabber-receipts--update-status (jc from ref-id column)
+  "Update receipt status for message REF-ID from FROM on JC.
+COLUMN is \"delivered_at\" or \"displayed_at\".  Never downgrade a
+visible message from `:displayed' to `:delivered'."
+  (let* ((timestamp (floor (float-time)))
+         (account (jabber-connection-bare-jid jc))
+         (peer (jabber-jid-user from))
+         (status (if (string= column "displayed_at") :displayed :delivered))
+         (thread-targets
+          (jabber-message-thread-update-targets
+           jc peer "chat" ref-id))
+         (buffers
+          (cond
+           ((eq thread-targets 'closed) nil)
+           (thread-targets thread-targets)
+           (t (delq nil (list (jabber-receipts--find-buffer from jc))))))
+         accepted
+         cascade-epoch)
+    (dolist (buffer buffers)
+      (when-let* ((result
+                   (jabber-receipts--update-buffer-status
+                    buffer ref-id column timestamp status)))
+        (setq accepted t
+              cascade-epoch (or (cdr result) cascade-epoch))))
+    (when (or accepted (null buffers))
+      (jabber-db-update-receipt account peer ref-id column timestamp))
+    (when cascade-epoch
+      (jabber-db-cascade-displayed
+       account peer timestamp cascade-epoch ref-id))))
+
+(defun jabber-receipts--cascade-displayed (node)
+  "Walk backward from NODE, promoting :delivered nodes to :displayed.
+Per XEP-0333, a <displayed/> marker implies all prior messages were
+also seen.  Only promotes :local nodes whose :status is :delivered."
+  (let ((prev (ewoc-prev jabber-chat-ewoc node))
+        (inhibit-read-only t))
+    (while prev
+      (let* ((data (ewoc-data prev))
+             (type (car data))
+             (msg (cadr data)))
+        (cond
+         ((and (eq type :local)
+               (eq (plist-get msg :status) :delivered))
+          (jabber-receipts--restore-on-rollback prev)
+          (plist-put msg :status :displayed)
+          (jabber-chat-ewoc-invalidate prev))
+         ((and (eq type :local)
+               (eq (plist-get msg :status) :displayed))
+          (setq prev nil))))              ; stop, already cascaded
+      (when prev
+        (setq prev (ewoc-prev jabber-chat-ewoc prev))))))
+
+(defun jabber-receipts--update-header-line (column timestamp)
+  "Update `jabber-chat-receipt-message' for COLUMN at TIMESTAMP.
+Does not downgrade from \"seen\" to \"delivered\"."
+  (let* ((time-str (format-time-string "%H:%M" timestamp))
+         (is-seen (string= column "displayed_at"))
+         (label (if is-seen "seen" "delivered"))
+         (face (if is-seen 'jabber-chat-seen 'jabber-chat-delivered)))
+    (unless (and (not is-seen)
+                 (string-match-p "seen" jabber-chat-receipt-message))
+      (setq jabber-chat-receipt-message
+            (propertize (format " %s %s" label time-str) 'face face))
+      (force-mode-line-update))))
+
+(defun jabber-receipts--clear-header-line ()
+  "Clear receipt status when sending a new outgoing message."
+  (setq jabber-chat-receipt-message "")
+  (force-mode-line-update))
+
+(defun jabber-receipts--local-message-inserted (_msg)
+  "Clear the old receipt status when a new outgoing message is inserted."
+  (jabber-receipts--clear-header-line))
+
+(add-hook 'jabber-chat-local-message-functions
+          #'jabber-receipts--local-message-inserted)
+
+(jabber-chain-add 'jabber-message-chain #'jabber-receipts--handle-message 50)
+
+;;; Display marker on buffer visibility
+
+(defun jabber-receipts--on-window-change ()
+  "Send displayed marker when chat buffer becomes visible."
+  (when (and jabber-chat-send-receipts
+             (derived-mode-p 'jabber-chat-mode)
+             jabber-receipts--pending-displayed-id
+             jabber-chatting-with
+             (jabber-receipts--sender-authorized-p
+              jabber-buffer-connection jabber-chatting-with)
+             (get-buffer-window (current-buffer) 'visible))
+    (jabber-send-sexp-if-connected
+     jabber-buffer-connection
+     `(message ((to . ,jabber-chatting-with) (type . "chat"))
+               (displayed ((xmlns . ,jabber-chat-markers-xmlns)
+                           (id . ,jabber-receipts--pending-displayed-id)))))
+    (setq jabber-receipts--pending-displayed-id nil)))
+
+(add-hook 'window-configuration-change-hook #'jabber-receipts--on-window-change)
+
+;;; Disco feature advertisement
+
+(jabber-disco-advertise-feature jabber-receipts-xmlns)
+(jabber-disco-advertise-feature jabber-chat-markers-xmlns)
+
+(provide 'jabber-receipts)
+
+;;; jabber-receipts.el ends here

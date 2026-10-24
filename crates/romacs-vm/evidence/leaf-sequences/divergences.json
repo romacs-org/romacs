@@ -1,0 +1,30 @@
+[
+  {
+    "id": "mapconcat/0016",
+    "source": "(prin1-to-string (condition-case e (list 'ok (equal (mapconcat (lambda (x) (if x \"T\" \"F\")) (make-bool-vector 3 t) \",\") \"T,T,T\")) (error (list 'sig e))))",
+    "expected": "(ok t)",
+    "alternate": null,
+    "actual": "(sig (void-function make-bool-vector))"
+  },
+  {
+    "id": "mapconcat/0021",
+    "source": "(prin1-to-string (condition-case e (list 'ok (get-text-property 0 'face (mapconcat #'identity (list (propertize \"x\" 'face 'bold))))) (error (list 'sig e))))",
+    "expected": "(ok bold)",
+    "alternate": null,
+    "actual": "(ok nil)"
+  },
+  {
+    "id": "sort/0023",
+    "source": "(prin1-to-string (condition-case e (list 'ok (sort '(3 1 2))) (error (list 'sig e))))",
+    "expected": "(ok (1 2 3))",
+    "alternate": null,
+    "actual": "(sig (void-function value<))"
+  },
+  {
+    "id": "sort/0024",
+    "source": "(prin1-to-string (condition-case e (list 'ok (sort [3 1 2] nil)) (error (list 'sig e))))",
+    "expected": "(ok [1 2 3])",
+    "alternate": null,
+    "actual": "(sig (void-function value<))"
+  }
+]

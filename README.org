@@ -1,0 +1,33 @@
+#+title: Romacs
+
+A Lisp editor with a Rust VM and a GPU-rendered GUI. Early development;
+GNU Emacs Lisp compatibility is incomplete.
+
+* Build and run
+
+Requires Rust (=rust-toolchain.toml=) and the native dependencies listed in
+=nix/dependencies.nix=. =nix develop= provides the development environment.
+
+#+begin_src sh
+cargo build --release --locked -p romacs-vm-gui
+scripts/romacs
+#+end_src
+
+* Keys
+
+- =C-x C-f=: open a file or directory; =TAB= completes names.
+- =C-x C-s=: save; =C-x b=: switch buffers; =M-x=: run a command.
+- Dired: =n/p= move, =RET= opens, =^= parent, =g= refresh, =q= return.
+- =C-g=: cancel.
+
+Local UTF-8 files are supported. Dired is currently browse-only.
+
+* Development
+
+#+begin_src sh
+cargo test --locked -p romacs-vm --lib
+cargo test --locked -p romacs-vm-gui --test find_file
+#+end_src
+
+Keep generated logs, captures and run receipts out of Git. Fixed test fixtures
+remain source inputs. See =DIVERGENCES.md= for compatibility limits.

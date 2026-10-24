@@ -1,0 +1,1216 @@
+{
+ "protocol": "bignums-compiled-source-v1",
+ "regime": "GNU byte-compiled / VM2 source-compiled",
+ "world": "fresh process per case on both sides",
+ "gc": "enabled both: GNU default; VM2 floor 1 (not every short case collects)",
+ "generator_sha256": "f21efd59bd5ebd9f2f9bea912d56942fc6eb75684cc8c1a566dff5a5b26ff30b",
+ "gnu_sha256": "20a94ee7abc04960e3296deead030a37866d1d1e1522f3efd818838af7fffbe4",
+ "gnu_sources": {
+  "src/bignum.c": "b1f9fbded50391389b232e384324c91d8a094654c661fd80e503504f916e5c65",
+  "src/data.c": "eca7895a8043cd0a960dfe037a46028374d1a40cc6ee4d0cf6de90ac56c242ae",
+  "src/alloc.c": "b7bbe6972facf1208414a22d803e906cb577c477adaef975d6e7bf63144bc9a1",
+  "src/fns.c": "796fb20e762e383b3e078c54e7ef4185082068e88a0a38ebb2dd52558cafdec8",
+  "src/lisp.h": "7b1349a09486ec6e5637abfb1467005b1ce7db603cfa39c611ab6076a6245166",
+  "src/print.c": "a4d3613dd97297cb4a9b682f0fbe5a86d3ae1ac9a1a07bddaf6da970b28f0a85",
+  "lisp/subr.el": "6eb5746b37ce3db9767d6f67052a07e1586392495f4fc6ce595b053b75b4d656"
+ },
+ "cases": [
+  {
+   "family": "literal",
+   "source": "0",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "0"
+  },
+  {
+   "family": "predicate",
+   "source": "(let ((n 0)) (list (integerp n) (fixnump n) (bignump n) (natnump n) (numberp n) (wholenump n)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(t t nil t t t)"
+  },
+  {
+   "family": "roundtrip",
+   "source": "(let ((n 0)) (list (number-to-string n) (equal n (read (number-to-string n)))))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(\"0\" t)"
+  },
+  {
+   "family": "literal",
+   "source": "-1",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "-1"
+  },
+  {
+   "family": "predicate",
+   "source": "(let ((n -1)) (list (integerp n) (fixnump n) (bignump n) (natnump n) (numberp n) (wholenump n)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(t t nil nil t nil)"
+  },
+  {
+   "family": "roundtrip",
+   "source": "(let ((n -1)) (list (number-to-string n) (equal n (read (number-to-string n)))))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(\"-1\" t)"
+  },
+  {
+   "family": "literal",
+   "source": "1152921504606846975",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "1152921504606846975"
+  },
+  {
+   "family": "predicate",
+   "source": "(let ((n 1152921504606846975)) (list (integerp n) (fixnump n) (bignump n) (natnump n) (numberp n) (wholenump n)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(t t nil t t t)"
+  },
+  {
+   "family": "roundtrip",
+   "source": "(let ((n 1152921504606846975)) (list (number-to-string n) (equal n (read (number-to-string n)))))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(\"1152921504606846975\" t)"
+  },
+  {
+   "family": "literal",
+   "source": "1152921504606846976",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "1152921504606846976"
+  },
+  {
+   "family": "predicate",
+   "source": "(let ((n 1152921504606846976)) (list (integerp n) (fixnump n) (bignump n) (natnump n) (numberp n) (wholenump n)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(t t nil t t t)"
+  },
+  {
+   "family": "roundtrip",
+   "source": "(let ((n 1152921504606846976)) (list (number-to-string n) (equal n (read (number-to-string n)))))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(\"1152921504606846976\" t)"
+  },
+  {
+   "family": "literal",
+   "source": "-1152921504606846976",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "-1152921504606846976"
+  },
+  {
+   "family": "predicate",
+   "source": "(let ((n -1152921504606846976)) (list (integerp n) (fixnump n) (bignump n) (natnump n) (numberp n) (wholenump n)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(t t nil nil t nil)"
+  },
+  {
+   "family": "roundtrip",
+   "source": "(let ((n -1152921504606846976)) (list (number-to-string n) (equal n (read (number-to-string n)))))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(\"-1152921504606846976\" t)"
+  },
+  {
+   "family": "literal",
+   "source": "-1152921504606846977",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "-1152921504606846977"
+  },
+  {
+   "family": "predicate",
+   "source": "(let ((n -1152921504606846977)) (list (integerp n) (fixnump n) (bignump n) (natnump n) (numberp n) (wholenump n)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(t t nil nil t nil)"
+  },
+  {
+   "family": "roundtrip",
+   "source": "(let ((n -1152921504606846977)) (list (number-to-string n) (equal n (read (number-to-string n)))))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(\"-1152921504606846977\" t)"
+  },
+  {
+   "family": "literal",
+   "source": "2305843009213693951",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "2305843009213693951"
+  },
+  {
+   "family": "predicate",
+   "source": "(let ((n 2305843009213693951)) (list (integerp n) (fixnump n) (bignump n) (natnump n) (numberp n) (wholenump n)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(t t nil t t t)"
+  },
+  {
+   "family": "roundtrip",
+   "source": "(let ((n 2305843009213693951)) (list (number-to-string n) (equal n (read (number-to-string n)))))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(\"2305843009213693951\" t)"
+  },
+  {
+   "family": "literal",
+   "source": "2305843009213693952",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "2305843009213693952"
+  },
+  {
+   "family": "predicate",
+   "source": "(let ((n 2305843009213693952)) (list (integerp n) (fixnump n) (bignump n) (natnump n) (numberp n) (wholenump n)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(t nil t t t t)"
+  },
+  {
+   "family": "roundtrip",
+   "source": "(let ((n 2305843009213693952)) (list (number-to-string n) (equal n (read (number-to-string n)))))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(\"2305843009213693952\" t)"
+  },
+  {
+   "family": "literal",
+   "source": "-2305843009213693952",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "-2305843009213693952"
+  },
+  {
+   "family": "predicate",
+   "source": "(let ((n -2305843009213693952)) (list (integerp n) (fixnump n) (bignump n) (natnump n) (numberp n) (wholenump n)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(t t nil nil t nil)"
+  },
+  {
+   "family": "roundtrip",
+   "source": "(let ((n -2305843009213693952)) (list (number-to-string n) (equal n (read (number-to-string n)))))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(\"-2305843009213693952\" t)"
+  },
+  {
+   "family": "literal",
+   "source": "-2305843009213693953",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "-2305843009213693953"
+  },
+  {
+   "family": "predicate",
+   "source": "(let ((n -2305843009213693953)) (list (integerp n) (fixnump n) (bignump n) (natnump n) (numberp n) (wholenump n)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(t nil t nil t nil)"
+  },
+  {
+   "family": "roundtrip",
+   "source": "(let ((n -2305843009213693953)) (list (number-to-string n) (equal n (read (number-to-string n)))))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(\"-2305843009213693953\" t)"
+  },
+  {
+   "family": "literal",
+   "source": "9223372036854775807",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "9223372036854775807"
+  },
+  {
+   "family": "predicate",
+   "source": "(let ((n 9223372036854775807)) (list (integerp n) (fixnump n) (bignump n) (natnump n) (numberp n) (wholenump n)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(t nil t t t t)"
+  },
+  {
+   "family": "roundtrip",
+   "source": "(let ((n 9223372036854775807)) (list (number-to-string n) (equal n (read (number-to-string n)))))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(\"9223372036854775807\" t)"
+  },
+  {
+   "family": "literal",
+   "source": "9223372036854775808",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "9223372036854775808"
+  },
+  {
+   "family": "predicate",
+   "source": "(let ((n 9223372036854775808)) (list (integerp n) (fixnump n) (bignump n) (natnump n) (numberp n) (wholenump n)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(t nil t t t t)"
+  },
+  {
+   "family": "roundtrip",
+   "source": "(let ((n 9223372036854775808)) (list (number-to-string n) (equal n (read (number-to-string n)))))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(\"9223372036854775808\" t)"
+  },
+  {
+   "family": "literal",
+   "source": "18446744073709551615",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "18446744073709551615"
+  },
+  {
+   "family": "predicate",
+   "source": "(let ((n 18446744073709551615)) (list (integerp n) (fixnump n) (bignump n) (natnump n) (numberp n) (wholenump n)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(t nil t t t t)"
+  },
+  {
+   "family": "roundtrip",
+   "source": "(let ((n 18446744073709551615)) (list (number-to-string n) (equal n (read (number-to-string n)))))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(\"18446744073709551615\" t)"
+  },
+  {
+   "family": "literal",
+   "source": "18446744073709551616",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "18446744073709551616"
+  },
+  {
+   "family": "predicate",
+   "source": "(let ((n 18446744073709551616)) (list (integerp n) (fixnump n) (bignump n) (natnump n) (numberp n) (wholenump n)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(t nil t t t t)"
+  },
+  {
+   "family": "roundtrip",
+   "source": "(let ((n 18446744073709551616)) (list (number-to-string n) (equal n (read (number-to-string n)))))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(\"18446744073709551616\" t)"
+  },
+  {
+   "family": "literal",
+   "source": "18446744073709551617",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "18446744073709551617"
+  },
+  {
+   "family": "predicate",
+   "source": "(let ((n 18446744073709551617)) (list (integerp n) (fixnump n) (bignump n) (natnump n) (numberp n) (wholenump n)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(t nil t t t t)"
+  },
+  {
+   "family": "roundtrip",
+   "source": "(let ((n 18446744073709551617)) (list (number-to-string n) (equal n (read (number-to-string n)))))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(\"18446744073709551617\" t)"
+  },
+  {
+   "family": "literal",
+   "source": "10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000123",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000123"
+  },
+  {
+   "family": "predicate",
+   "source": "(let ((n 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000123)) (list (integerp n) (fixnump n) (bignump n) (natnump n) (numberp n) (wholenump n)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(t nil t t t t)"
+  },
+  {
+   "family": "roundtrip",
+   "source": "(let ((n 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000123)) (list (number-to-string n) (equal n (read (number-to-string n)))))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(\"10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000123\" t)"
+  },
+  {
+   "family": "literal",
+   "source": "-10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000123",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "-10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000123"
+  },
+  {
+   "family": "predicate",
+   "source": "(let ((n -10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000123)) (list (integerp n) (fixnump n) (bignump n) (natnump n) (numberp n) (wholenump n)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(t nil t nil t nil)"
+  },
+  {
+   "family": "roundtrip",
+   "source": "(let ((n -10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000123)) (list (number-to-string n) (equal n (read (number-to-string n)))))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(\"-10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000123\" t)"
+  },
+  {
+   "family": "arithmetic",
+   "source": "most-positive-fixnum",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "2305843009213693951"
+  },
+  {
+   "family": "arithmetic",
+   "source": "most-negative-fixnum",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "-2305843009213693952"
+  },
+  {
+   "family": "arithmetic",
+   "source": "(1+ 1152921504606846975)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "1152921504606846976"
+  },
+  {
+   "family": "arithmetic",
+   "source": "(1- -1152921504606846976)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "-1152921504606846977"
+  },
+  {
+   "family": "arithmetic",
+   "source": "(1+ 2305843009213693951)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "2305843009213693952"
+  },
+  {
+   "family": "arithmetic",
+   "source": "(1- -2305843009213693952)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "-2305843009213693953"
+  },
+  {
+   "family": "arithmetic",
+   "source": "(1- 2305843009213693952)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "2305843009213693951"
+  },
+  {
+   "family": "arithmetic",
+   "source": "(1+ -2305843009213693953)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "-2305843009213693952"
+  },
+  {
+   "family": "arithmetic",
+   "source": "(- -2305843009213693952)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "2305843009213693952"
+  },
+  {
+   "family": "arithmetic",
+   "source": "(abs -2305843009213693952)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "2305843009213693952"
+  },
+  {
+   "family": "arithmetic",
+   "source": "(* 2305843009213693951 2305843009213693951)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "5316911983139663487003542222693990401"
+  },
+  {
+   "family": "arithmetic",
+   "source": "(+ 18446744073709551616 -18446744073709551616)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "0"
+  },
+  {
+   "family": "arithmetic",
+   "source": "(- 18446744073709551616 18446744073709551615)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "1"
+  },
+  {
+   "family": "arithmetic",
+   "source": "(+ 2305843009213693951 1 -1)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "2305843009213693951"
+  },
+  {
+   "family": "identity",
+   "source": "(let ((f (lambda (x) (+ 1152921504606846976 x)))) (let ((a (funcall f 0)) (b (funcall f 0))) (list (eq a b) (eql a b) (equal a b))))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(t t t)"
+  },
+  {
+   "family": "hash",
+   "source": "(let ((f (lambda (x) (+ 1152921504606846976 x))) (h (make-hash-table :test 'eq))) (puthash (funcall f 0) 'hit h) (list (gethash (funcall f 0) h) (hash-table-count h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(hit 1)"
+  },
+  {
+   "family": "hash",
+   "source": "(let ((f (lambda (x) (+ 1152921504606846976 x))) (h (make-hash-table :test 'eql))) (puthash (funcall f 0) 'hit h) (list (gethash (funcall f 0) h) (hash-table-count h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(hit 1)"
+  },
+  {
+   "family": "hash",
+   "source": "(let ((f (lambda (x) (+ 1152921504606846976 x))) (h (make-hash-table :test 'equal))) (puthash (funcall f 0) 'hit h) (list (gethash (funcall f 0) h) (hash-table-count h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(hit 1)"
+  },
+  {
+   "family": "identity",
+   "source": "(let ((f (lambda (x) (+ 2305843009213693951 x)))) (let ((a (funcall f 0)) (b (funcall f 0))) (list (eq a b) (eql a b) (equal a b))))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(t t t)"
+  },
+  {
+   "family": "hash",
+   "source": "(let ((f (lambda (x) (+ 2305843009213693951 x))) (h (make-hash-table :test 'eq))) (puthash (funcall f 0) 'hit h) (list (gethash (funcall f 0) h) (hash-table-count h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(hit 1)"
+  },
+  {
+   "family": "hash",
+   "source": "(let ((f (lambda (x) (+ 2305843009213693951 x))) (h (make-hash-table :test 'eql))) (puthash (funcall f 0) 'hit h) (list (gethash (funcall f 0) h) (hash-table-count h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(hit 1)"
+  },
+  {
+   "family": "hash",
+   "source": "(let ((f (lambda (x) (+ 2305843009213693951 x))) (h (make-hash-table :test 'equal))) (puthash (funcall f 0) 'hit h) (list (gethash (funcall f 0) h) (hash-table-count h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(hit 1)"
+  },
+  {
+   "family": "identity",
+   "source": "(let ((f (lambda (x) (+ 2305843009213693952 x)))) (let ((a (funcall f 0)) (b (funcall f 0))) (list (eq a b) (eql a b) (equal a b))))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(nil t t)"
+  },
+  {
+   "family": "hash",
+   "source": "(let ((f (lambda (x) (+ 2305843009213693952 x))) (h (make-hash-table :test 'eq))) (puthash (funcall f 0) 'hit h) (list (gethash (funcall f 0) h) (hash-table-count h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(nil 1)"
+  },
+  {
+   "family": "hash",
+   "source": "(let ((f (lambda (x) (+ 2305843009213693952 x))) (h (make-hash-table :test 'eql))) (puthash (funcall f 0) 'hit h) (list (gethash (funcall f 0) h) (hash-table-count h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(hit 1)"
+  },
+  {
+   "family": "hash",
+   "source": "(let ((f (lambda (x) (+ 2305843009213693952 x))) (h (make-hash-table :test 'equal))) (puthash (funcall f 0) 'hit h) (list (gethash (funcall f 0) h) (hash-table-count h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(hit 1)"
+  },
+  {
+   "family": "identity",
+   "source": "(let ((f (lambda (x) (+ -2305843009213693952 x)))) (let ((a (funcall f 0)) (b (funcall f 0))) (list (eq a b) (eql a b) (equal a b))))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(t t t)"
+  },
+  {
+   "family": "hash",
+   "source": "(let ((f (lambda (x) (+ -2305843009213693952 x))) (h (make-hash-table :test 'eq))) (puthash (funcall f 0) 'hit h) (list (gethash (funcall f 0) h) (hash-table-count h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(hit 1)"
+  },
+  {
+   "family": "hash",
+   "source": "(let ((f (lambda (x) (+ -2305843009213693952 x))) (h (make-hash-table :test 'eql))) (puthash (funcall f 0) 'hit h) (list (gethash (funcall f 0) h) (hash-table-count h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(hit 1)"
+  },
+  {
+   "family": "hash",
+   "source": "(let ((f (lambda (x) (+ -2305843009213693952 x))) (h (make-hash-table :test 'equal))) (puthash (funcall f 0) 'hit h) (list (gethash (funcall f 0) h) (hash-table-count h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(hit 1)"
+  },
+  {
+   "family": "identity",
+   "source": "(let ((f (lambda (x) (+ -2305843009213693953 x)))) (let ((a (funcall f 0)) (b (funcall f 0))) (list (eq a b) (eql a b) (equal a b))))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(nil t t)"
+  },
+  {
+   "family": "hash",
+   "source": "(let ((f (lambda (x) (+ -2305843009213693953 x))) (h (make-hash-table :test 'eq))) (puthash (funcall f 0) 'hit h) (list (gethash (funcall f 0) h) (hash-table-count h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(nil 1)"
+  },
+  {
+   "family": "hash",
+   "source": "(let ((f (lambda (x) (+ -2305843009213693953 x))) (h (make-hash-table :test 'eql))) (puthash (funcall f 0) 'hit h) (list (gethash (funcall f 0) h) (hash-table-count h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(hit 1)"
+  },
+  {
+   "family": "hash",
+   "source": "(let ((f (lambda (x) (+ -2305843009213693953 x))) (h (make-hash-table :test 'equal))) (puthash (funcall f 0) 'hit h) (list (gethash (funcall f 0) h) (hash-table-count h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(hit 1)"
+  },
+  {
+   "family": "identity",
+   "source": "(let ((f (lambda (x) (+ 1267650600228229401496703205377 x)))) (let ((a (funcall f 0)) (b (funcall f 0))) (list (eq a b) (eql a b) (equal a b))))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(nil t t)"
+  },
+  {
+   "family": "hash",
+   "source": "(let ((f (lambda (x) (+ 1267650600228229401496703205377 x))) (h (make-hash-table :test 'eq))) (puthash (funcall f 0) 'hit h) (list (gethash (funcall f 0) h) (hash-table-count h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(nil 1)"
+  },
+  {
+   "family": "hash",
+   "source": "(let ((f (lambda (x) (+ 1267650600228229401496703205377 x))) (h (make-hash-table :test 'eql))) (puthash (funcall f 0) 'hit h) (list (gethash (funcall f 0) h) (hash-table-count h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(hit 1)"
+  },
+  {
+   "family": "hash",
+   "source": "(let ((f (lambda (x) (+ 1267650600228229401496703205377 x))) (h (make-hash-table :test 'equal))) (puthash (funcall f 0) 'hit h) (list (gethash (funcall f 0) h) (hash-table-count h)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(hit 1)"
+  },
+  {
+   "family": "division",
+   "source": "(/ 1267650600228229401496703205383 3)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "422550200076076467165567735127"
+  },
+  {
+   "family": "division",
+   "source": "(% 1267650600228229401496703205383 3)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "2"
+  },
+  {
+   "family": "division",
+   "source": "(mod 1267650600228229401496703205383 3)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "2"
+  },
+  {
+   "family": "division",
+   "source": "(/ 1267650600228229401496703205383 -3)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "-422550200076076467165567735127"
+  },
+  {
+   "family": "division",
+   "source": "(% 1267650600228229401496703205383 -3)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "2"
+  },
+  {
+   "family": "division",
+   "source": "(mod 1267650600228229401496703205383 -3)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "-1"
+  },
+  {
+   "family": "division",
+   "source": "(/ 1267650600228229401496703205383 1180591620717411303425)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "1073741823"
+  },
+  {
+   "family": "division",
+   "source": "(% 1267650600228229401496703205383 1180591620717411303425)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "1180591620716337561608"
+  },
+  {
+   "family": "division",
+   "source": "(mod 1267650600228229401496703205383 1180591620717411303425)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "1180591620716337561608"
+  },
+  {
+   "family": "division",
+   "source": "(/ 1267650600228229401496703205383 -1180591620717411303425)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "-1073741823"
+  },
+  {
+   "family": "division",
+   "source": "(% 1267650600228229401496703205383 -1180591620717411303425)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "1180591620716337561608"
+  },
+  {
+   "family": "division",
+   "source": "(mod 1267650600228229401496703205383 -1180591620717411303425)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "-1073741817"
+  },
+  {
+   "family": "division",
+   "source": "(/ -1267650600228229401496703205383 3)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "-422550200076076467165567735127"
+  },
+  {
+   "family": "division",
+   "source": "(% -1267650600228229401496703205383 3)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "-2"
+  },
+  {
+   "family": "division",
+   "source": "(mod -1267650600228229401496703205383 3)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "1"
+  },
+  {
+   "family": "division",
+   "source": "(/ -1267650600228229401496703205383 -3)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "422550200076076467165567735127"
+  },
+  {
+   "family": "division",
+   "source": "(% -1267650600228229401496703205383 -3)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "-2"
+  },
+  {
+   "family": "division",
+   "source": "(mod -1267650600228229401496703205383 -3)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "-2"
+  },
+  {
+   "family": "division",
+   "source": "(/ -1267650600228229401496703205383 1180591620717411303425)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "-1073741823"
+  },
+  {
+   "family": "division",
+   "source": "(% -1267650600228229401496703205383 1180591620717411303425)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "-1180591620716337561608"
+  },
+  {
+   "family": "division",
+   "source": "(mod -1267650600228229401496703205383 1180591620717411303425)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "1073741817"
+  },
+  {
+   "family": "division",
+   "source": "(/ -1267650600228229401496703205383 -1180591620717411303425)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "1073741823"
+  },
+  {
+   "family": "division",
+   "source": "(% -1267650600228229401496703205383 -1180591620717411303425)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "-1180591620716337561608"
+  },
+  {
+   "family": "division",
+   "source": "(mod -1267650600228229401496703205383 -1180591620717411303425)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "-1180591620716337561608"
+  },
+  {
+   "family": "shift",
+   "source": "(ash -7 -101)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "-1"
+  },
+  {
+   "family": "shift",
+   "source": "(lsh -7 -101)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "0"
+  },
+  {
+   "family": "shift",
+   "source": "(ash -7 -3)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "-1"
+  },
+  {
+   "family": "shift",
+   "source": "(lsh -7 -3)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "576460752303423487"
+  },
+  {
+   "family": "shift",
+   "source": "(ash -7 0)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "-7"
+  },
+  {
+   "family": "shift",
+   "source": "(lsh -7 0)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "-7"
+  },
+  {
+   "family": "shift",
+   "source": "(ash -7 3)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "-56"
+  },
+  {
+   "family": "shift",
+   "source": "(lsh -7 3)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "-56"
+  },
+  {
+   "family": "shift",
+   "source": "(ash -7 101)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "-17747108403195211620953844875264"
+  },
+  {
+   "family": "shift",
+   "source": "(lsh -7 101)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "-17747108403195211620953844875264"
+  },
+  {
+   "family": "shift",
+   "source": "(ash 7 -101)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "0"
+  },
+  {
+   "family": "shift",
+   "source": "(lsh 7 -101)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "0"
+  },
+  {
+   "family": "shift",
+   "source": "(ash 7 -3)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "0"
+  },
+  {
+   "family": "shift",
+   "source": "(lsh 7 -3)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "0"
+  },
+  {
+   "family": "shift",
+   "source": "(ash 7 0)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "7"
+  },
+  {
+   "family": "shift",
+   "source": "(lsh 7 0)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "7"
+  },
+  {
+   "family": "shift",
+   "source": "(ash 7 3)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "56"
+  },
+  {
+   "family": "shift",
+   "source": "(lsh 7 3)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "56"
+  },
+  {
+   "family": "shift",
+   "source": "(ash 7 101)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "17747108403195211620953844875264"
+  },
+  {
+   "family": "shift",
+   "source": "(lsh 7 101)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "17747108403195211620953844875264"
+  },
+  {
+   "family": "shift",
+   "source": "(ash -1267650600228229401496703205383 -101)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "-1"
+  },
+  {
+   "family": "shift",
+   "source": "(lsh -1267650600228229401496703205383 -101)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(signal (args-out-of-range -1267650600228229401496703205383 -101))"
+  },
+  {
+   "family": "shift",
+   "source": "(ash -1267650600228229401496703205383 -3)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "-158456325028528675187087900673"
+  },
+  {
+   "family": "shift",
+   "source": "(lsh -1267650600228229401496703205383 -3)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(signal (args-out-of-range -1267650600228229401496703205383 -3))"
+  },
+  {
+   "family": "shift",
+   "source": "(ash -1267650600228229401496703205383 0)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "-1267650600228229401496703205383"
+  },
+  {
+   "family": "shift",
+   "source": "(lsh -1267650600228229401496703205383 0)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "-1267650600228229401496703205383"
+  },
+  {
+   "family": "shift",
+   "source": "(ash -1267650600228229401496703205383 3)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "-10141204801825835211973625643064"
+  },
+  {
+   "family": "shift",
+   "source": "(lsh -1267650600228229401496703205383 3)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "-10141204801825835211973625643064"
+  },
+  {
+   "family": "shift",
+   "source": "(ash -1267650600228229401496703205383 101)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "-3213876088517980551083924184700072313447601199186539515478016"
+  },
+  {
+   "family": "shift",
+   "source": "(lsh -1267650600228229401496703205383 101)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "-3213876088517980551083924184700072313447601199186539515478016"
+  },
+  {
+   "family": "shift",
+   "source": "(ash 1267650600228229401496703205383 -101)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "0"
+  },
+  {
+   "family": "shift",
+   "source": "(lsh 1267650600228229401496703205383 -101)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "0"
+  },
+  {
+   "family": "shift",
+   "source": "(ash 1267650600228229401496703205383 -3)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "158456325028528675187087900672"
+  },
+  {
+   "family": "shift",
+   "source": "(lsh 1267650600228229401496703205383 -3)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "158456325028528675187087900672"
+  },
+  {
+   "family": "shift",
+   "source": "(ash 1267650600228229401496703205383 0)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "1267650600228229401496703205383"
+  },
+  {
+   "family": "shift",
+   "source": "(lsh 1267650600228229401496703205383 0)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "1267650600228229401496703205383"
+  },
+  {
+   "family": "shift",
+   "source": "(ash 1267650600228229401496703205383 3)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "10141204801825835211973625643064"
+  },
+  {
+   "family": "shift",
+   "source": "(lsh 1267650600228229401496703205383 3)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "10141204801825835211973625643064"
+  },
+  {
+   "family": "shift",
+   "source": "(ash 1267650600228229401496703205383 101)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "3213876088517980551083924184700072313447601199186539515478016"
+  },
+  {
+   "family": "shift",
+   "source": "(lsh 1267650600228229401496703205383 101)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "3213876088517980551083924184700072313447601199186539515478016"
+  },
+  {
+   "family": "conversion-error",
+   "source": "(/ 1 0)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(signal (arith-error))"
+  },
+  {
+   "family": "conversion-error",
+   "source": "(/ 1.0 0)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "1.0e+INF"
+  },
+  {
+   "family": "conversion-error",
+   "source": "(/ 1 0.0)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "1.0e+INF"
+  },
+  {
+   "family": "conversion-error",
+   "source": "(% 1 0)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(signal (arith-error))"
+  },
+  {
+   "family": "conversion-error",
+   "source": "(mod 1 0)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(signal (arith-error))"
+  },
+  {
+   "family": "conversion-error",
+   "source": "(/ 18446744073709551616 0)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(signal (arith-error))"
+  },
+  {
+   "family": "conversion-error",
+   "source": "(float 18446744073709551617)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "1.8446744073709552e+19"
+  },
+  {
+   "family": "conversion-error",
+   "source": "(float 9007199254740995)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "9007199254740996.0"
+  },
+  {
+   "family": "conversion-error",
+   "source": "(float 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "1.0e+INF"
+  },
+  {
+   "family": "conversion-error",
+   "source": "(truncate 1.0e+INF)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(signal (overflow-error))"
+  },
+  {
+   "family": "conversion-error",
+   "source": "(ash 1 18446744073709551616)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(signal (overflow-error))"
+  },
+  {
+   "family": "conversion-error",
+   "source": "(ash -7 -18446744073709551616)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "-1"
+  },
+  {
+   "family": "conversion-error",
+   "source": "(ash 0 18446744073709551616)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "0"
+  },
+  {
+   "family": "conversion-error",
+   "source": "(let ((integer-width 128)) (ash 1 128))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "340282366920938463463374607431768211456"
+  },
+  {
+   "family": "conversion-error",
+   "source": "(let ((integer-width 128)) (ash 1 127))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "170141183460469231731687303715884105728"
+  },
+  {
+   "family": "comparison",
+   "source": "(list (< 1267650600228229401496703205377 1.2676506002282294e+30) (< 1.2676506002282294e+30 1267650600228229401496703205377) (= 1267650600228229401496703205377 1.2676506002282294e+30))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(nil t nil)"
+  },
+  {
+   "family": "comparison",
+   "source": "(list (< 9007199254740993 9007199254740992.0) (< 9007199254740992.0 9007199254740993) (= 9007199254740993 9007199254740992.0))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(nil t nil)"
+  },
+  {
+   "family": "comparison",
+   "source": "(list (< -1267650600228229401496703205377 -1.2676506002282294e+30) (< -1.2676506002282294e+30 -1267650600228229401496703205377) (= -1267650600228229401496703205377 -1.2676506002282294e+30))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "expected": "(t nil nil)"
+  }
+ ]
+}

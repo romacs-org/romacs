@@ -1,0 +1,30 @@
+;;; window-divider-preview-test.el --- Visual probe for GUI dividers -*- lexical-binding: t; -*-
+
+(setq inhibit-startup-screen t)
+(set-face-foreground 'window-divider-first-pixel "#f0f0f0")
+(set-face-foreground 'window-divider "#4a90e2")
+(set-face-foreground 'window-divider-last-pixel "#1f3b57")
+(setq window-divider-default-places t)
+(setq window-divider-default-right-width 8)
+(setq window-divider-default-bottom-width 6)
+(window-divider-mode 1)
+(modify-frame-parameters (selected-frame)
+                         '((right-divider-width . 8)
+                           (bottom-divider-width . 6)))
+
+(switch-to-buffer (get-buffer-create "*divider-left*"))
+(erase-buffer)
+(insert "Left window\n\nThe divider between windows should be a pixel rectangle, not a text glyph.\n")
+(split-window-right)
+(other-window 1)
+(switch-to-buffer (get-buffer-create "*divider-right*"))
+(erase-buffer)
+(insert "Right window\n\nNo ASCII vertical-border character should be used for the GUI divider.\n")
+(split-window-below)
+(other-window 1)
+(switch-to-buffer (get-buffer-create "*divider-bottom*"))
+(erase-buffer)
+(insert "Bottom window\n\nThe horizontal divider should use pixel geometry.\n")
+(other-window -2)
+
+;;; window-divider-preview-test.el ends here

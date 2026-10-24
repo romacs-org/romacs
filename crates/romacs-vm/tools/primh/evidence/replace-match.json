@@ -1,0 +1,226 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "replace-match",
+ "spec_sha256": "2bd31eb4dccf0feaa48a0b14bdf67a57aff615fe2e177caa3622b2d4d1b8ecee",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "replace-match",
+    "subr",
+    1,
+    5
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "search.c": "3b9dda9f663ba44c64823daac395c38b46cc3cf47b72b370af864be075ef8375"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "replace-match/0000",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (replace-match 1.5 1.5 1.5 1.5 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 1.5))"
+  },
+  {
+   "id": "replace-match/0001",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'replace-match '())) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr replace-match> 0))"
+  },
+  {
+   "id": "replace-match/0002",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'replace-match '(1 1 1 1 1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr replace-match> 6))"
+  },
+  {
+   "id": "replace-match/0003",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.5) (a1 1.5) (a2 1.5) (a3 1.5) (a4 1.5)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (replace-match a0 a1 a2 a3 a4))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 1.5))"
+  },
+  {
+   "id": "replace-match/0004",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.5) (a1 1.5) (a2 1.5) (a3 1.5) (a4 1.5)) (let ((r (replace-match a0 a1 a2 a3 a4))) (list (eq r a0) (eq r a1) (eq r a2) (eq r a3) (eq r a4))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 1.5))"
+  },
+  {
+   "id": "replace-match/0005",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (string-match \"-mode$\" \"auto-save-visited-mode\") (replace-match \"\" nil nil \"auto-save-visited-mode\"))) (error (list 'sig e))))",
+   "expected": "(ok \"auto-save-visited\")"
+  },
+  {
+   "id": "replace-match/0006",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (string-match \"a\" \"cat\") (replace-match \"oo\" t t \"cat\"))) (error (list 'sig e))))",
+   "expected": "(ok \"coot\")"
+  },
+  {
+   "id": "replace-match/0007",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (string-match \"é\\\\(λ\\\\)\" \"xéλz\") (list (funcall #'replace-match \"β\" t t \"xéλz\" 1) (match-data t)))) (error (list 'sig e))))",
+   "expected": "(ok (\"xéβz\" (1 3 2 3)))"
+  },
+  {
+   "id": "replace-match/0008",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((s (copy-sequence \"abc\"))) (string-match \"b\" s) (list (replace-match \"\\\\&\" t t s) s (fboundp 'replace-match) (functionp #'replace-match)))) (error (list 'sig e))))",
+   "expected": "(ok (\"a\\\\&c\" \"abc\" t t))"
+  },
+  {
+   "id": "replace-match/0009",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (replace-match 1 t t \"abc\")) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 1))"
+  },
+  {
+   "id": "replace-match/0010",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (replace-match \"x\" t t 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 1))"
+  },
+  {
+   "id": "replace-match/0011",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set-match-data '(1 9)) (list (condition-case e (replace-match \"x\" t t \"abc\") (error e)) (match-data t)))) (error (list 'sig e))))",
+   "expected": "(ok ((args-out-of-range 1 9) (1 9)))"
+  },
+  {
+   "id": "replace-match/0012",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set-match-data '(0 1)) (replace-match \"x\" t t \"abc\" -1))) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range -1 0 6))"
+  },
+  {
+   "id": "replace-match/0013",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set-match-data '(0 1)) (replace-match \"x\" t t \"abc\" 3))) (error (list 'sig e))))",
+   "expected": "(sig (error \"replace-match subexpression does not exist\" 3))"
+  },
+  {
+   "id": "replace-match/0014",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set-match-data '(0 1)) (replace-match \"x\" t t \"abc\" 'x))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp x))"
+  },
+  {
+   "id": "replace-match/0015",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set-match-data '(0 1 nil nil)) (replace-match \"x\" t t \"abc\" 1))) (error (list 'sig e))))",
+   "expected": "(sig (error \"replace-match subexpression does not exist\" 1))"
+  },
+  {
+   "id": "replace-match/0016",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set-match-data '(0 0)) (replace-match \"!\" t nil \"abc\"))) (error (list 'sig e))))",
+   "expected": "(ok \"!abc\")"
+  },
+  {
+   "id": "replace-match/0017",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set-match-data '(3 3)) (replace-match \"!\" t nil \"abc\" 0))) (error (list 'sig e))))",
+   "expected": "(ok \"abc!\")"
+  },
+  {
+   "id": "replace-match/0018",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set-match-data '(0 3)) (replace-match \"\" nil nil \"abc\"))) (error (list 'sig e))))",
+   "expected": "(ok \"\")"
+  },
+  {
+   "id": "replace-match/0019",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set-match-data '(1 2)) (list (multibyte-string-p (replace-match \"β\" t t \"abc\")) (replace-match \"β\" t t \"abc\")))) (error (list 'sig e))))",
+   "expected": "(ok (t \"aβc\"))"
+  },
+  {
+   "id": "replace-match/0020",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set-match-data '(1 2)) (replace-match \"x\" t t (string-to-multibyte \"abc\")))) (error (list 'sig e))))",
+   "expected": "(ok \"axc\")"
+  },
+  {
+   "id": "replace-match/0021",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set-match-data '(1 2)) (replace-match \"x\" t t (unibyte-string 97 255 99)))) (error (list 'sig e))))",
+   "expected": "(ok \"axc\")"
+  },
+  {
+   "id": "replace-match/0022",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (erase-buffer) (insert \"abc\") (goto-char 1) (looking-at \"a\") (list (replace-match \"x\" t t) (buffer-string) (point)))) (error (list 'sig e))))",
+   "expected": "(ok (nil \"xbc\" 2))"
+  },
+  {
+   "id": "replace-match/0023",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (string-match \"ABC\" \"ABC\") (replace-match \"new\" nil t \"ABC\"))) (error (list 'sig e))))",
+   "expected": "(ok \"NEW\")"
+  },
+  {
+   "id": "replace-match/0024",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (string-match \"abc\" \"abc\") (replace-match \"\\\\&\" t nil \"abc\"))) (error (list 'sig e))))",
+   "expected": "(ok \"abc\")"
+  },
+  {
+   "id": "replace-match/0025",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (string-match \"abc\" \"abc\") (replace-match \"x\" t t (propertize \"abc\" 'face 'bold)))) (error (list 'sig e))))",
+   "expected": "(ok \"x\")"
+  },
+  {
+   "id": "replace-match/0026",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set-match-data '(0 1)) (replace-match (unibyte-string 255) t t (string-to-multibyte \"abc\")))) (error (list 'sig e))))",
+   "expected": "(ok \"\\377bc\")"
+  },
+  {
+   "id": "replace-match/0027",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set-match-data '(1 -1)) (replace-match \"x\" t t \"abc\"))) (error (list 'sig e))))",
+   "expected": "(ok \"axc\")"
+  },
+  {
+   "id": "replace-match/0028",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set-match-data '(0 1)) (list (replace-match \"\" nil nil \"abc\") (match-data t)))) (error (list 'sig e))))",
+   "expected": "(ok (\"bc\" (0 1)))"
+  },
+  {
+   "id": "replace-match/0029",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set-match-data '(0 1)) (replace-match \"x\" t t \"abc\" #x2000000000000000))) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range 2305843009213693952 0 6))"
+  },
+  {
+   "id": "replace-match/0030",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1.5) (error (list 'sig e))))",
+   "expected": "(ok 1.5)"
+  }
+ ],
+ "pinned": {
+  "replace-match/0012": "DATA",
+  "replace-match/0013": "CONDITION",
+  "replace-match/0022": "SIGNAL-VS-VALUE",
+  "replace-match/0023": "SIGNAL-VS-VALUE",
+  "replace-match/0026": "SIGNAL-VS-VALUE",
+  "replace-match/0027": "SIGNAL-VS-VALUE",
+  "replace-match/0029": "DATA"
+ }
+}

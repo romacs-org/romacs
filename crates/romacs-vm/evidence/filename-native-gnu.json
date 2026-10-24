@@ -1,0 +1,257 @@
+{
+  "gnu_commit": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "gnu_binary": "emacs-32.0.50",
+  "binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+  "scope": "C-owned semantics with explicit unbound, spy, and real GNU env.el helper cases",
+  "cases": [
+    {
+      "id": "directory-sorted",
+      "source": "(directory-files \"@ROOT@\")",
+      "expected": "(\".\" \"..\" \".hidden\" \"a.el\" \"alpha\" \"sub\" \"zeta\" \"é\")"
+    },
+    {
+      "id": "directory-full",
+      "source": "(directory-files \"@ROOT@/\" t)",
+      "expected": "(\"@ROOT@/.\" \"@ROOT@/..\" \"@ROOT@/.hidden\" \"@ROOT@/a.el\" \"@ROOT@/alpha\" \"@ROOT@/sub\" \"@ROOT@/zeta\" \"@ROOT@/é\")"
+    },
+    {
+      "id": "directory-regex",
+      "source": "(directory-files \"@ROOT@\" nil \"\\\\.el\\\\'\")",
+      "expected": "(\"a.el\")"
+    },
+    {
+      "id": "directory-case-sensitive",
+      "source": "(let ((case-fold-search t)) (directory-files \"@ROOT@\" nil \"ALPHA\"))",
+      "expected": "nil"
+    },
+    {
+      "id": "directory-count-zero",
+      "source": "(directory-files \"@ROOT@\" nil nil nil 0)",
+      "expected": "nil"
+    },
+    {
+      "id": "directory-count-one",
+      "source": "(length (directory-files \"@ROOT@\" nil nil nil 1))",
+      "expected": "1"
+    },
+    {
+      "id": "directory-nosort-count",
+      "source": "(length (directory-files \"@ROOT@\" nil nil t 3))",
+      "expected": "3"
+    },
+    {
+      "id": "directory-bad-count",
+      "source": "(directory-files \"@ROOT@\" nil nil nil -1)",
+      "expected": "(wrong-type-argument wholenump -1)"
+    },
+    {
+      "id": "directory-bad-match",
+      "source": "(directory-files \"@ROOT@\" nil 2)",
+      "expected": "(wrong-type-argument stringp 2)"
+    },
+    {
+      "id": "directory-bad-directory",
+      "source": "(directory-files 2)",
+      "expected": "(wrong-type-argument stringp 2)"
+    },
+    {
+      "id": "directory-missing",
+      "source": "(directory-files \"@ROOT@/missing\")",
+      "expected": "(file-missing \"Opening directory\" \"No such file or directory\" \"@ROOT@/missing\")"
+    },
+    {
+      "id": "directory-not-directory",
+      "source": "(directory-files \"@ROOT@/alpha\")",
+      "expected": "(file-error \"Opening directory\" \"Not a directory\" \"@ROOT@/alpha\")"
+    },
+    {
+      "id": "directory-nosort-set",
+      "source": "(sort (directory-files \"@ROOT@\" nil nil t) 'string-lessp)",
+      "expected": "(\".\" \"..\" \".hidden\" \"a.el\" \"alpha\" \"sub\" \"zeta\" \"é\")"
+    },
+    {
+      "id": "directory-match-data",
+      "source": "(progn (string-match \"b\" \"abc\") (directory-files \"@ROOT@\" nil \"alpha\") (match-data))",
+      "expected": "(1 2)"
+    },
+    {
+      "id": "substitute-0",
+      "source": "(substitute-in-file-name \"plain\")",
+      "expected": "\"plain\""
+    },
+    {
+      "id": "substitute-1",
+      "source": "(substitute-in-file-name \"a//b\")",
+      "expected": "\"/b\""
+    },
+    {
+      "id": "substitute-2",
+      "source": "(substitute-in-file-name \"a///b\")",
+      "expected": "\"/b\""
+    },
+    {
+      "id": "substitute-3",
+      "source": "(substitute-in-file-name \"a/~b\")",
+      "unsupported": "named-user embedded filename lookup",
+      "expected": "\"a/~b\""
+    },
+    {
+      "id": "substitute-4",
+      "source": "(substitute-in-file-name \"a/~\")",
+      "expected": "\"~\""
+    },
+    {
+      "id": "substitute-5",
+      "source": "(substitute-in-file-name \"a/~/b\")",
+      "expected": "\"~/b\""
+    },
+    {
+      "id": "substitute-6",
+      "source": "(substitute-in-file-name \"/a//b/~user/c\")",
+      "unsupported": "named-user embedded filename lookup",
+      "expected": "\"/b/~user/c\""
+    },
+    {
+      "id": "substitute-7",
+      "source": "(substitute-in-file-name \"$$HOME\")",
+      "expected": "\"$$HOME\""
+    },
+    {
+      "id": "substitute-8",
+      "source": "(substitute-in-file-name \"$HOME\")",
+      "expected": "\"$HOME\""
+    },
+    {
+      "id": "substitute-9",
+      "source": "(substitute-in-file-name \"${HOME}\")",
+      "expected": "\"${HOME}\""
+    },
+    {
+      "id": "substitute-10",
+      "source": "(substitute-in-file-name \"/a/./b/../c\")",
+      "expected": "\"/a/./b/../c\""
+    },
+    {
+      "id": "substitute-11",
+      "source": "(substitute-in-file-name \"//root\")",
+      "expected": "\"/root\""
+    },
+    {
+      "id": "substitute-12",
+      "source": "(substitute-in-file-name \"a/~~x\")",
+      "unsupported": "named-user embedded filename lookup",
+      "expected": "\"a/~~x\""
+    },
+    {
+      "id": "substitute-identity",
+      "source": "(let ((s (copy-sequence \"plain\"))) (eq s (substitute-in-file-name s)))",
+      "expected": "t"
+    },
+    {
+      "id": "substitute-type",
+      "source": "(substitute-in-file-name 2)",
+      "expected": "(wrong-type-argument stringp 2)"
+    },
+    {
+      "id": "directory-missing-trailing",
+      "source": "(directory-files \"@ROOT@/missing/\")",
+      "expected": "(file-missing \"Opening directory\" \"No such file or directory\" \"@ROOT@/missing\")"
+    },
+    {
+      "id": "directory-nul",
+      "source": "(condition-case e (directory-files (string 47 0)) (wrong-type-argument (list (car e) (car (cdr e)) (equal (car (cdr (cdr e))) (string 47 0)))))",
+      "expected": "(wrong-type-argument filenamep t)"
+    },
+    {
+      "id": "directory-bad-regexp",
+      "source": "(directory-files \"@ROOT@\" nil \"[\")",
+      "expected": "(invalid-regexp \"Unmatched [ or [^\")"
+    },
+    {
+      "id": "substitute-raw-bytes",
+      "source": "(let ((s (substitute-in-file-name (unibyte-string 255 97 47 47 98)))) (list (equal s \"/b\") (multibyte-string-p s)))",
+      "expected": "(t nil)"
+    },
+    {
+      "id": "directory-result-multibyte",
+      "source": "(list (multibyte-string-p (car (directory-files \"@ROOT@\" nil \"^alpha$\"))) (multibyte-string-p (car (directory-files \"@ROOT@\" nil \"^é$\"))))",
+      "expected": "(nil t)"
+    },
+    {
+      "id": "directory-full-result-multibyte",
+      "source": "(list (multibyte-string-p (car (directory-files \"@ROOT@\" t \"^alpha$\"))) (multibyte-string-p (car (directory-files \"@ROOT@\" t \"^é$\"))))",
+      "expected": "(nil t)"
+    },
+    {
+      "id": "substitute-tilde-nul-before-helper",
+      "source": "(progn (defalias 'substitute-env-in-file-name (lambda (s) s)) (equal (substitute-in-file-name (string 97 47 126 0 98)) (string 126 0 98)))",
+      "expected": "t"
+    },
+    {
+      "id": "substitute-tilde-nul-after-helper",
+      "source": "(progn (defalias 'substitute-env-in-file-name (lambda (s) (string 97 47 126 0 98))) (equal (substitute-in-file-name \"x\") (string 126 0 98)))",
+      "expected": "t"
+    },
+    {
+      "id": "helper-order",
+      "source": "(let (seen) (defalias 'substitute-env-in-file-name (lambda (s) (setq seen s) \"prefix//after/~/final\")) (list (substitute-in-file-name \"before//input\") seen))",
+      "expected": "(\"~/final\" \"/input\")"
+    },
+    {
+      "id": "helper-error",
+      "source": "(progn (defalias 'substitute-env-in-file-name (lambda (s) (signal 'file-error (list \"helper failed\" s)))) (substitute-in-file-name \"before//input\"))",
+      "expected": "(file-error \"helper failed\" \"/input\")"
+    },
+    {
+      "id": "helper-type",
+      "source": "(progn (defalias 'substitute-env-in-file-name (lambda (s) 42)) (substitute-in-file-name \"input\"))",
+      "expected": "(wrong-type-argument stringp 42)"
+    },
+    {
+      "id": "helper-once",
+      "source": "(let ((calls 0)) (defalias 'substitute-env-in-file-name (lambda (s) (setq calls (1+ calls)) \"prefix//$$HOME\")) (list (substitute-in-file-name \"before//input\") calls))",
+      "expected": "(\"/$$HOME\" 1)"
+    },
+    {
+      "id": "helper-identity",
+      "source": "(let ((s (copy-sequence \"input\"))) (defalias 'substitute-env-in-file-name (lambda (s) s)) (eq s (substitute-in-file-name s)))",
+      "expected": "t"
+    },
+    {
+      "id": "helper-same-object-mutation",
+      "source": "(progn (defalias 'substitute-env-in-file-name (lambda (s) (aset s 1 47) s)) (substitute-in-file-name \"axb\"))",
+      "expected": "\"a/b\""
+    },
+    {
+      "id": "helper-original-multibyte",
+      "source": "(progn (defalias 'substitute-env-in-file-name (lambda (s) (string-to-multibyte \"a//b\"))) (let ((s (substitute-in-file-name (unibyte-string 120)))) (list (equal s \"/b\") (multibyte-string-p s))))",
+      "expected": "(t nil)"
+    },
+    {
+      "id": "real-helper-dollar",
+      "real_helper": true,
+      "source": "(equal (substitute-in-file-name \"before//$$UNDEFINED/~/result\") \"~/result\")",
+      "expected": "t"
+    },
+    {
+      "id": "real-helper-env",
+      "real_helper": true,
+      "source": "(let ((process-environment (list \"ROMACS_FILENAME_CASE=prefix//final\"))) (equal (substitute-in-file-name \"before/$ROMACS_FILENAME_CASE\") \"/final\"))",
+      "candidate_error": "(void-function getenv-internal)",
+      "expected": "t"
+    },
+    {
+      "id": "real-helper-undefined",
+      "real_helper": true,
+      "source": "(let ((process-environment nil)) (equal (substitute-in-file-name \"$ROMACS_FILENAME_UNDEFINED\") \"$ROMACS_FILENAME_UNDEFINED\"))",
+      "candidate_error": "(void-function getenv-internal)",
+      "expected": "t"
+    },
+    {
+      "id": "real-helper-getenv-fixture",
+      "real_helper": true,
+      "source": "(progn (defalias 'getenv (lambda (&rest args) \"prefix//from-env\")) (equal (substitute-in-file-name \"before/$ROMACS_FILENAME_CASE\") \"/from-env\"))",
+      "expected": "t"
+    }
+  ]
+}

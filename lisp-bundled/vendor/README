@@ -1,0 +1,68 @@
+Bundled packages
+================
+
+Third-party Lisp belongs in lisp/vendor/<package>/.  Keep each package's
+prefix, file split and license headers.  Own packages live directly under
+lisp/; C sources belong under native/, outside the Lisp compilation tree.
+
+Each import is a hard fork without history: first copy source and ERT suites
+verbatim, recording source path, HEAD commit, version and license in the
+commit message, then adapt in a separate commit (at most 2,500 changed lines).
+Verify the first commit against a SHA-256 source manifest.  Do not import
+*-autoloads.el, *-pkg.el, .elc, .so, private fixtures, Makefiles or flakes.
+Existing suites go in test/lisp/<package>/; keep support files beside them.
+
+VENDOR format
+-------------
+
+Every third-party package directory contains a plain-text VENDOR file:
+
+  Upstream: https://example.org/project
+  Version: <upstream release, or unreleased>
+  Commit: <full upstream commit ID>
+  License: <SPDX expression matching the retained source headers>
+  Local changes:
+  - None (verbatim import).
+
+Replace the last entry with a short list of adaptations as they land.
+This file documents provenance; no checker or package manager reads it.
+Add each imported package to the list below with its version and license.
+
+Imported third-party packages
+-----------------------------
+
+markdown-mode 2.9-alpha — GPL-3.0-or-later.
+websocket 1.16 — GPL-2.0-or-later.
+fsm 0.2.1 — GPL-2.0-or-later. See fsm/VENDOR.
+
+Native boundary
+---------------
+
+jabber-omemo-core is the single temporary dynamic-module exception to the
+Rust-native boundary.  Its source belongs in native/jabber-omemo/ and its
+built module in libexec/romacs/.  R5 replaces it with the native OMEMO engine.
+Never import the built .so into this tree.  epdfinfo is a separate helper
+process, built from native/epdfinfo/ into libexec/romacs/.
+
+Verification
+------------
+
+scripts/gate packages [PKG...] builds the runtime and runs each named
+package's test/lisp/<package>/*.el files in a separate ERT batch process and
+private HOME.  With no names it selects bundled packages with suites; core
+ERT directories and resource fixtures are not selected implicitly.  Nested resource directories are not loaded as suites.  Each failing
+suite is rerun under GNU Emacs 32 as a diagnostic oracle, with a fresh HOME;
+GNU agreement does not turn the failure green.  Logs and exit codes are
+kept in the gate run directory.  Empty suites and timeouts fail.
+
+scripts/gate full also runs J0-batch.  It reads top-level (provide 'FEATURE)
+forms in the bundled own-package paths, vendor/ and profile/, then requires
+those features with the compiled runtime.  Source syntax is read by Lisp,
+not inferred from filenames.  New own-package locations must be added to
+BUNDLED_DIRS or BUNDLED_FILES in scripts/gate.  Profile files must contain no
+autoload cookies: loading the personal profile remains an explicit choice
+in the user's init.  J0 checks it explicitly in an isolated batch process.
+
+The package tier is separate from full.  Run it whenever changing a package
+or its tests, and for core integration from W4b onward.  No personal state,
+accounts, live editor sessions or sockets are needed by this tier.

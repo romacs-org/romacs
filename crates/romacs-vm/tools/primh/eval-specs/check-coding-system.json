@@ -1,0 +1,31 @@
+{
+  "name": "check-coding-system",
+  "arity": [
+    1,
+    1
+  ],
+  "effect": "global",
+  "gnu_files": [
+    "coding.c"
+  ],
+  "gnu_def": "coding.c:8647",
+  "rust": "src/prims/coding.rs:61",
+  "args": [
+    "no-generated-domain"
+  ],
+  "probes": [
+    "(check-coding-system nil)",
+    "(check-coding-system 'no-conversion)",
+    "(check-coding-system 'oracle-missing)",
+    "(check-coding-system 17)",
+    "(check-coding-system \"raw-text\")",
+    "(check-coding-system '(no-conversion))",
+    "(check-coding-system [])",
+    "(progn (define-coding-system-internal 'oracle-cod 67 'raw-text nil t nil nil nil nil nil nil '(:probe 7) nil) (list (check-coding-system 'oracle-cod) (check-coding-system 'oracle-cod-unix) (check-coding-system 'oracle-cod-dos) (check-coding-system 'oracle-cod-mac)))",
+    "(progn (setq oracle-count 0) (put 'oracle-lazy 'coding-system-define-form '(progn (setq oracle-count (1+ oracle-count)) (define-coding-system-internal 'oracle-lazy 67 'raw-text nil t nil nil nil nil nil nil '(:probe 7) nil))) (list (check-coding-system 'oracle-lazy) (check-coding-system 'oracle-lazy) oracle-count (get 'oracle-lazy 'coding-system-define-form)))",
+    "(progn (setq oracle-count 0) (put 'oracle-lazy 'coding-system-define-form '(progn (setq oracle-count (1+ oracle-count)) (error \"lazy-error\"))) (condition-case e (check-coding-system 'oracle-lazy) (error (list e oracle-count (get 'oracle-lazy 'coding-system-define-form)))))",
+    "(progn (setq oracle-count 0) (put 'oracle-lazy 'coding-system-define-form '(progn (setq oracle-count (1+ oracle-count)) nil)) (condition-case e (check-coding-system 'oracle-lazy) (error (list e oracle-count))))",
+    "(progn (setq oracle-count 0) (put 'oracle-lazy 'coding-system-define-form '(progn (setq oracle-count (1+ oracle-count)) (throw 'escaped 'did-escape))) (catch 'escaped (check-coding-system 'oracle-lazy) 'not-thrown))",
+    "(progn (setq oracle-count 0) (put 'oracle-lazy 'coding-system-define-form '(progn (setq oracle-count (1+ oracle-count)) (progn (setq oracle-redisplay inhibit-redisplay) (define-coding-system-internal 'oracle-lazy 67 'raw-text nil t nil nil nil nil nil nil '(:probe 7) nil)))) (list (check-coding-system 'oracle-lazy) oracle-redisplay))"
+  ]
+}

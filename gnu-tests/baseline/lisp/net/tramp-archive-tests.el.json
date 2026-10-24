@@ -1,0 +1,1081 @@
+{
+ "blob": "b4dfd1fd610e8c4cf5cfb960c24654a593425afd",
+ "compiled": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": true,
+  "results": {
+   "tramp-archive-test00-availability": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "tramp-archive-test01-file-name-syntax": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "tramp-archive-test01-file-name-syntax-cascaded": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-archive-test02-file-name-dissect": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "tramp-archive-test05-expand-file-name": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "tramp-archive-test05-expand-file-name-cascaded": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-archive-test05-expand-file-name-non-archive-directory": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "tramp-archive-test06-directory-file-name": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "tramp-archive-test06-directory-file-name-cascaded": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-archive-test07-file-exists-p": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-archive-test07-file-exists-p-cascaded": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-archive-test08-file-local-copy": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-archive-test08-file-local-copy-cascaded": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-archive-test09-insert-file-contents": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-archive-test09-insert-file-contents-cascaded": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-archive-test11-copy-file": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-archive-test11-copy-file-cascaded": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-archive-test15-copy-directory": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-archive-test15-copy-directory-cascaded": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-archive-test16-directory-files": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-archive-test16-directory-files-cascaded": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-archive-test17-insert-directory": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-archive-test17-insert-directory-cascaded": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-archive-test18-file-attributes": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-archive-test18-file-attributes-cascaded": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-archive-test19-directory-files-and-attributes": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-archive-test19-directory-files-and-attributes-cascaded": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-archive-test20-file-modes": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-archive-test20-file-modes-cascaded": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-archive-test21-file-links": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-archive-test21-file-links-cascaded": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-archive-test26-file-name-completion": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-archive-test26-file-name-completion-cascaded": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-archive-test40-make-nearby-temp-file": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "tramp-archive-test40-make-nearby-temp-file-cascaded": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-archive-test43-file-system-info": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "tramp-archive-test43-file-system-info-cascaded": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-archive-test44-user-group-ids": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "tramp-archive-test44-user-group-ids-cascaded": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-archive-test51-auto-load": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-archive-test51-delay-load": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-archive-test52-without-remote-files": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "tramp-archive-test99-libarchive-tests": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (equal (ert--stats-selector ert--current-run-stats) (ert-test-name (ert-running-test)))) :form (signal wrong-type-argument (ert--stats nil))))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": [
+     ":expensive-test",
+     ":unstable"
+    ]
+   }
+  },
+  "timed_out": false
+ },
+ "file": "lisp/net/tramp-archive-tests.el",
+ "gnu": {
+  "emacs": "<recording-path-redacted>/emacs-32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+  "version": "32.0.50"
+ },
+ "harness_sha256": "78c20850429a08af22faadf73b5d164c560230e83d7eb88ef60cb995670703ef",
+ "mini": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": null,
+  "results": {
+   "tramp-archive-test00-availability": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "tramp-archive-test01-file-name-syntax": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "tramp-archive-test01-file-name-syntax-cascaded": {
+    "as_expected": null,
+    "detail": "(void-function ert-get-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-archive-test02-file-name-dissect": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "tramp-archive-test05-expand-file-name": {
+    "as_expected": null,
+    "detail": "((should (string-equal (expand-file-name (concat tramp-archive-test-archive \"../file\")) (concat (ert-resource-directory) \"file\")) :value nil))",
+    "expected": ":passed",
+    "outcome": "failed",
+    "tags": null
+   },
+   "tramp-archive-test05-expand-file-name-cascaded": {
+    "as_expected": null,
+    "detail": "(void-function ert-get-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-archive-test05-expand-file-name-non-archive-directory": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "tramp-archive-test06-directory-file-name": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "tramp-archive-test06-directory-file-name-cascaded": {
+    "as_expected": null,
+    "detail": "(void-function ert-get-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-archive-test07-file-exists-p": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "tramp-archive-test07-file-exists-p-cascaded": {
+    "as_expected": null,
+    "detail": "(void-function ert-get-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-archive-test08-file-local-copy": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "tramp-archive-test08-file-local-copy-cascaded": {
+    "as_expected": null,
+    "detail": "(void-function ert-get-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-archive-test09-insert-file-contents": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "tramp-archive-test09-insert-file-contents-cascaded": {
+    "as_expected": null,
+    "detail": "(void-function ert-get-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-archive-test11-copy-file": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "tramp-archive-test11-copy-file-cascaded": {
+    "as_expected": null,
+    "detail": "(void-function ert-get-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-archive-test15-copy-directory": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "tramp-archive-test15-copy-directory-cascaded": {
+    "as_expected": null,
+    "detail": "(void-function ert-get-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-archive-test16-directory-files": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "tramp-archive-test16-directory-files-cascaded": {
+    "as_expected": null,
+    "detail": "(void-function ert-get-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-archive-test17-insert-directory": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "tramp-archive-test17-insert-directory-cascaded": {
+    "as_expected": null,
+    "detail": "(void-function ert-get-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-archive-test18-file-attributes": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "tramp-archive-test18-file-attributes-cascaded": {
+    "as_expected": null,
+    "detail": "(void-function ert-get-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-archive-test19-directory-files-and-attributes": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "tramp-archive-test19-directory-files-and-attributes-cascaded": {
+    "as_expected": null,
+    "detail": "(void-function ert-get-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-archive-test20-file-modes": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "tramp-archive-test20-file-modes-cascaded": {
+    "as_expected": null,
+    "detail": "(void-function ert-get-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-archive-test21-file-links": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "tramp-archive-test21-file-links-cascaded": {
+    "as_expected": null,
+    "detail": "(void-function ert-get-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-archive-test26-file-name-completion": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "tramp-archive-test26-file-name-completion-cascaded": {
+    "as_expected": null,
+    "detail": "(void-function ert-get-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-archive-test40-make-nearby-temp-file": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "tramp-archive-test40-make-nearby-temp-file-cascaded": {
+    "as_expected": null,
+    "detail": "(void-function ert-get-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-archive-test43-file-system-info": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "tramp-archive-test43-file-system-info-cascaded": {
+    "as_expected": null,
+    "detail": "(void-function ert-get-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-archive-test44-user-group-ids": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "tramp-archive-test44-user-group-ids-cascaded": {
+    "as_expected": null,
+    "detail": "(void-function ert-get-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-archive-test51-auto-load": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "tramp-archive-test51-delay-load": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "tramp-archive-test52-without-remote-files": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "tramp-archive-test99-libarchive-tests": {
+    "as_expected": null,
+    "detail": "(void-function ert--stats-selector)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   }
+  },
+  "timed_out": false
+ },
+ "read_error": null,
+ "real": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": true,
+  "results": {
+   "tramp-archive-test00-availability": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "tramp-archive-test01-file-name-syntax": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "tramp-archive-test01-file-name-syntax-cascaded": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-archive-test02-file-name-dissect": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "tramp-archive-test05-expand-file-name": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "tramp-archive-test05-expand-file-name-cascaded": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-archive-test05-expand-file-name-non-archive-directory": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "tramp-archive-test06-directory-file-name": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "tramp-archive-test06-directory-file-name-cascaded": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-archive-test07-file-exists-p": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-archive-test07-file-exists-p-cascaded": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-archive-test08-file-local-copy": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-archive-test08-file-local-copy-cascaded": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-archive-test09-insert-file-contents": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-archive-test09-insert-file-contents-cascaded": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-archive-test11-copy-file": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-archive-test11-copy-file-cascaded": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-archive-test15-copy-directory": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-archive-test15-copy-directory-cascaded": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-archive-test16-directory-files": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-archive-test16-directory-files-cascaded": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-archive-test17-insert-directory": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-archive-test17-insert-directory-cascaded": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-archive-test18-file-attributes": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-archive-test18-file-attributes-cascaded": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-archive-test19-directory-files-and-attributes": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-archive-test19-directory-files-and-attributes-cascaded": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-archive-test20-file-modes": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-archive-test20-file-modes-cascaded": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-archive-test21-file-links": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-archive-test21-file-links-cascaded": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-archive-test26-file-name-completion": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-archive-test26-file-name-completion-cascaded": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-archive-test40-make-nearby-temp-file": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "tramp-archive-test40-make-nearby-temp-file-cascaded": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-archive-test43-file-system-info": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "tramp-archive-test43-file-system-info-cascaded": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-archive-test44-user-group-ids": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "tramp-archive-test44-user-group-ids-cascaded": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-archive-test51-auto-load": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-archive-test51-delay-load": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-archive-test52-without-remote-files": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "tramp-archive-test99-libarchive-tests": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (equal (ert--stats-selector ert--current-run-stats) (ert-test-name (ert-running-test)))) :form (signal wrong-type-argument (ert--stats nil))))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": [
+     ":expensive-test",
+     ":unstable"
+    ]
+   }
+  },
+  "timed_out": false
+ },
+ "schema": 1,
+ "toplevel_deftests": 25
+}

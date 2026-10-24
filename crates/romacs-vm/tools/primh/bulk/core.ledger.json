@@ -1,0 +1,193 @@
+{
+ "comment": "Accepted differences of the bulk `core` corpus. Each pin names its verdict class and the /DIVERGENCES.md row that records GNU's behaviour beside ours. tests/bulk_core.rs fails on a pin that stops differing, changes class, names an unknown case or names a missing ledger row. Pins are human judgements: never regenerate them blindly after a re-record.",
+ "pins": {
+  "append/1041": {
+   "class": "VALUE",
+   "divergence": "VM2-CLOSEQ1"
+  },
+  "cdr/0043": {
+   "class": "PRINTER",
+   "divergence": "VM2-EV2"
+  },
+  "eq/0476": {
+   "class": "VALUE",
+   "divergence": "VM2-EMPTY1"
+  },
+  "eq/1067": {
+   "class": "VALUE",
+   "divergence": "VM2-EMPTY1"
+  },
+  "length/0034": {
+   "class": "PRINTER",
+   "divergence": "VM2-EV2"
+  },
+  "length/0071": {
+   "class": "VALUE",
+   "divergence": "VM2-CLOSEQ1"
+  },
+  "mapcar/0011": {
+   "class": "PRINTER",
+   "divergence": "VM2-EV2"
+  },
+  "mapcar/0023": {
+   "class": "PRINTER",
+   "divergence": "VM2-EV2"
+  },
+  "mapcar/0035": {
+   "class": "PRINTER",
+   "divergence": "VM2-EV2"
+  },
+  "mapcar/0047": {
+   "class": "PRINTER",
+   "divergence": "VM2-EV2"
+  },
+  "mapcar/0059": {
+   "class": "PRINTER",
+   "divergence": "VM2-EV2"
+  },
+  "mapcar/0071": {
+   "class": "PRINTER",
+   "divergence": "VM2-EV2"
+  },
+  "mapcar/0083": {
+   "class": "PRINTER",
+   "divergence": "VM2-EV2"
+  },
+  "mapcar/0095": {
+   "class": "PRINTER",
+   "divergence": "VM2-EV2"
+  },
+  "mapcar/0107": {
+   "class": "PRINTER",
+   "divergence": "VM2-EV2"
+  },
+  "mapcar/0119": {
+   "class": "PRINTER",
+   "divergence": "VM2-EV2"
+  },
+  "mapcar/0131": {
+   "class": "PRINTER",
+   "divergence": "VM2-EV2"
+  },
+  "mapcar/0178": {
+   "class": "PRINTER",
+   "divergence": "VM2-EV2"
+  },
+  "mapcar/0190": {
+   "class": "PRINTER",
+   "divergence": "VM2-EV2"
+  },
+  "mapcar/0202": {
+   "class": "PRINTER",
+   "divergence": "VM2-EV2"
+  },
+  "mapcar/0203": {
+   "class": "DATA",
+   "divergence": "VM2-MAPCAR1"
+  },
+  "mapcar/0204": {
+   "class": "DATA",
+   "divergence": "VM2-MAPCAR1"
+  },
+  "mapcar/0205": {
+   "class": "DATA",
+   "divergence": "VM2-MAPCAR1"
+  },
+  "mapcar/0206": {
+   "class": "DATA",
+   "divergence": "VM2-MAPCAR1"
+  },
+  "mapcar/0217": {
+   "class": "PRINTER",
+   "divergence": "VM2-EV2"
+  },
+  "mapcar/0229": {
+   "class": "PRINTER",
+   "divergence": "VM2-EV2"
+  },
+  "mapcar/0257": {
+   "class": "VALUE",
+   "divergence": "VM2-CLOSEQ1"
+  },
+  "memq/0018": {
+   "class": "PRINTER",
+   "divergence": "VM2-EV2"
+  },
+  "memq/0037": {
+   "class": "PRINTER",
+   "divergence": "VM2-EV2"
+  },
+  "memq/0056": {
+   "class": "PRINTER",
+   "divergence": "VM2-EV2"
+  },
+  "memq/0075": {
+   "class": "PRINTER",
+   "divergence": "VM2-EV2"
+  },
+  "memq/0094": {
+   "class": "PRINTER",
+   "divergence": "VM2-EV2"
+  },
+  "memq/0113": {
+   "class": "PRINTER",
+   "divergence": "VM2-EV2"
+  },
+  "memq/0132": {
+   "class": "PRINTER",
+   "divergence": "VM2-EV2"
+  },
+  "memq/0151": {
+   "class": "PRINTER",
+   "divergence": "VM2-EV2"
+  },
+  "memq/0170": {
+   "class": "PRINTER",
+   "divergence": "VM2-EV2"
+  },
+  "memq/0189": {
+   "class": "PRINTER",
+   "divergence": "VM2-EV2"
+  },
+  "memq/0196": {
+   "class": "PRINTER",
+   "divergence": "VM2-EV2"
+  },
+  "memq/0215": {
+   "class": "PRINTER",
+   "divergence": "VM2-EV2"
+  },
+  "memq/0234": {
+   "class": "PRINTER",
+   "divergence": "VM2-EV2"
+  },
+  "memq/0253": {
+   "class": "PRINTER",
+   "divergence": "VM2-EV2"
+  },
+  "memq/0265": {
+   "class": "PRINTER",
+   "divergence": "VM2-EV2"
+  },
+  "memq/0284": {
+   "class": "PRINTER",
+   "divergence": "VM2-EV2"
+  },
+  "memq/0311": {
+   "class": "PRINTER",
+   "divergence": "VM2-EV2"
+  },
+  "memq/0330": {
+   "class": "PRINTER",
+   "divergence": "VM2-EV2"
+  },
+  "substring/1585": {
+   "class": "VALUE",
+   "divergence": "VM2-EMPTY1"
+  },
+  "substring/1669": {
+   "class": "VALUE",
+   "divergence": "VM2-EMPTY1"
+  }
+ }
+}

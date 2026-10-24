@@ -1,0 +1,424 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "symbol-plist",
+ "spec_sha256": "bdab530e80949ec07d9065f77a708ad70ce13127968907ff121ed5f78ecdf55c",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "symbol-plist",
+    "subr",
+    1,
+    1
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "data.c": "eca7895a8043cd0a960dfe037a46028374d1a40cc6ee4d0cf6de90ac56c242ae"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "symbol-plist/0000",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (symbol-plist nil)) (error (list 'sig e))))",
+   "expected": "(ok (event-symbol-element-mask (nil 0) event-symbol-elements (nil) modifier-cache ((0))))"
+  },
+  {
+   "id": "symbol-plist/0001",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (symbol-plist t)) (error (list 'sig e))))",
+   "expected": "(ok (event-symbol-element-mask (t 0) event-symbol-elements (t) modifier-cache ((0 . t)) cl--class #s(built-in-class t \"Abstract supertype of everything.\" nil nil nil nil)))"
+  },
+  {
+   "id": "symbol-plist/0002",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (symbol-plist 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 0))"
+  },
+  {
+   "id": "symbol-plist/0003",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (symbol-plist 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1))"
+  },
+  {
+   "id": "symbol-plist/0004",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (symbol-plist 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 2))"
+  },
+  {
+   "id": "symbol-plist/0005",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (symbol-plist -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp -1))"
+  },
+  {
+   "id": "symbol-plist/0006",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (symbol-plist most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 2305843009213693951))"
+  },
+  {
+   "id": "symbol-plist/0007",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (symbol-plist 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1.5))"
+  },
+  {
+   "id": "symbol-plist/0008",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (symbol-plist 'sym)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "symbol-plist/0009",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (symbol-plist :kw)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "symbol-plist/0010",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (symbol-plist (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"\"))"
+  },
+  {
+   "id": "symbol-plist/0011",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (symbol-plist (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"abc\"))"
+  },
+  {
+   "id": "symbol-plist/0012",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (symbol-plist (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"λx\"))"
+  },
+  {
+   "id": "symbol-plist/0013",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (symbol-plist (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 3)))"
+  },
+  {
+   "id": "symbol-plist/0014",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (symbol-plist (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (a (b))))"
+  },
+  {
+   "id": "symbol-plist/0015",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (symbol-plist (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 . 2)))"
+  },
+  {
+   "id": "symbol-plist/0016",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (symbol-plist (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 . 3)))"
+  },
+  {
+   "id": "symbol-plist/0017",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (symbol-plist (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp [1 2]))"
+  },
+  {
+   "id": "symbol-plist/0018",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (symbol-plist (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "symbol-plist/0019",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (symbol-plist (make-symbol \"primh-sp\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "symbol-plist/0020",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (symbol-plist 'primh-sp-fresh)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "symbol-plist/0021",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (symbol-plist :primh-sp-kw)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "symbol-plist/0022",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'symbol-plist '())) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr symbol-plist> 0))"
+  },
+  {
+   "id": "symbol-plist/0023",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'symbol-plist '(1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr symbol-plist> 2))"
+  },
+  {
+   "id": "symbol-plist/0024",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (symbol-plist a0))) (error (list 'sig e))))",
+   "expected": "(ok (event-symbol-element-mask (nil 0) event-symbol-elements (nil) modifier-cache ((0))))"
+  },
+  {
+   "id": "symbol-plist/0025",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil)) (let ((r (symbol-plist a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "symbol-plist/0026",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1)) (let ((r (symbol-plist a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1))"
+  },
+  {
+   "id": "symbol-plist/0027",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-positive-fixnum)) (let ((r (symbol-plist a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 2305843009213693951))"
+  },
+  {
+   "id": "symbol-plist/0028",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :kw)) (let ((r (symbol-plist a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "symbol-plist/0029",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\"))) (let ((r (symbol-plist a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"λx\"))"
+  },
+  {
+   "id": "symbol-plist/0030",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 2))) (let ((r (symbol-plist a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 . 2)))"
+  },
+  {
+   "id": "symbol-plist/0031",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (symbol-plist a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "symbol-plist/0032",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :primh-sp-kw)) (let ((r (symbol-plist a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "symbol-plist/0033",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((s (make-symbol \"primh-sp\"))) (put s 'a 1) (put s 'b 2) (symbol-plist s))) (error (list 'sig e))))",
+   "expected": "(ok (a 1 b 2))"
+  },
+  {
+   "id": "symbol-plist/0034",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a (make-symbol \"primh-sp\")) (b (make-symbol \"primh-sp\"))) (put a 'k 1) (list (symbol-plist a) (symbol-plist b) (symbol-plist 'primh-sp-twin)))) (error (list 'sig e))))",
+   "expected": "(ok ((k 1) nil nil))"
+  },
+  {
+   "id": "symbol-plist/0035",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (put 'primh-sp3 'x 1) (put 'primh-sp3 'y 2) (put 'primh-sp3 'x 3) (symbol-plist 'primh-sp3))) (error (list 'sig e))))",
+   "expected": "(ok (x 3 y 2))"
+  },
+  {
+   "id": "symbol-plist/0036",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((s (make-symbol \"primh-sp\")) (l (list 'z 9))) (setplist s l) (eq (symbol-plist s) l))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "symbol-plist/0037",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defvar primh-sp5 1) (make-variable-buffer-local 'primh-sp5) (symbol-plist 'primh-sp5))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "symbol-plist/0038",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (put :primh-sp-kw6 'p 1) (symbol-plist :primh-sp-kw6))) (error (list 'sig e))))",
+   "expected": "(ok (p 1))"
+  },
+  {
+   "id": "symbol-plist/0039",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (put nil 'primh-sp7 1) (plist-get (symbol-plist nil) 'primh-sp7))) (error (list 'sig e))))",
+   "expected": "(ok 1)"
+  },
+  {
+   "id": "symbol-plist/0040",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (put t 'primh-sp8 2) (plist-get (symbol-plist t) 'primh-sp8))) (error (list 'sig e))))",
+   "expected": "(ok 2)"
+  },
+  {
+   "id": "symbol-plist/0041",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((s (make-symbol \"primh-sp\"))) (put s 'v (list 1 (list 2 3) (copy-sequence \"s\"))) (let ((i 0)) (while (< i 5000) (list i i) (setq i (1+ i)))) (symbol-plist s))) (error (list 'sig e))))",
+   "expected": "(ok (v (1 (2 3) \"s\")))"
+  },
+  {
+   "id": "symbol-plist/0042",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 'primh-sp-fresh) (error (list 'sig e))))",
+   "expected": "(ok primh-sp-fresh)"
+  },
+  {
+   "id": "symbol-plist/0043",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 'sym) (error (list 'sig e))))",
+   "expected": "(ok sym)"
+  },
+  {
+   "id": "symbol-plist/0044",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (cons 1 (cons 2 3))) (error (list 'sig e))))",
+   "expected": "(ok (1 2 . 3))"
+  },
+  {
+   "id": "symbol-plist/0045",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (cons 1 2)) (error (list 'sig e))))",
+   "expected": "(ok (1 . 2))"
+  },
+  {
+   "id": "symbol-plist/0046",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"\")) (error (list 'sig e))))",
+   "expected": "(ok \"\")"
+  },
+  {
+   "id": "symbol-plist/0047",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"abc\")) (error (list 'sig e))))",
+   "expected": "(ok \"abc\")"
+  },
+  {
+   "id": "symbol-plist/0048",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"λx\")) (error (list 'sig e))))",
+   "expected": "(ok \"λx\")"
+  },
+  {
+   "id": "symbol-plist/0049",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (error (list 'sig e))))",
+   "expected": "(ok (1 2 1 2 . #2))"
+  },
+  {
+   "id": "symbol-plist/0050",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list 'a (list 'b))) (error (list 'sig e))))",
+   "expected": "(ok (a (b)))"
+  },
+  {
+   "id": "symbol-plist/0051",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list 1 2 3)) (error (list 'sig e))))",
+   "expected": "(ok (1 2 3))"
+  },
+  {
+   "id": "symbol-plist/0052",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (make-symbol \"primh-sp\")) (error (list 'sig e))))",
+   "expected": "(ok primh-sp)"
+  },
+  {
+   "id": "symbol-plist/0053",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vector 1 2)) (error (list 'sig e))))",
+   "expected": "(ok [1 2])"
+  },
+  {
+   "id": "symbol-plist/0054",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok -1) (error (list 'sig e))))",
+   "expected": "(ok -1)"
+  },
+  {
+   "id": "symbol-plist/0055",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 0) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "symbol-plist/0056",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1) (error (list 'sig e))))",
+   "expected": "(ok 1)"
+  },
+  {
+   "id": "symbol-plist/0057",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1.5) (error (list 'sig e))))",
+   "expected": "(ok 1.5)"
+  },
+  {
+   "id": "symbol-plist/0058",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 2) (error (list 'sig e))))",
+   "expected": "(ok 2)"
+  },
+  {
+   "id": "symbol-plist/0059",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok :kw) (error (list 'sig e))))",
+   "expected": "(ok :kw)"
+  },
+  {
+   "id": "symbol-plist/0060",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok :primh-sp-kw) (error (list 'sig e))))",
+   "expected": "(ok :primh-sp-kw)"
+  },
+  {
+   "id": "symbol-plist/0061",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok most-positive-fixnum) (error (list 'sig e))))",
+   "expected": "(ok 2305843009213693951)"
+  },
+  {
+   "id": "symbol-plist/0062",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok nil) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "symbol-plist/0063",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok t) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  }
+ ],
+ "pinned": {
+  "symbol-plist/0018": "PRINTER",
+  "symbol-plist/0031": "PRINTER",
+  "symbol-plist/0049": "PRINTER",
+  "symbol-plist/0000": "VALUE",
+  "symbol-plist/0001": "VALUE",
+  "symbol-plist/0024": "VALUE",
+  "symbol-plist/0025": "VALUE"
+ }
+}

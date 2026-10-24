@@ -1,0 +1,85 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "buffer-local-value",
+ "spec_sha256": "6a85fa40cd68828d2854c7150cce20857695addc6a115990f0ac4c1aa20a4fd8",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "buffer-local-value",
+    "subr",
+    2,
+    2
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "buffer.c": "bb93b33042953fab31294645204d46c48c3a3d7b8516f7b923c7d86b9766b91d"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "buffer-local-value/0000",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'buffer-local-value '(1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr buffer-local-value> 1))"
+  },
+  {
+   "id": "buffer-local-value/0001",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'buffer-local-value '(1 1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr buffer-local-value> 3))"
+  },
+  {
+   "id": "buffer-local-value/0002",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((b (get-buffer-create \"local-other\"))) (setq bl-x 7) (with-current-buffer b (set (make-local-variable 'bl-x) 12)) (list (buffer-local-value 'bl-x b) bl-x (local-variable-p 'bl-x b) (cdr (assq 'bl-x (buffer-local-variables b)))))) (error (list 'sig e))))",
+   "expected": "(ok (12 7 t 12))"
+  },
+  {
+   "id": "buffer-local-value/0003",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((b (get-buffer-create \"untouched\"))) (with-current-buffer b (setq fill-column 43)) (with-temp-buffer (setq fill-column 32) (kill-all-local-variables)) (buffer-local-value 'fill-column b))) (error (list 'sig e))))",
+   "expected": "(ok 43)"
+  },
+  {
+   "id": "buffer-local-value/0004",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (condition-case e (buffer-local-value 3 nil) (wrong-type-argument e))) (error (list 'sig e))))",
+   "expected": "(ok (wrong-type-argument symbolp 3))"
+  },
+  {
+   "id": "buffer-local-value/0005",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (condition-case e (local-variable-p 3) (wrong-type-argument (car e))) (condition-case e (buffer-local-value 'bl-void (current-buffer)) (void-variable e)) (condition-case e (kill-local-variable 3) (wrong-type-argument (car e))))) (error (list 'sig e))))",
+   "expected": "(ok (wrong-type-argument (void-variable bl-void) wrong-type-argument))"
+  },
+  {
+   "id": "buffer-local-value/0006",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (condition-case e (buffer-local-value 'x nil) (error e))) (error (list 'sig e))))",
+   "expected": "(ok (wrong-type-argument bufferp nil))"
+  },
+  {
+   "id": "buffer-local-value/0007",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (fboundp 'buffer-local-value) (functionp 'buffer-local-value))) (error (list 'sig e))))",
+   "expected": "(ok (t t))"
+  },
+  {
+   "id": "buffer-local-value/0008",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (funcall 'buffer-local-value 'fill-column (current-buffer)))) (error (list 'sig e))))",
+   "expected": "(ok 70)"
+  }
+ ]
+}

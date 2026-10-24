@@ -1,0 +1,436 @@
+[
+  {
+    "id": "M01-quote-limit",
+    "test": "quoted_reader_is_bounded",
+    "target": "readiness",
+    "expected": "quote depth must be bounded",
+    "edits": [
+      {
+        "file": "src/datum.rs",
+        "old": "pub const MAX_DEPTH: usize = 32;",
+        "new": "pub const MAX_DEPTH: usize = 256;"
+      }
+    ]
+  },
+  {
+    "id": "M02-raw-depth",
+    "test": "checked_constructor_refuses_raw_depth_before_cloning",
+    "target": "readiness",
+    "expected": "raw depth must not cross boundary",
+    "edits": [
+      {
+        "file": "src/datum.rs",
+        "old": "        Self::check(raw)?;",
+        "new": "        // Mutant: unchecked clone."
+      }
+    ]
+  },
+  {
+    "id": "M03-expanded-bytes",
+    "test": "shared_atoms_have_an_expanded_byte_budget",
+    "target": "readiness",
+    "expected": "expanded atom bytes must be capped",
+    "edits": [
+      {
+        "file": "src/datum.rs",
+        "old": "pub const MAX_BYTES: usize = 16 << 20;",
+        "new": "pub const MAX_BYTES: usize = 64 << 20;"
+      }
+    ]
+  },
+  {
+    "id": "M04-printed-bytes",
+    "test": "printed_bytes_are_bounded",
+    "target": "readiness",
+    "expected": "printed byte budget must be capped",
+    "edits": [
+      {
+        "file": "src/datum.rs",
+        "old": "pub const MAX_BYTES: usize = 16 << 20;",
+        "new": "pub const MAX_BYTES: usize = 64 << 20;"
+      }
+    ]
+  },
+  {
+    "id": "M05-borrowed-atom",
+    "test": "graph_atoms_are_borrowed_until_budget_check",
+    "target": "readiness",
+    "expected": "assertion failed: matches!",
+    "edits": [
+      {
+        "file": "src/datum.rs",
+        "old": "if *bytes > MAX_BYTES {",
+        "new": "if false {"
+      }
+    ]
+  },
+  {
+    "id": "M06-million-quotes",
+    "test": "million_quotes_do_not_abort",
+    "target": "readiness",
+    "expected": "million quotes must return TooDeep without abort",
+    "edits": [
+      {
+        "file": "src/datum.rs",
+        "old": "                b'\\'' => {\n                    self.i += 1;\n                    if stack.len() >= MAX_DEPTH {\n                        return Err(DatumError::TooDeep);\n                    }\n                    stack.push(F::Quote);",
+        "new": "                b'\\'' => {\n                    self.i += 1;\n                    stack.push(F::Quote);"
+      }
+    ]
+  },
+  {
+    "id": "M07-million-raw",
+    "test": "million_raw_nodes_do_not_enter_face_apis",
+    "target": "readiness",
+    "expected": "raw million-deep tree must be rejected without cloning",
+    "edits": [
+      {
+        "file": "src/datum.rs",
+        "old": "        Self::check(raw)?;",
+        "new": "        // Mutant: unchecked clone."
+      }
+    ]
+  },
+  {
+    "id": "M08-valid-remap-rejection",
+    "test": "remapping_onto_inheriting_face_is_valid",
+    "target": "readiness",
+    "expected": "GNU-valid remapping must bind",
+    "edits": [
+      {
+        "file": "src/remap.rs",
+        "old": "        check_remap_cycles(theme, &normalized)?;",
+        "new": "        if normalized.entries.contains_key(\"default\") { return Err(FaceError::InheritanceCycle { cycle: vec![\"default\".into()] }); }\n        check_remap_cycles(theme, &normalized)?;"
+      }
+    ]
+  },
+  {
+    "id": "M09-remap-barrier",
+    "test": "remapping_onto_inheriting_face_is_valid",
+    "target": "readiness",
+    "expected": "assertion `left == right` failed",
+    "edits": [
+      {
+        "file": "src/remap.rs",
+        "old": "if last == Some(PointKind::Normal) {",
+        "new": "if last.is_some() {"
+      }
+    ]
+  },
+  {
+    "id": "M10-inherit-alias",
+    "test": "aliases_resolve_in_inheritance_and_lookup",
+    "target": "readiness",
+    "expected": "inheritance must resolve aliases",
+    "edits": [
+      {
+        "file": "src/theme.rs",
+        "old": "                *parent = target.clone();",
+        "new": "                let _ = target; break;"
+      }
+    ]
+  },
+  {
+    "id": "M11-alias-cycle",
+    "test": "alias_cycles_fail_before_publishing",
+    "target": "readiness",
+    "expected": "alias cycles must be rejected",
+    "edits": [
+      {
+        "file": "src/theme.rs",
+        "old": "        if next == alias {",
+        "new": "        if false {"
+      }
+    ]
+  },
+  {
+    "id": "M12-remap-alias",
+    "test": "aliases_resolve_in_inheritance_and_lookup",
+    "target": "readiness",
+    "expected": "remap key must resolve aliases",
+    "edits": [
+      {
+        "file": "src/remap.rs",
+        "old": ".entry(Arc::from(theme.canonical_name(name)))",
+        "new": ".entry(name.clone())"
+      }
+    ]
+  },
+  {
+    "id": "M13-reference-alias",
+    "test": "aliases_resolve_in_inheritance_and_lookup",
+    "target": "readiness",
+    "expected": "face reference must resolve aliases",
+    "edits": [
+      {
+        "file": "src/remap.rs",
+        "old": "                let name = theme.canonical_name(name);",
+        "new": "                let name = name;"
+      }
+    ]
+  },
+  {
+    "id": "M14-alias-theme-user",
+    "test": "alias_names_at_theme_and_user_boundaries",
+    "target": "readiness",
+    "expected": "theme alias key must resolve",
+    "edits": [
+      {
+        "file": "src/theme.rs",
+        "old": "let target: Arc<str> = registry.canonical_name(name).into();",
+        "new": "let target: Arc<str> = name.clone();"
+      }
+    ]
+  },
+  {
+    "id": "M15-c-parent-order",
+    "test": "c_height_merge_truncates_each_inheritance_step",
+    "target": "readiness",
+    "expected": "redisplay must right-fold parents before own height",
+    "edits": [
+      {
+        "file": "src/remap.rs",
+        "old": "for parent in def.parents() {",
+        "new": "for parent in def.parents().iter().rev() {"
+      }
+    ]
+  },
+  {
+    "id": "M16-c-oracle-rounding",
+    "test": "c_oracle_nonunit_defaults",
+    "target": "readiness",
+    "expected": "C realized reference",
+    "edits": [
+      {
+        "file": "src/attr.rs",
+        "old": "Height::Absolute((s * h as f64) as i64)",
+        "new": "Height::Absolute((s * h as f64).round() as i64)"
+      }
+    ]
+  },
+  {
+    "id": "M17-user-layer",
+    "test": "user_override_composes_and_survives_theme_replacement",
+    "target": "readiness",
+    "expected": "user preferences must compose over theme",
+    "edits": [
+      {
+        "file": "src/theme.rs",
+        "old": "if let Some(user) = inputs.user.faces.get(name) {",
+        "new": "if let Some(user) = inputs.user.faces.get(name).filter(|_| false) {"
+      }
+    ]
+  },
+  {
+    "id": "M18-owner-preferences",
+    "test": "owner_preferences_compose_over_bundled_modus",
+    "target": "readiness",
+    "expected": "owner preferences default height",
+    "edits": [
+      {
+        "file": "src/theme.rs",
+        "old": "            user.set_face(name, &plist)?;",
+        "new": "            let _ = (name, plist);"
+      }
+    ]
+  },
+  {
+    "id": "M19-default-underline",
+    "test": "default_underline_reset_is_declared_not_accidental_base",
+    "target": "readiness",
+    "expected": "default underline must reset before base merge",
+    "edits": [
+      {
+        "file": "src/theme.rs",
+        "old": "        for a in [\n            Attribute::Underline,\n            Attribute::Overline,",
+        "new": "        for a in [\n            Attribute::Overline,"
+      }
+    ]
+  },
+  {
+    "id": "M20-undefined-parent",
+    "test": "missing_parent_does_not_hide_later_parent",
+    "target": "readiness",
+    "expected": "undefined parent must be skipped",
+    "edits": [
+      {
+        "file": "src/remap.rs",
+        "old": "for parent in def.parents() {",
+        "new": "for parent in def.parents().iter().take_while(|p| theme.contains(p)) {"
+      }
+    ]
+  },
+  {
+    "id": "M21-function-height",
+    "test": "removed_font_mechanisms_have_explicit_tests",
+    "target": "readiness",
+    "expected": "function heights must be rejected",
+    "edits": [
+      {
+        "file": "src/attr.rs",
+        "old": "                _ => {\n                    return Err(err(\n                        \"not an integer or float (function heights are not data)\",\n                    ));\n                }",
+        "new": "                _ => Height::Absolute(100),"
+      }
+    ]
+  },
+  {
+    "id": "M22-font-handling",
+    "test": "removed_font_mechanisms_have_explicit_tests",
+    "target": "readiness",
+    "expected": "assertion `left == right` failed",
+    "edits": [
+      {
+        "file": "src/spec.rs",
+        "old": "                \":font\" => {}",
+        "new": "                \":font\" => { attrs = attrs.with(Attribute::Height, Slot::Set(crate::Value::Height(crate::Height::Absolute(900)))); }"
+      }
+    ]
+  },
+  {
+    "id": "M23-dashed-family",
+    "test": "removed_font_mechanisms_have_explicit_tests",
+    "target": "readiness",
+    "expected": "assertion `left == right` failed",
+    "edits": [
+      {
+        "file": "src/attr.rs",
+        "old": "        A::Family | A::Foundry => match value {\n            Datum::Str(s) => nonempty(s),",
+        "new": "        A::Family | A::Foundry => match value {\n            Datum::Str(s) => nonempty(&Arc::from(s.split('-').next().unwrap_or(s))),"
+      }
+    ]
+  },
+  {
+    "id": "M24-fallback-diagnostic",
+    "test": "rejected_remap_has_a_paintable_buffer_fallback",
+    "target": "readiness",
+    "expected": "remap rejection must return its diagnostic",
+    "edits": [
+      {
+        "file": "src/remap.rs",
+        "old": "                Some(error),",
+        "new": "                None,"
+      }
+    ]
+  },
+  {
+    "id": "M25-graphical",
+    "test": "romacs_matches_graphical_specs",
+    "target": "readiness",
+    "expected": "graphical selector graphic must match",
+    "edits": [
+      {
+        "file": "src/spec.rs",
+        "old": "has(\"graphic\")",
+        "new": "false"
+      }
+    ]
+  },
+  {
+    "id": "M26-raw-defface-type",
+    "test": "theme_internals_are_not_reachable_from_outside",
+    "target": "generation",
+    "expected": "Expected test case to fail to compile, but it succeeded.",
+    "edits": [
+      {
+        "file": "src/theme.rs",
+        "old": "pub fn defface(&mut self, name: &str, spec: &BoundedDatum)",
+        "new": "pub fn defface(&mut self, name: &str, spec: &Datum)"
+      },
+      {
+        "file": "src/theme.rs",
+        "old": "let collapsed = Collapsed::collapse(name, spec)?;",
+        "new": "let collapsed = Collapsed::collapse(name, &BoundedDatum::new(spec).unwrap())?;"
+      }
+    ]
+  },
+  {
+    "id": "M27-raw-remap-type",
+    "test": "theme_internals_are_not_reachable_from_outside",
+    "target": "generation",
+    "expected": "Expected test case to fail to compile, but it succeeded.",
+    "edits": [
+      {
+        "file": "src/remap.rs",
+        "old": "pub fn from_alist(alist: &BoundedDatum)",
+        "new": "pub fn from_alist(alist: &Datum)"
+      }
+    ]
+  },
+  {
+    "id": "M28-realized-reference",
+    "target": "readiness",
+    "test": "c_oracle_nonunit_defaults",
+    "expected": "C realized reference",
+    "edits": [
+      {
+        "file": "src/remap.rs",
+        "old": "    pub fn realize_ref(&self, face_ref: &FaceRef) -> Attrs {\n        render(\n            &self.theme,\n            &self.resolved,\n            Task::Layers(&face_ref.0),\n            &self.default_realized,\n        )\n    }",
+        "new": "    pub fn realize_ref(&self, face_ref: &FaceRef) -> Attrs {\n        self.effective_ref(face_ref).merge(&self.default_realized)\n    }"
+      }
+    ]
+  },
+  {
+    "id": "M29-duplicate-canonical",
+    "target": "readiness",
+    "test": "duplicate_preference_and_alias_keys_are_explicit_errors",
+    "expected": "duplicate canonical theme keys must be rejected",
+    "edits": [
+      {
+        "file": "src/theme.rs",
+        "old": "if canonical.insert(target, faces[name].clone()).is_some() {",
+        "new": "if canonical.insert(target, faces[name].clone()).is_some() && false {"
+      }
+    ]
+  },
+  {
+    "id": "M30-duplicate-user",
+    "target": "readiness",
+    "test": "duplicate_preference_and_alias_keys_are_explicit_errors",
+    "expected": "duplicate user preference keys must be rejected",
+    "edits": [
+      {
+        "file": "src/theme.rs",
+        "old": "if user.faces.contains_key(name) {",
+        "new": "if false && user.faces.contains_key(name) {"
+      }
+    ]
+  },
+  {
+    "id": "M31-user-alias",
+    "target": "readiness",
+    "test": "alias_names_at_theme_and_user_boundaries",
+    "expected": "user alias key must resolve",
+    "edits": [
+      {
+        "file": "src/theme.rs",
+        "old": "faces: canonical_faces(&inputs.deffaces, &inputs.user.faces)?,",
+        "new": "faces: inputs.user.faces.clone(),"
+      }
+    ]
+  },
+  {
+    "id": "M32-setter-alias",
+    "target": "readiness",
+    "test": "alias_names_at_theme_and_user_boundaries",
+    "expected": "set-face alias key must resolve",
+    "edits": [
+      {
+        "file": "src/theme.rs",
+        "old": "let key: Arc<str> = self.canonical_name(face).into();",
+        "new": "let key: Arc<str> = face.into();"
+      }
+    ]
+  },
+  {
+    "id": "M33-user-survives-spec",
+    "target": "readiness",
+    "test": "user_override_composes_and_survives_theme_replacement",
+    "expected": "assertion `left == right` failed",
+    "edits": [
+      {
+        "file": "src/theme.rs",
+        "old": "        inputs.spec = spec;",
+        "new": "        inputs.spec = spec;\n        inputs.user = Arc::default();"
+      }
+    ]
+  }
+]

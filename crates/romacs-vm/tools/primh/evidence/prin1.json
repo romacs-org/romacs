@@ -1,0 +1,1019 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "prin1",
+ "spec_sha256": "20d89d36b6d030df951bc8f39a96bf8f317579aa42e726d3d12dd724420d2e70",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "prin1",
+    "subr",
+    1,
+    3
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "print.c": "a4d3613dd97297cb4a9b682f0fbe5a86d3ae1ac9a1a07bddaf6da970b28f0a85"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "prin1/0000",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'prin1 '())) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr prin1> 0))"
+  },
+  {
+   "id": "prin1/0001",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'prin1 '(1 1 1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr prin1> 4))"
+  },
+  {
+   "id": "prin1/0002",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj nil) (out nil)) (let ((r (prin1 obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (110 105 108)))"
+  },
+  {
+   "id": "prin1/0003",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj t) (out nil)) (let ((r (prin1 obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (116)))"
+  },
+  {
+   "id": "prin1/0004",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj 0) (out nil)) (let ((r (prin1 obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (48)))"
+  },
+  {
+   "id": "prin1/0005",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj -42) (out nil)) (let ((r (prin1 obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (45 52 50)))"
+  },
+  {
+   "id": "prin1/0006",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj most-positive-fixnum) (out nil)) (let ((r (prin1 obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (50 51 48 53 56 52 51 48 48 57 50 49 51 54 57 51 57 53 49)))"
+  },
+  {
+   "id": "prin1/0007",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj most-negative-fixnum) (out nil)) (let ((r (prin1 obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (45 50 51 48 53 56 52 51 48 48 57 50 49 51 54 57 51 57 53 50)))"
+  },
+  {
+   "id": "prin1/0008",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj 1.0) (out nil)) (let ((r (prin1 obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (49 46 48)))"
+  },
+  {
+   "id": "prin1/0009",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj -0.0) (out nil)) (let ((r (prin1 obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (45 48 46 48)))"
+  },
+  {
+   "id": "prin1/0010",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj 1e20) (out nil)) (let ((r (prin1 obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (49 101 43 50 48)))"
+  },
+  {
+   "id": "prin1/0011",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj 1e-9) (out nil)) (let ((r (prin1 obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (49 101 45 48 57)))"
+  },
+  {
+   "id": "prin1/0012",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj 1.0e+INF) (out nil)) (let ((r (prin1 obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (49 46 48 101 43 73 78 70)))"
+  },
+  {
+   "id": "prin1/0013",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj -1.0e+INF) (out nil)) (let ((r (prin1 obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (45 49 46 48 101 43 73 78 70)))"
+  },
+  {
+   "id": "prin1/0014",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj 0.0e+NaN) (out nil)) (let ((r (prin1 obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (48 46 48 101 43 78 97 78)))"
+  },
+  {
+   "id": "prin1/0015",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj (string-to-number \"1.0e+NaN\")) (out nil)) (let ((r (prin1 obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (49 46 48 101 43 78 97 78)))"
+  },
+  {
+   "id": "prin1/0016",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj 'alpha) (out nil)) (let ((r (prin1 obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (97 108 112 104 97)))"
+  },
+  {
+   "id": "prin1/0017",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj (intern \"123\")) (out nil)) (let ((r (prin1 obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (92 49 50 51)))"
+  },
+  {
+   "id": "prin1/0018",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj (intern \"a b\")) (out nil)) (let ((r (prin1 obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (97 92 32 98)))"
+  },
+  {
+   "id": "prin1/0019",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj (intern \"\")) (out nil)) (let ((r (prin1 obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (35 35)))"
+  },
+  {
+   "id": "prin1/0020",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj (make-symbol \"fresh\")) (out nil)) (let ((r (prin1 obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (102 114 101 115 104)))"
+  },
+  {
+   "id": "prin1/0021",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj \"\") (out nil)) (let ((r (prin1 obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (34 34)))"
+  },
+  {
+   "id": "prin1/0022",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj \"plain\") (out nil)) (let ((r (prin1 obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (34 112 108 97 105 110 34)))"
+  },
+  {
+   "id": "prin1/0023",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj \"λ雪😀\") (out nil)) (let ((r (prin1 obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (34 955 38634 128512 34)))"
+  },
+  {
+   "id": "prin1/0024",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj \"a\n\f\\\"z\") (out nil)) (let ((r (prin1 obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (34 97 10 12 92 34 122 34)))"
+  },
+  {
+   "id": "prin1/0025",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj (unibyte-string 0 7 10 127 128 255)) (out nil)) (let ((r (prin1 obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (34 0 7 10 127 4194176 4194303 34)))"
+  },
+  {
+   "id": "prin1/0026",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj (string-to-multibyte (unibyte-string 255))) (out nil)) (let ((r (prin1 obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (34 92 51 55 55 34)))"
+  },
+  {
+   "id": "prin1/0027",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj '(a (b c) . d)) (out nil)) (let ((r (prin1 obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (40 97 32 40 98 32 99 41 32 46 32 100 41)))"
+  },
+  {
+   "id": "prin1/0028",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj '(quote (a b))) (out nil)) (let ((r (prin1 obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (39 40 97 32 98 41)))"
+  },
+  {
+   "id": "prin1/0029",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj [1 \"x\" [2 3]]) (out nil)) (let ((r (prin1 obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (91 49 32 34 120 34 32 91 50 32 51 93 93)))"
+  },
+  {
+   "id": "prin1/0030",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj (make-bool-vector 3 t)) (out nil)) (let ((r (prin1 obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (35 38 51 34 7 34)))"
+  },
+  {
+   "id": "prin1/0031",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj (make-hash-table)) (out nil)) (let ((r (prin1 obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (35 115 40 104 97 115 104 45 116 97 98 108 101 41)))"
+  },
+  {
+   "id": "prin1/0032",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj (let ((h (make-hash-table))) (puthash 'a 7 h) h)) (out nil)) (let ((r (prin1 obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (35 115 40 104 97 115 104 45 116 97 98 108 101 32 100 97 116 97 32 40 97 32 55 41 41)))"
+  },
+  {
+   "id": "prin1/0033",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj (current-buffer)) (out nil)) (let ((r (prin1 obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (35 60 98 117 102 102 101 114 32 42 115 99 114 97 116 99 104 42 62)))"
+  },
+  {
+   "id": "prin1/0034",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj (point-marker)) (out nil)) (let ((r (prin1 obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (35 60 109 97 114 107 101 114 32 97 116 32 49 32 105 110 32 42 115 99 114 97 116 99 104 42 62)))"
+  },
+  {
+   "id": "prin1/0035",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj (symbol-function 'car)) (out nil)) (let ((r (prin1 obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (35 60 115 117 98 114 32 99 97 114 62)))"
+  },
+  {
+   "id": "prin1/0036",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj (lambda (x) x)) (out nil)) (let ((r (prin1 obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (35 91 50 53 55 32 34 4194183 34 32 91 93 32 50 32 34 10 10 40 102 110 32 88 41 34 93)))",
+   "gnu_regime_variant": "(ok (t (35 91 40 120 41 32 40 120 41 32 40 116 41 93)))"
+  },
+  {
+   "id": "prin1/0037",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj (let ((x (list 'a))) (setcdr x x) x)) (out nil)) (let ((r (prin1 obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (40 97 32 46 32 35 48 41)))"
+  },
+  {
+   "id": "prin1/0038",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj (let ((x (list 'a))) (list x x))) (out nil)) (let ((r (prin1 obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (40 40 97 41 32 40 97 41 41)))"
+  },
+  {
+   "id": "prin1/0039",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obj (let ((x (vector nil))) (aset x 0 x) x)) (out nil)) (let ((r (prin1 obj (lambda (c) (setq out (cons c out)))))) (list (eq r obj) (nreverse out))))) (error (list 'sig e))))",
+   "expected": "(ok (t (91 35 48 93)))"
+  },
+  {
+   "id": "prin1/0040",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((out nil)) (prin1 '(a (b c) \"λ\\n\" (quote x)) (lambda (c) (setq out (cons c out))) nil) (nreverse out))) (error (list 'sig e))))",
+   "expected": "(ok (40 97 32 40 98 32 99 41 32 34 955 10 34 32 39 120 41))"
+  },
+  {
+   "id": "prin1/0041",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((out nil)) (prin1 '(a (b c) \"λ\\n\" (quote x)) (lambda (c) (setq out (cons c out))) '((length . 0))) (nreverse out))) (error (list 'sig e))))",
+   "expected": "(ok (40 46 46 46 41))"
+  },
+  {
+   "id": "prin1/0042",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((out nil)) (prin1 '(a (b c) \"λ\\n\" (quote x)) (lambda (c) (setq out (cons c out))) '((length . 1))) (nreverse out))) (error (list 'sig e))))",
+   "expected": "(ok (40 97 32 46 46 46 41))"
+  },
+  {
+   "id": "prin1/0043",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((out nil)) (prin1 '(a (b c) \"λ\\n\" (quote x)) (lambda (c) (setq out (cons c out))) '((length . 2))) (nreverse out))) (error (list 'sig e))))",
+   "expected": "(ok (40 97 32 40 98 32 99 41 32 46 46 46 41))"
+  },
+  {
+   "id": "prin1/0044",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((out nil)) (prin1 '(a (b c) \"λ\\n\" (quote x)) (lambda (c) (setq out (cons c out))) '((level . 0))) (nreverse out))) (error (list 'sig e))))",
+   "expected": "(ok (46 46 46))"
+  },
+  {
+   "id": "prin1/0045",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((out nil)) (prin1 '(a (b c) \"λ\\n\" (quote x)) (lambda (c) (setq out (cons c out))) '((level . 1))) (nreverse out))) (error (list 'sig e))))",
+   "expected": "(ok (40 97 32 46 46 46 32 34 955 10 34 32 46 46 46 41))"
+  },
+  {
+   "id": "prin1/0046",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((out nil)) (prin1 '(a (b c) \"λ\\n\" (quote x)) (lambda (c) (setq out (cons c out))) '((quoted . nil))) (nreverse out))) (error (list 'sig e))))",
+   "expected": "(ok (40 97 32 40 98 32 99 41 32 34 955 10 34 32 40 113 117 111 116 101 32 120 41 41))"
+  },
+  {
+   "id": "prin1/0047",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((out nil)) (prin1 '(a (b c) \"λ\\n\" (quote x)) (lambda (c) (setq out (cons c out))) '((quoted . t))) (nreverse out))) (error (list 'sig e))))",
+   "expected": "(ok (40 97 32 40 98 32 99 41 32 34 955 10 34 32 39 120 41))"
+  },
+  {
+   "id": "prin1/0048",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((out nil)) (prin1 '(a (b c) \"λ\\n\" (quote x)) (lambda (c) (setq out (cons c out))) '((circle . t))) (nreverse out))) (error (list 'sig e))))",
+   "expected": "(ok (40 97 32 40 98 32 99 41 32 34 955 10 34 32 39 120 41))"
+  },
+  {
+   "id": "prin1/0049",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((out nil)) (prin1 '(a (b c) \"λ\\n\" (quote x)) (lambda (c) (setq out (cons c out))) '((escape-newlines . t))) (nreverse out))) (error (list 'sig e))))",
+   "expected": "(ok (40 97 32 40 98 32 99 41 32 34 955 92 110 34 32 39 120 41))"
+  },
+  {
+   "id": "prin1/0050",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((out nil)) (prin1 '(a (b c) \"λ\\n\" (quote x)) (lambda (c) (setq out (cons c out))) '((escape-control-characters . t))) (nreverse out))) (error (list 'sig e))))",
+   "expected": "(ok (40 97 32 40 98 32 99 41 32 34 955 92 49 50 34 32 39 120 41))"
+  },
+  {
+   "id": "prin1/0051",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((out nil)) (prin1 '(a (b c) \"λ\\n\" (quote x)) (lambda (c) (setq out (cons c out))) '((escape-nonascii . t))) (nreverse out))) (error (list 'sig e))))",
+   "expected": "(ok (40 97 32 40 98 32 99 41 32 34 955 10 34 32 39 120 41))"
+  },
+  {
+   "id": "prin1/0052",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((out nil)) (prin1 '(a (b c) \"λ\\n\" (quote x)) (lambda (c) (setq out (cons c out))) '((escape-multibyte . t))) (nreverse out))) (error (list 'sig e))))",
+   "expected": "(ok (40 97 32 40 98 32 99 41 32 34 92 120 48 51 98 98 10 34 32 39 120 41))"
+  },
+  {
+   "id": "prin1/0053",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((out nil)) (prin1 '(a (b c) \"λ\\n\" (quote x)) (lambda (c) (setq out (cons c out))) t) (nreverse out))) (error (list 'sig e))))",
+   "expected": "(ok (40 97 32 40 98 32 99 41 32 34 955 10 34 32 39 120 41))"
+  },
+  {
+   "id": "prin1/0054",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((print-length nil) (out nil)) (prin1 '(a (b c) \"λ\\n\" (quote x)) (lambda (c) (setq out (cons c out)))) (nreverse out))) (error (list 'sig e))))",
+   "expected": "(ok (40 97 32 40 98 32 99 41 32 34 955 10 34 32 39 120 41))"
+  },
+  {
+   "id": "prin1/0055",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((print-length 0) (out nil)) (prin1 '(a (b c) \"λ\\n\" (quote x)) (lambda (c) (setq out (cons c out)))) (nreverse out))) (error (list 'sig e))))",
+   "expected": "(ok (40 46 46 46 41))"
+  },
+  {
+   "id": "prin1/0056",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((print-length 1) (out nil)) (prin1 '(a (b c) \"λ\\n\" (quote x)) (lambda (c) (setq out (cons c out)))) (nreverse out))) (error (list 'sig e))))",
+   "expected": "(ok (40 97 32 46 46 46 41))"
+  },
+  {
+   "id": "prin1/0057",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((print-length -1) (out nil)) (prin1 '(a (b c) \"λ\\n\" (quote x)) (lambda (c) (setq out (cons c out)))) (nreverse out))) (error (list 'sig e))))",
+   "expected": "(ok (40 97 32 40 98 32 99 41 32 34 955 10 34 32 39 120 41))"
+  },
+  {
+   "id": "prin1/0058",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((print-length t) (out nil)) (prin1 '(a (b c) \"λ\\n\" (quote x)) (lambda (c) (setq out (cons c out)))) (nreverse out))) (error (list 'sig e))))",
+   "expected": "(ok (40 97 32 40 98 32 99 41 32 34 955 10 34 32 39 120 41))"
+  },
+  {
+   "id": "prin1/0059",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((print-level nil) (out nil)) (prin1 '(a (b c) \"λ\\n\" (quote x)) (lambda (c) (setq out (cons c out)))) (nreverse out))) (error (list 'sig e))))",
+   "expected": "(ok (40 97 32 40 98 32 99 41 32 34 955 10 34 32 39 120 41))"
+  },
+  {
+   "id": "prin1/0060",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((print-level 0) (out nil)) (prin1 '(a (b c) \"λ\\n\" (quote x)) (lambda (c) (setq out (cons c out)))) (nreverse out))) (error (list 'sig e))))",
+   "expected": "(ok (46 46 46))"
+  },
+  {
+   "id": "prin1/0061",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((print-level 1) (out nil)) (prin1 '(a (b c) \"λ\\n\" (quote x)) (lambda (c) (setq out (cons c out)))) (nreverse out))) (error (list 'sig e))))",
+   "expected": "(ok (40 97 32 46 46 46 32 34 955 10 34 32 46 46 46 41))"
+  },
+  {
+   "id": "prin1/0062",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((print-level -1) (out nil)) (prin1 '(a (b c) \"λ\\n\" (quote x)) (lambda (c) (setq out (cons c out)))) (nreverse out))) (error (list 'sig e))))",
+   "expected": "(ok (46 46 46))"
+  },
+  {
+   "id": "prin1/0063",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((print-level t) (out nil)) (prin1 '(a (b c) \"λ\\n\" (quote x)) (lambda (c) (setq out (cons c out)))) (nreverse out))) (error (list 'sig e))))",
+   "expected": "(ok (40 97 32 40 98 32 99 41 32 34 955 10 34 32 39 120 41))"
+  },
+  {
+   "id": "prin1/0064",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((print-quoted nil) (out nil)) (prin1 '(a (b c) \"λ\\n\" (quote x)) (lambda (c) (setq out (cons c out)))) (nreverse out))) (error (list 'sig e))))",
+   "expected": "(ok (40 97 32 40 98 32 99 41 32 34 955 10 34 32 40 113 117 111 116 101 32 120 41 41))"
+  },
+  {
+   "id": "prin1/0065",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((print-quoted t) (out nil)) (prin1 '(a (b c) \"λ\\n\" (quote x)) (lambda (c) (setq out (cons c out)))) (nreverse out))) (error (list 'sig e))))",
+   "expected": "(ok (40 97 32 40 98 32 99 41 32 34 955 10 34 32 39 120 41))"
+  },
+  {
+   "id": "prin1/0066",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((print-circle nil) (out nil)) (prin1 '(a (b c) \"λ\\n\" (quote x)) (lambda (c) (setq out (cons c out)))) (nreverse out))) (error (list 'sig e))))",
+   "expected": "(ok (40 97 32 40 98 32 99 41 32 34 955 10 34 32 39 120 41))"
+  },
+  {
+   "id": "prin1/0067",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((print-circle t) (out nil)) (prin1 '(a (b c) \"λ\\n\" (quote x)) (lambda (c) (setq out (cons c out)))) (nreverse out))) (error (list 'sig e))))",
+   "expected": "(ok (40 97 32 40 98 32 99 41 32 34 955 10 34 32 39 120 41))"
+  },
+  {
+   "id": "prin1/0068",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((print-escape-newlines nil) (out nil)) (prin1 '(a (b c) \"λ\\n\" (quote x)) (lambda (c) (setq out (cons c out)))) (nreverse out))) (error (list 'sig e))))",
+   "expected": "(ok (40 97 32 40 98 32 99 41 32 34 955 10 34 32 39 120 41))"
+  },
+  {
+   "id": "prin1/0069",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((print-escape-newlines t) (out nil)) (prin1 '(a (b c) \"λ\\n\" (quote x)) (lambda (c) (setq out (cons c out)))) (nreverse out))) (error (list 'sig e))))",
+   "expected": "(ok (40 97 32 40 98 32 99 41 32 34 955 92 110 34 32 39 120 41))"
+  },
+  {
+   "id": "prin1/0070",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((print-escape-nonascii nil) (out nil)) (prin1 '(a (b c) \"λ\\n\" (quote x)) (lambda (c) (setq out (cons c out)))) (nreverse out))) (error (list 'sig e))))",
+   "expected": "(ok (40 97 32 40 98 32 99 41 32 34 955 10 34 32 39 120 41))"
+  },
+  {
+   "id": "prin1/0071",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((print-escape-nonascii t) (out nil)) (prin1 '(a (b c) \"λ\\n\" (quote x)) (lambda (c) (setq out (cons c out)))) (nreverse out))) (error (list 'sig e))))",
+   "expected": "(ok (40 97 32 40 98 32 99 41 32 34 955 10 34 32 39 120 41))"
+  },
+  {
+   "id": "prin1/0072",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((print-escape-multibyte nil) (out nil)) (prin1 '(a (b c) \"λ\\n\" (quote x)) (lambda (c) (setq out (cons c out)))) (nreverse out))) (error (list 'sig e))))",
+   "expected": "(ok (40 97 32 40 98 32 99 41 32 34 955 10 34 32 39 120 41))"
+  },
+  {
+   "id": "prin1/0073",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((print-escape-multibyte t) (out nil)) (prin1 '(a (b c) \"λ\\n\" (quote x)) (lambda (c) (setq out (cons c out)))) (nreverse out))) (error (list 'sig e))))",
+   "expected": "(ok (40 97 32 40 98 32 99 41 32 34 92 120 48 51 98 98 10 34 32 39 120 41))"
+  },
+  {
+   "id": "prin1/0074",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((print-escape-control-characters nil) (out nil)) (prin1 '(a (b c) \"λ\\n\" (quote x)) (lambda (c) (setq out (cons c out)))) (nreverse out))) (error (list 'sig e))))",
+   "expected": "(ok (40 97 32 40 98 32 99 41 32 34 955 10 34 32 39 120 41))"
+  },
+  {
+   "id": "prin1/0075",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((print-escape-control-characters t) (out nil)) (prin1 '(a (b c) \"λ\\n\" (quote x)) (lambda (c) (setq out (cons c out)))) (nreverse out))) (error (list 'sig e))))",
+   "expected": "(ok (40 97 32 40 98 32 99 41 32 34 955 92 49 50 34 32 39 120 41))"
+  },
+  {
+   "id": "prin1/0076",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((out nil) (standard-output (lambda (c) (setq out (cons c out))))) (prin1 \"λ\") (nreverse out))) (error (list 'sig e))))",
+   "expected": "(sig (void-variable out))"
+  },
+  {
+   "id": "prin1/0077",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (prin1 42 7)) (error (list 'sig e))))",
+   "expected": "(sig (invalid-function 7))"
+  },
+  {
+   "id": "prin1/0078",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (prin1 42 (current-buffer))) (error (list 'sig e))))",
+   "expected": "(ok 42)"
+  },
+  {
+   "id": "prin1/0079",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (append (prin1-to-string nil) nil)) (error (list 'sig e))))",
+   "expected": "(ok (110 105 108))"
+  },
+  {
+   "id": "prin1/0080",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (append (prin1-to-string t) nil)) (error (list 'sig e))))",
+   "expected": "(ok (116))"
+  },
+  {
+   "id": "prin1/0081",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (append (prin1-to-string 0) nil)) (error (list 'sig e))))",
+   "expected": "(ok (48))"
+  },
+  {
+   "id": "prin1/0082",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (append (prin1-to-string -42) nil)) (error (list 'sig e))))",
+   "expected": "(ok (45 52 50))"
+  },
+  {
+   "id": "prin1/0083",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (append (prin1-to-string most-positive-fixnum) nil)) (error (list 'sig e))))",
+   "expected": "(ok (50 51 48 53 56 52 51 48 48 57 50 49 51 54 57 51 57 53 49))"
+  },
+  {
+   "id": "prin1/0084",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (append (prin1-to-string most-negative-fixnum) nil)) (error (list 'sig e))))",
+   "expected": "(ok (45 50 51 48 53 56 52 51 48 48 57 50 49 51 54 57 51 57 53 50))"
+  },
+  {
+   "id": "prin1/0085",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (append (prin1-to-string 1.0) nil)) (error (list 'sig e))))",
+   "expected": "(ok (49 46 48))"
+  },
+  {
+   "id": "prin1/0086",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (append (prin1-to-string -0.0) nil)) (error (list 'sig e))))",
+   "expected": "(ok (45 48 46 48))"
+  },
+  {
+   "id": "prin1/0087",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (append (prin1-to-string 1e20) nil)) (error (list 'sig e))))",
+   "expected": "(ok (49 101 43 50 48))"
+  },
+  {
+   "id": "prin1/0088",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (append (prin1-to-string 1e-9) nil)) (error (list 'sig e))))",
+   "expected": "(ok (49 101 45 48 57))"
+  },
+  {
+   "id": "prin1/0089",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (append (prin1-to-string 1.0e+INF) nil)) (error (list 'sig e))))",
+   "expected": "(ok (49 46 48 101 43 73 78 70))"
+  },
+  {
+   "id": "prin1/0090",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (append (prin1-to-string -1.0e+INF) nil)) (error (list 'sig e))))",
+   "expected": "(ok (45 49 46 48 101 43 73 78 70))"
+  },
+  {
+   "id": "prin1/0091",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (append (prin1-to-string 0.0e+NaN) nil)) (error (list 'sig e))))",
+   "expected": "(ok (48 46 48 101 43 78 97 78))"
+  },
+  {
+   "id": "prin1/0092",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (append (prin1-to-string (string-to-number \"1.0e+NaN\")) nil)) (error (list 'sig e))))",
+   "expected": "(ok (49 46 48 101 43 78 97 78))"
+  },
+  {
+   "id": "prin1/0093",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (append (prin1-to-string 'alpha) nil)) (error (list 'sig e))))",
+   "expected": "(ok (97 108 112 104 97))"
+  },
+  {
+   "id": "prin1/0094",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (append (prin1-to-string (intern \"123\")) nil)) (error (list 'sig e))))",
+   "expected": "(ok (92 49 50 51))"
+  },
+  {
+   "id": "prin1/0095",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (append (prin1-to-string (intern \"a b\")) nil)) (error (list 'sig e))))",
+   "expected": "(ok (97 92 32 98))"
+  },
+  {
+   "id": "prin1/0096",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (append (prin1-to-string (intern \"\")) nil)) (error (list 'sig e))))",
+   "expected": "(ok (35 35))"
+  },
+  {
+   "id": "prin1/0097",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (append (prin1-to-string (make-symbol \"fresh\")) nil)) (error (list 'sig e))))",
+   "expected": "(ok (102 114 101 115 104))"
+  },
+  {
+   "id": "prin1/0098",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (append (prin1-to-string \"\") nil)) (error (list 'sig e))))",
+   "expected": "(ok (34 34))"
+  },
+  {
+   "id": "prin1/0099",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (append (prin1-to-string \"plain\") nil)) (error (list 'sig e))))",
+   "expected": "(ok (34 112 108 97 105 110 34))"
+  },
+  {
+   "id": "prin1/0100",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (append (prin1-to-string \"λ雪😀\") nil)) (error (list 'sig e))))",
+   "expected": "(ok (34 955 38634 128512 34))"
+  },
+  {
+   "id": "prin1/0101",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (append (prin1-to-string \"a\n\f\\\"z\") nil)) (error (list 'sig e))))",
+   "expected": "(ok (34 97 10 12 92 34 122 34))"
+  },
+  {
+   "id": "prin1/0102",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (append (prin1-to-string (unibyte-string 0 7 10 127 128 255)) nil)) (error (list 'sig e))))",
+   "expected": "(ok (34 0 7 10 127 92 50 48 48 92 51 55 55 34))"
+  },
+  {
+   "id": "prin1/0103",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (append (prin1-to-string (string-to-multibyte (unibyte-string 255))) nil)) (error (list 'sig e))))",
+   "expected": "(ok (34 92 51 55 55 34))"
+  },
+  {
+   "id": "prin1/0104",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (append (prin1-to-string '(a (b c) . d)) nil)) (error (list 'sig e))))",
+   "expected": "(ok (40 97 32 40 98 32 99 41 32 46 32 100 41))"
+  },
+  {
+   "id": "prin1/0105",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (append (prin1-to-string '(quote (a b))) nil)) (error (list 'sig e))))",
+   "expected": "(ok (39 40 97 32 98 41))"
+  },
+  {
+   "id": "prin1/0106",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (append (prin1-to-string [1 \"x\" [2 3]]) nil)) (error (list 'sig e))))",
+   "expected": "(ok (91 49 32 34 120 34 32 91 50 32 51 93 93))"
+  },
+  {
+   "id": "prin1/0107",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (append (prin1-to-string (make-bool-vector 3 t)) nil)) (error (list 'sig e))))",
+   "expected": "(ok (35 38 51 34 7 34))"
+  },
+  {
+   "id": "prin1/0108",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (append (prin1-to-string (make-hash-table)) nil)) (error (list 'sig e))))",
+   "expected": "(ok (35 115 40 104 97 115 104 45 116 97 98 108 101 41))"
+  },
+  {
+   "id": "prin1/0109",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (append (prin1-to-string (let ((h (make-hash-table))) (puthash 'a 7 h) h)) nil)) (error (list 'sig e))))",
+   "expected": "(ok (35 115 40 104 97 115 104 45 116 97 98 108 101 32 100 97 116 97 32 40 97 32 55 41 41))"
+  },
+  {
+   "id": "prin1/0110",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (append (prin1-to-string (current-buffer)) nil)) (error (list 'sig e))))",
+   "expected": "(ok (35 60 98 117 102 102 101 114 32 42 115 99 114 97 116 99 104 42 62))"
+  },
+  {
+   "id": "prin1/0111",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (append (prin1-to-string (point-marker)) nil)) (error (list 'sig e))))",
+   "expected": "(ok (35 60 109 97 114 107 101 114 32 97 116 32 49 32 105 110 32 42 115 99 114 97 116 99 104 42 62))"
+  },
+  {
+   "id": "prin1/0112",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (append (prin1-to-string (symbol-function 'car)) nil)) (error (list 'sig e))))",
+   "expected": "(ok (35 60 115 117 98 114 32 99 97 114 62))"
+  },
+  {
+   "id": "prin1/0113",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (append (prin1-to-string (lambda (x) x)) nil)) (error (list 'sig e))))",
+   "expected": "(ok (35 91 50 53 55 32 34 92 50 48 55 34 32 91 93 32 50 32 34 10 10 40 102 110 32 88 41 34 93))",
+   "gnu_regime_variant": "(ok (35 91 40 120 41 32 40 120 41 32 40 116 41 93))"
+  },
+  {
+   "id": "prin1/0114",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (append (prin1-to-string (let ((x (list 'a))) (setcdr x x) x)) nil)) (error (list 'sig e))))",
+   "expected": "(ok (40 97 32 46 32 35 48 41))"
+  },
+  {
+   "id": "prin1/0115",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (append (prin1-to-string (let ((x (list 'a))) (list x x))) nil)) (error (list 'sig e))))",
+   "expected": "(ok (40 40 97 41 32 40 97 41 41))"
+  },
+  {
+   "id": "prin1/0116",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (append (prin1-to-string (let ((x (vector nil))) (aset x 0 x) x)) nil)) (error (list 'sig e))))",
+   "expected": "(ok (91 35 48 93))"
+  },
+  {
+   "id": "prin1/0117",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (append (prin1-to-string '(a (b c) \"λ\\n\") nil nil) nil)) (error (list 'sig e))))",
+   "expected": "(ok (40 97 32 40 98 32 99 41 32 34 955 10 34 41))"
+  },
+  {
+   "id": "prin1/0118",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (append (prin1-to-string '(a (b c) \"λ\\n\") nil '((length . 0))) nil)) (error (list 'sig e))))",
+   "expected": "(ok (40 46 46 46 41))"
+  },
+  {
+   "id": "prin1/0119",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (append (prin1-to-string '(a (b c) \"λ\\n\") nil '((length . 1))) nil)) (error (list 'sig e))))",
+   "expected": "(ok (40 97 32 46 46 46 41))"
+  },
+  {
+   "id": "prin1/0120",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (append (prin1-to-string '(a (b c) \"λ\\n\") nil '((length . 2))) nil)) (error (list 'sig e))))",
+   "expected": "(ok (40 97 32 40 98 32 99 41 32 46 46 46 41))"
+  },
+  {
+   "id": "prin1/0121",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (append (prin1-to-string '(a (b c) \"λ\\n\") nil '((level . 0))) nil)) (error (list 'sig e))))",
+   "expected": "(ok (46 46 46))"
+  },
+  {
+   "id": "prin1/0122",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (append (prin1-to-string '(a (b c) \"λ\\n\") nil '((level . 1))) nil)) (error (list 'sig e))))",
+   "expected": "(ok (40 97 32 46 46 46 32 34 955 10 34 41))"
+  },
+  {
+   "id": "prin1/0123",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (append (prin1-to-string '(a (b c) \"λ\\n\") nil '((quoted . nil))) nil)) (error (list 'sig e))))",
+   "expected": "(ok (40 97 32 40 98 32 99 41 32 34 955 10 34 41))"
+  },
+  {
+   "id": "prin1/0124",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (append (prin1-to-string '(a (b c) \"λ\\n\") nil '((quoted . t))) nil)) (error (list 'sig e))))",
+   "expected": "(ok (40 97 32 40 98 32 99 41 32 34 955 10 34 41))"
+  },
+  {
+   "id": "prin1/0125",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (append (prin1-to-string '(a (b c) \"λ\\n\") nil '((circle . t))) nil)) (error (list 'sig e))))",
+   "expected": "(ok (40 97 32 40 98 32 99 41 32 34 955 10 34 41))"
+  },
+  {
+   "id": "prin1/0126",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (append (prin1-to-string '(a (b c) \"λ\\n\") nil '((escape-newlines . t))) nil)) (error (list 'sig e))))",
+   "expected": "(ok (40 97 32 40 98 32 99 41 32 34 955 92 110 34 41))"
+  },
+  {
+   "id": "prin1/0127",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (append (prin1-to-string '(a (b c) \"λ\\n\") nil '((escape-control-characters . t))) nil)) (error (list 'sig e))))",
+   "expected": "(ok (40 97 32 40 98 32 99 41 32 34 955 92 49 50 34 41))"
+  },
+  {
+   "id": "prin1/0128",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (append (prin1-to-string '(a (b c) \"λ\\n\") nil '((escape-nonascii . t))) nil)) (error (list 'sig e))))",
+   "expected": "(ok (40 97 32 40 98 32 99 41 32 34 955 10 34 41))"
+  },
+  {
+   "id": "prin1/0129",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (append (prin1-to-string '(a (b c) \"λ\\n\") nil '((escape-multibyte . t))) nil)) (error (list 'sig e))))",
+   "expected": "(ok (40 97 32 40 98 32 99 41 32 34 92 120 48 51 98 98 10 34 41))"
+  },
+  {
+   "id": "prin1/0130",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (append (prin1-to-string '(a (b c) \"λ\\n\") nil t) nil)) (error (list 'sig e))))",
+   "expected": "(ok (40 97 32 40 98 32 99 41 32 34 955 10 34 41))"
+  },
+  {
+   "id": "prin1/0131",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((print-circle t)) (append (prin1-to-string (let ((x (list 1 2))) (list x x))) nil))) (error (list 'sig e))))",
+   "expected": "(ok (40 35 49 61 40 49 32 50 41 32 35 49 35 41))"
+  },
+  {
+   "id": "prin1/0132",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((print-circle t)) (append (prin1-to-string (let ((x (vector nil))) (aset x 0 x) x)) nil))) (error (list 'sig e))))",
+   "expected": "(ok (35 49 61 91 35 49 35 93))"
+  },
+  {
+   "id": "prin1/0133",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((print-circle t)) (append (prin1-to-string (let ((x (copy-sequence \"xx\"))) (list x x))) nil))) (error (list 'sig e))))",
+   "expected": "(ok (40 35 49 61 34 120 120 34 32 35 49 35 41))"
+  },
+  {
+   "id": "prin1/0134",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((print-circle t)) (append (prin1-to-string (propertize \"x\" 'face 'bold)) nil))) (error (list 'sig e))))",
+   "expected": "(ok (35 40 34 120 34 32 48 32 49 32 40 102 97 99 101 32 98 111 108 100 41 41))"
+  },
+  {
+   "id": "prin1/0135",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((print-circle t)) (append (prin1-to-string (make-char-table 'foo)) nil))) (error (list 'sig e))))",
+   "expected": "(ok (35 94 91 110 105 108 32 110 105 108 32 102 111 111 32 110 105 108 32 110 105 108 32 110 105 108 32 110 105 108 32 110 105 108 32 110 105 108 32 110 105 108 32 110 105 108 32 110 105 108 32 110 105 108 32 110 105 108 32 110 105 108 32 110 105 108 32 110 105 108 32 110 105 108 32 110 105 108 32 110 105 108 32 110 105 108 32 110 105 108 32 110 105 108 32 110 105 108 32 110 105 108 32 110 105 108 32 110 105 108 32 110 105 108 32 110 105 108 32 110 105 108 32 110 105 108 32 110 105 108 32 110 105 108 32 110 105 108 32 110 105 108 32 110 105 108 32 110 105 108 32 110 105 108 32 110 105 108 32 110 105 108 32 110 105 108 32 110 105 108 32 110 105 108 32 110 105 108 32 110 105 108 32 110 105 108 32 110 105 108 32 110 105 108 32 110 105 108 32 110 105 108 32 110 105 108 32 110 105 108 32 110 105 108 32 110 105 108 32 110 105 108 32 110 105 108 32 110 105 108 32 110 105 108 32 110 105 108 32 110 105 108 32 110 105 108 32 110 105 108 32 110 105 108 32 110 105 108 32 110 105 108 32 110 105 108 32 110 105 108 32 110 105 108 93))"
+  },
+  {
+   "id": "prin1/0136",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((print-circle t)) (append (prin1-to-string (selected-frame)) nil))) (error (list 'sig e))))",
+   "expected": "(ok (35 60 102 114 97 109 101 32 70 49 32 48 120 53 54 49 102 49 98 51 102 56 53 100 56 62))"
+  },
+  {
+   "id": "prin1/0137",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((print-circle t)) (append (prin1-to-string (frame-terminal)) nil))) (error (list 'sig e))))",
+   "expected": "(ok (35 60 116 101 114 109 105 110 97 108 32 48 32 111 110 32 105 110 105 116 105 97 108 95 116 101 114 109 105 110 97 108 62))"
+  },
+  {
+   "id": "prin1/0138",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((print-circle t)) (append (prin1-to-string (make-marker)) nil))) (error (list 'sig e))))",
+   "expected": "(ok (35 60 109 97 114 107 101 114 32 105 110 32 110 111 32 98 117 102 102 101 114 62))"
+  },
+  {
+   "id": "prin1/0139",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((print-escape-newlines nil)) (append (prin1-to-string (concat (unibyte-string 0 7 10 127 128 255) \"ab\")) nil))) (error (list 'sig e))))",
+   "expected": "(ok (34 0 7 10 127 92 50 48 48 92 51 55 55 97 98 34))"
+  },
+  {
+   "id": "prin1/0140",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((print-escape-newlines t)) (append (prin1-to-string (concat (unibyte-string 0 7 10 127 128 255) \"ab\")) nil))) (error (list 'sig e))))",
+   "expected": "(ok (34 0 7 92 110 127 92 50 48 48 92 51 55 55 97 98 34))"
+  },
+  {
+   "id": "prin1/0141",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((print-escape-nonascii nil)) (append (prin1-to-string (concat (unibyte-string 0 7 10 127 128 255) \"ab\")) nil))) (error (list 'sig e))))",
+   "expected": "(ok (34 0 7 10 127 92 50 48 48 92 51 55 55 97 98 34))"
+  },
+  {
+   "id": "prin1/0142",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((print-escape-nonascii t)) (append (prin1-to-string (concat (unibyte-string 0 7 10 127 128 255) \"ab\")) nil))) (error (list 'sig e))))",
+   "expected": "(ok (34 0 7 10 127 92 50 48 48 92 51 55 55 97 98 34))"
+  },
+  {
+   "id": "prin1/0143",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((print-escape-multibyte nil)) (append (prin1-to-string (concat (unibyte-string 0 7 10 127 128 255) \"ab\")) nil))) (error (list 'sig e))))",
+   "expected": "(ok (34 0 7 10 127 92 50 48 48 92 51 55 55 97 98 34))"
+  },
+  {
+   "id": "prin1/0144",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((print-escape-multibyte t)) (append (prin1-to-string (concat (unibyte-string 0 7 10 127 128 255) \"ab\")) nil))) (error (list 'sig e))))",
+   "expected": "(ok (34 0 7 10 127 92 50 48 48 92 51 55 55 97 98 34))"
+  },
+  {
+   "id": "prin1/0145",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((print-escape-control-characters nil)) (append (prin1-to-string (concat (unibyte-string 0 7 10 127 128 255) \"ab\")) nil))) (error (list 'sig e))))",
+   "expected": "(ok (34 0 7 10 127 92 50 48 48 92 51 55 55 97 98 34))"
+  },
+  {
+   "id": "prin1/0146",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((print-escape-control-characters t)) (append (prin1-to-string (concat (unibyte-string 0 7 10 127 128 255) \"ab\")) nil))) (error (list 'sig e))))",
+   "expected": "(ok (34 92 48 92 55 92 49 50 92 49 55 55 92 50 48 48 92 51 55 55 97 98 34))"
+  },
+  {
+   "id": "prin1/0147",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((print-quoted nil)) (append (prin1-to-string (concat (unibyte-string 0 7 10 127 128 255) \"ab\")) nil))) (error (list 'sig e))))",
+   "expected": "(ok (34 0 7 10 127 92 50 48 48 92 51 55 55 97 98 34))"
+  },
+  {
+   "id": "prin1/0148",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((print-quoted t)) (append (prin1-to-string (concat (unibyte-string 0 7 10 127 128 255) \"ab\")) nil))) (error (list 'sig e))))",
+   "expected": "(ok (34 0 7 10 127 92 50 48 48 92 51 55 55 97 98 34))"
+  },
+  {
+   "id": "prin1/0149",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((float-output-format t)) (append (prin1-to-string 42) nil))) (error (list 'sig e))))",
+   "expected": "(ok (52 50))"
+  },
+  {
+   "id": "prin1/0150",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((print-gensym t)) (append (prin1-to-string 42) nil))) (error (list 'sig e))))",
+   "expected": "(ok (52 50))"
+  },
+  {
+   "id": "prin1/0151",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((print-continuous-numbering t)) (append (prin1-to-string 42) nil))) (error (list 'sig e))))",
+   "expected": "(ok (52 50))"
+  },
+  {
+   "id": "prin1/0152",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((print-number-table t)) (append (prin1-to-string 42) nil))) (error (list 'sig e))))",
+   "expected": "(ok (52 50))"
+  },
+  {
+   "id": "prin1/0153",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((print-integers-as-characters t)) (append (prin1-to-string 42) nil))) (error (list 'sig e))))",
+   "expected": "(ok (63 42))"
+  },
+  {
+   "id": "prin1/0154",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((print-unreadable-function t)) (append (prin1-to-string 42) nil))) (error (list 'sig e))))",
+   "expected": "(ok (52 50))"
+  },
+  {
+   "id": "prin1/0155",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((print-charset-text-property t)) (append (prin1-to-string 42) nil))) (error (list 'sig e))))",
+   "expected": "(ok (52 50))"
+  },
+  {
+   "id": "prin1/0156",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((print-symbols-bare t)) (append (prin1-to-string 42) nil))) (error (list 'sig e))))",
+   "expected": "(ok (52 50))"
+  },
+  {
+   "id": "prin1/0157",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (prin1-to-string 42 nil 7)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument consp 7))"
+  },
+  {
+   "id": "prin1/0158",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (prin1-to-string 42 nil '(garbage))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument consp garbage))"
+  },
+  {
+   "id": "prin1/0159",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (prin1-to-string 42 nil '((unknown . t)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp nil))"
+  }
+ ],
+ "pinned": {
+  "prin1/0025": "SIGNAL-VS-VALUE",
+  "prin1/0034": "MISSING",
+  "prin1/0036": "VALUE",
+  "prin1/0037": "SIGNAL-VS-VALUE",
+  "prin1/0039": "SIGNAL-VS-VALUE",
+  "prin1/0078": "SIGNAL-VS-VALUE",
+  "prin1/0111": "MISSING",
+  "prin1/0113": "VALUE",
+  "prin1/0114": "SIGNAL-VS-VALUE",
+  "prin1/0116": "SIGNAL-VS-VALUE",
+  "prin1/0136": "SIGNAL-VS-VALUE",
+  "prin1/0137": "SIGNAL-VS-VALUE",
+  "prin1/0138": "SIGNAL-VS-VALUE",
+  "prin1/0149": "SIGNAL-VS-VALUE",
+  "prin1/0150": "SIGNAL-VS-VALUE",
+  "prin1/0151": "SIGNAL-VS-VALUE",
+  "prin1/0152": "SIGNAL-VS-VALUE",
+  "prin1/0153": "SIGNAL-VS-VALUE",
+  "prin1/0154": "SIGNAL-VS-VALUE",
+  "prin1/0155": "SIGNAL-VS-VALUE",
+  "prin1/0156": "SIGNAL-VS-VALUE",
+  "prin1/0157": "DATA",
+  "prin1/0158": "DATA",
+  "prin1/0159": "CONDITION"
+ }
+}

@@ -1,0 +1,53 @@
+[package]
+name = "romacs-renderer-wgpu"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "WGPU text renderer primitives for Romacs"
+
+[features]
+default = []
+video = ["dep:romacs-video"]
+video-dmabuf = ["video"]
+webview = []
+
+[dependencies]
+enum_dispatch.workspace = true
+rustc-hash.workspace = true
+sha2.workspace = true
+cosmic-text.workspace = true
+swash.workspace = true
+fontdb.workspace = true
+wgpu.workspace = true
+wgpu-hal.workspace = true
+naga.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+bytemuck.workspace = true
+pollster.workspace = true
+ash.workspace = true
+image.workspace = true
+png.workspace = true
+zune-jpeg.workspace = true
+imagesize.workspace = true
+flate2.workspace = true
+libc.workspace = true
+resvg.workspace = true
+svgtypes.workspace = true
+simplecss.workspace = true
+romacs-display-protocol.workspace = true
+romacs-font.workspace = true
+romacs-font-materializer.workspace = true
+romacs-video = { workspace = true, optional = true }
+
+[dev-dependencies]
+romacs-infra.workspace = true
+romacs-test-fonts.workspace = true
+tracing-test.workspace = true
+jpeg-encoder.workspace = true
+image-extras.workspace = true
+
+[lints]
+workspace = true

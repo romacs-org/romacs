@@ -1,0 +1,5 @@
+error[E0616]: field `0` of struct `romacs_vm::handle::FormObject` is private
+ --> tests/heap_boundary/fail/form_object_is_opaque.rs:5:24
+  |
+5 |         let _ = object.0;
+  |                        ^ private field

@@ -1,0 +1,63 @@
+{
+  "name": "eql",
+  "arity": [
+    2,
+    2
+  ],
+  "effect": "pure",
+  "gnu_files": [
+    "fns.c"
+  ],
+  "gnu_def": "fns.c:2800",
+  "rust": "src/prims/eql.rs:4",
+  "args": [
+    "lane-eql",
+    "lane-eql"
+  ],
+  "extra": {
+    "0": [
+      "nil",
+      "t",
+      "0",
+      "1",
+      "-1",
+      "1.0",
+      "0.0",
+      "-0.0",
+      "0.0e+NaN",
+      "1.0e+INF",
+      "(string-to-number \"2305843009213693952\")",
+      "(string-to-number \"2305843009213693953\")",
+      "(string-to-number \"-2305843009213693953\")",
+      "\"\u03bb\ud83d\ude42\"",
+      "'symbol",
+      "'(1)",
+      "[1]"
+    ],
+    "1": [
+      "nil",
+      "t",
+      "0",
+      "1",
+      "-1",
+      "1.0",
+      "0.0",
+      "-0.0",
+      "0.0e+NaN",
+      "1.0e+INF",
+      "(string-to-number \"2305843009213693952\")",
+      "(string-to-number \"2305843009213693953\")",
+      "(string-to-number \"-2305843009213693953\")",
+      "\"\u03bb\ud83d\ude42\"",
+      "'symbol",
+      "'(1)",
+      "[1]"
+    ]
+  },
+  "probes": [
+    "(let ((x (list 1))) (eql x x))",
+    "(let ((x (vector \"\u03bb\"))) (eql x x))",
+    "(let ((x (copy-sequence \"\u03bb\"))) (eql x x))",
+    "(funcall #'eql 1.0 1.0)"
+  ]
+}

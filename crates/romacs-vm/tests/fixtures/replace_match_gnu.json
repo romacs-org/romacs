@@ -1,0 +1,102 @@
+{
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+  "regime": "-Q --batch; text-quoting-style grave",
+  "cases": [
+    {
+      "source": "(progn (string-match \"-mode\" \"Auto-mode\") (replace-match \"\" nil nil \"Auto-mode\"))",
+      "gnu": "\"Auto\"",
+      "supported": true
+    },
+    {
+      "source": "(progn (string-match \"é\\\\(λ\\\\)\" \"aéλz\") (list (replace-match \"X\" t t \"aéλz\") (replace-match \"Y\" t t \"aéλz\" 1) (match-data t)))",
+      "gnu": "(\"aXz\" \"aéYz\" (1 3 2 3))",
+      "supported": true
+    },
+    {
+      "source": "(progn (string-match \"b\" \"abc\") (funcall #'replace-match \"\" t t \"abc\"))",
+      "gnu": "\"ac\"",
+      "supported": true
+    },
+    {
+      "source": "(progn (string-match \"\\\\(a\\\\)b\" \"zab!\") (replace-match \"<\\\\&-\\\\1-\\\\9-\\\\\\\\-\\\\?>\" t nil \"zab!\"))",
+      "gnu": "\"z<ab-a--\\\\-\\\\?>!\"",
+      "supported": true
+    },
+    {
+      "source": "(progn (string-match \"\\\\(a\\\\)b\" \"zab!\") (replace-match \"\\\\&\" t nil \"zab!\" 1))",
+      "gnu": "\"zab!\"",
+      "supported": true
+    },
+    {
+      "source": "(progn (string-match \"a\" \"a\") (condition-case e (replace-match \"\\\\x\" t nil \"a\") (error e)))",
+      "gnu": "(error \"Invalid use of `\\\\' in replacement text\")",
+      "supported": true
+    },
+    {
+      "source": "(let ((s (copy-sequence \"abc\")) (r (copy-sequence \"XY\"))) (put-text-property 0 3 'face 'bold s) (put-text-property 0 2 'face 'italic r) (string-match \"b\" s) (let ((out (replace-match r t t s))) (list (substring-no-properties out) (get-text-property 0 'face out) (get-text-property 1 'face out) (get-text-property 3 'face out) (substring-no-properties s))))",
+      "gnu": "(\"aXYc\" bold italic bold \"abc\")",
+      "supported": true
+    },
+    {
+      "source": "(progn (string-match \"a\" \"a\") (condition-case e (replace-match \"x\" t t \"a\" 30) (error (list (car e) (car (cdr e)) (car (cdr (cdr e)))))))",
+      "gnu": "(args-out-of-range 30 0)",
+      "supported": true
+    },
+    {
+      "source": "(progn (set-match-data '(0 1 nil nil)) (condition-case e (replace-match \"x\" t t \"a\" 1) (error e)))",
+      "gnu": "(error \"replace-match subexpression does not exist\" 1)",
+      "supported": true
+    },
+    {
+      "source": "(progn (string-match \"a\" \"a\") (list (multibyte-string-p (replace-match (string-to-multibyte \"\\\\&\") t nil (string-make-unibyte \"a\"))) (multibyte-string-p (replace-match (string-to-multibyte \"b\") t t \"a\"))))",
+      "gnu": "(nil t)",
+      "supported": true
+    },
+    {
+      "source": "(condition-case e (replace-match 3) (error e))",
+      "gnu": "(wrong-type-argument stringp 3)",
+      "supported": true
+    },
+    {
+      "source": "(condition-case e (replace-match \"x\" t t 3) (error e))",
+      "gnu": "(wrong-type-argument stringp 3)",
+      "supported": true
+    },
+    {
+      "source": "(progn (string-match \"a\" \"a\") (set-match-data nil) (condition-case e (replace-match \"x\" t t \"a\") (error e)))",
+      "gnu": "(error \"replace-match subexpression does not exist\" nil)",
+      "supported": true
+    },
+    {
+      "source": "(progn (set-match-data '(0 1)) (condition-case e (replace-match \"x\" t t \"a\" 'bad) (error e)))",
+      "gnu": "(wrong-type-argument integerp bad)",
+      "supported": true
+    },
+    {
+      "source": "(progn (set-match-data '(0 4)) (condition-case e (replace-match \"x\" t t \"a\") (error e)))",
+      "gnu": "(args-out-of-range 0 4)",
+      "supported": true
+    },
+    {
+      "source": "(condition-case e (replace-match) (error (list (car e) (car (cdr (cdr e))))))",
+      "gnu": "(wrong-number-of-arguments 0)",
+      "supported": true
+    },
+    {
+      "source": "(condition-case e (replace-match \"a\" t t \"b\" nil 1) (error (list (car e) (car (cdr (cdr e))))))",
+      "gnu": "(wrong-number-of-arguments 6)",
+      "supported": true
+    },
+    {
+      "source": "(progn (set-match-data '(0 1)) (condition-case e (replace-match \"x\" t t) (error e)))",
+      "gnu": "(args-out-of-range 0 1)",
+      "supported": false
+    },
+    {
+      "source": "(progn (set-match-data '(0 1)) (condition-case e (replace-match \"x\" nil t \"a\") (error e)))",
+      "gnu": "\"x\"",
+      "supported": false
+    }
+  ]
+}

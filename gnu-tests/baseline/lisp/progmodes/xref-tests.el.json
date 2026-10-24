@@ -1,0 +1,317 @@
+{
+  "blob": "7c1ef3e7ad82e41e5cb0f8ec58408fbff64c5110",
+  "compiled": {
+    "complete": true,
+    "exit": 0,
+    "garbled_lines": 0,
+    "load_error": null,
+    "load_ok": true,
+    "results": {
+      "xref--buf-pairs-iterator-cleans-up-markers": {
+        "as_expected": false,
+        "detail": "(file-missing \"Setting current directory\" \"No such file or directory\" \"<recording-home>/.hermes/cache/scratch/gnu-run-elc-B9zRcr/xref-resources/\")",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": []
+      },
+      "xref--buf-pairs-iterator-groups-markers-by-buffers-1": {
+        "as_expected": false,
+        "detail": "(file-missing \"Setting current directory\" \"No such file or directory\" \"<recording-home>/.hermes/cache/scratch/gnu-run-elc-B9zRcr/xref-resources/\")",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": []
+      },
+      "xref--buf-pairs-iterator-groups-markers-by-buffers-2": {
+        "as_expected": false,
+        "detail": "(file-missing \"Setting current directory\" \"No such file or directory\" \"<recording-home>/.hermes/cache/scratch/gnu-run-elc-B9zRcr/xref-resources/\")",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": []
+      },
+      "xref--xref-file-name-display-is-abs": {
+        "as_expected": false,
+        "detail": "(file-missing \"Setting current directory\" \"No such file or directory\" \"<recording-home>/.hermes/cache/scratch/gnu-run-elc-B9zRcr/xref-resources/\")",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": []
+      },
+      "xref--xref-file-name-display-is-nondirectory": {
+        "as_expected": false,
+        "detail": "(file-missing \"Setting current directory\" \"No such file or directory\" \"<recording-home>/.hermes/cache/scratch/gnu-run-elc-B9zRcr/xref-resources/\")",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": []
+      },
+      "xref--xref-file-name-display-is-relative-to-project-root": {
+        "as_expected": false,
+        "detail": "(file-missing \"Setting current directory\" \"No such file or directory\" \"<recording-home>/.hermes/cache/scratch/gnu-run-elc-B9zRcr/xref-resources/\")",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": []
+      },
+      "xref-matches-in-directory-filters-with-ignores": {
+        "as_expected": false,
+        "detail": "(file-missing \"Setting current directory\" \"No such file or directory\" \"<recording-home>/.hermes/cache/scratch/gnu-run-elc-B9zRcr/xref-resources/\")",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": []
+      },
+      "xref-matches-in-directory-finds-an-empty-line-regexp-match": {
+        "as_expected": false,
+        "detail": "(file-missing \"Setting current directory\" \"No such file or directory\" \"<recording-home>/.hermes/cache/scratch/gnu-run-elc-B9zRcr/xref-resources/\")",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": []
+      },
+      "xref-matches-in-directory-finds-none-for-some-regexp": {
+        "as_expected": false,
+        "detail": "(file-missing \"Setting current directory\" \"No such file or directory\" \"<recording-home>/.hermes/cache/scratch/gnu-run-elc-B9zRcr/xref-resources/\")",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": []
+      },
+      "xref-matches-in-directory-finds-some-for-bar": {
+        "as_expected": false,
+        "detail": "(file-missing \"Setting current directory\" \"No such file or directory\" \"<recording-home>/.hermes/cache/scratch/gnu-run-elc-B9zRcr/xref-resources/\")",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": []
+      },
+      "xref-matches-in-directory-finds-two-matches-on-the-same-line": {
+        "as_expected": false,
+        "detail": "(file-missing \"Setting current directory\" \"No such file or directory\" \"<recording-home>/.hermes/cache/scratch/gnu-run-elc-B9zRcr/xref-resources/\")",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": []
+      },
+      "xref-matches-in-files-includes-matches-from-all-the-files": {
+        "as_expected": false,
+        "detail": "(file-missing \"Opening directory\" \"No such file or directory\" \"<recording-home>/.hermes/cache/scratch/gnu-run-elc-B9zRcr/xref-resources\")",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": []
+      },
+      "xref-matches-in-files-trims-summary-for-matches-on-same-line": {
+        "as_expected": false,
+        "detail": "(file-missing \"Opening directory\" \"No such file or directory\" \"<recording-home>/.hermes/cache/scratch/gnu-run-elc-B9zRcr/xref-resources\")",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": []
+      }
+    },
+    "timed_out": false
+  },
+  "file": "lisp/progmodes/xref-tests.el",
+  "gnu": {
+    "emacs": "<recording-path-redacted>/emacs-32.0.50",
+    "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+    "sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+    "version": "32.0.50"
+  },
+  "harness_sha256": "78c20850429a08af22faadf73b5d164c560230e83d7eb88ef60cb995670703ef",
+  "mini": {
+    "complete": true,
+    "exit": 0,
+    "garbled_lines": 0,
+    "load_error": null,
+    "load_ok": null,
+    "results": {
+      "xref--buf-pairs-iterator-cleans-up-markers": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "xref--buf-pairs-iterator-groups-markers-by-buffers-1": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "xref--buf-pairs-iterator-groups-markers-by-buffers-2": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "xref--xref-file-name-display-is-abs": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "xref--xref-file-name-display-is-nondirectory": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "xref--xref-file-name-display-is-relative-to-project-root": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "xref-matches-in-directory-filters-with-ignores": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "xref-matches-in-directory-finds-an-empty-line-regexp-match": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "xref-matches-in-directory-finds-none-for-some-regexp": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "xref-matches-in-directory-finds-some-for-bar": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "xref-matches-in-directory-finds-two-matches-on-the-same-line": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "xref-matches-in-files-includes-matches-from-all-the-files": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "xref-matches-in-files-trims-summary-for-matches-on-same-line": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      }
+    },
+    "timed_out": false
+  },
+  "read_error": null,
+  "real": {
+    "complete": true,
+    "exit": 0,
+    "garbled_lines": 0,
+    "load_error": null,
+    "load_ok": true,
+    "results": {
+      "xref--buf-pairs-iterator-cleans-up-markers": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "xref--buf-pairs-iterator-groups-markers-by-buffers-1": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "xref--buf-pairs-iterator-groups-markers-by-buffers-2": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "xref--xref-file-name-display-is-abs": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "xref--xref-file-name-display-is-nondirectory": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "xref--xref-file-name-display-is-relative-to-project-root": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "xref-matches-in-directory-filters-with-ignores": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "xref-matches-in-directory-finds-an-empty-line-regexp-match": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "xref-matches-in-directory-finds-none-for-some-regexp": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "xref-matches-in-directory-finds-some-for-bar": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "xref-matches-in-directory-finds-two-matches-on-the-same-line": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "xref-matches-in-files-includes-matches-from-all-the-files": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "xref-matches-in-files-trims-summary-for-matches-on-same-line": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      }
+    },
+    "timed_out": false
+  },
+  "schema": 1,
+  "toplevel_deftests": 0
+}

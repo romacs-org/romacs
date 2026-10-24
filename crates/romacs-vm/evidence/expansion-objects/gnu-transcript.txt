@@ -1,0 +1,11 @@
+A 42
+B 42
+C t
+D t
+E t
+F 7
+G 9
+H (invalid-function t)
+I 1
+J t
+version 32.0.50

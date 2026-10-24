@@ -1,0 +1,37 @@
+{
+ "name": "terminal-live-p",
+ "arity": [
+  1,
+  1
+ ],
+ "effect": "reads",
+ "gnu_files": [
+  "terminal.c"
+ ],
+ "gnu_def": "terminal.c:443",
+ "args": [
+  "none"
+ ],
+ "extra": {
+  "0": [
+   "nil",
+   "t",
+   "1",
+   "'symbol",
+   "\"string\""
+  ]
+ },
+ "probes": [
+  "(fboundp 'terminal-live-p)",
+  "(terminal-live-p nil)",
+  "(terminal-live-p (selected-frame))",
+  "(terminal-live-p (frame-terminal))",
+  "(terminal-live-p t)",
+  "(terminal-live-p 1)",
+  "(terminal-live-p 'symbol)",
+  "(terminal-live-p \"string\")",
+  "(terminal-live-p (selected-window))",
+  "(funcall #'terminal-live-p (frame-terminal))"
+ ],
+ "rust": "src/prims/frame.rs:10"
+}

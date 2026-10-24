@@ -1,0 +1,913 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "rassoc",
+ "spec_sha256": "0f927530767c4fface5239fe30445ab71eb8a4b20b94ab90a3551c0d9cc030ee",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "rassoc",
+    "subr",
+    2,
+    2
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "fns.c": "db81c235d7c63f312128ad84c11d55ae4665a2599099be1229dbaa329afdb3bf"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "rassoc/0000",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc nil nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassoc/0001",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc nil (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassoc/0002",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc nil (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok (b))"
+  },
+  {
+   "id": "rassoc/0003",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc nil '(nil atom (a . 1) (b . 2) (c 1 2)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassoc/0004",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc nil '((a . 1) . bad))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp ((a . 1) . bad)))"
+  },
+  {
+   "id": "rassoc/0005",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc nil 42)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 42))"
+  },
+  {
+   "id": "rassoc/0006",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc t nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassoc/0007",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc t (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassoc/0008",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc t (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassoc/0009",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc t '(nil atom (a . 1) (b . 2) (c 1 2)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassoc/0010",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc t '((a . 1) . bad))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp ((a . 1) . bad)))"
+  },
+  {
+   "id": "rassoc/0011",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc t 42)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 42))"
+  },
+  {
+   "id": "rassoc/0012",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc 0 nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassoc/0013",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc 0 (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassoc/0014",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc 0 (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassoc/0015",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc 0 '(nil atom (a . 1) (b . 2) (c 1 2)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassoc/0016",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc 0 '((a . 1) . bad))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp ((a . 1) . bad)))"
+  },
+  {
+   "id": "rassoc/0017",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc 0 42)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 42))"
+  },
+  {
+   "id": "rassoc/0018",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc 1 nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassoc/0019",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc 1 (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassoc/0020",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc 1 (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassoc/0021",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc 1 '(nil atom (a . 1) (b . 2) (c 1 2)))) (error (list 'sig e))))",
+   "expected": "(ok (a . 1))"
+  },
+  {
+   "id": "rassoc/0022",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc 1 '((a . 1) . bad))) (error (list 'sig e))))",
+   "expected": "(ok (a . 1))"
+  },
+  {
+   "id": "rassoc/0023",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc 1 42)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 42))"
+  },
+  {
+   "id": "rassoc/0024",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc 2 nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassoc/0025",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc 2 (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassoc/0026",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc 2 (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassoc/0027",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc 2 '(nil atom (a . 1) (b . 2) (c 1 2)))) (error (list 'sig e))))",
+   "expected": "(ok (b . 2))"
+  },
+  {
+   "id": "rassoc/0028",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc 2 '((a . 1) . bad))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp ((a . 1) . bad)))"
+  },
+  {
+   "id": "rassoc/0029",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc 2 42)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 42))"
+  },
+  {
+   "id": "rassoc/0030",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc -1 nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassoc/0031",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc -1 (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassoc/0032",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc -1 (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassoc/0033",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc -1 '(nil atom (a . 1) (b . 2) (c 1 2)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassoc/0034",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc -1 '((a . 1) . bad))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp ((a . 1) . bad)))"
+  },
+  {
+   "id": "rassoc/0035",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc -1 42)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 42))"
+  },
+  {
+   "id": "rassoc/0036",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc most-positive-fixnum nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassoc/0037",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc most-positive-fixnum (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassoc/0038",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc most-positive-fixnum (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassoc/0039",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc most-positive-fixnum '(nil atom (a . 1) (b . 2) (c 1 2)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassoc/0040",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc most-positive-fixnum '((a . 1) . bad))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp ((a . 1) . bad)))"
+  },
+  {
+   "id": "rassoc/0041",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc most-positive-fixnum 42)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 42))"
+  },
+  {
+   "id": "rassoc/0042",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc 1.5 nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassoc/0043",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc 1.5 (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassoc/0044",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc 1.5 (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassoc/0045",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc 1.5 '(nil atom (a . 1) (b . 2) (c 1 2)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassoc/0046",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc 1.5 '((a . 1) . bad))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp ((a . 1) . bad)))"
+  },
+  {
+   "id": "rassoc/0047",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc 1.5 42)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 42))"
+  },
+  {
+   "id": "rassoc/0048",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc 'sym nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassoc/0049",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc 'sym (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassoc/0050",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc 'sym (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassoc/0051",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc 'sym '(nil atom (a . 1) (b . 2) (c 1 2)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassoc/0052",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc 'sym '((a . 1) . bad))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp ((a . 1) . bad)))"
+  },
+  {
+   "id": "rassoc/0053",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc 'sym 42)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 42))"
+  },
+  {
+   "id": "rassoc/0054",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc :kw nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassoc/0055",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc :kw (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassoc/0056",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc :kw (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassoc/0057",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc :kw '(nil atom (a . 1) (b . 2) (c 1 2)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassoc/0058",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc :kw '((a . 1) . bad))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp ((a . 1) . bad)))"
+  },
+  {
+   "id": "rassoc/0059",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc :kw 42)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 42))"
+  },
+  {
+   "id": "rassoc/0060",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc (copy-sequence \"\") nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassoc/0061",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc (copy-sequence \"\") (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassoc/0062",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc (copy-sequence \"\") (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassoc/0063",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc (copy-sequence \"\") '(nil atom (a . 1) (b . 2) (c 1 2)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassoc/0064",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc (copy-sequence \"\") '((a . 1) . bad))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp ((a . 1) . bad)))"
+  },
+  {
+   "id": "rassoc/0065",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc (copy-sequence \"\") 42)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 42))"
+  },
+  {
+   "id": "rassoc/0066",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc (copy-sequence \"abc\") nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassoc/0067",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc (copy-sequence \"abc\") (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassoc/0068",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc (copy-sequence \"abc\") (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassoc/0069",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc (copy-sequence \"abc\") '(nil atom (a . 1) (b . 2) (c 1 2)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassoc/0070",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc (copy-sequence \"abc\") '((a . 1) . bad))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp ((a . 1) . bad)))"
+  },
+  {
+   "id": "rassoc/0071",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc (copy-sequence \"abc\") 42)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 42))"
+  },
+  {
+   "id": "rassoc/0072",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc (copy-sequence \"λx\") nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassoc/0073",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc (copy-sequence \"λx\") (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassoc/0074",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc (copy-sequence \"λx\") (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassoc/0075",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc (copy-sequence \"λx\") '(nil atom (a . 1) (b . 2) (c 1 2)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassoc/0076",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc (copy-sequence \"λx\") '((a . 1) . bad))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp ((a . 1) . bad)))"
+  },
+  {
+   "id": "rassoc/0077",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc (copy-sequence \"λx\") 42)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 42))"
+  },
+  {
+   "id": "rassoc/0078",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc (vector 1 2) nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassoc/0079",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc (vector 1 2) (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassoc/0080",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc (vector 1 2) (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassoc/0081",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc (vector 1 2) '(nil atom (a . 1) (b . 2) (c 1 2)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassoc/0082",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc (vector 1 2) '((a . 1) . bad))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp ((a . 1) . bad)))"
+  },
+  {
+   "id": "rassoc/0083",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc (vector 1 2) 42)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 42))"
+  },
+  {
+   "id": "rassoc/0084",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'rassoc '(1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr rassoc> 1))"
+  },
+  {
+   "id": "rassoc/0085",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'rassoc '(1 1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr rassoc> 3))"
+  },
+  {
+   "id": "rassoc/0086",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 nil)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (rassoc a0 a1))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassoc/0087",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-positive-fixnum) (a1 (list 1 2 3))) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (rassoc a0 a1))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassoc/0088",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 (list 'a (list 'b)))) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (rassoc a0 a1))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassoc/0089",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 nil)) (let ((r (rassoc a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (t t))"
+  },
+  {
+   "id": "rassoc/0090",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 '(nil atom (a . 1) (b . 2) (c 1 2)))) (let ((r (rassoc a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (t nil))"
+  },
+  {
+   "id": "rassoc/0091",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 nil)) (let ((r (rassoc a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "rassoc/0092",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 '(nil atom (a . 1) (b . 2) (c 1 2)))) (let ((r (rassoc a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "rassoc/0093",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0) (a1 nil)) (let ((r (rassoc a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "rassoc/0094",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0) (a1 '(nil atom (a . 1) (b . 2) (c 1 2)))) (let ((r (rassoc a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "rassoc/0095",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 nil)) (let ((r (rassoc a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "rassoc/0096",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 '(nil atom (a . 1) (b . 2) (c 1 2)))) (let ((r (rassoc a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "rassoc/0097",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 2) (a1 nil)) (let ((r (rassoc a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "rassoc/0098",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 2) (a1 '(nil atom (a . 1) (b . 2) (c 1 2)))) (let ((r (rassoc a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "rassoc/0099",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1) (a1 nil)) (let ((r (rassoc a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "rassoc/0100",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1) (a1 '(nil atom (a . 1) (b . 2) (c 1 2)))) (let ((r (rassoc a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "rassoc/0101",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-positive-fixnum) (a1 nil)) (let ((r (rassoc a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "rassoc/0102",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-positive-fixnum) (a1 '(nil atom (a . 1) (b . 2) (c 1 2)))) (let ((r (rassoc a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "rassoc/0103",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.5) (a1 nil)) (let ((r (rassoc a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "rassoc/0104",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.5) (a1 '(nil atom (a . 1) (b . 2) (c 1 2)))) (let ((r (rassoc a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "rassoc/0105",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'sym) (a1 nil)) (let ((r (rassoc a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "rassoc/0106",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'sym) (a1 '(nil atom (a . 1) (b . 2) (c 1 2)))) (let ((r (rassoc a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "rassoc/0107",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :kw) (a1 nil)) (let ((r (rassoc a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "rassoc/0108",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :kw) (a1 '(nil atom (a . 1) (b . 2) (c 1 2)))) (let ((r (rassoc a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "rassoc/0109",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\")) (a1 nil)) (let ((r (rassoc a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "rassoc/0110",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\")) (a1 '(nil atom (a . 1) (b . 2) (c 1 2)))) (let ((r (rassoc a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "rassoc/0111",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 nil)) (let ((r (rassoc a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "rassoc/0112",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 '(nil atom (a . 1) (b . 2) (c 1 2)))) (let ((r (rassoc a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "rassoc/0113",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 nil)) (let ((r (rassoc a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "rassoc/0114",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 '(nil atom (a . 1) (b . 2) (c 1 2)))) (let ((r (rassoc a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "rassoc/0115",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (vector 1 2)) (a1 nil)) (let ((r (rassoc a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "rassoc/0116",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (vector 1 2)) (a1 '(nil atom (a . 1) (b . 2) (c 1 2)))) (let ((r (rassoc a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "rassoc/0117",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc '(1 2) '((a 1 2) (b 3)))) (error (list 'sig e))))",
+   "expected": "(ok (a 1 2))"
+  },
+  {
+   "id": "rassoc/0118",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc nil '(nil a (a) (b . 2)))) (error (list 'sig e))))",
+   "expected": "(ok (a))"
+  },
+  {
+   "id": "rassoc/0119",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc 2 '((a . 1) (b . 2)))) (error (list 'sig e))))",
+   "expected": "(ok (b . 2))"
+  },
+  {
+   "id": "rassoc/0120",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((entry (cons 'key (list 1 2))) (xs (list entry))) (eq entry (rassoc (list 1 2) xs)))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "rassoc/0121",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (condition-case e (rassoc 1 '((a . 2) . bad)) (error e))) (error (list 'sig e))))",
+   "expected": "(ok (wrong-type-argument listp ((a . 2) . bad)))"
+  },
+  {
+   "id": "rassoc/0122",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc 1 '((a . 1) . bad))) (error (list 'sig e))))",
+   "expected": "(ok (a . 1))"
+  },
+  {
+   "id": "rassoc/0123",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((xs (list (cons 'a 1)))) (setcdr xs xs) (condition-case e (rassoc 2 xs) (circular-list (eq (car (cdr e)) xs))))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "rassoc/0124",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (funcall #'rassoc 2 '((a . 2)))) (error (list 'sig e))))",
+   "expected": "(ok (a . 2))"
+  },
+  {
+   "id": "rassoc/0125",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc (copy-sequence \"yes\") (list (cons 'a (copy-sequence \"yes\"))))) (error (list 'sig e))))",
+   "expected": "(ok (a . \"yes\"))"
+  },
+  {
+   "id": "rassoc/0126",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc [1 2] '((a . [1 2])))) (error (list 'sig e))))",
+   "expected": "(ok (a . [1 2]))"
+  },
+  {
+   "id": "rassoc/0127",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (rassoc 1.5 '((a . 1.5)))) (error (list 'sig e))))",
+   "expected": "(ok (a . 1.5))"
+  },
+  {
+   "id": "rassoc/0128",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok '((a . 1) . bad)) (error (list 'sig e))))",
+   "expected": "(ok ((a . 1) . bad))"
+  },
+  {
+   "id": "rassoc/0129",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok '(nil atom (a . 1) (b . 2) (c 1 2))) (error (list 'sig e))))",
+   "expected": "(ok (nil atom (a . 1) (b . 2) (c 1 2)))"
+  },
+  {
+   "id": "rassoc/0130",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 'sym) (error (list 'sig e))))",
+   "expected": "(ok sym)"
+  },
+  {
+   "id": "rassoc/0131",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"\")) (error (list 'sig e))))",
+   "expected": "(ok \"\")"
+  },
+  {
+   "id": "rassoc/0132",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"abc\")) (error (list 'sig e))))",
+   "expected": "(ok \"abc\")"
+  },
+  {
+   "id": "rassoc/0133",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"λx\")) (error (list 'sig e))))",
+   "expected": "(ok \"λx\")"
+  },
+  {
+   "id": "rassoc/0134",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list 'a (list 'b))) (error (list 'sig e))))",
+   "expected": "(ok (a (b)))"
+  },
+  {
+   "id": "rassoc/0135",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list 1 2 3)) (error (list 'sig e))))",
+   "expected": "(ok (1 2 3))"
+  },
+  {
+   "id": "rassoc/0136",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vector 1 2)) (error (list 'sig e))))",
+   "expected": "(ok [1 2])"
+  },
+  {
+   "id": "rassoc/0137",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok -1) (error (list 'sig e))))",
+   "expected": "(ok -1)"
+  },
+  {
+   "id": "rassoc/0138",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 0) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "rassoc/0139",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1) (error (list 'sig e))))",
+   "expected": "(ok 1)"
+  },
+  {
+   "id": "rassoc/0140",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1.5) (error (list 'sig e))))",
+   "expected": "(ok 1.5)"
+  },
+  {
+   "id": "rassoc/0141",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 2) (error (list 'sig e))))",
+   "expected": "(ok 2)"
+  },
+  {
+   "id": "rassoc/0142",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 42) (error (list 'sig e))))",
+   "expected": "(ok 42)"
+  },
+  {
+   "id": "rassoc/0143",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok :kw) (error (list 'sig e))))",
+   "expected": "(ok :kw)"
+  },
+  {
+   "id": "rassoc/0144",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok most-positive-fixnum) (error (list 'sig e))))",
+   "expected": "(ok 2305843009213693951)"
+  },
+  {
+   "id": "rassoc/0145",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok nil) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "rassoc/0146",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok t) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  }
+ ]
+}

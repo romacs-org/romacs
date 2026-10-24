@@ -1,0 +1,199 @@
+{
+ "name": "corpus-17",
+ "frame": {
+  "width": 480,
+  "height": 168,
+  "bg": "#ffffff",
+  "fg": "#000000"
+ },
+ "font": {
+  "family": "Liberation Mono",
+  "pixel_size": 20,
+  "regular": "/usr/share/fonts/liberation/LiberationMono-Regular.ttf",
+  "bold": "/usr/share/fonts/liberation/LiberationMono-Bold.ttf",
+  "italic": "/usr/share/fonts/liberation/LiberationMono-Italic.ttf"
+ },
+ "cursor_color": "#00a000",
+ "buffer": [
+  {
+   "text": "Αθήνα"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "q?",
+   "fg": "#008000"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "θάλασσα"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "jumps"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "#if"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "window",
+   "fg": "#008000"
+  },
+  {
+   "text": "\n"
+  },
+  {
+   "text": "cursor",
+   "bold": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "Χάος",
+   "bold": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "θάλασσα"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "a&b"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "glyph",
+   "fg": "#696969",
+   "bold": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "ζωή"
+  },
+  {
+   "text": "\n"
+  },
+  {
+   "text": "λόγος"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "ξένος"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "[0-9]+"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "Αθήνα",
+   "bold": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "dog"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "[0-9]+",
+   "italic": true
+  },
+  {
+   "text": "\n"
+  }
+ ],
+ "point": 50,
+ "expect": {
+  "origin": [
+   0,
+   0
+  ],
+  "rows": [
+   {
+    "text": "Αθήνα q? θάλασσα jumps #if window",
+    "runs": [
+     {
+      "start": 6,
+      "end": 8,
+      "fg": "#008000"
+     },
+     {
+      "start": 27,
+      "end": 33,
+      "fg": "#008000"
+     }
+    ]
+   },
+   {
+    "text": "cursor Χάος θάλασσα a&b glyph ζωή",
+    "runs": [
+     {
+      "start": 0,
+      "end": 6,
+      "bold": true
+     },
+     {
+      "start": 7,
+      "end": 11,
+      "bold": true
+     },
+     {
+      "start": 24,
+      "end": 29,
+      "fg": "#696969",
+      "bold": true
+     }
+    ]
+   },
+   {
+    "text": "λόγος ξένος [0-9]+ Αθήνα dog [0-9]+",
+    "runs": [
+     {
+      "start": 19,
+      "end": 24,
+      "bold": true
+     },
+     {
+      "start": 29,
+      "end": 35,
+      "italic": true
+     }
+    ]
+   }
+  ],
+  "cursor": {
+   "row": 1,
+   "col": 15
+  }
+ }
+}

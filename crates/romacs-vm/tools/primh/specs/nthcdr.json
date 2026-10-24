@@ -1,0 +1,1 @@
+{"name": "nthcdr", "arity": [2, 2], "effect": "pure", "gnu_files": ["fns.c"], "gnu_def": "fns.c:1749", "rust": "src/prims/fns.rs:25", "args": []}

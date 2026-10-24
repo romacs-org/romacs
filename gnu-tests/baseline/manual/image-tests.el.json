@@ -1,0 +1,905 @@
+{
+ "blob": "33656cdbcc318d9aa828823ac0acfc9404b613bc",
+ "compiled": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": true,
+  "results": {
+   "image-tests-image-mask-p/error-on-invalid-spec": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (display-images-p)) :form (display-images-p) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-image-mask-p/gif": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p ...)))) :form (and (and (display-images-p) (image-type-available-p 'gif))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-image-mask-p/jpeg": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p ...)))) :form (and (and (display-images-p) (image-type-available-p 'jpeg))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-image-mask-p/pbm": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p ...)))) :form (and (and (display-images-p) (image-type-available-p 'pbm))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-image-mask-p/png": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p ...)))) :form (and (and (display-images-p) (image-type-available-p 'png))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-image-mask-p/svg": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p ...)))) :form (and (and (display-images-p) (image-type-available-p 'svg))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-image-mask-p/tiff": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p ...)))) :form (and (and (display-images-p) (image-type-available-p 'tiff))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-image-mask-p/webp": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p ...)))) :form (and (and (display-images-p) (image-type-available-p 'webp))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-image-mask-p/xbm": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p ...)))) :form (and (and (display-images-p) (image-type-available-p 'xbm))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-image-mask-p/xpm": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p ...)))) :form (and (and (display-images-p) (image-type-available-p 'xpm))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-image-metadata/gif": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p ...)) (not (eq system-type ...)) (not (bound-and-true-p w32-use-native-image-API)))) :form (and (and (display-images-p) (image-type-available-p 'gif)) (not (eq system-type 'darwin)) (not (and (boundp ...) w32-use-native-image-API))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-image-metadata/jpeg": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p ...)))) :form (and (and (display-images-p) (image-type-available-p 'jpeg))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-image-metadata/nil-on-invalid-spec": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (display-images-p)) :form (display-images-p) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-image-metadata/pbm": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p ...)))) :form (and (and (display-images-p) (image-type-available-p 'pbm))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-image-metadata/png": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p ...)))) :form (and (and (display-images-p) (image-type-available-p 'png))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-image-metadata/svg": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p ...)))) :form (and (and (display-images-p) (image-type-available-p 'svg))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-image-metadata/tiff": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p ...)))) :form (and (and (display-images-p) (image-type-available-p 'tiff))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-image-metadata/webp": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p ...)) (not (eq system-type ...)))) :form (and (and (display-images-p) (image-type-available-p 'webp)) (not (eq system-type 'darwin))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-image-metadata/xbm": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p ...)))) :form (and (and (display-images-p) (image-type-available-p 'xbm))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-image-metadata/xpm": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p ...)))) :form (and (and (display-images-p) (image-type-available-p 'xpm))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-image-size/error-on-invalid-spec": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (display-images-p)) :form (display-images-p) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-image-size/gif": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p ...)))) :form (and (and (display-images-p) (image-type-available-p 'gif))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-image-size/jpeg": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p ...)))) :form (and (and (display-images-p) (image-type-available-p 'jpeg))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-image-size/pbm": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p ...)))) :form (and (and (display-images-p) (image-type-available-p 'pbm))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-image-size/png": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p ...)))) :form (and (and (display-images-p) (image-type-available-p 'png))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-image-size/svg": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p ...)))) :form (and (and (display-images-p) (image-type-available-p 'svg))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-image-size/tiff": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p ...)))) :form (and (and (display-images-p) (image-type-available-p 'tiff))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-image-size/webp": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p ...)))) :form (and (and (display-images-p) (image-type-available-p 'webp))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-image-size/xbm": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p ...)))) :form (and (and (display-images-p) (image-type-available-p 'xbm))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-image-size/xpm": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p ...)))) :form (and (and (display-images-p) (image-type-available-p 'xpm))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-load-image/gif": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p ...)))) :form (and (and (display-images-p) (image-type-available-p 'gif))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-load-image/jpeg": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p ...)))) :form (and (and (display-images-p) (image-type-available-p 'jpeg))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-load-image/pbm": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p ...)))) :form (and (and (display-images-p) (image-type-available-p 'pbm))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-load-image/png": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p ...)))) :form (and (and (display-images-p) (image-type-available-p 'png))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-load-image/svg": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p ...)))) :form (and (and (display-images-p) (image-type-available-p 'svg))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-load-image/svg-invalid": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p svg)))) :form (and (and (display-images-p) (image-type-available-p svg))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-load-image/svg-too-big": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p svg)))) :form (and (and (display-images-p) (image-type-available-p svg))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-load-image/tiff": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p ...)))) :form (and (and (display-images-p) (image-type-available-p 'tiff))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-load-image/webp": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p ...)))) :form (and (and (display-images-p) (image-type-available-p 'webp))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-load-image/xbm": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p ...)))) :form (and (and (display-images-p) (image-type-available-p 'xbm))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-load-image/xpm": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p ...)))) :form (and (and (display-images-p) (image-type-available-p 'xpm))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   }
+  },
+  "timed_out": false
+ },
+ "file": "manual/image-tests.el",
+ "gnu": {
+  "emacs": "<recording-path-redacted>/emacs-32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+  "version": "32.0.50"
+ },
+ "harness_sha256": "78c20850429a08af22faadf73b5d164c560230e83d7eb88ef60cb995670703ef",
+ "mini": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": null,
+  "results": {
+   "image-tests-image-mask-p/error-on-invalid-spec": {
+    "as_expected": null,
+    "detail": "((skip-unless (display-images-p)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "image-tests-image-mask-p/gif": {
+    "as_expected": null,
+    "detail": "((skip-unless (and (and (display-images-p) (image-type-available-p 'gif)))))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "image-tests-image-mask-p/jpeg": {
+    "as_expected": null,
+    "detail": "((skip-unless (and (and (display-images-p) (image-type-available-p 'jpeg)))))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "image-tests-image-mask-p/pbm": {
+    "as_expected": null,
+    "detail": "((skip-unless (and (and (display-images-p) (image-type-available-p 'pbm)))))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "image-tests-image-mask-p/png": {
+    "as_expected": null,
+    "detail": "((skip-unless (and (and (display-images-p) (image-type-available-p 'png)))))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "image-tests-image-mask-p/svg": {
+    "as_expected": null,
+    "detail": "((skip-unless (and (and (display-images-p) (image-type-available-p 'svg)))))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "image-tests-image-mask-p/tiff": {
+    "as_expected": null,
+    "detail": "((skip-unless (and (and (display-images-p) (image-type-available-p 'tiff)))))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "image-tests-image-mask-p/webp": {
+    "as_expected": null,
+    "detail": "((skip-unless (and (and (display-images-p) (image-type-available-p 'webp)))))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "image-tests-image-mask-p/xbm": {
+    "as_expected": null,
+    "detail": "((skip-unless (and (and (display-images-p) (image-type-available-p 'xbm)))))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "image-tests-image-mask-p/xpm": {
+    "as_expected": null,
+    "detail": "((skip-unless (and (and (display-images-p) (image-type-available-p 'xpm)))))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "image-tests-image-metadata/gif": {
+    "as_expected": null,
+    "detail": "((skip-unless (and (and (display-images-p) (image-type-available-p 'gif)) (not (eq system-type 'darwin)) (not (bound-and-true-p w32-use-native-image-API)))))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "image-tests-image-metadata/jpeg": {
+    "as_expected": null,
+    "detail": "((skip-unless (and (and (display-images-p) (image-type-available-p 'jpeg)))))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "image-tests-image-metadata/nil-on-invalid-spec": {
+    "as_expected": null,
+    "detail": "((skip-unless (display-images-p)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "image-tests-image-metadata/pbm": {
+    "as_expected": null,
+    "detail": "((skip-unless (and (and (display-images-p) (image-type-available-p 'pbm)))))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "image-tests-image-metadata/png": {
+    "as_expected": null,
+    "detail": "((skip-unless (and (and (display-images-p) (image-type-available-p 'png)))))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "image-tests-image-metadata/svg": {
+    "as_expected": null,
+    "detail": "((skip-unless (and (and (display-images-p) (image-type-available-p 'svg)))))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "image-tests-image-metadata/tiff": {
+    "as_expected": null,
+    "detail": "((skip-unless (and (and (display-images-p) (image-type-available-p 'tiff)))))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "image-tests-image-metadata/webp": {
+    "as_expected": null,
+    "detail": "((skip-unless (and (and (display-images-p) (image-type-available-p 'webp)) (not (eq system-type 'darwin)))))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "image-tests-image-metadata/xbm": {
+    "as_expected": null,
+    "detail": "((skip-unless (and (and (display-images-p) (image-type-available-p 'xbm)))))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "image-tests-image-metadata/xpm": {
+    "as_expected": null,
+    "detail": "((skip-unless (and (and (display-images-p) (image-type-available-p 'xpm)))))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "image-tests-image-size/error-on-invalid-spec": {
+    "as_expected": null,
+    "detail": "((skip-unless (display-images-p)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "image-tests-image-size/gif": {
+    "as_expected": null,
+    "detail": "((skip-unless (and (and (display-images-p) (image-type-available-p 'gif)))))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "image-tests-image-size/jpeg": {
+    "as_expected": null,
+    "detail": "((skip-unless (and (and (display-images-p) (image-type-available-p 'jpeg)))))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "image-tests-image-size/pbm": {
+    "as_expected": null,
+    "detail": "((skip-unless (and (and (display-images-p) (image-type-available-p 'pbm)))))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "image-tests-image-size/png": {
+    "as_expected": null,
+    "detail": "((skip-unless (and (and (display-images-p) (image-type-available-p 'png)))))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "image-tests-image-size/svg": {
+    "as_expected": null,
+    "detail": "((skip-unless (and (and (display-images-p) (image-type-available-p 'svg)))))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "image-tests-image-size/tiff": {
+    "as_expected": null,
+    "detail": "((skip-unless (and (and (display-images-p) (image-type-available-p 'tiff)))))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "image-tests-image-size/webp": {
+    "as_expected": null,
+    "detail": "((skip-unless (and (and (display-images-p) (image-type-available-p 'webp)))))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "image-tests-image-size/xbm": {
+    "as_expected": null,
+    "detail": "((skip-unless (and (and (display-images-p) (image-type-available-p 'xbm)))))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "image-tests-image-size/xpm": {
+    "as_expected": null,
+    "detail": "((skip-unless (and (and (display-images-p) (image-type-available-p 'xpm)))))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "image-tests-load-image/gif": {
+    "as_expected": null,
+    "detail": "((skip-unless (and (and (display-images-p) (image-type-available-p 'gif)))))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "image-tests-load-image/jpeg": {
+    "as_expected": null,
+    "detail": "((skip-unless (and (and (display-images-p) (image-type-available-p 'jpeg)))))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "image-tests-load-image/pbm": {
+    "as_expected": null,
+    "detail": "((skip-unless (and (and (display-images-p) (image-type-available-p 'pbm)))))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "image-tests-load-image/png": {
+    "as_expected": null,
+    "detail": "((skip-unless (and (and (display-images-p) (image-type-available-p 'png)))))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "image-tests-load-image/svg": {
+    "as_expected": null,
+    "detail": "((skip-unless (and (and (display-images-p) (image-type-available-p 'svg)))))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "image-tests-load-image/svg-invalid": {
+    "as_expected": null,
+    "detail": "((skip-unless (and (and (display-images-p) (image-type-available-p svg)))))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "image-tests-load-image/svg-too-big": {
+    "as_expected": null,
+    "detail": "((skip-unless (and (and (display-images-p) (image-type-available-p svg)))))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "image-tests-load-image/tiff": {
+    "as_expected": null,
+    "detail": "((skip-unless (and (and (display-images-p) (image-type-available-p 'tiff)))))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "image-tests-load-image/webp": {
+    "as_expected": null,
+    "detail": "((skip-unless (and (and (display-images-p) (image-type-available-p 'webp)))))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "image-tests-load-image/xbm": {
+    "as_expected": null,
+    "detail": "((skip-unless (and (and (display-images-p) (image-type-available-p 'xbm)))))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "image-tests-load-image/xpm": {
+    "as_expected": null,
+    "detail": "((skip-unless (and (and (display-images-p) (image-type-available-p 'xpm)))))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   }
+  },
+  "timed_out": false
+ },
+ "read_error": null,
+ "real": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": true,
+  "results": {
+   "image-tests-image-mask-p/error-on-invalid-spec": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (display-images-p)) :form (display-images-p) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-image-mask-p/gif": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p ...)))) :form (and (and (display-images-p) (image-type-available-p 'gif))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-image-mask-p/jpeg": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p ...)))) :form (and (and (display-images-p) (image-type-available-p 'jpeg))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-image-mask-p/pbm": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p ...)))) :form (and (and (display-images-p) (image-type-available-p 'pbm))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-image-mask-p/png": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p ...)))) :form (and (and (display-images-p) (image-type-available-p 'png))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-image-mask-p/svg": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p ...)))) :form (and (and (display-images-p) (image-type-available-p 'svg))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-image-mask-p/tiff": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p ...)))) :form (and (and (display-images-p) (image-type-available-p 'tiff))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-image-mask-p/webp": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p ...)))) :form (and (and (display-images-p) (image-type-available-p 'webp))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-image-mask-p/xbm": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p ...)))) :form (and (and (display-images-p) (image-type-available-p 'xbm))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-image-mask-p/xpm": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p ...)))) :form (and (and (display-images-p) (image-type-available-p 'xpm))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-image-metadata/gif": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p ...)) (not (eq system-type ...)) (not (bound-and-true-p w32-use-native-image-API)))) :form (and (and (display-images-p) (image-type-available-p 'gif)) (not (eq system-type 'darwin)) (not (and (boundp ...) w32-use-native-image-API))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-image-metadata/jpeg": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p ...)))) :form (and (and (display-images-p) (image-type-available-p 'jpeg))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-image-metadata/nil-on-invalid-spec": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (display-images-p)) :form (display-images-p) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-image-metadata/pbm": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p ...)))) :form (and (and (display-images-p) (image-type-available-p 'pbm))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-image-metadata/png": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p ...)))) :form (and (and (display-images-p) (image-type-available-p 'png))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-image-metadata/svg": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p ...)))) :form (and (and (display-images-p) (image-type-available-p 'svg))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-image-metadata/tiff": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p ...)))) :form (and (and (display-images-p) (image-type-available-p 'tiff))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-image-metadata/webp": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p ...)) (not (eq system-type ...)))) :form (and (and (display-images-p) (image-type-available-p 'webp)) (not (eq system-type 'darwin))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-image-metadata/xbm": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p ...)))) :form (and (and (display-images-p) (image-type-available-p 'xbm))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-image-metadata/xpm": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p ...)))) :form (and (and (display-images-p) (image-type-available-p 'xpm))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-image-size/error-on-invalid-spec": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (display-images-p)) :form (display-images-p) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-image-size/gif": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p ...)))) :form (and (and (display-images-p) (image-type-available-p 'gif))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-image-size/jpeg": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p ...)))) :form (and (and (display-images-p) (image-type-available-p 'jpeg))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-image-size/pbm": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p ...)))) :form (and (and (display-images-p) (image-type-available-p 'pbm))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-image-size/png": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p ...)))) :form (and (and (display-images-p) (image-type-available-p 'png))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-image-size/svg": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p ...)))) :form (and (and (display-images-p) (image-type-available-p 'svg))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-image-size/tiff": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p ...)))) :form (and (and (display-images-p) (image-type-available-p 'tiff))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-image-size/webp": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p ...)))) :form (and (and (display-images-p) (image-type-available-p 'webp))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-image-size/xbm": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p ...)))) :form (and (and (display-images-p) (image-type-available-p 'xbm))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-image-size/xpm": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p ...)))) :form (and (and (display-images-p) (image-type-available-p 'xpm))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-load-image/gif": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p ...)))) :form (and (and (display-images-p) (image-type-available-p 'gif))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-load-image/jpeg": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p ...)))) :form (and (and (display-images-p) (image-type-available-p 'jpeg))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-load-image/pbm": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p ...)))) :form (and (and (display-images-p) (image-type-available-p 'pbm))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-load-image/png": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p ...)))) :form (and (and (display-images-p) (image-type-available-p 'png))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-load-image/svg": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p ...)))) :form (and (and (display-images-p) (image-type-available-p 'svg))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-load-image/svg-invalid": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p svg)))) :form (and (and (display-images-p) (image-type-available-p svg))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-load-image/svg-too-big": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p svg)))) :form (and (and (display-images-p) (image-type-available-p svg))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-load-image/tiff": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p ...)))) :form (and (and (display-images-p) (image-type-available-p 'tiff))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-load-image/webp": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p ...)))) :form (and (and (display-images-p) (image-type-available-p 'webp))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-load-image/xbm": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p ...)))) :form (and (and (display-images-p) (image-type-available-p 'xbm))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "image-tests-load-image/xpm": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (and (display-images-p) (image-type-available-p ...)))) :form (and (and (display-images-p) (image-type-available-p 'xpm))) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   }
+  },
+  "timed_out": false
+ },
+ "schema": 1,
+ "toplevel_deftests": 32
+}

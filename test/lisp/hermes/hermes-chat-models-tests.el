@@ -1,0 +1,1388 @@
+;;; hermes-chat-models-tests.el --- model selection tests for hermes-el  -*- lexical-binding: t; -*-
+
+;;; Commentary:
+
+;; Tests for `hermes-chat-models': `model.options' completion candidates,
+;; the `config.set' model switch with its expensive-model confirmation
+;; loop, and API-key provider connect from the chat picker.
+
+;;; Code:
+
+(require 'ert)
+(require 'hermes-test-helpers)
+(ert-deftest hermes-chat-setting-values-follow-buffer-and-pending-owner ()
+  "Current values never invent defaults or reuse another session's override."
+  (hermes-test-with-chat-buffer
+   (should (equal (hermes-chat--model-setting-value) "unknown"))
+   (should (equal (hermes-chat--reasoning-setting-value) "unknown"))
+   (should (eq (get-text-property 0 'face
+                                 (hermes-chat--reasoning-setting-value)) 'shadow))
+   (setq hermes-chat--model "model-a"
+         hermes-chat--runtime-flags '(:reasoning-effort "high"))
+   (should (equal (hermes-chat--model-setting-value) "model-a"))
+   (should (equal (hermes-chat--reasoning-setting-value) "high"))
+   (hermes-test-with-chat-buffer
+    (setq hermes-chat--model "model-b")
+    (should (equal (hermes-chat--model-setting-value) "model-b"))
+    (should (equal (hermes-chat--reasoning-setting-value) "unknown")))
+   (setq hermes-chat--dashboard-create-model "next-model"
+         hermes-chat--dashboard-create-reasoning-effort "low")
+   (should (equal (hermes-chat--model-setting-value) "next-model (pending)"))
+   (should (equal (hermes-chat--reasoning-setting-value) "low (pending)"))
+   (should (eq (get-text-property 0 'face (hermes-chat--model-setting-value))
+               'warning))
+   (setq hermes-chat--dashboard-active-session-id "new"
+         hermes-chat--create-overrides-retry-session-id "old")
+   (should (equal (hermes-chat--model-setting-value) "model-a"))
+   (should (equal (hermes-chat--reasoning-setting-value) "high"))
+   (setq hermes-chat--create-overrides-retry-session-id "new")
+   (should (equal (hermes-chat--reasoning-setting-value) "low (pending)"))))
+
+(ert-deftest hermes-chat-detached-settings-reject-unowned-session ()
+  "Detached durable settings fail before prompting or changing local state."
+  (dolist (active '(nil "saved"))
+    (dolist (retry '(nil "another-session"))
+      (hermes-test-with-chat-buffer
+       (setq hermes-chat--session-id "saved"
+             hermes-chat--dashboard-active-session-id active
+             hermes-chat--create-overrides-retry-session-id retry
+             hermes-chat--model "original"
+             hermes-chat--runtime-flags '(:reasoning-effort "low"))
+       (let ((before (buffer-string)))
+         (cl-letf (((symbol-function 'completing-read)
+                    (lambda (&rest _) (ert-fail "Detached setting prompted")))
+                   ((symbol-function 'hermes-chat--dashboard-control-client)
+                    (lambda () (ert-fail "Detached setting connected"))))
+           (dolist (setter '(hermes-chat-switch-model hermes-chat-set-reasoning))
+             (should (string-match-p
+                      "Reconnect or resume"
+                      (error-message-string
+                       (should-error (call-interactively setter)
+                                     :type 'user-error)))))
+           (should-error (hermes-chat-set-reasoning "high") :type 'user-error)
+           (should-error
+            (hermes-chat--apply-model (current-buffer) nil "next" nil)
+            :type 'user-error))
+         (should (equal (buffer-string) before)))
+       (should (equal hermes-chat--model "original"))
+       (should (equal hermes-chat--runtime-flags '(:reasoning-effort "low")))
+       (should-not hermes-chat--dashboard-create-model)
+       (should-not hermes-chat--dashboard-create-provider)
+       (should-not hermes-chat--dashboard-create-reasoning-effort)))))
+
+(ert-deftest hermes-chat-detached-settings-preserve-fresh-and-owned-retry ()
+  "Fresh chats and exact failed-create retries retain pending settings."
+  (dolist (session '(nil "retry"))
+    (hermes-test-with-chat-buffer
+     (setq hermes-chat--session-id session
+           hermes-chat--create-overrides-retry-session-id session)
+     (cl-letf (((symbol-function 'hermes-dashboard-transport-model-options)
+                (lambda (_client &rest args)
+                  (funcall (plist-get args :resolve)
+                           '((providers . (((slug . "p") (authenticated . t)
+                                             (models . ("next")))))))))
+               ((symbol-function 'completing-read)
+                (lambda (_prompt choices &rest _) (car (all-completions "" choices))))
+               ((symbol-function 'hermes-chat--dashboard-control-client)
+                (lambda () (hermes-test--dashboard-client))))
+       (hermes-chat-switch-model)
+       (hermes-chat-set-reasoning "high"))
+     (should (equal hermes-chat--dashboard-create-model "next"))
+     (should (equal hermes-chat--dashboard-create-provider "p"))
+     (should (equal hermes-chat--dashboard-create-reasoning-effort "high"))
+     (should (equal (hermes-chat--model-setting-value) "next (pending)"))
+     (should (equal (hermes-chat--reasoning-setting-value) "high (pending)"))
+     (should (equal hermes-chat--create-overrides-retry-session-id session))
+     ;; Exercise the unchanged create/resume gate, not just the pending labels.
+     (let ((client (hermes-test--dashboard-client)) calls continued)
+       (setq hermes-chat--dashboard-client client
+             hermes-chat--dashboard-active-session-id (or session "created")
+             hermes-chat--dashboard-session-ready-p t)
+       (cl-letf (((symbol-function 'hermes-dashboard-transport-config-set)
+                  (lambda (_client key value &rest args)
+                    (push (cons key value) calls)
+                    (funcall (plist-get args :resolve) '((ok . t))))))
+         (funcall (if session #'hermes-chat--dashboard-apply-retry-overrides
+                    #'hermes-chat--dashboard-apply-create-overrides)
+                  client (lambda () (setq continued t))
+                  hermes-chat--lifecycle-generation #'ert-fail))
+       (should continued)
+       (should (equal (nreverse calls)
+                      '(("model" . "next --provider p")
+                        ("reasoning" . "high")))))
+     (should-not hermes-chat--dashboard-create-model)
+     (should-not hermes-chat--dashboard-create-reasoning-effort)
+     (should-not hermes-chat--create-overrides-retry-session-id))))
+
+(ert-deftest hermes-chat-setting-values-create-in-flight-is-pending ()
+  "The newly attached session has not confirmed in-flight create overrides."
+  (hermes-test-with-chat-buffer
+   (setq hermes-chat--dashboard-active-session-id "creating"
+         hermes-chat--dashboard-create-model "next-model"
+         hermes-chat--dashboard-create-reasoning-effort "low"
+         hermes-chat--create-override-owner (gensym "create-"))
+   (should (equal (hermes-chat--model-setting-value) "next-model (pending)"))
+   (should (equal (hermes-chat--reasoning-setting-value) "low (pending)"))))
+
+(ert-deftest hermes-chat-setting-values-render-native-popup ()
+  "Native popup labels show bounded values without replacing setters."
+  (hermes-test-with-chat-buffer
+   (setq hermes-chat--model "model-a"
+         hermes-chat--runtime-flags '(:reasoning-effort "high")
+         hermes-chat--working-directory "/remote/project/")
+   (let ((text (keymap-popup--render
+                (keymap-popup--meta hermes-chat-model-map 'descriptions))))
+     (should (string-match-p "Model: model-a" text))
+     (should (eq (get-text-property (string-match "model-a" text) 'face text)
+                 'keymap-popup-value))
+     (should (string-match-p "Reasoning: high" text))
+     (should (string-match-p "Connect provider" text)))
+   (should (string-match-p
+            "Directory: /remote/project/"
+            (keymap-popup--render
+             (keymap-popup--meta hermes-chat-work-map 'descriptions))))
+   (should (eq (lookup-key hermes-chat-model-map (kbd "m"))
+               #'hermes-chat-switch-model))
+   (should (eq (lookup-key hermes-chat-model-map (kbd "e"))
+               #'hermes-chat-set-reasoning))
+   (setq hermes-chat--model (make-string 100 ?x))
+   (should (<= (string-width (hermes-chat--model-setting-value)) 40))))
+
+(ert-deftest hermes-chat-setting-values-long-pending-label-stays-visible ()
+  "Rendering budgets the full label and retains exact full model help text."
+  (hermes-test-with-chat-buffer
+   (let ((model (concat "provider/" (make-string 90 ?界))))
+     (setq hermes-chat--dashboard-create-model model)
+     (let* ((label (hermes-chat--model-setting-value "Model"))
+            (text (keymap-popup--render
+                   (keymap-popup--meta hermes-chat-model-map 'descriptions)))
+            (start (string-match "provider/" label)))
+       (should (<= (string-width label) 40))
+       (should (string-match-p "Model (pending): provider/" text))
+       (should (equal (get-text-property start 'help-echo label) model))
+       (should (eq (get-text-property start 'face label) 'warning))
+       (should-not (get-text-property 0 'face label))))))
+
+(ert-deftest hermes-chat-setting-values-reasoning-prompt-and-default ()
+  "Unknown reasoning has no made-up default; known values are offered."
+  (hermes-test-with-chat-buffer
+   (cl-letf (((symbol-function 'completing-read)
+              (lambda (prompt _choices _pred _require _initial _history default)
+                (should (string-match-p "current: unknown" prompt))
+                (should-not default)
+                "high")))
+     (should (equal (hermes-chat--read-reasoning-effort) "high")))
+   (setq hermes-chat--runtime-flags '(:reasoning-effort "low"))
+   (cl-letf (((symbol-function 'completing-read)
+              (lambda (prompt _choices _pred _require _initial _history default)
+                (should (string-match-p "current: low" prompt))
+                (should (equal default "low"))
+                default)))
+     (should (equal (hermes-chat--read-reasoning-effort) "low")))))
+
+(ert-deftest hermes-chat-setting-values-model-prompt-uses-owner-buffer ()
+  "An asynchronous model catalog reads the owner's value, not callback context."
+  (hermes-test-with-chat-buffer
+   (setq hermes-chat--model "owner-model")
+   (let ((owner (current-buffer))
+         (context (hermes-chat--model-switch-context))
+         (payload '((providers . (((slug . "p") (authenticated . t)
+                                   (models . ("next"))))))))
+     (with-temp-buffer
+       (setq-local hermes-chat--model "unrelated-model")
+       (cl-letf (((symbol-function 'completing-read)
+                  (lambda (prompt &rest _)
+                    (should (string-match-p "current: owner-model" prompt))
+                    "")))
+         (hermes-chat--prompt-and-set-model owner nil payload context))
+       (with-current-buffer owner
+         (setq hermes-chat--dashboard-active-session-id "successor"))
+       (cl-letf (((symbol-function 'completing-read)
+                  (lambda (&rest _) (ert-fail "Stale catalog opened prompt"))))
+         (hermes-chat--prompt-and-set-model owner nil payload context))))))
+
+(ert-deftest hermes-chat-setting-values-reasoning-refuses-changed-owner ()
+  "A reasoning prompt cannot apply to a session created while it was open."
+  (hermes-test-with-chat-buffer
+   (cl-letf (((symbol-function 'completing-read)
+              (lambda (&rest _)
+                (setq hermes-chat--dashboard-active-session-id "successor")
+                "high")))
+     (should-error (call-interactively #'hermes-chat-set-reasoning)
+                   :type 'user-error))
+   (should-not hermes-chat--dashboard-create-reasoning-effort)
+   (should-not hermes-chat--runtime-flags)))
+
+(ert-deftest hermes-chat-setting-values-directory-prompt-keeps-current-path ()
+  "Browsing another directory still hints the actual session directory."
+  (hermes-test-with-chat-buffer
+   (setq hermes-chat--working-directory "/remote/current/")
+   (cl-letf (((symbol-function 'completing-read)
+              (lambda (prompt &rest _)
+                (should (string-match-p "current: /remote/current/" prompt))
+                "")))
+     (hermes-chat--choose-directory-candidate
+      nil hermes-chat--lifecycle-generation nil "/remote/browsed/"
+      '((entries . nil))))))
+
+(ert-deftest hermes-chat-model-candidates-auth-first-dedup ()
+  "Model candidates list authenticated providers first and keep provider identity."
+  (let* ((cands (hermes-chat--model-candidates
+                 '((providers
+                    . (((slug . "openai") (name . "OpenAI")
+                        (authenticated . nil) (models . ("gpt")))
+                       ((slug . "anthropic") (name . "Anthropic")
+                        (authenticated . t)
+                        (models . ("claude"))
+                        (pricing . ((claude . ((input . "$3") (output . "$15")))))
+                        (capabilities . ((claude . ((reasoning . t)
+                                                    (fast . t)
+                                                    (context_window . 200000))))))
+                       ((slug . "openrouter") (name . "OpenRouter")
+                        (authenticated . t) (models . ("claude" ((id . "gemini"))))
+                        (capabilities . ((gemini . ((fast . t) (ultrafast . t)))))))))))
+         (labels (mapcar #'car cands))
+         (providers (mapcar (lambda (cand)
+                              (plist-get (cdr cand) :provider))
+                            cands)))
+    (should (equal providers '("anthropic" "openrouter" "openrouter" "openai")))
+    (should (equal (car labels) "claude · Anthropic (anthropic)"))
+    (should (equal (plist-get (cdar cands) :details)
+                   '("200k ctx" "$3/$15" "reasoning" "fast")))
+    (should (equal (plist-get (cdr (nth 2 cands)) :details) '("ultrafast")))
+    (should (equal (hermes-chat--model-config-value (cdar cands))
+                   "claude --provider anthropic"))))
+
+;; Fixture: the same model id served by two providers, one with full
+;; catalogue facts, plus an unconnected provider.
+(defconst hermes-test--grouped-model-catalog
+  '((model . "claude") (provider . "openrouter")
+    (providers
+     . (((slug . "anthropic") (name . "Anthropic") (authenticated . t)
+         (models . ("claude" "haiku"))
+         (pricing . ((claude . ((input . "$3") (output . "$15")))
+                     (haiku . ((free . t)))))
+         (capabilities . ((claude . ((reasoning . t) (context_window . 1000000))))))
+        ((slug . "openrouter") (name . "OpenRouter") (authenticated . t)
+         (models . ("claude")))
+        ((slug . "openai") (name . "OpenAI") (authenticated . :false)
+         (models . ("gpt")))))))
+
+(ert-deftest hermes-chat-model-picker-groups-by-provider-with-metadata ()
+  "One reader groups exact values by provider and annotates catalogue facts."
+  (let* ((cands (hermes-chat--model-candidates hermes-test--grouped-model-catalog))
+         (table (hermes-chat--model-completion-table
+                 cands "claude · OpenRouter (openrouter)"))
+         (metadata (completion-metadata "" table nil))
+         (group (completion-metadata-get metadata 'group-function))
+         (annotate (completion-metadata-get metadata 'annotation-function)))
+    (should (equal (all-completions "" table)
+                   '("claude · Anthropic (anthropic)" "haiku · Anthropic (anthropic)"
+                     "claude · OpenRouter (openrouter)" "gpt · OpenAI (openai)")))
+    (should (eq (completion-metadata-get metadata 'display-sort-function)
+                #'identity))
+    ;; Group titles carry the provider; inside a group only the model shows.
+    (should (equal (mapcar (lambda (value) (funcall group value nil))
+                           (all-completions "" table))
+                   '("Anthropic (anthropic)" "Anthropic (anthropic)"
+                     "OpenRouter (openrouter)" "OpenAI (openai) · not connected")))
+    (should (equal (funcall group "claude · OpenRouter (openrouter)" t) "claude"))
+    ;; Catalogue facts are quiet; only the current model is marked.
+    (let ((facts (funcall annotate "claude · Anthropic (anthropic)")))
+      (should (equal (substring-no-properties facts) "  1M ctx · $3/$15 · reasoning"))
+      (should (eq (get-text-property 2 'face facts) 'shadow)))
+    (should (equal (substring-no-properties
+                    (funcall annotate "haiku · Anthropic (anthropic)"))
+                   "  free"))
+    (let ((current (funcall annotate "claude · OpenRouter (openrouter)")))
+      (should (equal (substring-no-properties current) "  • current"))
+      (should (eq (get-text-property 2 'face current) 'success)))
+    (should-not (funcall annotate "gpt · OpenAI (openai)"))))
+
+(ert-deftest hermes-chat-model-picker-defaults-to-current-and-returns-exact-provider ()
+  "The current model is the default; duplicate ids keep their provider."
+  (dolist (pick '(default "claude · Anthropic (anthropic)"))
+    (hermes-test-with-chat-buffer
+     (setq hermes-chat--model "claude"
+           hermes-chat--dashboard-active-session-id "sid"
+           hermes-chat--dashboard-session-ready-p t)
+     (let (seen-default applied)
+       (cl-letf (((symbol-function 'completing-read)
+                  (lambda (_prompt table _pred require _initial _history default)
+                    (should require)
+                    (should (functionp table))
+                    (setq seen-default default)
+                    (if (eq pick 'default) default pick)))
+                 ((symbol-function 'hermes-dashboard-transport-config-set)
+                  (lambda (_client _key value &rest _) (setq applied value))))
+         (hermes-chat--prompt-and-set-model
+          (current-buffer) 'client hermes-test--grouped-model-catalog
+          (hermes-chat--model-switch-context)))
+       ;; The catalogue reports OpenRouter as the session's provider.
+       (should (equal seen-default "claude · OpenRouter (openrouter)"))
+       ;; Accepting the current default still dispatches the switch.
+       (should (equal applied (if (eq pick 'default)
+                                  "claude --provider openrouter"
+                                "claude --provider anthropic")))))))
+
+(ert-deftest hermes-chat-model-picker-current-requires-exact-provider ()
+  "A reported provider without a matching row marks and defaults nothing."
+  (let* ((catalog '((model . "claude") (provider . "missing")
+                    (providers . (((slug . "anthropic") (name . "Anthropic")
+                                   (authenticated . t) (models . ("claude")))))))
+         (cands (hermes-chat--model-candidates catalog)))
+    (should-not (hermes-chat--model-current-value cands "claude" "missing"))
+    (should (equal (hermes-chat--model-current-value cands "claude" "anthropic")
+                   "claude · Anthropic (anthropic)"))
+    (hermes-test-with-chat-buffer
+     (setq hermes-chat--model "claude"
+           hermes-chat--dashboard-active-session-id "sid"
+           hermes-chat--dashboard-session-ready-p t)
+     (should-not (hermes-chat--model-picker-current cands catalog))
+     (let ((seen-default 'unset) annotation applied)
+       (cl-letf (((symbol-function 'completing-read)
+                  (lambda (_prompt table _pred _require _initial _history default)
+                    (setq seen-default default
+                          annotation
+                          (funcall (completion-metadata-get
+                                    (completion-metadata "" table nil)
+                                    'annotation-function)
+                                   "claude · Anthropic (anthropic)"))
+                    ;; Accepting the (absent) default returns the empty string.
+                    (or default "")))
+                 ((symbol-function 'hermes-dashboard-transport-config-set)
+                  (lambda (_client _key value &rest _) (setq applied value))))
+         (hermes-chat--prompt-and-set-model
+          (current-buffer) 'client catalog (hermes-chat--model-switch-context)))
+       (should-not seen-default)
+       (should-not (and annotation
+                        (string-search "current" (substring-no-properties annotation))))
+       ;; No implicit provider change.
+       (should-not applied)))))
+
+(ert-deftest hermes-chat-model-picker-selecting-current-still-switches ()
+  "Choosing the current model and provider dispatches the switch."
+  (hermes-test-with-chat-buffer
+   (setq hermes-chat--model "claude"
+         hermes-chat--dashboard-active-session-id "sid"
+         hermes-chat--dashboard-session-ready-p t)
+   (let (applied seen-default)
+     (cl-letf (((symbol-function 'completing-read)
+                (lambda (_prompt _table _pred _require _initial _history default)
+                  (setq seen-default default)
+                  default))
+               ((symbol-function 'hermes-dashboard-transport-config-set)
+                (lambda (_client _key value &rest _) (setq applied value))))
+       (hermes-chat--prompt-and-set-model
+        (current-buffer) 'client hermes-test--grouped-model-catalog
+        (hermes-chat--model-switch-context)))
+     (should (equal seen-default "claude · OpenRouter (openrouter)"))
+     (should (equal applied "claude --provider openrouter")))))
+
+(ert-deftest hermes-chat-model-picker-pending-choice-default-switches-live ()
+  "A pending failed-create choice is the default, and choosing it switches."
+  (hermes-test-with-chat-buffer
+   (setq hermes-chat--model "claude"
+         hermes-chat--dashboard-active-session-id "sid"
+         hermes-chat--dashboard-session-ready-p t
+         hermes-chat--create-overrides-retry-session-id "sid"
+         hermes-chat--dashboard-create-model "haiku"
+         hermes-chat--dashboard-create-provider "anthropic")
+   (let (applied)
+     (cl-letf (((symbol-function 'completing-read)
+                (lambda (_prompt _table _pred _require _initial _history default)
+                  default))
+               ((symbol-function 'hermes-dashboard-transport-config-set)
+                (lambda (_client _key value &rest _) (setq applied value))))
+       (hermes-chat--prompt-and-set-model
+        (current-buffer) 'client hermes-test--grouped-model-catalog
+        (hermes-chat--model-switch-context)))
+     (should (equal applied "haiku --provider anthropic")))))
+
+(ert-deftest hermes-chat-model-picker-current-changed-during-read-switches ()
+  "A live model change while the reader is open never suppresses the switch."
+  (hermes-test-with-chat-buffer
+   (setq hermes-chat--model "claude"
+         hermes-chat--dashboard-active-session-id "sid"
+         hermes-chat--dashboard-session-ready-p t)
+   (let ((owner (current-buffer)) applied)
+     (cl-letf (((symbol-function 'completing-read)
+                (lambda (_prompt _table _pred _require _initial _history default)
+                  (with-current-buffer owner
+                    (hermes-chat--capture-session-identity '(:model "haiku")))
+                  default))
+               ((symbol-function 'hermes-dashboard-transport-config-set)
+                (lambda (_client _key value &rest _) (setq applied value))))
+       (hermes-chat--prompt-and-set-model
+        (current-buffer) 'client hermes-test--grouped-model-catalog
+        (hermes-chat--model-switch-context)))
+     (should (equal applied "claude --provider openrouter")))))
+
+(ert-deftest hermes-chat-model-picker-unconfirmed-provider-still-switches ()
+  "A model-only current match is not proof of provider; choosing it switches."
+  (hermes-test-with-chat-buffer
+   (setq hermes-chat--model "haiku"
+         hermes-chat--dashboard-active-session-id "sid"
+         hermes-chat--dashboard-session-ready-p t)
+   (let (applied seen-default)
+     (cl-letf (((symbol-function 'completing-read)
+                (lambda (_prompt _table _pred _require _initial _history default)
+                  (setq seen-default default)
+                  default))
+               ((symbol-function 'hermes-dashboard-transport-config-set)
+                (lambda (_client _key value &rest _) (setq applied value))))
+       (hermes-chat--prompt-and-set-model
+        (current-buffer) 'client hermes-test--grouped-model-catalog
+        (hermes-chat--model-switch-context)))
+     (should (equal seen-default "haiku · Anthropic (anthropic)"))
+     (should (equal applied "haiku --provider anthropic")))))
+
+(ert-deftest hermes-chat-model-picker-pending-choice-is-current ()
+  "A pending create-time model and provider win over the catalogue's report."
+  (hermes-test-with-chat-buffer
+   (setq hermes-chat--model "claude"
+         hermes-chat--dashboard-create-model "claude"
+         hermes-chat--dashboard-create-provider "anthropic")
+   (let ((cands (hermes-chat--model-candidates hermes-test--grouped-model-catalog)))
+     (should (equal (hermes-chat--model-picker-current
+                     cands hermes-test--grouped-model-catalog)
+                    "claude · Anthropic (anthropic)")))))
+
+(ert-deftest hermes-chat-model-capf-completes-cached-authenticated-models ()
+  "`/model' arguments complete from cached authenticated provider models."
+  (let ((payload
+         '((providers
+            . (((slug . "openai-codex") (name . "OpenAI Codex")
+                (authenticated . t) (models . ("gpt-5.6")))
+               ((slug . "anthropic") (name . "Anthropic")
+                (authenticated . t) (models . ("claude-opus")))
+               ((slug . "openrouter") (name . "OpenRouter")
+                (authenticated . nil) (models . ("gpt-5.6"))))))))
+    (cl-letf (((symbol-function 'hermes-dashboard-transport-cached-model-options)
+               (lambda (_client) payload))
+              ((symbol-function 'hermes-dashboard-transport-model-options-cached)
+               (lambda (&rest _args)
+                 (ert-fail "Warm completion must not issue an RPC"))))
+      (hermes-test-with-chat-buffer
+       (setq hermes-chat--dashboard-client (hermes-test--dashboard-client))
+       (goto-char (point-max))
+       (insert "/model gp")
+       (let* ((capf (hermes-chat--model-capf))
+              (candidates (nth 2 capf))
+              (annotation (plist-get (nthcdr 3 capf) :annotation-function)))
+         (should (= (nth 0 capf) (- (point) 2)))
+         (should (= (nth 1 capf) (point)))
+         (should (equal candidates
+                        '("gpt-5.6 --provider openai-codex"
+                          "claude-opus --provider anthropic")))
+         (should (string-match-p
+                  "OpenAI Codex"
+                  (funcall annotation "gpt-5.6 --provider openai-codex")))
+         (should-not (member "gpt-5.6 --provider openrouter" candidates)))))))
+
+(ert-deftest hermes-chat-model-capf-completes-at-point-in-chat-mode ()
+  "TAB-style completion inserts the unique cached `/model' argument."
+  (let ((payload
+         '((providers
+            . (((slug . "openai-codex") (name . "OpenAI Codex")
+                (authenticated . t) (models . ("gpt-5.6"))))))))
+    (cl-letf (((symbol-function 'hermes-dashboard-transport-cached-model-options)
+               (lambda (_client) payload)))
+      (hermes-test-with-chat-buffer
+       (setq hermes-chat--dashboard-client (hermes-test--dashboard-client))
+       (goto-char (point-max))
+       (insert "/model gp")
+       (completion-at-point)
+       (should (equal (hermes-chat-input-string)
+                      "/model gpt-5.6 --provider openai-codex"))))))
+
+(ert-deftest hermes-chat-model-capf-warms-cold-cache-asynchronously ()
+  "A cold `/model' completion starts one asynchronous catalog warmup."
+  (let ((requests 0) requested)
+    (cl-letf (((symbol-function 'hermes-dashboard-transport-cached-model-options)
+               (lambda (_client) nil))
+              ((symbol-function 'hermes-dashboard-transport-model-options-cached)
+               (lambda (_client &rest args)
+                 (cl-incf requests)
+                 (setq requested args))))
+      (hermes-test-with-chat-buffer
+       (setq hermes-chat--dashboard-client (hermes-test--dashboard-client))
+       (goto-char (point-max))
+       (insert "/model gp")
+       (should-not (hermes-chat--model-capf))
+       (should-not (hermes-chat--model-capf))
+       (should (= requests 1))
+       (should (equal (plist-get requested :session-id)
+                      hermes-chat--dashboard-active-session-id))))))
+
+(ert-deftest hermes-chat-model-warmup-uses-client-endpoint ()
+  "A warm default endpoint must not suppress another client's catalog warmup."
+  (let* ((hermes-dashboard-transport--model-options-cache nil)
+         (hermes-dashboard-transport--model-options-requests nil)
+         (ready (hermes--promise-make))
+         (client (make-hermes-dashboard-transport-client
+                  :base-url "http://other.example" :ready-promise ready))
+         (fresh '((providers . nil)))
+         fetched)
+    (hermes-dashboard-transport--store-model-options '((model . "default")))
+    (cl-letf (((symbol-function 'hermes-dashboard-transport-model-options)
+               (lambda (owner &rest args)
+                 (setq fetched owner)
+                 (funcall (plist-get args :resolve) fresh))))
+      (hermes-chat--warm-model-options client)
+      (should-not fetched)
+      (hermes--promise-resolve ready client)
+      (should (eq fetched client))
+      (should (equal (hermes-dashboard-transport-cached-model-options client)
+                     fresh)))))
+
+(ert-deftest hermes-chat-switch-model-sets-chosen-model ()
+  "Switching prompts from model.options and applies the choice via config.set."
+  (let (set-key set-value set-session set-confirm)
+    (cl-letf (((symbol-function 'hermes-dashboard-transport-model-options)
+               (lambda (_client &rest args)
+                 (funcall (plist-get args :resolve)
+                          '((model . "old-model")
+                            (providers
+                             . (((slug . "p1") (authenticated . t)
+                                 (name . "Provider One")
+                                 (models . ("alpha" "beta")))))))))
+              ((symbol-function 'completing-read)
+               (lambda (_prompt coll &rest _)
+                 (let ((choice (cl-find "beta" (all-completions "" coll) :test #'string-match-p)))
+                   (should choice)
+                   choice)))
+              ((symbol-function 'hermes-dashboard-transport-config-set)
+               (lambda (_client key value &rest args)
+                 (setq set-key key set-value value
+                       set-session (plist-get args :session-id)
+                       set-confirm (plist-get args :confirm-expensive-model))
+                 (funcall (plist-get args :resolve)
+                          '((key . "model") (value . "beta --provider p1"))))))
+      (hermes-test-with-chat-buffer
+       (setq hermes-chat--dashboard-client (hermes-test--dashboard-client)
+             hermes-chat--dashboard-active-session-id "sid-1"
+             hermes-chat--dashboard-session-ready-p t)
+       (hermes-chat-switch-model)
+       (should (equal set-key "model"))
+       (should (equal set-value "beta --provider p1"))
+       (should (equal set-session "sid-1"))
+       (should-not set-confirm)
+       (should (string-match-p "Model set to beta" (buffer-string)))))))
+
+(ert-deftest hermes-chat-switch-model-refreshes-warm-catalog ()
+  "The public picker refreshes even for a new session or replacement client."
+  (dolist (attached '(nil t))
+    (hermes-test-with-chat-buffer
+     (let* ((client (hermes-test--dashboard-client))
+            (fresh '((providers . (((slug . "local") (authenticated . t)
+                                    (models . ("Qwen")))))))
+            requested choices applied)
+       (setf (hermes-dashboard-transport-client-base-url client)
+             "http://models.example")
+       (when attached
+         (setq hermes-chat--dashboard-client client
+               hermes-chat--dashboard-active-session-id "new-session"
+               hermes-chat--dashboard-session-ready-p t))
+       ;; A replacement at the same endpoint still shares the old cache.
+       (hermes-dashboard-transport--store-model-options
+        '((providers . (((slug . "local") (authenticated . t)
+                         (models . ("Devstral")))))) "http://models.example")
+       (hermes-dashboard-transport--store-model-options
+        '((providers . (((slug . "other") (authenticated . t)
+                         (models . ("foreign-model")))))))
+       (cl-letf (((symbol-function 'hermes-chat--dashboard-control-client)
+                  (lambda () client))
+                 ((symbol-function 'hermes-dashboard-transport-model-options)
+                  (lambda (owner &rest args)
+                    (setq requested owner)
+                    (funcall (plist-get args :resolve) fresh)))
+                 ((symbol-function 'hermes-dashboard-transport-session-create)
+                  (lambda (&rest _) (ert-fail "Picker created a session")))
+                 ((symbol-function 'hermes-dashboard-transport-config-set)
+                  (lambda (_client _key value &rest _args)
+                    (setq applied value)))
+                 (completing-read-function
+                  (lambda (_prompt collection &rest _)
+                    (setq choices (all-completions "" collection))
+                    (car (all-completions "" collection)))))
+         (call-interactively #'hermes-chat-switch-model)
+         (should (eq requested client))
+         (should (equal choices '("Qwen · local")))
+         (if attached
+             (should (equal applied "Qwen --provider local"))
+           (should (equal hermes-chat--dashboard-create-model "Qwen")))
+         (should (equal (hermes-dashboard-transport-cached-model-options client)
+                        fresh)))))))
+
+(ert-deftest hermes-chat-switch-model-failed-refresh-keeps-completion-only ()
+  "A failed picker read reports failure, without offering cached choices."
+  (hermes-test-with-chat-buffer
+   (setq hermes-chat--dashboard-client (hermes-test--dashboard-client)
+         hermes-chat--dashboard-active-session-id "sid"
+         hermes-chat--dashboard-session-ready-p t)
+   (let ((old '((providers . (((slug . "local") (authenticated . t)
+                              (models . ("Devstral")))))))
+         prompted)
+     (hermes-dashboard-transport--store-model-options old)
+     (cl-letf (((symbol-function 'hermes-dashboard-transport-model-options)
+                (lambda (_client &rest args)
+                  (funcall (plist-get args :reject) "Catalog unavailable")))
+               (completing-read-function
+                (lambda (&rest _) (setq prompted t) "")))
+       (call-interactively #'hermes-chat-switch-model)
+       (should-not prompted)
+       (should (string-match-p "Catalog unavailable" (buffer-string)))
+       (goto-char (point-max))
+       (insert "/model D")
+       (should (equal (nth 2 (hermes-chat--model-capf))
+                      '("Devstral --provider local")))))))
+
+(ert-deftest hermes-chat-switch-model-before-session-fetches-without-creating-session ()
+  "A cold catalog may connect its socket but must not create the chat session."
+  (let ((client (hermes-test--dashboard-client)))
+    (cl-letf (((symbol-function 'hermes-dashboard-transport-cached-model-options)
+               (lambda (&optional _client) nil))
+              ((symbol-function 'hermes-chat--dashboard-control-client)
+               (lambda () client))
+              ((symbol-function 'hermes-dashboard-transport-model-options-cached)
+               (lambda (seen-client &rest args)
+                 (should (eq seen-client client))
+                 (funcall (plist-get args :resolve)
+                          '((providers . (((slug . "p1") (authenticated . t)
+                                           (models . ("beta")))))))))
+              ((symbol-function 'hermes-dashboard-transport-session-create)
+               (lambda (&rest _args) (ert-fail "must not create a session")))
+              ((symbol-function 'completing-read)
+               (lambda (&rest _args) "beta · p1")))
+      (hermes-test-with-chat-buffer
+       (hermes-chat-switch-model)
+       (should (equal hermes-chat--dashboard-create-model "beta"))))))
+
+(ert-deftest hermes-chat-model-before-session-projects-selection-to-header ()
+  "A draft model choice is visible before the first session exists."
+  (hermes-test-with-chat-buffer
+   (hermes-chat--apply-model
+    (current-buffer) nil '(:model "gpt-5.6" :provider "openai-codex") nil)
+   (should (equal hermes-chat--model "gpt-5.6"))
+   (should (equal (substring-no-properties
+                   (hermes-chat--header-model-segment))
+                  "gpt-5.6"))))
+
+(ert-deftest hermes-chat-live-model-switch-clears-model-only-retry ()
+  "A successful live switch clears obsolete model-only retry state."
+  (let ((client (hermes-test--dashboard-client)))
+    (hermes-test-with-chat-buffer
+     (setq hermes-chat--dashboard-client client
+           hermes-chat--dashboard-active-session-id "sid-live"
+           hermes-chat--dashboard-session-ready-p t
+           hermes-chat--dashboard-create-model "old-model"
+           hermes-chat--dashboard-create-provider "old-provider"
+           hermes-chat--create-overrides-retry-session-id "sid-live")
+     (hermes-chat--model-set-result
+      (current-buffer) client '(:model "new-model") '((key . "model")) nil
+      (hermes-chat--model-switch-context))
+     (should-not hermes-chat--dashboard-create-model)
+     (should-not hermes-chat--dashboard-create-provider)
+     (should-not hermes-chat--create-overrides-retry-session-id))))
+
+(ert-deftest hermes-chat-live-model-switch-preserves-other-create-retries ()
+  "A live model switch leaves reasoning and fast retry provenance intact."
+  (let ((client (hermes-test--dashboard-client)))
+    (hermes-test-with-chat-buffer
+     (setq hermes-chat--dashboard-client client
+           hermes-chat--dashboard-active-session-id "sid-live"
+           hermes-chat--dashboard-session-ready-p t
+           hermes-chat--dashboard-create-model "old-model"
+           hermes-chat--dashboard-create-provider "old-provider"
+           hermes-chat--dashboard-create-reasoning-effort "high"
+           hermes-chat--dashboard-create-fast-p t
+           hermes-chat--create-overrides-retry-session-id "sid-live")
+     (hermes-chat--model-set-result
+      (current-buffer) client '(:model "new-model") '((key . "model")) nil
+      (hermes-chat--model-switch-context))
+     (should-not hermes-chat--dashboard-create-model)
+     (should-not hermes-chat--dashboard-create-provider)
+     (should (equal hermes-chat--dashboard-create-reasoning-effort "high"))
+     (should hermes-chat--dashboard-create-fast-p)
+     (should (equal hermes-chat--create-overrides-retry-session-id "sid-live")))))
+
+(ert-deftest hermes-chat-stale-live-model-result-keeps-successor-overrides ()
+  "A stale live-switch result cannot clear a successor session's pending state."
+  (let ((client (hermes-test--dashboard-client)))
+    (hermes-test-with-chat-buffer
+     (setq hermes-chat--dashboard-client client
+           hermes-chat--dashboard-active-session-id "sid-old"
+           hermes-chat--dashboard-session-ready-p t)
+     (let ((context (hermes-chat--model-switch-context)))
+       (setq hermes-chat--dashboard-active-session-id "sid-new"
+             hermes-chat--dashboard-create-model "successor-model"
+             hermes-chat--dashboard-create-provider "successor-provider"
+             hermes-chat--create-overrides-retry-session-id "sid-new")
+       (hermes-chat--model-set-result
+        (current-buffer) client '(:model "old-result") '((key . "model")) nil
+        context)
+       (should (equal hermes-chat--dashboard-create-model "successor-model"))
+       (should (equal hermes-chat--dashboard-create-provider "successor-provider"))
+       (should (equal hermes-chat--create-overrides-retry-session-id "sid-new"))))))
+
+(ert-deftest hermes-chat-switch-model-confirms-expensive-choice ()
+  "Expensive model confirmation retries config.set with confirmation enabled."
+  (let ((calls 0)
+        confirms prompt)
+    (cl-letf (((symbol-function 'hermes-dashboard-transport-model-options)
+               (lambda (_client &rest args)
+                 (funcall (plist-get args :resolve)
+                          '((model . "old-model")
+                            (providers
+                             . (((slug . "p1") (authenticated . t)
+                                 (name . "Provider One")
+                                 (models . ("beta")))))))))
+              ((symbol-function 'completing-read)
+               (lambda (_prompt coll &rest _)
+                 (cl-find "beta" (all-completions "" coll) :test #'string-match-p)))
+              ((symbol-function 'yes-or-no-p)
+               (lambda (text)
+                 (setq prompt text)
+                 t))
+              ((symbol-function 'hermes-dashboard-transport-config-set)
+               (lambda (_client _key value &rest args)
+                 (should (equal value "beta --provider p1"))
+                 (setq calls (1+ calls))
+                 (push (plist-get args :confirm-expensive-model) confirms)
+                 (funcall (plist-get args :resolve)
+                          (if (= calls 1)
+                              '((confirm_required . t)
+                                (confirm_message . "This model may be expensive"))
+                            '((key . "model")
+                              (value . "beta --provider p1")))))))
+      (hermes-test-with-chat-buffer
+       (setq hermes-chat--dashboard-client (hermes-test--dashboard-client)
+             hermes-chat--dashboard-active-session-id "sid-1"
+             hermes-chat--dashboard-session-ready-p t)
+       (hermes-chat-switch-model)
+       (should (equal calls 2))
+       (should (equal (nreverse confirms) '(nil t)))
+       (should (equal prompt "This model may be expensive"))
+       (should (string-match-p "Model set to beta" (buffer-string)))))))
+
+(ert-deftest hermes-chat-switch-model-stops-repeated-expensive-confirmation ()
+  "A repeated confirmation request after consent reports an error instead of looping."
+  (let ((calls 0)
+        confirms)
+    (cl-letf (((symbol-function 'hermes-dashboard-transport-model-options)
+               (lambda (_client &rest args)
+                 (funcall (plist-get args :resolve)
+                          '((model . "old-model")
+                            (providers
+                             . (((slug . "p1") (authenticated . t)
+                                 (name . "Provider One")
+                                 (models . ("beta")))))))))
+              ((symbol-function 'completing-read)
+               (lambda (_prompt coll &rest _)
+                 (cl-find "beta" (all-completions "" coll) :test #'string-match-p)))
+              ((symbol-function 'yes-or-no-p) (lambda (&rest _) t))
+              ((symbol-function 'hermes-dashboard-transport-config-set)
+               (lambda (_client _key value &rest args)
+                 (should (equal value "beta --provider p1"))
+                 (setq calls (1+ calls))
+                 (push (plist-get args :confirm-expensive-model) confirms)
+                 (funcall (plist-get args :resolve)
+                          '((confirm_required . t)
+                            (confirm_message . "Still expensive"))))))
+      (hermes-test-with-chat-buffer
+       (setq hermes-chat--dashboard-client (hermes-test--dashboard-client)
+             hermes-chat--dashboard-active-session-id "sid-1"
+             hermes-chat--dashboard-session-ready-p t)
+       (hermes-chat-switch-model)
+       (should (equal calls 2))
+       (should (equal (nreverse confirms) '(nil t)))
+       (should (string-match-p "still requires confirmation"
+                               (buffer-string)))))))
+
+(ert-deftest hermes-chat-switch-model-cancelled-expensive-choice-stops ()
+  "Declining an expensive-model confirmation does not retry config.set."
+  (let ((calls 0))
+    (cl-letf (((symbol-function 'hermes-dashboard-transport-model-options)
+               (lambda (_client &rest args)
+                 (funcall (plist-get args :resolve)
+                          '((model . "old-model")
+                            (providers
+                             . (((slug . "p1") (authenticated . t)
+                                 (name . "Provider One")
+                                 (models . ("beta")))))))))
+              ((symbol-function 'completing-read)
+               (lambda (_prompt coll &rest _)
+                 (cl-find "beta" (all-completions "" coll) :test #'string-match-p)))
+              ((symbol-function 'yes-or-no-p) (lambda (&rest _) nil))
+              ((symbol-function 'hermes-dashboard-transport-config-set)
+               (lambda (_client _key value &rest args)
+                 (should (equal value "beta --provider p1"))
+                 (setq calls (1+ calls))
+                 (funcall (plist-get args :resolve)
+                          '((confirm_required . t)
+                            (confirm_message . "This model may be expensive"))))))
+      (hermes-test-with-chat-buffer
+       (setq hermes-chat--dashboard-client (hermes-test--dashboard-client)
+             hermes-chat--dashboard-active-session-id "sid-1"
+             hermes-chat--dashboard-session-ready-p t)
+       (hermes-chat-switch-model)
+       (should (equal calls 1))
+       (should (string-match-p "Model switch cancelled" (buffer-string)))))))
+
+(ert-deftest hermes-chat-switch-model-renders-config-set-rejection ()
+  "A config.set rejection from the dashboard is rendered in the chat buffer."
+  (cl-letf (((symbol-function 'hermes-dashboard-transport-model-options)
+             (lambda (_client &rest args)
+               (funcall (plist-get args :resolve)
+                        '((model . "old-model")
+                          (providers
+                           . (((slug . "p1") (authenticated . t)
+                               (name . "Provider One")
+                               (models . ("beta")))))))))
+            ((symbol-function 'completing-read)
+             (lambda (_prompt coll &rest _)
+               (cl-find "beta" (all-completions "" coll) :test #'string-match-p)))
+            ((symbol-function 'hermes-dashboard-transport-config-set)
+             (lambda (_client _key _value &rest args)
+               (funcall (plist-get args :reject) "backend denied"))))
+    (hermes-test-with-chat-buffer
+     (setq hermes-chat--dashboard-client (hermes-test--dashboard-client)
+           hermes-chat--dashboard-active-session-id "sid-1"
+           hermes-chat--dashboard-session-ready-p t)
+     (hermes-chat-switch-model)
+     (should (string-match-p "backend denied" (buffer-string))))))
+
+(ert-deftest hermes-chat-switch-model-ignores-catalog-after-turn-starts ()
+  "A delayed catalog cannot prompt once the target chat becomes busy."
+  (let (resolve prompted applied)
+    (cl-letf (((symbol-function 'hermes-dashboard-transport-model-options-cached)
+               (lambda (_client &rest args)
+                 (setq resolve (plist-get args :resolve))))
+              ((symbol-function 'completing-read)
+               (lambda (&rest _args) (setq prompted t) "model"))
+              ((symbol-function 'hermes-dashboard-transport-config-set)
+               (lambda (&rest _args) (setq applied t))))
+      (hermes-test-with-chat-buffer
+       (setq hermes-chat--dashboard-client (hermes-test--dashboard-client)
+             hermes-chat--dashboard-active-session-id "sid-1"
+             hermes-chat--dashboard-session-ready-p t)
+       (hermes-chat-switch-model)
+       (setq hermes-chat--pending-assistant-id "assistant")
+       (funcall resolve
+                '((providers . (((slug . "p") (authenticated . t)
+                                  (models . ("model")))))))
+       (should-not prompted)
+       (should-not applied)))))
+
+(ert-deftest hermes-chat-switch-model-allows-locally-finished-turn ()
+  "A terminal event releases the model picker without waiting for session.info."
+  (let (requested)
+    (cl-letf (((symbol-function
+                'hermes-dashboard-transport-model-options-cached)
+               (lambda (_client &rest _args) (setq requested t))))
+      (hermes-test-with-chat-buffer
+       (setq hermes-chat--dashboard-client (hermes-test--dashboard-client)
+             hermes-chat--dashboard-active-session-id "sid-1"
+             hermes-chat--dashboard-session-ready-p t
+             hermes-chat--dashboard-running-p t)
+       (hermes-chat--run-turn-reducer nil '(:type done))
+       (hermes-chat-switch-model)
+       (should requested)
+       (should-not hermes-chat--dashboard-running-p)))))
+
+(ert-deftest hermes-chat-switch-model-ignores-catalog-after-reset ()
+  "A delayed catalog cannot prompt after the chat lifetime changes."
+  (let (resolve prompted)
+    (cl-letf (((symbol-function 'hermes-dashboard-transport-model-options-cached)
+               (lambda (_client &rest args)
+                 (setq resolve (plist-get args :resolve))))
+              ((symbol-function 'completing-read)
+               (lambda (&rest _args) (setq prompted t) "model")))
+      (hermes-test-with-chat-buffer
+       (setq hermes-chat--dashboard-client (hermes-test--dashboard-client)
+             hermes-chat--dashboard-active-session-id "sid-1"
+             hermes-chat--dashboard-session-ready-p t)
+       (hermes-chat-switch-model)
+       (setq hermes-chat--lifecycle-generation
+             (hermes-chat--next-lifetime-token))
+       (funcall resolve
+                '((providers . (((slug . "p") (authenticated . t)
+                                  (models . ("model")))))))
+       (should-not prompted)))))
+
+(ert-deftest hermes-chat-switch-model-ignores-catalog-after-client-change ()
+  "A delayed catalog cannot prompt after the chat changes transport clients."
+  (let (resolve prompted)
+    (cl-letf (((symbol-function 'hermes-dashboard-transport-model-options-cached)
+               (lambda (_client &rest args)
+                 (setq resolve (plist-get args :resolve))))
+              ((symbol-function 'completing-read)
+               (lambda (&rest _args) (setq prompted t) "model")))
+      (hermes-test-with-chat-buffer
+       (setq hermes-chat--dashboard-client (hermes-test--dashboard-client)
+             hermes-chat--dashboard-active-session-id "sid-1"
+             hermes-chat--dashboard-session-ready-p t)
+       (hermes-chat-switch-model)
+       (setq hermes-chat--dashboard-client (hermes-test--dashboard-client))
+       (funcall resolve
+                '((providers . (((slug . "p") (authenticated . t)
+                                  (models . ("model")))))))
+       (should-not prompted)))))
+
+;;; Group: provider onboarding from chat
+
+(ert-deftest hermes-chat-find-provider-matches-slug ()
+  "`hermes-chat--find-provider' returns the provider row for a slug, or nil."
+  (let ((result '((providers . (((slug . "openai"))
+                                ((slug . "deepseek") (name . "DeepSeek")))))))
+    (should (equal (hermes-transport--get
+                    (hermes-chat--find-provider result "deepseek") 'name)
+                   "DeepSeek"))
+    (should-not (hermes-chat--find-provider result "nope"))))
+
+(ert-deftest hermes-chat-connect-provider-candidate-saves-then-runs-on-connected ()
+  "Connecting reads a key and saves it scoped to the session, then continues."
+  (let (saved on-ran)
+    (cl-letf (((symbol-function 'read-passwd) (lambda (&rest _) "sk-secret"))
+              ((symbol-function 'hermes-dashboard-transport-model-save-key)
+               (lambda (_client slug key &rest args)
+                 (setq saved (list slug key (plist-get args :session-id)))
+                 (funcall (plist-get args :resolve)
+                          '((provider . ((slug . "deepseek"))))))))
+      (hermes-test-with-chat-buffer
+        (setq hermes-chat--dashboard-active-session-id "sid-1"
+              hermes-chat--dashboard-session-ready-p t)
+        (hermes-chat--connect-provider-candidate
+         (current-buffer) 'fake-client
+         '((slug . "deepseek") (name . "DeepSeek")
+           (auth_type . "api_key") (key_env . "DEEPSEEK_API_KEY"))
+         (lambda () (setq on-ran t)))))
+    (should (equal saved '("deepseek" "sk-secret" "sid-1")))
+    (should on-ran)))
+
+(ert-deftest hermes-chat-connect-provider-uses-owner-buffer-context ()
+  "A connect started outside the chat still saves against that chat session."
+  (let (saved)
+    (cl-letf (((symbol-function 'read-passwd) (lambda (&rest _) "sk-secret"))
+              ((symbol-function 'hermes-dashboard-transport-model-save-key)
+               (lambda (_client slug key &rest args)
+                 (setq saved (list slug key (plist-get args :session-id)))
+                 (funcall (plist-get args :resolve)
+                          '((provider . ((slug . "deepseek"))))))))
+      (hermes-test-with-chat-buffer
+        (setq hermes-chat--dashboard-client (hermes-test--dashboard-client)
+              hermes-chat--dashboard-active-session-id "sid-1"
+              hermes-chat--dashboard-session-ready-p t)
+        (let ((chat (current-buffer))
+              (client hermes-chat--dashboard-client))
+          (with-temp-buffer
+            (hermes-chat--connect-provider-candidate
+             chat client
+             '((slug . "deepseek") (name . "DeepSeek")
+               (auth_type . "api_key") (key_env . "DEEPSEEK_API_KEY")))))))
+    (should (equal saved '("deepseek" "sk-secret" "sid-1")))))
+
+(ert-deftest hermes-chat-connect-provider-ignores-key-after-disconnect ()
+  "A provider key read across disconnect is not saved or applied."
+  (let (saved applied chat)
+    (cl-letf (((symbol-function 'read-passwd)
+               (lambda (&rest _)
+                 (with-current-buffer chat
+                   (hermes-chat-disconnect))
+                 "sk-secret"))
+              ((symbol-function 'hermes-dashboard-transport-stop)
+               (lambda (&rest _)))
+              ((symbol-function 'hermes-dashboard-transport-model-save-key)
+               (lambda (&rest _) (setq saved t)))
+              ((symbol-function 'hermes-dashboard-transport-config-set)
+               (lambda (&rest _) (setq applied t))))
+      (hermes-test-with-chat-buffer
+        (setq hermes-chat--dashboard-client (hermes-test--dashboard-client)
+              hermes-chat--dashboard-active-session-id "sid-1"
+              hermes-chat--dashboard-session-ready-p t
+              chat (current-buffer))
+        (let ((client hermes-chat--dashboard-client))
+          (with-temp-buffer
+            (should-error
+             (hermes-chat--connect-provider-candidate
+              chat client
+              '((slug . "deepseek") (name . "DeepSeek")
+                (auth_type . "api_key") (key_env . "DEEPSEEK_API_KEY"))
+              (lambda () (setq applied t)))
+             :type 'user-error))
+          (should-not saved)
+          (should-not applied)
+          (should-not (string-match-p "sk-secret" (buffer-string))))))))
+
+(ert-deftest hermes-chat-connect-provider-stale-save-callbacks-are-inert ()
+  "Late save-key callbacks cannot mutate a chat after ownership is lost."
+  (let (resolve reject invalidated applied)
+    (cl-letf (((symbol-function 'read-passwd) (lambda (&rest _) "sk-secret"))
+              ((symbol-function 'hermes-dashboard-transport-stop)
+               (lambda (&rest _)))
+              ((symbol-function 'hermes-dashboard-transport-invalidate-model-options)
+               (lambda (&rest _) (setq invalidated t)))
+              ((symbol-function 'hermes-dashboard-transport-model-save-key)
+               (lambda (_client _slug _key &rest args)
+                 (setq resolve (plist-get args :resolve)
+                       reject (plist-get args :reject)))))
+      (hermes-test-with-chat-buffer
+        (setq hermes-chat--dashboard-client (hermes-test--dashboard-client)
+              hermes-chat--dashboard-active-session-id "sid-1"
+              hermes-chat--dashboard-session-ready-p t)
+        (let ((chat (current-buffer))
+              (client hermes-chat--dashboard-client))
+          (with-temp-buffer
+            (hermes-chat--connect-provider-candidate
+             chat client
+             '((slug . "deepseek") (name . "DeepSeek")
+               (auth_type . "api_key") (key_env . "DEEPSEEK_API_KEY"))
+             (lambda () (setq applied t))))
+          (hermes-chat-disconnect)
+          (funcall resolve '((ok . t)))
+          (funcall reject "transport failure")
+          (should-not invalidated)
+          (should-not applied)
+          (should-not (string-match-p "Connected provider" (buffer-string)))
+          (should-not (string-match-p "transport failure" (buffer-string)))
+          (should-not (string-match-p "sk-secret" (buffer-string))))))))
+
+(ert-deftest hermes-chat-model-picker-connects-unauthed-then-applies ()
+  "Picking an unauthenticated provider's model connects it, then applies it."
+  (let (saved applied)
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (_prompt labels &rest _) (car (all-completions "" labels))))
+              ((symbol-function 'read-passwd) (lambda (&rest _) "sk-secret"))
+              ((symbol-function 'hermes-dashboard-transport-model-save-key)
+               (lambda (_client slug _key &rest args)
+                 (setq saved slug)
+                 (funcall (plist-get args :resolve)
+                          '((provider . ((slug . "deepseek")))))))
+              ((symbol-function 'hermes-dashboard-transport-config-set)
+               (lambda (_client key value &rest args)
+                 (setq applied (cons key value))
+                 (funcall (plist-get args :resolve) '((ok . t))))))
+      (hermes-test-with-chat-buffer
+        (setq hermes-chat--dashboard-active-session-id "sid-1"
+              hermes-chat--dashboard-session-ready-p t)
+        (hermes-chat--prompt-and-set-model
+         (current-buffer) 'fake-client
+         '((providers . (((slug . "deepseek") (name . "DeepSeek")
+                          (auth_type . "api_key") (key_env . "DEEPSEEK_API_KEY")
+                          (models . ("deepseek-chat")))))))))
+    (should (equal saved "deepseek"))
+    (should (equal (car applied) "model"))))
+
+(ert-deftest hermes-chat-model-picker-does-not-key-connect-oauth-provider ()
+  "Picking an unauthenticated OAuth model never enters the API-key flow."
+  (let (read-key saved applied notice)
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (_prompt labels &rest _) (car (all-completions "" labels))))
+              ((symbol-function 'read-passwd)
+               (lambda (&rest _) (setq read-key t) "oauth-secret"))
+              ((symbol-function 'hermes-dashboard-transport-model-save-key)
+               (lambda (&rest _) (setq saved t)))
+              ((symbol-function 'hermes-dashboard-transport-config-set)
+               (lambda (&rest _) (setq applied t)))
+              ((symbol-function 'message)
+               (lambda (format-string &rest args)
+                 (setq notice (apply #'format format-string args)))))
+      (hermes-test-with-chat-buffer
+        (setq hermes-chat--dashboard-active-session-id "sid-oauth"
+              hermes-chat--dashboard-session-ready-p t)
+        (hermes-chat--prompt-and-set-model
+         (current-buffer) 'fake-client
+         '((providers . (((slug . "openai-codex") (name . "OpenAI Codex")
+                          (auth_type . "oauth") (authenticated . nil)
+                          (models . ("gpt-5.6")))))))))
+    (should-not read-key)
+    (should-not saved)
+    (should-not applied)
+    (should (string-match-p "OAuth" notice))
+    (should (string-match-p "OpenAI Codex" notice))))
+
+(defun hermes-test--model-picker-reply (client request model &optional failure)
+  "Deliver MODEL or FAILURE for CLIENT's serialized picker REQUEST."
+  (hermes-dashboard-transport--handle-frame
+   client (hermes-dashboard-transport--encode-frame
+           `((jsonrpc . "2.0") (id . ,(alist-get 'id request))
+             ,(if failure `(error . ((code . -32000) (message . ,failure)))
+                `(result . ((providers . [((slug . "local")
+                                          (authenticated . t)
+                                          (models . [,model]))]))))))))
+
+(ert-deftest hermes-chat-model-invocation-retires-old-catalogue ()
+  "Only the newest same-chat RPC catalogue may prompt or report failure."
+  (dolist (failure '(nil "Old catalogue failed"))
+    (hermes-test-with-chat-buffer
+     (let* ((client (hermes-test--dashboard-client))
+            (hermes-dashboard-transport-request-timeout nil)
+            requests choices
+            (hermes-dashboard-transport-websocket-send-function
+             (lambda (_socket text)
+               (push (json-parse-string text :object-type 'alist) requests)))
+            (completing-read-function
+             (lambda (_prompt collection &rest _)
+               (push (all-completions "" collection) choices)
+               (car (all-completions "" collection)))))
+       (setq hermes-chat--dashboard-client client)
+       (setf (hermes-dashboard-transport-client-ready-p client) t)
+       (call-interactively #'hermes-chat-switch-model)
+       (call-interactively #'hermes-chat-switch-model)
+       (should (= (length requests) 2))
+       (should (equal (mapcar (lambda (row) (alist-get 'method row)) requests)
+                      '("model.options" "model.options")))
+       (hermes-test--model-picker-reply client (car requests) "Qwen")
+       (let ((before (buffer-string)))
+         (hermes-test--model-picker-reply client (cadr requests) "Devstral" failure)
+         (should (equal (buffer-string) before)))
+       (should (equal choices '(("Qwen · local"))))
+       (should (equal hermes-chat--dashboard-create-model "Qwen"))
+       (should (equal hermes-chat--dashboard-create-provider "local"))
+       (should (equal (mapcar #'car (hermes-chat--model-candidates
+                                    (hermes-dashboard-transport-cached-model-options client)))
+                      '("Qwen · local")))
+       (should (= (hash-table-count
+                   (hermes-dashboard-transport-client-pending client)) 0))))))
+
+(ert-deftest hermes-chat-model-invocation-rechecks-native-reader ()
+  "A nested same-chat picker supersedes its outer native completion reader."
+  (dolist (cancel '(nil t))
+    (hermes-test-with-chat-buffer
+     (let* ((client (hermes-test--dashboard-client))
+            (owner (current-buffer))
+            (hermes-dashboard-transport-request-timeout nil)
+            requests (reads 0)
+            (hermes-dashboard-transport-websocket-send-function
+             (lambda (_socket text)
+               (push (json-parse-string text :object-type 'alist) requests)))
+            (completing-read-function
+             (lambda (_prompt collection &rest _)
+               (cl-incf reads)
+               (when (= reads 1)
+		 (with-current-buffer owner
+                   (call-interactively #'hermes-chat-switch-model))
+		 (hermes-test--model-picker-reply client (car requests) "Qwen"))
+               (if (and cancel (equal (car (all-completions "" collection)) "Qwen · local"))
+                   "" (car (all-completions "" collection))))))
+       (setq hermes-chat--dashboard-client client)
+       (setf (hermes-dashboard-transport-client-ready-p client) t)
+       (call-interactively #'hermes-chat-switch-model)
+       (hermes-test--model-picker-reply client (car requests) "Devstral")
+       (should (= reads 2))
+       (should (equal hermes-chat--dashboard-create-model (unless cancel "Qwen")))
+       (should-not (string-match-p "Model set to Devstral" (buffer-string)))))))
+
+(ert-deftest hermes-chat-model-invocation-is-independent-between-chats ()
+  "A newer catalogue in another chat does not retire this chat's picker."
+  (hermes-test-with-chat-buffer
+   (let* ((client (hermes-test--dashboard-client))
+          (first (current-buffer))
+          (hermes-dashboard-transport-request-timeout nil)
+          requests
+          (hermes-dashboard-transport-websocket-send-function
+           (lambda (_socket text)
+             (push (json-parse-string text :object-type 'alist) requests)))
+          (completing-read-function
+           (lambda (_prompt collection &rest _) (car (all-completions "" collection)))))
+     (setf (hermes-dashboard-transport-client-ready-p client) t)
+     (setq hermes-chat--dashboard-client client)
+     (call-interactively #'hermes-chat-switch-model)
+     (hermes-test-with-chat-buffer
+      (setq hermes-chat--dashboard-client client)
+      (call-interactively #'hermes-chat-switch-model)
+      (hermes-test--model-picker-reply client (car requests) "Qwen")
+      (hermes-test--model-picker-reply client (cadr requests) "Devstral")
+      (should (equal hermes-chat--dashboard-create-model "Qwen"))
+      (with-current-buffer first
+        (should (equal hermes-chat--dashboard-create-model "Devstral")))))))
+
+(ert-deftest hermes-chat-model-invocation-retires-provider-continuations ()
+  "Supersession during key input or save fences both success and error effects."
+  (dolist (stage '(input success error))
+    (hermes-test-with-chat-buffer
+     (let ((client (hermes-test--dashboard-client))
+           (owner (current-buffer)) saved (reads 0) (invalidations 0))
+       (setq hermes-chat--dashboard-client client)
+       (cl-letf (((symbol-function 'hermes-dashboard-transport-model-options)
+                  (lambda (_client &rest args)
+                    (cl-incf reads)
+                    (funcall (plist-get args :resolve)
+                             `((providers . (((slug . "local")
+                                              (auth_type . "api_key")
+                                              (authenticated . ,(> reads 1))
+                                              (models . (,(if (= reads 1) "old" "new"))))))))))
+                 (completing-read-function
+                  (lambda (_prompt collection &rest _) (car (all-completions "" collection))))
+                 ((symbol-function 'read-passwd)
+                  (lambda (&rest _)
+                    (when (eq stage 'input)
+                      (with-current-buffer owner
+                        (call-interactively #'hermes-chat-switch-model)))
+                    "synthetic-key"))
+                 ((symbol-function 'hermes-dashboard-transport-model-save-key)
+                  (lambda (_client _slug _key &rest args) (setq saved args)))
+                 ((symbol-function 'hermes-dashboard-transport-invalidate-model-options)
+                  (lambda (&rest _) (cl-incf invalidations))))
+         (if (eq stage 'input)
+             (should-error (call-interactively #'hermes-chat-switch-model)
+                           :type 'user-error)
+           (call-interactively #'hermes-chat-switch-model))
+         (unless (eq stage 'input)
+           (should saved)
+           (call-interactively #'hermes-chat-switch-model)
+           (funcall (plist-get saved (if (eq stage 'success) :resolve :reject))
+                    (if (eq stage 'success) '((ok . t)) "Old key failure")))
+         (when (eq stage 'input) (should-not saved))
+         (should (= reads 2))
+         (should (= invalidations 0))
+         (should (equal hermes-chat--dashboard-create-model "new"))
+         (should-not (string-match-p "Connected provider\\|Old key failure"
+                                     (buffer-string))))))))
+
+(ert-deftest hermes-chat-model-invocation-retires-config-continuations ()
+  "Old setters cannot publish or continue confirmation after a newer picker."
+  (dolist (stage '(success error confirm-yes confirm-no))
+    (hermes-test-with-chat-buffer
+     (let ((client (hermes-test--dashboard-client))
+           (owner (current-buffer)) requests)
+       (setq hermes-chat--dashboard-client client
+             hermes-chat--dashboard-active-session-id "session"
+             hermes-chat--dashboard-session-ready-p t)
+       (cl-letf (((symbol-function 'hermes-dashboard-transport-model-options)
+                  (lambda (_client &rest args)
+                    (funcall (plist-get args :resolve)
+                             '((providers . (((slug . "local") (authenticated . t)
+                                               (models . ("model")))))))))
+                 (completing-read-function
+                  (lambda (_prompt collection &rest _) (car (all-completions "" collection))))
+                 ((symbol-function 'hermes-dashboard-transport-config-set)
+                  (lambda (_client _key _value &rest args) (push args requests)))
+                 ((symbol-function 'yes-or-no-p)
+                  (lambda (&rest _)
+                    (with-current-buffer owner
+                      (call-interactively #'hermes-chat-switch-model))
+                    (eq stage 'confirm-yes))))
+         (call-interactively #'hermes-chat-switch-model)
+         (let ((old (car requests)) (before (buffer-string)))
+           (pcase stage
+             ((or 'success 'error)
+              (call-interactively #'hermes-chat-switch-model)
+              (funcall (plist-get old (if (eq stage 'success) :resolve :reject))
+                       (if (eq stage 'success) '((ok . t)) "Old set failure")))
+             (_ (funcall (plist-get old :resolve) '((confirm_required . t)))))
+           (should (= (length requests) 2))
+           (should (equal (buffer-string) before))
+           ;; The latest setter still owns ordinary success publication.
+           (funcall (plist-get (car requests) :resolve) '((ok . t)))
+           (should (string-match-p "Model set to model" (buffer-string)))))))))
+
+(ert-deftest hermes-chat-model-invocation-retires-during-acquisition ()
+  "Real credential reentry preserves the newest picker and its single lease."
+  (dolist (pinned '(nil t))
+    (dolist (reenter '(nil t))
+    (let* ((instance '("remote" . "http://remote.invalid"))
+           (hermes-instances (list instance))
+           (hermes-dashboard-transport-remote-auth-method 'token)
+           (hermes-dashboard-transport-start-mode 'remote)
+           (hermes-dashboard-transport-idle-close-delay nil)
+           (hermes-dashboard-transport-request-timeout nil))
+      (hermes-test-with-chat-buffer
+       (setq hermes-chat--pinned-url (and pinned "http://remote.invalid"))
+       (let* ((owner (current-buffer))
+              (secret-reads 0) (reads 0) opened requests closed
+              (hermes-dashboard-transport-websocket-send-function
+               (lambda (socket text)
+                 (push (cons socket (json-parse-string text :object-type 'alist))
+                       requests)))
+              (completing-read-function
+               (lambda (_prompt collection &rest _)
+                 (cl-incf reads)
+                 (car (all-completions "" collection)))))
+         (should hermes-instance)
+         (should (eq hermes-chat--resolved-start-mode 'remote))
+         (cl-letf (((symbol-function 'auth-source-search)
+                    (lambda (&rest _)
+                      (list (list :secret
+                                  (lambda ()
+                                    (cl-incf secret-reads)
+                                    (when (and reenter (= secret-reads 1))
+                                      (with-current-buffer owner
+                                        (call-interactively #'hermes-chat-switch-model)))
+                                    "synthetic-token")))))
+                   ((symbol-function 'hermes-dashboard-transport--remote-connect)
+                    (lambda (client _auth)
+                      (push client opened)
+                      (setf (hermes-dashboard-transport-client-websocket client)
+                            (make-symbol "socket")
+                            (hermes-dashboard-transport-client-ready-p client) t)))
+                   ((symbol-function 'websocket-close)
+                    (lambda (socket) (push socket closed))))
+           (unwind-protect
+               (progn
+                 (call-interactively #'hermes-chat-switch-model)
+                 (should (= secret-reads (if reenter 2 1)))
+                 (should (= (length requests) 1))
+                 (let ((newest (car (last opened))))
+                   (should (eq newest hermes-chat--dashboard-client))
+                   (should (eq newest (gethash (cdr instance)
+                                              hermes-dashboard-transport--clients)))
+                   (should (= (hermes-dashboard-transport-client-refcount newest) 1))
+                   (when reenter
+                     (should (hermes-dashboard-transport-client-stopping-p (car opened)))
+                     (should (= (hermes-dashboard-transport-client-refcount (car opened)) 0))
+                     (should (= (length closed) 1)))
+                   (hermes-test--model-picker-reply newest (cdar requests) "newest")
+                   (should (= reads 1))
+                   (should (equal hermes-chat--dashboard-create-model "newest"))
+                   (should (equal hermes-chat--dashboard-create-provider "local")))
+                 (hermes-chat-disconnect)
+                 (should (= (hash-table-count hermes-dashboard-transport--clients) 0))
+                 (should (= (length closed) (length opened)))
+                 (dolist (client opened)
+                   (should (= (hermes-dashboard-transport-client-refcount client) 0))))
+             (dolist (client opened)
+               (hermes-dashboard-transport-stop client))))))))))
+
+(ert-deftest hermes-chat-model-acquisition-releases-retired-lifetime ()
+  "Credential input cannot attach a client after mode exit or replacement."
+  (dolist (pinned '(nil t))
+    (dolist (retire '(fundamental-mode hermes-chat-mode))
+    (let ((hermes-instances '(("remote" . "http://remote.invalid")))
+          (hermes-dashboard-transport-remote-auth-method 'token)
+          (hermes-dashboard-transport-start-mode 'remote)
+          (hermes-dashboard-transport-idle-close-delay nil))
+      (hermes-test-with-chat-buffer
+       (setq hermes-chat--pinned-url (and pinned "http://remote.invalid"))
+       (let ((owner (current-buffer)) opened requests closed)
+         (cl-letf (((symbol-function 'auth-source-search)
+                    (lambda (&rest _)
+                      (list (list :secret
+                                  (lambda ()
+                                    (with-current-buffer owner (funcall retire))
+                                    "synthetic-token")))))
+                   ((symbol-function 'hermes-dashboard-transport--remote-connect)
+                    (lambda (client _auth)
+                      (setq opened client)
+                      (setf (hermes-dashboard-transport-client-websocket client)
+                            (make-symbol "socket")
+                            (hermes-dashboard-transport-client-ready-p client) t)))
+                   ((symbol-function 'websocket-close)
+                    (lambda (socket) (push socket closed)))
+                   ((symbol-function 'hermes-dashboard-transport-model-options)
+                    (lambda (&rest args) (push args requests))))
+           (unwind-protect
+               (progn
+                 (call-interactively #'hermes-chat-switch-model)
+                 (should opened)
+                 (should-not requests)
+                 (should-not hermes-chat--dashboard-client)
+                 (should (hermes-dashboard-transport-client-stopping-p opened))
+                 (should (= (hermes-dashboard-transport-client-refcount opened) 0))
+                 (should (= (hash-table-count hermes-dashboard-transport--clients) 0))
+                 (should (= (length closed) 1)))
+             (when opened (hermes-dashboard-transport-stop opened))))))))))
+
+(provide 'hermes-chat-models-tests)
+;;; hermes-chat-models-tests.el ends here

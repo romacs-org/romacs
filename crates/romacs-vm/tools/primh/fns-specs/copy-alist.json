@@ -1,0 +1,33 @@
+{
+ "name": "copy-alist",
+ "arity": [
+  1,
+  1
+ ],
+ "effect": "pure",
+ "gnu_files": [
+  "fns.c"
+ ],
+ "gnu_def": "fns.c:1516",
+ "rust": "src/prims/fns_alist_copy.rs:4",
+ "args": [
+  "list"
+ ],
+ "extra": {
+  "0": [
+   "42",
+   "[1]",
+   "\"a\"",
+   "'(a . b)"
+  ]
+ },
+ "probes": [
+  "(copy-alist '((a . 1) (b . 2)))",
+  "(copy-alist nil)",
+  "(let* ((entry (cons (list 'key) (list 'value))) (atom (vector 1)) (xs (list entry atom)) (ys (copy-alist xs))) (list (eq xs ys) (eq entry (car ys)) (eq (car entry) (car (car ys))) (eq (cdr entry) (cdr (car ys))) (eq atom (car (cdr ys)))))",
+  "(condition-case e (copy-alist '(a . b)) (error e))",
+  "(condition-case e (copy-alist [a]) (error e))",
+  "(let ((xs (list 'a 'b))) (setcdr (cdr xs) xs) (condition-case e (copy-alist xs) (circular-list (list (car e) (eq (car (cdr e)) (cdr xs))))))",
+  "(funcall #'copy-alist '((a . 2)))"
+ ]
+}

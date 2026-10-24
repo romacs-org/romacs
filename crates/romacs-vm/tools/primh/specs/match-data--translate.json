@@ -1,0 +1,30 @@
+{
+ "name": "match-data--translate",
+ "arity": [1, 1],
+ "effect": "global",
+ "gnu_files": ["search.c"],
+ "gnu_def": "search.c:3062",
+ "rust": "src/prims/search.rs:4",
+ "args": [],
+ "probes": [
+  "(progn (set-match-data '(0 1)) (let ((i 0)) (while (< i 5) (match-data--translate 2305843009213693951) (setq i (1+ i)))) (match-data t))",
+  "(progn (set-match-data '(1 3 nil nil 4 8)) (list (match-data--translate 2) (match-data t)))",
+  "(progn (set-match-data '(1 3 nil nil 4 8)) (match-data--translate -5) (match-data t))",
+  "(progn (set-match-data '(2 -1)) (match-data--translate 2) (match-data t))",
+  "(progn (string-match \"é\\\\(λ\\\\)\" \"xéλ\") (match-data--translate 3) (match-data t))",
+  "(progn (set-match-data nil) (list (match-data--translate 4) (match-data t)))",
+  "(progn (set-match-data '(3 5)) (funcall #'match-data--translate 0) (match-data t))",
+  "(progn (set-match-data '(2 4)) (list (condition-case e (match-data--translate nil) (error e)) (match-data t)))",
+  "(progn (erase-buffer) (insert \"aéλz\") (goto-char 2) (looking-at \"éλ\") (let ((saved (match-data))) (match-data--translate 1) (list (match-beginning 0) (match-end 0) (eq (car (cdr (cdr (match-data t)))) (current-buffer)) (marker-position (car saved)))))",
+  "(progn (erase-buffer) (set-buffer-multibyte nil) (insert \"abcd\") (goto-char 1) (looking-at \"ab\") (match-data--translate 1) (list (match-beginning 0) (match-end 0) (eq (car (cdr (cdr (match-data t)))) (current-buffer))))",
+  "(list (fboundp 'match-data--translate) (functionp #'match-data--translate) (funcall #'match-data--translate 2))",
+  "(progn (set-match-data '(0 1)) (let ((inhibit-changing-match-data t)) (match-data--translate 3)) (match-data t))",
+  "(let ((x (list 1 2))) (setcdr (cdr x) x) (condition-case e (match-data--translate x) (error (list (car e) (car (cdr e)) (eq (car (cdr (cdr e))) x) (car x) (car (cdr x)) (eq (cdr (cdr x)) x) (cdr (cdr (cdr e)))))))",
+  "(progn (set-match-data '(1 3 nil nil 4 8)) (match-data--translate 2) (match-data--translate -3) (match-data t))",
+  "(progn (set-match-data '(0 1)) (match-data--translate 2305843009213693951) (match-data--translate 1) (match-data t))",
+  "(progn (set-match-data '(0 1)) (match-data--translate 2305843009213693951) (match-data--translate 1) (list (match-beginning 0) (match-end 0)))",
+  "(progn (erase-buffer) (insert \"abc\") (goto-char 1) (looking-at \"ab\") (match-data--translate 10) (list (marker-position (car (match-data))) (marker-position (car (cdr (match-data))))))",
+  "(progn (set-match-data '(2 -7)) (match-data--translate 1) (match-data t))",
+  "(progn (string-match \"a\" \"ab\") (string-match \"z\" \"ab\") (match-data--translate 1) (match-data t))"
+ ]
+}

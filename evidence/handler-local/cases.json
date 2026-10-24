@@ -1,0 +1,272 @@
+[
+  {
+    "id": "get-file-buffer-unrelated",
+    "source": "(progn (setq text-quoting-style 'straight) (setq default-directory @DIR@ buffer-file-name @FILE@ coding-system-for-read 'utf-8-unix coding-system-for-write 'utf-8-unix set-auto-coding-function nil file-coding-system-alist nil write-region-annotate-functions nil write-region-post-annotation-function nil buffer-file-format nil inhibit-file-name-operation nil inhibit-file-name-handlers nil) (fmakunbound 'after-insert-file-set-coding) (fmakunbound 'format-decode) (setq file-name-handler-alist '((\"^/remote:\" . hl-handler))) (null (get-file-buffer (concat buffer-file-name \"-absent\"))))",
+    "expected": "t"
+  },
+  {
+    "id": "get-file-buffer-filtered",
+    "source": "(progn (setq text-quoting-style 'straight) (setq default-directory @DIR@ buffer-file-name @FILE@ coding-system-for-read 'utf-8-unix coding-system-for-write 'utf-8-unix set-auto-coding-function nil file-coding-system-alist nil write-region-annotate-functions nil write-region-post-annotation-function nil buffer-file-format nil inhibit-file-name-operation nil inhibit-file-name-handlers nil) (fmakunbound 'after-insert-file-set-coding) (fmakunbound 'format-decode) (put 'hl-handler 'operations '(unrelated-operation)) (setq file-name-handler-alist '((\".\" . hl-handler))) (null (get-file-buffer (concat buffer-file-name \"-absent\"))))",
+    "expected": "t"
+  },
+  {
+    "id": "get-file-buffer-inhibited",
+    "source": "(progn (setq text-quoting-style 'straight) (setq default-directory @DIR@ buffer-file-name @FILE@ coding-system-for-read 'utf-8-unix coding-system-for-write 'utf-8-unix set-auto-coding-function nil file-coding-system-alist nil write-region-annotate-functions nil write-region-post-annotation-function nil buffer-file-format nil inhibit-file-name-operation nil inhibit-file-name-handlers nil) (fmakunbound 'after-insert-file-set-coding) (fmakunbound 'format-decode) (setq file-name-handler-alist '((\".\" . hl-handler)) inhibit-file-name-operation 'get-file-buffer inhibit-file-name-handlers '(hl-handler)) (put 'hl-handler 'operations '(get-file-buffer)) (null (get-file-buffer (concat buffer-file-name \"-absent\"))))",
+    "expected": "t"
+  },
+  {
+    "id": "file-accessible-directory-p-unrelated",
+    "source": "(progn (setq text-quoting-style 'straight) (setq default-directory @DIR@ buffer-file-name @FILE@ coding-system-for-read 'utf-8-unix coding-system-for-write 'utf-8-unix set-auto-coding-function nil file-coding-system-alist nil write-region-annotate-functions nil write-region-post-annotation-function nil buffer-file-format nil inhibit-file-name-operation nil inhibit-file-name-handlers nil) (fmakunbound 'after-insert-file-set-coding) (fmakunbound 'format-decode) (setq file-name-handler-alist '((\"^/remote:\" . hl-handler))) (file-accessible-directory-p default-directory))",
+    "expected": "t"
+  },
+  {
+    "id": "file-accessible-directory-p-filtered",
+    "source": "(progn (setq text-quoting-style 'straight) (setq default-directory @DIR@ buffer-file-name @FILE@ coding-system-for-read 'utf-8-unix coding-system-for-write 'utf-8-unix set-auto-coding-function nil file-coding-system-alist nil write-region-annotate-functions nil write-region-post-annotation-function nil buffer-file-format nil inhibit-file-name-operation nil inhibit-file-name-handlers nil) (fmakunbound 'after-insert-file-set-coding) (fmakunbound 'format-decode) (put 'hl-handler 'operations '(unrelated-operation)) (setq file-name-handler-alist '((\".\" . hl-handler))) (file-accessible-directory-p default-directory))",
+    "expected": "t"
+  },
+  {
+    "id": "file-accessible-directory-p-inhibited",
+    "source": "(progn (setq text-quoting-style 'straight) (setq default-directory @DIR@ buffer-file-name @FILE@ coding-system-for-read 'utf-8-unix coding-system-for-write 'utf-8-unix set-auto-coding-function nil file-coding-system-alist nil write-region-annotate-functions nil write-region-post-annotation-function nil buffer-file-format nil inhibit-file-name-operation nil inhibit-file-name-handlers nil) (fmakunbound 'after-insert-file-set-coding) (fmakunbound 'format-decode) (setq file-name-handler-alist '((\".\" . hl-handler)) inhibit-file-name-operation 'file-accessible-directory-p inhibit-file-name-handlers '(hl-handler)) (put 'hl-handler 'operations '(file-accessible-directory-p)) (file-accessible-directory-p default-directory))",
+    "expected": "t"
+  },
+  {
+    "id": "directory-files-unrelated",
+    "source": "(progn (setq text-quoting-style 'straight) (setq default-directory @DIR@ buffer-file-name @FILE@ coding-system-for-read 'utf-8-unix coding-system-for-write 'utf-8-unix set-auto-coding-function nil file-coding-system-alist nil write-region-annotate-functions nil write-region-post-annotation-function nil buffer-file-format nil inhibit-file-name-operation nil inhibit-file-name-handlers nil) (fmakunbound 'after-insert-file-set-coding) (fmakunbound 'format-decode) (setq file-name-handler-alist '((\"^/remote:\" . hl-handler))) (not (null (member \"input\" (directory-files default-directory)))))",
+    "expected": "t"
+  },
+  {
+    "id": "directory-files-filtered",
+    "source": "(progn (setq text-quoting-style 'straight) (setq default-directory @DIR@ buffer-file-name @FILE@ coding-system-for-read 'utf-8-unix coding-system-for-write 'utf-8-unix set-auto-coding-function nil file-coding-system-alist nil write-region-annotate-functions nil write-region-post-annotation-function nil buffer-file-format nil inhibit-file-name-operation nil inhibit-file-name-handlers nil) (fmakunbound 'after-insert-file-set-coding) (fmakunbound 'format-decode) (put 'hl-handler 'operations '(unrelated-operation)) (setq file-name-handler-alist '((\".\" . hl-handler))) (not (null (member \"input\" (directory-files default-directory)))))",
+    "expected": "t"
+  },
+  {
+    "id": "directory-files-inhibited",
+    "source": "(progn (setq text-quoting-style 'straight) (setq default-directory @DIR@ buffer-file-name @FILE@ coding-system-for-read 'utf-8-unix coding-system-for-write 'utf-8-unix set-auto-coding-function nil file-coding-system-alist nil write-region-annotate-functions nil write-region-post-annotation-function nil buffer-file-format nil inhibit-file-name-operation nil inhibit-file-name-handlers nil) (fmakunbound 'after-insert-file-set-coding) (fmakunbound 'format-decode) (setq file-name-handler-alist '((\".\" . hl-handler)) inhibit-file-name-operation 'directory-files inhibit-file-name-handlers '(hl-handler)) (put 'hl-handler 'operations '(directory-files)) (not (null (member \"input\" (directory-files default-directory)))))",
+    "expected": "t"
+  },
+  {
+    "id": "substitute-in-file-name-unrelated",
+    "source": "(progn (setq text-quoting-style 'straight) (setq default-directory @DIR@ buffer-file-name @FILE@ coding-system-for-read 'utf-8-unix coding-system-for-write 'utf-8-unix set-auto-coding-function nil file-coding-system-alist nil write-region-annotate-functions nil write-region-post-annotation-function nil buffer-file-format nil inhibit-file-name-operation nil inhibit-file-name-handlers nil) (fmakunbound 'after-insert-file-set-coding) (fmakunbound 'format-decode) (setq file-name-handler-alist '((\"^/remote:\" . hl-handler))) (equal (substitute-in-file-name \"local.txt\") \"local.txt\"))",
+    "expected": "t"
+  },
+  {
+    "id": "substitute-in-file-name-filtered",
+    "source": "(progn (setq text-quoting-style 'straight) (setq default-directory @DIR@ buffer-file-name @FILE@ coding-system-for-read 'utf-8-unix coding-system-for-write 'utf-8-unix set-auto-coding-function nil file-coding-system-alist nil write-region-annotate-functions nil write-region-post-annotation-function nil buffer-file-format nil inhibit-file-name-operation nil inhibit-file-name-handlers nil) (fmakunbound 'after-insert-file-set-coding) (fmakunbound 'format-decode) (put 'hl-handler 'operations '(unrelated-operation)) (setq file-name-handler-alist '((\".\" . hl-handler))) (equal (substitute-in-file-name \"local.txt\") \"local.txt\"))",
+    "expected": "t"
+  },
+  {
+    "id": "substitute-in-file-name-inhibited",
+    "source": "(progn (setq text-quoting-style 'straight) (setq default-directory @DIR@ buffer-file-name @FILE@ coding-system-for-read 'utf-8-unix coding-system-for-write 'utf-8-unix set-auto-coding-function nil file-coding-system-alist nil write-region-annotate-functions nil write-region-post-annotation-function nil buffer-file-format nil inhibit-file-name-operation nil inhibit-file-name-handlers nil) (fmakunbound 'after-insert-file-set-coding) (fmakunbound 'format-decode) (setq file-name-handler-alist '((\".\" . hl-handler)) inhibit-file-name-operation 'substitute-in-file-name inhibit-file-name-handlers '(hl-handler)) (put 'hl-handler 'operations '(substitute-in-file-name)) (equal (substitute-in-file-name \"local.txt\") \"local.txt\"))",
+    "expected": "t"
+  },
+  {
+    "id": "insert-file-contents-unrelated",
+    "source": "(progn (setq text-quoting-style 'straight) (setq default-directory @DIR@ buffer-file-name @FILE@ coding-system-for-read 'utf-8-unix coding-system-for-write 'utf-8-unix set-auto-coding-function nil file-coding-system-alist nil write-region-annotate-functions nil write-region-post-annotation-function nil buffer-file-format nil inhibit-file-name-operation nil inhibit-file-name-handlers nil) (fmakunbound 'after-insert-file-set-coding) (fmakunbound 'format-decode) (setq file-name-handler-alist '((\"^/remote:\" . hl-handler))) (progn (insert-file-contents buffer-file-name) (equal (buffer-string) \"hello\\n\")))",
+    "expected": "t"
+  },
+  {
+    "id": "insert-file-contents-filtered",
+    "source": "(progn (setq text-quoting-style 'straight) (setq default-directory @DIR@ buffer-file-name @FILE@ coding-system-for-read 'utf-8-unix coding-system-for-write 'utf-8-unix set-auto-coding-function nil file-coding-system-alist nil write-region-annotate-functions nil write-region-post-annotation-function nil buffer-file-format nil inhibit-file-name-operation nil inhibit-file-name-handlers nil) (fmakunbound 'after-insert-file-set-coding) (fmakunbound 'format-decode) (put 'hl-handler 'operations '(unrelated-operation)) (setq file-name-handler-alist '((\".\" . hl-handler))) (progn (insert-file-contents buffer-file-name) (equal (buffer-string) \"hello\\n\")))",
+    "expected": "t"
+  },
+  {
+    "id": "insert-file-contents-inhibited",
+    "source": "(progn (setq text-quoting-style 'straight) (setq default-directory @DIR@ buffer-file-name @FILE@ coding-system-for-read 'utf-8-unix coding-system-for-write 'utf-8-unix set-auto-coding-function nil file-coding-system-alist nil write-region-annotate-functions nil write-region-post-annotation-function nil buffer-file-format nil inhibit-file-name-operation nil inhibit-file-name-handlers nil) (fmakunbound 'after-insert-file-set-coding) (fmakunbound 'format-decode) (setq file-name-handler-alist '((\".\" . hl-handler)) inhibit-file-name-operation 'insert-file-contents inhibit-file-name-handlers '(hl-handler)) (put 'hl-handler 'operations '(insert-file-contents)) (progn (insert-file-contents buffer-file-name) (equal (buffer-string) \"hello\\n\")))",
+    "expected": "t"
+  },
+  {
+    "id": "write-region-unrelated",
+    "source": "(progn (setq text-quoting-style 'straight) (setq default-directory @DIR@ buffer-file-name @FILE@ coding-system-for-read 'utf-8-unix coding-system-for-write 'utf-8-unix set-auto-coding-function nil file-coding-system-alist nil write-region-annotate-functions nil write-region-post-annotation-function nil buffer-file-format nil inhibit-file-name-operation nil inhibit-file-name-handlers nil) (fmakunbound 'after-insert-file-set-coding) (fmakunbound 'format-decode) (setq file-name-handler-alist '((\"^/remote:\" . hl-handler))) (null (write-region \"written\" nil buffer-file-name nil 'silent)))",
+    "expected": "t"
+  },
+  {
+    "id": "write-region-filtered",
+    "source": "(progn (setq text-quoting-style 'straight) (setq default-directory @DIR@ buffer-file-name @FILE@ coding-system-for-read 'utf-8-unix coding-system-for-write 'utf-8-unix set-auto-coding-function nil file-coding-system-alist nil write-region-annotate-functions nil write-region-post-annotation-function nil buffer-file-format nil inhibit-file-name-operation nil inhibit-file-name-handlers nil) (fmakunbound 'after-insert-file-set-coding) (fmakunbound 'format-decode) (put 'hl-handler 'operations '(unrelated-operation)) (setq file-name-handler-alist '((\".\" . hl-handler))) (null (write-region \"written\" nil buffer-file-name nil 'silent)))",
+    "expected": "t"
+  },
+  {
+    "id": "write-region-inhibited",
+    "source": "(progn (setq text-quoting-style 'straight) (setq default-directory @DIR@ buffer-file-name @FILE@ coding-system-for-read 'utf-8-unix coding-system-for-write 'utf-8-unix set-auto-coding-function nil file-coding-system-alist nil write-region-annotate-functions nil write-region-post-annotation-function nil buffer-file-format nil inhibit-file-name-operation nil inhibit-file-name-handlers nil) (fmakunbound 'after-insert-file-set-coding) (fmakunbound 'format-decode) (setq file-name-handler-alist '((\".\" . hl-handler)) inhibit-file-name-operation 'write-region inhibit-file-name-handlers '(hl-handler)) (put 'hl-handler 'operations '(write-region)) (null (write-region \"written\" nil buffer-file-name nil 'silent)))",
+    "expected": "t"
+  },
+  {
+    "id": "set-visited-file-modtime-unrelated",
+    "source": "(progn (setq text-quoting-style 'straight) (setq default-directory @DIR@ buffer-file-name @FILE@ coding-system-for-read 'utf-8-unix coding-system-for-write 'utf-8-unix set-auto-coding-function nil file-coding-system-alist nil write-region-annotate-functions nil write-region-post-annotation-function nil buffer-file-format nil inhibit-file-name-operation nil inhibit-file-name-handlers nil) (fmakunbound 'after-insert-file-set-coding) (fmakunbound 'format-decode) (setq file-name-handler-alist '((\"^/remote:\" . hl-handler))) (null (set-visited-file-modtime)))",
+    "expected": "t"
+  },
+  {
+    "id": "set-visited-file-modtime-filtered",
+    "source": "(progn (setq text-quoting-style 'straight) (setq default-directory @DIR@ buffer-file-name @FILE@ coding-system-for-read 'utf-8-unix coding-system-for-write 'utf-8-unix set-auto-coding-function nil file-coding-system-alist nil write-region-annotate-functions nil write-region-post-annotation-function nil buffer-file-format nil inhibit-file-name-operation nil inhibit-file-name-handlers nil) (fmakunbound 'after-insert-file-set-coding) (fmakunbound 'format-decode) (put 'hl-handler 'operations '(unrelated-operation)) (setq file-name-handler-alist '((\".\" . hl-handler))) (null (set-visited-file-modtime)))",
+    "expected": "t"
+  },
+  {
+    "id": "set-visited-file-modtime-inhibited",
+    "source": "(progn (setq text-quoting-style 'straight) (setq default-directory @DIR@ buffer-file-name @FILE@ coding-system-for-read 'utf-8-unix coding-system-for-write 'utf-8-unix set-auto-coding-function nil file-coding-system-alist nil write-region-annotate-functions nil write-region-post-annotation-function nil buffer-file-format nil inhibit-file-name-operation nil inhibit-file-name-handlers nil) (fmakunbound 'after-insert-file-set-coding) (fmakunbound 'format-decode) (setq file-name-handler-alist '((\".\" . hl-handler)) inhibit-file-name-operation 'set-visited-file-modtime inhibit-file-name-handlers '(hl-handler)) (put 'hl-handler 'operations '(set-visited-file-modtime)) (null (set-visited-file-modtime)))",
+    "expected": "t"
+  },
+  {
+    "id": "verify-visited-file-modtime-unrelated",
+    "source": "(progn (setq text-quoting-style 'straight) (setq default-directory @DIR@ buffer-file-name @FILE@ coding-system-for-read 'utf-8-unix coding-system-for-write 'utf-8-unix set-auto-coding-function nil file-coding-system-alist nil write-region-annotate-functions nil write-region-post-annotation-function nil buffer-file-format nil inhibit-file-name-operation nil inhibit-file-name-handlers nil) (fmakunbound 'after-insert-file-set-coding) (fmakunbound 'format-decode) (setq file-name-handler-alist '((\"^/remote:\" . hl-handler))) (progn (set-visited-file-modtime '(0 1 0 0)) (null (verify-visited-file-modtime))))",
+    "expected": "t"
+  },
+  {
+    "id": "verify-visited-file-modtime-filtered",
+    "source": "(progn (setq text-quoting-style 'straight) (setq default-directory @DIR@ buffer-file-name @FILE@ coding-system-for-read 'utf-8-unix coding-system-for-write 'utf-8-unix set-auto-coding-function nil file-coding-system-alist nil write-region-annotate-functions nil write-region-post-annotation-function nil buffer-file-format nil inhibit-file-name-operation nil inhibit-file-name-handlers nil) (fmakunbound 'after-insert-file-set-coding) (fmakunbound 'format-decode) (put 'hl-handler 'operations '(unrelated-operation)) (setq file-name-handler-alist '((\".\" . hl-handler))) (progn (set-visited-file-modtime '(0 1 0 0)) (null (verify-visited-file-modtime))))",
+    "expected": "t"
+  },
+  {
+    "id": "verify-visited-file-modtime-inhibited",
+    "source": "(progn (setq text-quoting-style 'straight) (setq default-directory @DIR@ buffer-file-name @FILE@ coding-system-for-read 'utf-8-unix coding-system-for-write 'utf-8-unix set-auto-coding-function nil file-coding-system-alist nil write-region-annotate-functions nil write-region-post-annotation-function nil buffer-file-format nil inhibit-file-name-operation nil inhibit-file-name-handlers nil) (fmakunbound 'after-insert-file-set-coding) (fmakunbound 'format-decode) (setq file-name-handler-alist '((\".\" . hl-handler)) inhibit-file-name-operation 'verify-visited-file-modtime inhibit-file-name-handlers '(hl-handler)) (put 'hl-handler 'operations '(verify-visited-file-modtime)) (progn (set-visited-file-modtime '(0 1 0 0)) (null (verify-visited-file-modtime))))",
+    "expected": "t"
+  },
+  {
+    "id": "get-file-buffer-nil-winner",
+    "source": "(progn (setq text-quoting-style 'straight) (setq default-directory @DIR@ buffer-file-name @FILE@ coding-system-for-read 'utf-8-unix coding-system-for-write 'utf-8-unix set-auto-coding-function nil file-coding-system-alist nil write-region-annotate-functions nil write-region-post-annotation-function nil buffer-file-format nil inhibit-file-name-operation nil inhibit-file-name-handlers nil) (fmakunbound 'after-insert-file-set-coding) (fmakunbound 'format-decode) (setq file-name-handler-alist '((\".\" . nil) (\".\" . hl-handler))) (null (get-file-buffer (concat buffer-file-name \"-absent\"))))",
+    "expected": "t"
+  },
+  {
+    "id": "file-accessible-directory-p-nil-winner",
+    "source": "(progn (setq text-quoting-style 'straight) (setq default-directory @DIR@ buffer-file-name @FILE@ coding-system-for-read 'utf-8-unix coding-system-for-write 'utf-8-unix set-auto-coding-function nil file-coding-system-alist nil write-region-annotate-functions nil write-region-post-annotation-function nil buffer-file-format nil inhibit-file-name-operation nil inhibit-file-name-handlers nil) (fmakunbound 'after-insert-file-set-coding) (fmakunbound 'format-decode) (setq file-name-handler-alist '((\".\" . nil) (\".\" . hl-handler))) (file-accessible-directory-p default-directory))",
+    "expected": "t"
+  },
+  {
+    "id": "directory-files-nil-winner",
+    "source": "(progn (setq text-quoting-style 'straight) (setq default-directory @DIR@ buffer-file-name @FILE@ coding-system-for-read 'utf-8-unix coding-system-for-write 'utf-8-unix set-auto-coding-function nil file-coding-system-alist nil write-region-annotate-functions nil write-region-post-annotation-function nil buffer-file-format nil inhibit-file-name-operation nil inhibit-file-name-handlers nil) (fmakunbound 'after-insert-file-set-coding) (fmakunbound 'format-decode) (setq file-name-handler-alist '((\".\" . nil) (\".\" . hl-handler))) (not (null (member \"input\" (directory-files default-directory)))))",
+    "expected": "t"
+  },
+  {
+    "id": "substitute-in-file-name-nil-winner",
+    "source": "(progn (setq text-quoting-style 'straight) (setq default-directory @DIR@ buffer-file-name @FILE@ coding-system-for-read 'utf-8-unix coding-system-for-write 'utf-8-unix set-auto-coding-function nil file-coding-system-alist nil write-region-annotate-functions nil write-region-post-annotation-function nil buffer-file-format nil inhibit-file-name-operation nil inhibit-file-name-handlers nil) (fmakunbound 'after-insert-file-set-coding) (fmakunbound 'format-decode) (setq file-name-handler-alist '((\".\" . nil) (\".\" . hl-handler))) (equal (substitute-in-file-name \"local.txt\") \"local.txt\"))",
+    "expected": "t"
+  },
+  {
+    "id": "insert-file-contents-nil-winner",
+    "source": "(progn (setq text-quoting-style 'straight) (setq default-directory @DIR@ buffer-file-name @FILE@ coding-system-for-read 'utf-8-unix coding-system-for-write 'utf-8-unix set-auto-coding-function nil file-coding-system-alist nil write-region-annotate-functions nil write-region-post-annotation-function nil buffer-file-format nil inhibit-file-name-operation nil inhibit-file-name-handlers nil) (fmakunbound 'after-insert-file-set-coding) (fmakunbound 'format-decode) (setq file-name-handler-alist '((\".\" . nil) (\".\" . hl-handler))) (progn (insert-file-contents buffer-file-name) (equal (buffer-string) \"hello\\n\")))",
+    "expected": "t"
+  },
+  {
+    "id": "write-region-nil-winner",
+    "source": "(progn (setq text-quoting-style 'straight) (setq default-directory @DIR@ buffer-file-name @FILE@ coding-system-for-read 'utf-8-unix coding-system-for-write 'utf-8-unix set-auto-coding-function nil file-coding-system-alist nil write-region-annotate-functions nil write-region-post-annotation-function nil buffer-file-format nil inhibit-file-name-operation nil inhibit-file-name-handlers nil) (fmakunbound 'after-insert-file-set-coding) (fmakunbound 'format-decode) (setq file-name-handler-alist '((\".\" . nil) (\".\" . hl-handler))) (null (write-region \"written\" nil buffer-file-name nil 'silent)))",
+    "expected": "t"
+  },
+  {
+    "id": "set-visited-file-modtime-nil-winner",
+    "source": "(progn (setq text-quoting-style 'straight) (setq default-directory @DIR@ buffer-file-name @FILE@ coding-system-for-read 'utf-8-unix coding-system-for-write 'utf-8-unix set-auto-coding-function nil file-coding-system-alist nil write-region-annotate-functions nil write-region-post-annotation-function nil buffer-file-format nil inhibit-file-name-operation nil inhibit-file-name-handlers nil) (fmakunbound 'after-insert-file-set-coding) (fmakunbound 'format-decode) (setq file-name-handler-alist '((\".\" . nil) (\".\" . hl-handler))) (null (set-visited-file-modtime)))",
+    "expected": "t"
+  },
+  {
+    "id": "verify-visited-file-modtime-nil-winner",
+    "source": "(progn (setq text-quoting-style 'straight) (setq default-directory @DIR@ buffer-file-name @FILE@ coding-system-for-read 'utf-8-unix coding-system-for-write 'utf-8-unix set-auto-coding-function nil file-coding-system-alist nil write-region-annotate-functions nil write-region-post-annotation-function nil buffer-file-format nil inhibit-file-name-operation nil inhibit-file-name-handlers nil) (fmakunbound 'after-insert-file-set-coding) (fmakunbound 'format-decode) (setq file-name-handler-alist '((\".\" . nil) (\".\" . hl-handler))) (progn (set-visited-file-modtime '(0 1 0 0)) (null (verify-visited-file-modtime))))",
+    "expected": "t"
+  },
+  {
+    "id": "get-file-buffer-selected",
+    "source": "(progn (setq text-quoting-style 'straight) (setq default-directory @DIR@ buffer-file-name @FILE@ coding-system-for-read 'utf-8-unix coding-system-for-write 'utf-8-unix set-auto-coding-function nil file-coding-system-alist nil write-region-annotate-functions nil write-region-post-annotation-function nil buffer-file-format nil inhibit-file-name-operation nil inhibit-file-name-handlers nil) (fmakunbound 'after-insert-file-set-coding) (fmakunbound 'format-decode) (defun hl-handler (&rest args) (error \"HL selected get-file-buffer\")) (put 'hl-handler 'operations '(get-file-buffer)) (setq file-name-handler-alist '((\".\" . hl-handler))) (condition-case e (null (get-file-buffer buffer-file-name)) (error (car (cdr e)))))",
+    "candidate_expected": "\"VM2 get-file-buffer matching file name handler is unsupported\"",
+    "expected": "\"HL selected get-file-buffer\""
+  },
+  {
+    "id": "file-accessible-directory-p-selected",
+    "source": "(progn (setq text-quoting-style 'straight) (setq default-directory @DIR@ buffer-file-name @FILE@ coding-system-for-read 'utf-8-unix coding-system-for-write 'utf-8-unix set-auto-coding-function nil file-coding-system-alist nil write-region-annotate-functions nil write-region-post-annotation-function nil buffer-file-format nil inhibit-file-name-operation nil inhibit-file-name-handlers nil) (fmakunbound 'after-insert-file-set-coding) (fmakunbound 'format-decode) (defun hl-handler (&rest args) (error \"HL selected file-accessible-directory-p\")) (put 'hl-handler 'operations '(file-accessible-directory-p)) (setq file-name-handler-alist '((\".\" . hl-handler))) (condition-case e (file-accessible-directory-p default-directory) (error (car (cdr e)))))",
+    "candidate_expected": "\"VM2 file-accessible-directory-p matching file name handler is unsupported\"",
+    "expected": "\"HL selected file-accessible-directory-p\""
+  },
+  {
+    "id": "directory-files-selected",
+    "source": "(progn (setq text-quoting-style 'straight) (setq default-directory @DIR@ buffer-file-name @FILE@ coding-system-for-read 'utf-8-unix coding-system-for-write 'utf-8-unix set-auto-coding-function nil file-coding-system-alist nil write-region-annotate-functions nil write-region-post-annotation-function nil buffer-file-format nil inhibit-file-name-operation nil inhibit-file-name-handlers nil) (fmakunbound 'after-insert-file-set-coding) (fmakunbound 'format-decode) (defun hl-handler (&rest args) (error \"HL selected directory-files\")) (put 'hl-handler 'operations '(directory-files)) (setq file-name-handler-alist '((\".\" . hl-handler))) (condition-case e (not (null (member \"input\" (directory-files default-directory)))) (error (car (cdr e)))))",
+    "candidate_expected": "\"VM2 directory-files matching file name handler is unsupported\"",
+    "expected": "\"HL selected directory-files\""
+  },
+  {
+    "id": "insert-file-contents-selected",
+    "source": "(progn (setq text-quoting-style 'straight) (setq default-directory @DIR@ buffer-file-name @FILE@ coding-system-for-read 'utf-8-unix coding-system-for-write 'utf-8-unix set-auto-coding-function nil file-coding-system-alist nil write-region-annotate-functions nil write-region-post-annotation-function nil buffer-file-format nil inhibit-file-name-operation nil inhibit-file-name-handlers nil) (fmakunbound 'after-insert-file-set-coding) (fmakunbound 'format-decode) (defun hl-handler (&rest args) (error \"HL selected insert-file-contents\")) (put 'hl-handler 'operations '(insert-file-contents)) (setq file-name-handler-alist '((\".\" . hl-handler))) (condition-case e (progn (insert-file-contents buffer-file-name) (equal (buffer-string) \"hello\\n\")) (error (car (cdr e)))))",
+    "candidate_expected": "\"VM2 insert-file-contents matching file name handler is unsupported\"",
+    "expected": "\"HL selected insert-file-contents\""
+  },
+  {
+    "id": "write-region-selected",
+    "source": "(progn (setq text-quoting-style 'straight) (setq default-directory @DIR@ buffer-file-name @FILE@ coding-system-for-read 'utf-8-unix coding-system-for-write 'utf-8-unix set-auto-coding-function nil file-coding-system-alist nil write-region-annotate-functions nil write-region-post-annotation-function nil buffer-file-format nil inhibit-file-name-operation nil inhibit-file-name-handlers nil) (fmakunbound 'after-insert-file-set-coding) (fmakunbound 'format-decode) (defun hl-handler (&rest args) (error \"HL selected write-region\")) (put 'hl-handler 'operations '(write-region)) (setq file-name-handler-alist '((\".\" . hl-handler))) (condition-case e (null (write-region \"written\" nil buffer-file-name nil 'silent)) (error (car (cdr e)))))",
+    "candidate_expected": "\"VM2 write-region matching file name handler is unsupported\"",
+    "expected": "\"HL selected write-region\""
+  },
+  {
+    "id": "set-visited-file-modtime-selected",
+    "source": "(progn (setq text-quoting-style 'straight) (setq default-directory @DIR@ buffer-file-name @FILE@ coding-system-for-read 'utf-8-unix coding-system-for-write 'utf-8-unix set-auto-coding-function nil file-coding-system-alist nil write-region-annotate-functions nil write-region-post-annotation-function nil buffer-file-format nil inhibit-file-name-operation nil inhibit-file-name-handlers nil) (fmakunbound 'after-insert-file-set-coding) (fmakunbound 'format-decode) (defun hl-handler (&rest args) (error \"HL selected set-visited-file-modtime\")) (put 'hl-handler 'operations '(set-visited-file-modtime)) (setq file-name-handler-alist '((\".\" . hl-handler))) (condition-case e (null (set-visited-file-modtime)) (error (car (cdr e)))))",
+    "candidate_expected": "\"VM2 set-visited-file-modtime matching file name handler is unsupported\"",
+    "expected": "\"HL selected set-visited-file-modtime\""
+  },
+  {
+    "id": "verify-visited-file-modtime-selected",
+    "source": "(progn (setq text-quoting-style 'straight) (setq default-directory @DIR@ buffer-file-name @FILE@ coding-system-for-read 'utf-8-unix coding-system-for-write 'utf-8-unix set-auto-coding-function nil file-coding-system-alist nil write-region-annotate-functions nil write-region-post-annotation-function nil buffer-file-format nil inhibit-file-name-operation nil inhibit-file-name-handlers nil) (fmakunbound 'after-insert-file-set-coding) (fmakunbound 'format-decode) (defun hl-handler (&rest args) (error \"HL selected verify-visited-file-modtime\")) (put 'hl-handler 'operations '(verify-visited-file-modtime)) (setq file-name-handler-alist '((\".\" . hl-handler))) (condition-case e (progn (set-visited-file-modtime '(0 1 0 0)) (null (verify-visited-file-modtime))) (error (car (cdr e)))))",
+    "candidate_expected": "\"VM2 verify-visited-file-modtime matching file name handler is unsupported\"",
+    "expected": "\"HL selected verify-visited-file-modtime\""
+  },
+  {
+    "id": "substitute-callback",
+    "source": "(progn (setq text-quoting-style 'straight) (setq default-directory @DIR@ buffer-file-name @FILE@ coding-system-for-read 'utf-8-unix coding-system-for-write 'utf-8-unix set-auto-coding-function nil file-coding-system-alist nil write-region-annotate-functions nil write-region-post-annotation-function nil buffer-file-format nil inhibit-file-name-operation nil inhibit-file-name-handlers nil) (fmakunbound 'after-insert-file-set-coding) (fmakunbound 'format-decode) (defun hl-handler (op name) (progn (garbage-collect) (concat (symbol-name op) \":\" name))) (put 'hl-handler 'operations '(substitute-in-file-name)) (setq file-name-handler-alist '((\".\" . hl-handler))) (condition-case e (equal (substitute-in-file-name \"local.txt\") \"substitute-in-file-name:local.txt\") (error (car (cdr e)))))",
+    "expected": "t"
+  },
+  {
+    "id": "substitute-invalid-return",
+    "source": "(progn (setq text-quoting-style 'straight) (setq default-directory @DIR@ buffer-file-name @FILE@ coding-system-for-read 'utf-8-unix coding-system-for-write 'utf-8-unix set-auto-coding-function nil file-coding-system-alist nil write-region-annotate-functions nil write-region-post-annotation-function nil buffer-file-format nil inhibit-file-name-operation nil inhibit-file-name-handlers nil) (fmakunbound 'after-insert-file-set-coding) (fmakunbound 'format-decode) (defun hl-handler (op name) 42) (put 'hl-handler 'operations '(substitute-in-file-name)) (setq file-name-handler-alist '((\".\" . hl-handler))) (condition-case e (substitute-in-file-name \"local.txt\") (error (car e))))",
+    "expected": "error"
+  },
+  {
+    "id": "raw-expansion-selected",
+    "source": "(progn (setq default-directory @DIR@ buffer-file-name @FILE@ coding-system-for-read 'utf-8-unix coding-system-for-write 'utf-8-unix set-auto-coding-function nil file-coding-system-alist nil write-region-annotate-functions nil write-region-post-annotation-function nil buffer-file-format nil inhibit-file-name-operation nil inhibit-file-name-handlers nil) (fmakunbound 'after-insert-file-set-coding) (fmakunbound 'format-decode) (setq text-quoting-style 'straight) (defun hl-handler (&rest args) (error \"HL selected expand-file-name\")) (put 'hl-handler 'operations '(expand-file-name)) (setq file-name-handler-alist '((\"^local\" . hl-handler))) (condition-case e (get-file-buffer \"local\") (error (car (cdr e)))))",
+    "candidate_expected": "\"VM2 expand-file-name matching file name handler is unsupported\"",
+    "expected": "\"HL selected expand-file-name\""
+  },
+  {
+    "id": "default-expansion-selected",
+    "source": "(progn (setq default-directory @DIR@ buffer-file-name @FILE@ coding-system-for-read 'utf-8-unix coding-system-for-write 'utf-8-unix set-auto-coding-function nil file-coding-system-alist nil write-region-annotate-functions nil write-region-post-annotation-function nil buffer-file-format nil inhibit-file-name-operation nil inhibit-file-name-handlers nil) (fmakunbound 'after-insert-file-set-coding) (fmakunbound 'format-decode) (setq text-quoting-style 'straight) (defun hl-handler (&rest args) (error \"HL selected expand-file-name\")) (put 'hl-handler 'operations '(expand-file-name)) (setq default-directory \"/remote:/\" file-name-handler-alist '((\"^/remote:\" . hl-handler))) (condition-case e (get-file-buffer \"local\") (error (car (cdr e)))))",
+    "candidate_expected": "\"VM2 expand-file-name matching file name handler is unsupported\"",
+    "expected": "\"HL selected expand-file-name\""
+  },
+  {
+    "id": "normalized-expansion-selected",
+    "source": "(progn (setq default-directory @DIR@ buffer-file-name @FILE@ coding-system-for-read 'utf-8-unix coding-system-for-write 'utf-8-unix set-auto-coding-function nil file-coding-system-alist nil write-region-annotate-functions nil write-region-post-annotation-function nil buffer-file-format nil inhibit-file-name-operation nil inhibit-file-name-handlers nil) (fmakunbound 'after-insert-file-set-coding) (fmakunbound 'format-decode) (setq text-quoting-style 'straight) (defun hl-handler (&rest args) (error \"HL selected expand-file-name\")) (put 'hl-handler 'operations '(expand-file-name)) (setq file-name-handler-alist '((\"/magic/\" . hl-handler))) (condition-case e (get-file-buffer \"/x/../magic/file\") (error (car (cdr e)))))",
+    "candidate_expected": "\"VM2 expand-file-name matching file name handler is unsupported\"",
+    "expected": "\"HL selected expand-file-name\""
+  },
+  {
+    "id": "write-original-visit-selected",
+    "source": "(progn (setq default-directory @DIR@ buffer-file-name @FILE@ coding-system-for-read 'utf-8-unix coding-system-for-write 'utf-8-unix set-auto-coding-function nil file-coding-system-alist nil write-region-annotate-functions nil write-region-post-annotation-function nil buffer-file-format nil inhibit-file-name-operation nil inhibit-file-name-handlers nil) (fmakunbound 'after-insert-file-set-coding) (fmakunbound 'format-decode) (setq text-quoting-style 'straight) (defun hl-handler (&rest args) (error \"HL selected write-region\")) (put 'hl-handler 'operations '(write-region)) (setq file-name-handler-alist '((\"^remote\" . hl-handler))) (condition-case e (write-region \"new\" nil buffer-file-name nil \"remote\") (error (car (cdr e)))))",
+    "candidate_expected": "\"VM2 write-region matching file name handler is unsupported\"",
+    "expected": "\"HL selected write-region\""
+  },
+  {
+    "id": "match-data-preserved",
+    "source": "(progn (setq default-directory @DIR@ buffer-file-name @FILE@ coding-system-for-read 'utf-8-unix coding-system-for-write 'utf-8-unix set-auto-coding-function nil file-coding-system-alist nil write-region-annotate-functions nil write-region-post-annotation-function nil buffer-file-format nil inhibit-file-name-operation nil inhibit-file-name-handlers nil) (fmakunbound 'after-insert-file-set-coding) (fmakunbound 'format-decode) (setq text-quoting-style 'straight) (setq file-name-handler-alist '((\"absent\" . hl-handler))) (string-match \"ell\" \"hello\") (let ((before (match-data))) (get-file-buffer buffer-file-name) (equal before (match-data))))",
+    "expected": "t"
+  },
+  {
+    "id": "invalid-regexp-not-filtered-away",
+    "source": "(progn (setq default-directory @DIR@ buffer-file-name @FILE@ coding-system-for-read 'utf-8-unix coding-system-for-write 'utf-8-unix set-auto-coding-function nil file-coding-system-alist nil write-region-annotate-functions nil write-region-post-annotation-function nil buffer-file-format nil inhibit-file-name-operation nil inhibit-file-name-handlers nil) (fmakunbound 'after-insert-file-set-coding) (fmakunbound 'format-decode) (setq text-quoting-style 'straight) (put 'hl-handler 'operations '(unrelated)) (setq file-name-handler-alist '((\"[\" . hl-handler))) (condition-case e (get-file-buffer buffer-file-name) (error (car e))))",
+    "expected": "invalid-regexp"
+  },
+  {
+    "id": "write-lock-selected",
+    "source": "(progn (setq default-directory @DIR@ buffer-file-name @FILE@ coding-system-for-read 'utf-8-unix coding-system-for-write 'utf-8-unix set-auto-coding-function nil file-coding-system-alist nil write-region-annotate-functions nil write-region-post-annotation-function nil buffer-file-format nil inhibit-file-name-operation nil inhibit-file-name-handlers nil) (fmakunbound 'after-insert-file-set-coding) (fmakunbound 'format-decode) (setq text-quoting-style 'straight) (defun hl-handler (&rest args) (error \"HL selected lock-file\")) (put 'hl-handler 'operations '(lock-file)) (setq file-name-handler-alist '((\".\" . hl-handler))) (condition-case e (write-region \"new\" nil buffer-file-name nil 'silent) (error (car (cdr e)))))",
+    "candidate_expected": "\"VM2 lock-file matching file name handler is unsupported\"",
+    "expected": "\"HL selected lock-file\""
+  },
+  {
+    "id": "write-unlock-selected",
+    "source": "(progn (setq default-directory @DIR@ buffer-file-name @FILE@ coding-system-for-read 'utf-8-unix coding-system-for-write 'utf-8-unix set-auto-coding-function nil file-coding-system-alist nil write-region-annotate-functions nil write-region-post-annotation-function nil buffer-file-format nil inhibit-file-name-operation nil inhibit-file-name-handlers nil) (fmakunbound 'after-insert-file-set-coding) (fmakunbound 'format-decode) (setq text-quoting-style 'straight) (defun hl-handler (&rest args) (error \"HL selected unlock-file\")) (put 'hl-handler 'operations '(unlock-file)) (setq file-name-handler-alist '((\".\" . hl-handler))) (condition-case e (write-region \"new\" nil buffer-file-name nil 'silent) (error (car (cdr e)))))",
+    "candidate_expected": "\"VM2 unlock-file matching file name handler is unsupported\"",
+    "expected": "\"HL selected unlock-file\""
+  },
+  {
+    "id": "insert-unlock-selected",
+    "source": "(progn (setq default-directory @DIR@ buffer-file-name @FILE@ coding-system-for-read 'utf-8-unix coding-system-for-write 'utf-8-unix set-auto-coding-function nil file-coding-system-alist nil write-region-annotate-functions nil write-region-post-annotation-function nil buffer-file-format nil inhibit-file-name-operation nil inhibit-file-name-handlers nil) (fmakunbound 'after-insert-file-set-coding) (fmakunbound 'format-decode) (setq text-quoting-style 'straight) (defun hl-handler (&rest args) (error \"HL selected unlock-file\")) (put 'hl-handler 'operations '(unlock-file)) (setq file-name-handler-alist '((\".\" . hl-handler))) (condition-case e (insert-file-contents buffer-file-name t) (error (car (cdr e)))))",
+    "candidate_expected": "\"VM2 unlock-file matching file name handler is unsupported\"",
+    "expected": "\"HL selected unlock-file\""
+  },
+  {
+    "id": "tilde-default-selected",
+    "source": "(progn (setq default-directory @DIR@ buffer-file-name @FILE@ coding-system-for-read 'utf-8-unix coding-system-for-write 'utf-8-unix set-auto-coding-function nil file-coding-system-alist nil write-region-annotate-functions nil write-region-post-annotation-function nil buffer-file-format nil inhibit-file-name-operation nil inhibit-file-name-handlers nil) (fmakunbound 'after-insert-file-set-coding) (fmakunbound 'format-decode) (setq text-quoting-style 'straight) (defun hl-handler (&rest args) (error \"HL selected expand-file-name\")) (put 'hl-handler 'operations '(expand-file-name)) (setq file-name-handler-alist (list (cons (concat \"^\" @HOME@) 'hl-handler)) default-directory \"~/\") (condition-case e (get-file-buffer \"/input\") (error (car (cdr e)))))",
+    "candidate_expected": "\"VM2 expand-file-name matching file name handler is unsupported\"",
+    "expected": "\"HL selected expand-file-name\""
+  }
+]

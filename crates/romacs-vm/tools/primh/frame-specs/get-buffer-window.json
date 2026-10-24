@@ -1,0 +1,46 @@
+{
+ "name": "get-buffer-window",
+ "arity": [
+  0,
+  2
+ ],
+ "effect": "reads",
+ "gnu_files": [
+  "window.c"
+ ],
+ "gnu_def": "window.c:3309",
+ "args": [
+  "none",
+  "none"
+ ],
+ "extra": {
+  "0": [
+   "nil",
+   "1",
+   "'symbol"
+  ],
+  "1": [
+   "nil",
+   "t",
+   "0",
+   "'visible"
+  ]
+ },
+ "probes": [
+  "(fboundp 'get-buffer-window)",
+  "(eq (get-buffer-window) (selected-window))",
+  "(eq (get-buffer-window (current-buffer)) (selected-window))",
+  "(eq (get-buffer-window (buffer-name)) (selected-window))",
+  "(get-buffer-window \"frame-probe-missing-buffer\")",
+  "(get-buffer-window (get-buffer-create \"frame-probe-undisplayed\"))",
+  "(eq (funcall #'get-buffer-window nil t) (selected-window))",
+  "(eq (get-buffer-window nil nil) (selected-window))",
+  "(eq (get-buffer-window nil t) (selected-window))",
+  "(eq (get-buffer-window nil 0) (selected-window))",
+  "(eq (get-buffer-window nil 'visible) (selected-window))",
+  "(eq (get-buffer-window nil (selected-frame)) (selected-window))",
+  "(let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (let ((buf (get-buffer-create \"frame-probe-other\"))) (set-window-buffer b buf) (list (eq (get-buffer-window buf) b) (eq (get-buffer-window nil) a))))",
+  "(let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (let* ((hb (window-pixel-height b)) (half-b (/ hb 2)) (c (progn (set-window-new-pixel b (- hb half-b)) (split-window-internal b half-b nil 0.5))) (x (get-buffer-create \"frame-search-cyclic\"))) (set-window-buffer a x) (set-window-buffer c x) (select-window b) (eq (get-buffer-window x) c)))"
+ ],
+ "rust": "src/prims/frame.rs:22"
+}

@@ -1,0 +1,289 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "string-search",
+ "spec_sha256": "e249f36bcdc5ce50c4ba7d5ad33f2894f65348a0014a3fb320dc828477bd6ffe",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "string-search",
+    "subr",
+    2,
+    3
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "fns.c": "db81c235d7c63f312128ad84c11d55ae4665a2599099be1229dbaa329afdb3bf"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "string-search/0000",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'string-search '(1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr string-search> 1))"
+  },
+  {
+   "id": "string-search/0001",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'string-search '(1 1 1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr string-search> 4))"
+  },
+  {
+   "id": "string-search/0002",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-search \"b\" \"abc\")) (error (list 'sig e))))",
+   "expected": "(ok 1)"
+  },
+  {
+   "id": "string-search/0003",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-search \"x\" \"abc\")) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "string-search/0004",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-search \"a\" \"abc\")) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "string-search/0005",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-search \"c\" \"abc\")) (error (list 'sig e))))",
+   "expected": "(ok 2)"
+  },
+  {
+   "id": "string-search/0006",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-search \"λ\" \"é🙂λz\")) (error (list 'sig e))))",
+   "expected": "(ok 2)"
+  },
+  {
+   "id": "string-search/0007",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-search \"z\" \"é🙂λz\")) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-search/0008",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-search \"é🙂\" \"xé🙂z\")) (error (list 'sig e))))",
+   "expected": "(ok 1)"
+  },
+  {
+   "id": "string-search/0009",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-search \"\" \"é🙂\" 1)) (error (list 'sig e))))",
+   "expected": "(ok 1)"
+  },
+  {
+   "id": "string-search/0010",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-search \"\" \"é🙂\" 2)) (error (list 'sig e))))",
+   "expected": "(ok 2)"
+  },
+  {
+   "id": "string-search/0011",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-search \"\" \"\")) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "string-search/0012",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-search \"a\" \"aba\" 0)) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "string-search/0013",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-search \"a\" \"aba\" 1)) (error (list 'sig e))))",
+   "expected": "(ok 2)"
+  },
+  {
+   "id": "string-search/0014",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-search \"a\" \"aba\" 3)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "string-search/0015",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-search \"a\" \"aba\" nil)) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "string-search/0016",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-search \"a\" \"aba\" 4)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range 4))"
+  },
+  {
+   "id": "string-search/0017",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-search \"a\" \"aba\" -1)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range -1))"
+  },
+  {
+   "id": "string-search/0018",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-search \"a\" \"aba\" 1.0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument fixnump 1.0))"
+  },
+  {
+   "id": "string-search/0019",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-search \"a\" \"aba\" 'x)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument fixnump x))"
+  },
+  {
+   "id": "string-search/0020",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-search 1 \"a\")) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 1))"
+  },
+  {
+   "id": "string-search/0021",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-search \"a\" 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 1))"
+  },
+  {
+   "id": "string-search/0022",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-search 1 2 'x)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 1))"
+  },
+  {
+   "id": "string-search/0023",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-search \"A\" \"a\")) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "string-search/0024",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-search (unibyte-string 255) (unibyte-string 97 255))) (error (list 'sig e))))",
+   "expected": "(ok 1)"
+  },
+  {
+   "id": "string-search/0025",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-search (unibyte-string 255) (string 97 #x3fffff))) (error (list 'sig e))))",
+   "expected": "(ok 1)"
+  },
+  {
+   "id": "string-search/0026",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-search (string #x3fffff) (unibyte-string 97 255))) (error (list 'sig e))))",
+   "expected": "(ok 1)"
+  },
+  {
+   "id": "string-search/0027",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-search \"é\" (unibyte-string 233))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "string-search/0028",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-search (unibyte-string 233) \"é\")) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "string-search/0029",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-search (string #x200000) (string 97 #x200000))) (error (list 'sig e))))",
+   "expected": "(ok 1)"
+  },
+  {
+   "id": "string-search/0030",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-search (string #xd800) (string 97 #xd800))) (error (list 'sig e))))",
+   "expected": "(ok 1)"
+  },
+  {
+   "id": "string-search/0031",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-search \"a\" (string-to-multibyte \"ba\"))) (error (list 'sig e))))",
+   "expected": "(ok 1)"
+  },
+  {
+   "id": "string-search/0032",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-search (propertize \"a\" 'face 'bold) \"ba\")) (error (list 'sig e))))",
+   "expected": "(ok 1)"
+  },
+  {
+   "id": "string-search/0033",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (fboundp 'string-search) (functionp #'string-search) (funcall #'string-search \"z\" \"éz\"))) (error (list 'sig e))))",
+   "expected": "(ok (t t 1))"
+  },
+  {
+   "id": "string-search/0034",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-search \"a\" \"a\" #x2000000000000000)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument fixnump 2305843009213693952))"
+  },
+  {
+   "id": "string-search/0035",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-search (unibyte-string #xc3 #xa9) \"é\")) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "string-search/0036",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-search \"é\" (unibyte-string #xc3 #xa9))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "string-search/0037",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-search (string 97 #x3fffff) (unibyte-string 120 97 255))) (error (list 'sig e))))",
+   "expected": "(ok 1)"
+  },
+  {
+   "id": "string-search/0038",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-search (unibyte-string 97 255) (string 120 97 #x3fffff))) (error (list 'sig e))))",
+   "expected": "(ok 1)"
+  },
+  {
+   "id": "string-search/0039",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-search \"é\" \"éaé\" 1)) (error (list 'sig e))))",
+   "expected": "(ok 2)"
+  },
+  {
+   "id": "string-search/0040",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"\")) (error (list 'sig e))))",
+   "expected": "(ok \"\")"
+  },
+  {
+   "id": "string-search/0041",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"abc\")) (error (list 'sig e))))",
+   "expected": "(ok \"abc\")"
+  },
+  {
+   "id": "string-search/0042",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"λx\")) (error (list 'sig e))))",
+   "expected": "(ok \"λx\")"
+  }
+ ]
+}

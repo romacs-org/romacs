@@ -1,0 +1,59 @@
+{
+  "gnu_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+  "cases": [
+    {
+      "name": "reader-obarray",
+      "source": "(let ((obarray (obarray-make))) (eq (car (read-from-string \"obarray-gap-x\")) (intern \"obarray-gap-x\" obarray)))",
+      "gnu": "t",
+      "gnu_stdout_hex": "74",
+      "gnu_error": "",
+      "gnu_exit": 0,
+      "vm": "nil\n",
+      "vm_error": "",
+      "vm_exit": 0
+    },
+    {
+      "name": "invalid-current-reset",
+      "source": "(let ((obarray 7)) (condition-case nil (intern \"obarray-gap-x\") (error nil)) (obarrayp obarray))",
+      "gnu": "t",
+      "gnu_stdout_hex": "74",
+      "gnu_error": "",
+      "gnu_exit": 0,
+      "vm": "nil\n",
+      "vm_error": "",
+      "vm_exit": 0
+    },
+    {
+      "name": "raw-name",
+      "source": "(condition-case e (symbol-name (intern (unibyte-string 255) (obarray-make))) (error e))",
+      "gnu": "\"\\xc1\\xbf\"",
+      "gnu_stdout_hex": "22c1bf22",
+      "gnu_error": "",
+      "gnu_exit": 0,
+      "vm": "(not-unicode-string #u8(255))\n",
+      "vm_error": "",
+      "vm_exit": 0
+    },
+    {
+      "name": "initial-order",
+      "source": "(let ((a (intern \"zz-gap-alpha\")) (b (intern \"zz-gap-bravo\")) (c (intern \"zz-gap-charlie\")) (out nil)) (mapatoms (lambda (s) (if (or (eq s a) (eq s b) (eq s c)) (setq out (cons (symbol-name s) out))))) out)",
+      "gnu": "(\"zz-gap-bravo\" \"zz-gap-alpha\" \"zz-gap-charlie\")",
+      "gnu_stdout_hex": "28227a7a2d6761702d627261766f2220227a7a2d6761702d616c7068612220227a7a2d6761702d636861726c69652229",
+      "gnu_error": "",
+      "gnu_exit": 0,
+      "vm": "(#u8(122 122 45 103 97 112 45 99 104 97 114 108 105 101) #u8(122 122 45 103 97 112 45 98 114 97 118 111) #u8(122 122 45 103 97 112 45 97 108 112 104 97))\n",
+      "vm_error": "",
+      "vm_exit": 0
+    },
+    {
+      "name": "generated-call-head",
+      "source": "(let ((s (intern \"f\" (obarray-make)))) (fset s (lambda () 1)) (funcall (eval (list (quote function) (list (quote lambda) nil (list s))) t)))",
+      "gnu": "1",
+      "gnu_exit": 0,
+      "vm": "",
+      "vm_error": "vm2: symbol required\n",
+      "vm_exit": 1
+    }
+  ],
+  "vm_sha256": "1b3334a5d1255da52aa60a023c4896925ca181ac1dfe25c36eaded23698716b9"
+}

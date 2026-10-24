@@ -1,0 +1,12 @@
+;; -*- lexical-binding: t -*-
+(menu-bar-mode 1)
+(prin1 (list (menu-bar-mode) (menu-bar-mode nil))) (terpri)
+(setq menu-bar-mode 'enabled)
+(prin1 (menu-bar-mode 'toggle)) (terpri)
+(prin1 (list (menu-bar-mode 0.5) (menu-bar-mode 'anything))) (terpri)
+(menu-bar-mode -1)
+(with-temp-buffer (make-local-variable 'menu-bar-mode) (prin1 (list (menu-bar-mode 1) menu-bar-mode (with-temp-buffer menu-bar-mode)))) (terpri)
+(prin1 (let ((truncate-lines t)) (with-temp-buffer truncate-lines))) (terpri)
+(let ((b (generate-new-buffer "s124-byte-name")))
+  (unwind-protect (prin1 (eq (get-buffer (string-as-unibyte "s124-byte-name")) b)) (kill-buffer b))) (terpri)
+(with-temp-buffer (make-local-variable 'load-path) (set 'load-path (list (or (getenv "ROMACS_LISP_DIR") (error "Set ROMACS_LISP_DIR to the Lisp fixture directory")))) (prin1 (locate-library "subr"))) (terpri)

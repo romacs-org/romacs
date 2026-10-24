@@ -1,0 +1,51 @@
+{
+  "name": "exp",
+  "arity": [
+    1,
+    1
+  ],
+  "effect": "pure",
+  "gnu_files": [
+    "floatfns.c",
+    "bignum.c"
+  ],
+  "gnu_def": "floatfns.c:210",
+  "rust": "src/prims/leaf_scalars.rs:27",
+  "args": [
+    "none"
+  ],
+  "probes": [
+    "(exp -1000)",
+    "(exp 1000)",
+    "(exp 709)",
+    "(= (exp -745) 5e-324)",
+    "(exp (car (read-from-string \"#x200000000000000001\")))",
+    "(exp (car (read-from-string \"#x-200000000000000001\")))",
+    "(list (fboundp 'exp) (functionp #'exp) (funcall #'exp 0))"
+  ],
+  "extra": {
+    "0": [
+      "0",
+      "1",
+      "-1",
+      "2",
+      "-2",
+      "0.0",
+      "-0.0",
+      "0.5",
+      "1.25",
+      "-3.75",
+      "most-positive-fixnum",
+      "most-negative-fixnum",
+      "1.0e+INF",
+      "-1.0e+INF",
+      "0.0e+NaN",
+      "nil",
+      "t",
+      "'wrong",
+      "\"bad\"",
+      "'(1)",
+      "[1]"
+    ]
+  }
+}

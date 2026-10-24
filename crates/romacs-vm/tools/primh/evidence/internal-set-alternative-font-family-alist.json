@@ -1,0 +1,430 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "internal-set-alternative-font-family-alist",
+ "spec_sha256": "c409cd218556e031518baa236aef386ca72801bbb76201f0ee996241ad69b639",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "internal-set-alternative-font-family-alist",
+    "subr",
+    1,
+    1
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "xfaces.c": "b1b0af98fe30cdbf25c9043fd6995e86554b99e3554eecdcf12acf5ccca6672e",
+  "fns.c": "db81c235d7c63f312128ad84c11d55ae4665a2599099be1229dbaa329afdb3bf",
+  "lread.c": "f343ea2619bd35d4a0a41c15d3143045acd0cecc06ea0e449c65141b4f146c53"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "internal-set-alternative-font-family-alist/0000",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'internal-set-alternative-font-family-alist '())) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr internal-set-alternative-font-family-alist> 0))"
+  },
+  {
+   "id": "internal-set-alternative-font-family-alist/0001",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'internal-set-alternative-font-family-alist '(1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr internal-set-alternative-font-family-alist> 2))"
+  },
+  {
+   "id": "internal-set-alternative-font-family-alist/0002",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal-set-alternative-font-family-alist nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "internal-set-alternative-font-family-alist/0003",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal-set-alternative-font-family-alist '(nil nil))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "internal-set-alternative-font-family-alist/0004",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal-set-alternative-font-family-alist '((\"AbC\" \"DeF\") (\"Other\")))) (error (list 'sig e))))",
+   "expected": "(ok ((AbC DeF) (Other)))"
+  },
+  {
+   "id": "internal-set-alternative-font-family-alist/0005",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal-set-alternative-font-family-alist 'oops)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp oops))"
+  },
+  {
+   "id": "internal-set-alternative-font-family-alist/0006",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal-set-alternative-font-family-alist t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp t))"
+  },
+  {
+   "id": "internal-set-alternative-font-family-alist/0007",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal-set-alternative-font-family-alist 42)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 42))"
+  },
+  {
+   "id": "internal-set-alternative-font-family-alist/0008",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal-set-alternative-font-family-alist 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1.5))"
+  },
+  {
+   "id": "internal-set-alternative-font-family-alist/0009",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal-set-alternative-font-family-alist \"abc\")) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"abc\"))"
+  },
+  {
+   "id": "internal-set-alternative-font-family-alist/0010",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal-set-alternative-font-family-alist [])) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp []))"
+  },
+  {
+   "id": "internal-set-alternative-font-family-alist/0011",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal-set-alternative-font-family-alist [nil])) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp [nil]))"
+  },
+  {
+   "id": "internal-set-alternative-font-family-alist/0012",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal-set-alternative-font-family-alist '((\"AbC\") . oops))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp oops))"
+  },
+  {
+   "id": "internal-set-alternative-font-family-alist/0013",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal-set-alternative-font-family-alist '((\"AbC\") . 42))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 42))"
+  },
+  {
+   "id": "internal-set-alternative-font-family-alist/0014",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal-set-alternative-font-family-alist '(oops . tail))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp tail))"
+  },
+  {
+   "id": "internal-set-alternative-font-family-alist/0015",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal-set-alternative-font-family-alist '(oops))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp oops))"
+  },
+  {
+   "id": "internal-set-alternative-font-family-alist/0016",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal-set-alternative-font-family-alist '(t))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp t))"
+  },
+  {
+   "id": "internal-set-alternative-font-family-alist/0017",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal-set-alternative-font-family-alist '(42))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 42))"
+  },
+  {
+   "id": "internal-set-alternative-font-family-alist/0018",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal-set-alternative-font-family-alist '(1.5))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1.5))"
+  },
+  {
+   "id": "internal-set-alternative-font-family-alist/0019",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal-set-alternative-font-family-alist '([]))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp []))"
+  },
+  {
+   "id": "internal-set-alternative-font-family-alist/0020",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal-set-alternative-font-family-alist '(\"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"abc\"))"
+  },
+  {
+   "id": "internal-set-alternative-font-family-alist/0021",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal-set-alternative-font-family-alist '((\"AbC\" . tail)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp tail))"
+  },
+  {
+   "id": "internal-set-alternative-font-family-alist/0022",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal-set-alternative-font-family-alist '((42 . tail)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp tail))"
+  },
+  {
+   "id": "internal-set-alternative-font-family-alist/0023",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal-set-alternative-font-family-alist '((\"AbC\" . 42)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 42))"
+  },
+  {
+   "id": "internal-set-alternative-font-family-alist/0024",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal-set-alternative-font-family-alist '((nil)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "internal-set-alternative-font-family-alist/0025",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal-set-alternative-font-family-alist '((oops)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp oops))"
+  },
+  {
+   "id": "internal-set-alternative-font-family-alist/0026",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal-set-alternative-font-family-alist '((t)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp t))"
+  },
+  {
+   "id": "internal-set-alternative-font-family-alist/0027",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal-set-alternative-font-family-alist '((65)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 65))"
+  },
+  {
+   "id": "internal-set-alternative-font-family-alist/0028",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal-set-alternative-font-family-alist '((-1)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp -1))"
+  },
+  {
+   "id": "internal-set-alternative-font-family-alist/0029",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal-set-alternative-font-family-alist '((1.5)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 1.5))"
+  },
+  {
+   "id": "internal-set-alternative-font-family-alist/0030",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal-set-alternative-font-family-alist '(([])))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp []))"
+  },
+  {
+   "id": "internal-set-alternative-font-family-alist/0031",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal-set-alternative-font-family-alist '(((\"AbC\"))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp (\"AbC\")))"
+  },
+  {
+   "id": "internal-set-alternative-font-family-alist/0032",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal-set-alternative-font-family-alist '(((\"AbC\" . x))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp (\"AbC\" . x)))"
+  },
+  {
+   "id": "internal-set-alternative-font-family-alist/0033",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal-set-alternative-font-family-alist '((\"AbC\" \"DeF\") (\"Hi\" nil)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "internal-set-alternative-font-family-alist/0034",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal-set-alternative-font-family-alist '(oops (\"AbC\" . tail)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp oops))"
+  },
+  {
+   "id": "internal-set-alternative-font-family-alist/0035",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal-set-alternative-font-family-alist '((\"\" \"\")))) (error (list 'sig e))))",
+   "expected": "(ok ((## ##)))"
+  },
+  {
+   "id": "internal-set-alternative-font-family-alist/0036",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal-set-alternative-font-family-alist '((4194303)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 4194303))"
+  },
+  {
+   "id": "internal-set-alternative-font-family-alist/0037",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal-set-alternative-font-family-alist '((4194304)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 4194304))"
+  },
+  {
+   "id": "internal-set-alternative-font-family-alist/0038",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal-set-alternative-font-family-alist '((2305843009213693951)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 2305843009213693951))"
+  },
+  {
+   "id": "internal-set-alternative-font-family-alist/0039",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal-set-alternative-font-family-alist '((67108929)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 67108929))"
+  },
+  {
+   "id": "internal-set-alternative-font-family-alist/0040",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal-set-alternative-font-family-alist '((\"ÄİΣ\" \"ISO8859-1\")))) (error (list 'sig e))))",
+   "expected": "(ok ((ÄİΣ ISO8859-1)))"
+  },
+  {
+   "id": "internal-set-alternative-font-family-alist/0041",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal-set-alternative-font-family-alist)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr internal-set-alternative-font-family-alist> 0))",
+   "gnu_regime_variant": "(sig (wrong-number-of-arguments internal-set-alternative-font-family-alist 0))"
+  },
+  {
+   "id": "internal-set-alternative-font-family-alist/0042",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal-set-alternative-font-family-alist nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr internal-set-alternative-font-family-alist> 2))",
+   "gnu_regime_variant": "(sig (wrong-number-of-arguments internal-set-alternative-font-family-alist 2))"
+  },
+  {
+   "id": "internal-set-alternative-font-family-alist/0043",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (fboundp 'internal-set-alternative-font-family-alist) (functionp 'internal-set-alternative-font-family-alist) (funcall #'internal-set-alternative-font-family-alist nil))) (error (list 'sig e))))",
+   "expected": "(ok (t t nil))"
+  },
+  {
+   "id": "internal-set-alternative-font-family-alist/0044",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((s (copy-sequence \"AbC\")) (row (list s \"DeF\")) (x (list row row nil)) (r (internal-set-alternative-font-family-alist x))) (list (equal r '((AbC DeF) (AbC DeF) nil)) (equal x '((\"AbC\" \"DeF\") (\"AbC\" \"DeF\") nil)) (eq r x) (eq (car r) row) (eq (car r) (car (cdr r))) (eq (car (car r)) s) (eq (cdr r) (cdr x)) (eq (cdr (car r)) (cdr row))))) (error (list 'sig e))))",
+   "expected": "(ok (t t nil nil nil nil nil nil))"
+  },
+  {
+   "id": "internal-set-alternative-font-family-alist/0045",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((s (propertize \"AbC\" 'tag '(shared))) (r (internal-set-alternative-font-family-alist (list (list s)))) (v (car (car r)))) (list r s (eq v s) (if (stringp v) (text-properties-at 0 v) (symbol-name v)) (text-properties-at 0 s)))) (error (list 'sig e))))",
+   "expected": "(ok (((AbC)) #(\"AbC\" 0 3 (tag (shared))) nil #(\"AbC\" 0 3 (tag (shared))) (tag (shared))))"
+  },
+  {
+   "id": "internal-set-alternative-font-family-alist/0046",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((s (propertize \"abc\" 'tag '(shared))) (r (internal-set-alternative-font-family-alist (list (list s)))) (v (car (car r)))) (list (eq v s) (if (stringp v) (text-properties-at 0 v) (symbol-name v))))) (error (list 'sig e))))",
+   "expected": "(ok (nil #(\"abc\" 0 3 (tag (shared)))))"
+  },
+  {
+   "id": "internal-set-alternative-font-family-alist/0047",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((s (unibyte-string 65 196)) (r (internal-set-alternative-font-family-alist (list (list s)))) (v (car (car r)))) (list (if (stringp v) (string-to-list v) (string-to-list (symbol-name v))) (if (stringp v) (multibyte-string-p v) (multibyte-string-p (symbol-name v)))))) (error (list 'sig e))))",
+   "expected": "(ok ((65 196) nil))"
+  },
+  {
+   "id": "internal-set-alternative-font-family-alist/0048",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((x (list (list \"A\")))) (setcdr x x) (condition-case e (internal-set-alternative-font-family-alist x) (error (list (car e) (eq (car (cdr e)) x) (car x) (eq (cdr x) x) (cdr (cdr e))))))) (error (list 'sig e))))",
+   "expected": "(ok (circular-list t (\"A\") t nil))"
+  },
+  {
+   "id": "internal-set-alternative-font-family-alist/0049",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((x (list \"A\"))) (setcdr x x) (condition-case e (internal-set-alternative-font-family-alist (list x)) (error (list (car e) (eq (car (cdr e)) x) (car x) (eq (cdr x) x) (cdr (cdr e))))))) (error (list 'sig e))))",
+   "expected": "(ok (circular-list t \"A\" t nil))"
+  },
+  {
+   "id": "internal-set-alternative-font-family-alist/0050",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((x (list \"A\"))) (setcdr x x) (condition-case e (internal-set-alternative-font-family-alist (list (list x))) (error (list (car e) (car (cdr e)) (eq (car (cdr (cdr e))) x) (car x) (eq (cdr x) x) (cdr (cdr (cdr e)))))))) (error (list 'sig e))))",
+   "expected": "(ok (wrong-type-argument stringp t \"A\" t nil))"
+  },
+  {
+   "id": "internal-set-alternative-font-family-alist/0051",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((x (list \"A\"))) (setcdr x x) (condition-case e (internal-set-alternative-font-family-alist x) (error (list (car e) (eq (car (cdr e)) x) (car x) (eq (cdr x) x) (cdr (cdr e))))))) (error (list 'sig e))))",
+   "expected": "(ok (circular-list t \"A\" t nil))"
+  },
+  {
+   "id": "internal-set-alternative-font-family-alist/0052",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((x (make-symbol \"oops\"))) (condition-case e (internal-set-alternative-font-family-alist (list (list x))) (error (list (car e) (car (cdr e)) (eq (car (cdr (cdr e))) x)))))) (error (list 'sig e))))",
+   "expected": "(ok (wrong-type-argument stringp t))"
+  },
+  {
+   "id": "internal-set-alternative-font-family-alist/0053",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((face-alternative-font-family-alist 'family-sentinel) (face-alternative-font-registry-alist 'registry-sentinel)) (list (internal-set-alternative-font-family-alist '((\"ABC\"))) face-alternative-font-family-alist face-alternative-font-registry-alist))) (error (list 'sig e))))",
+   "expected": "(ok (((ABC)) family-sentinel registry-sentinel))"
+  },
+  {
+   "id": "internal-set-alternative-font-family-alist/0054",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((x (list (list \"AbC\" \"DeF\"))) (r (internal-set-alternative-font-family-alist x))) (setcar (car r) 'changed) (setcdr r nil) x)) (error (list 'sig e))))",
+   "expected": "(ok ((\"AbC\" \"DeF\")))"
+  },
+  {
+   "id": "internal-set-alternative-font-family-alist/0055",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((x (list 'bad))) (setcdr x x) (condition-case e (internal-set-alternative-font-family-alist x) (error (list (car e) (eq (car (cdr e)) x) (car x) (eq (cdr x) x) (cdr (cdr e))))))) (error (list 'sig e))))",
+   "expected": "(ok (circular-list t bad t nil))"
+  },
+  {
+   "id": "internal-set-alternative-font-family-alist/0056",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((x (list 'bad))) (setcdr x x) (condition-case e (internal-set-alternative-font-family-alist (list x)) (error (list (car e) (eq (car (cdr e)) x) (car x) (eq (cdr x) x) (cdr (cdr e))))))) (error (list 'sig e))))",
+   "expected": "(ok (circular-list t bad t nil))"
+  },
+  {
+   "id": "internal-set-alternative-font-family-alist/0057",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((s (make-string 0 65)) (r (internal-set-alternative-font-family-alist (list (list s)))) (v (car (car r)))) (list (eq s v) (if (symbolp v) (symbol-name v) v)))) (error (list 'sig e))))",
+   "expected": "(ok (nil \"\"))"
+  },
+  {
+   "id": "internal-set-alternative-font-family-alist/0058",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((a (list \"A\" \"B\")) (b (list \"C\" \"D\")) (x (list a b)) (r (internal-set-alternative-font-family-alist x))) (list (eq x r) (eq (cdr x) (cdr r)) (eq a (car r)) (eq (cdr a) (cdr (car r))) (eq b (car (cdr r))) (eq (cdr b) (cdr (car (cdr r))))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil nil nil nil nil))"
+  },
+  {
+   "id": "internal-set-alternative-font-family-alist/0059",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((s (copy-sequence \"a\")) (r (internal-set-alternative-font-family-alist (list (list s s))))) (eq (car (car r)) (car (cdr (car r)))))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "internal-set-alternative-font-family-alist/0060",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((x (list \"A\"))) (setcdr x x) (condition-case e (internal-set-alternative-font-family-alist (list x)) (error (list (car e) (eq (car (cdr e)) x) (car x) (eq (cdr x) x) (cdr (cdr e))))))) (error (list 'sig e))))",
+   "expected": "(ok (circular-list t \"A\" t nil))"
+  },
+  {
+   "id": "internal-set-alternative-font-family-alist/0061",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal-set-alternative-font-family-alist '((\"A\") nil (\"B\" \"C\")))) (error (list 'sig e))))",
+   "expected": "(ok ((A) nil (B C)))"
+  },
+  {
+   "id": "internal-set-alternative-font-family-alist/0062",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((x (list (list \"A\" \"B\") (list \"C\" 'oops)))) (list (condition-case e (internal-set-alternative-font-family-alist x) (error e)) x))) (error (list 'sig e))))",
+   "expected": "(ok ((wrong-type-argument stringp oops) ((\"A\" \"B\") (\"C\" oops))))"
+  },
+  {
+   "id": "internal-set-alternative-font-family-alist/0063",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((obarray (obarray-make)) (r (internal-set-alternative-font-family-alist '((\"UNIQUEfont\" \"UNIQUEfont\"))))) (list (eq (car (car r)) (intern-soft \"UNIQUEfont\" obarray)) (eq (car (car r)) (car (cdr (car r)))) (symbol-name (car (car r)))))) (error (list 'sig e))))",
+   "expected": "(ok (t t \"UNIQUEfont\"))"
+  },
+  {
+   "id": "internal-set-alternative-font-family-alist/0064",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((obarray (obarray-make))) (list (condition-case e (internal-set-alternative-font-family-alist '((\"UNIQUEfont\" nil))) (error e)) (symbolp (intern-soft \"UNIQUEfont\" obarray)) (not (null (intern-soft \"UNIQUEfont\" obarray)))))) (error (list 'sig e))))",
+   "expected": "(ok ((wrong-type-argument stringp nil) t t))"
+  }
+ ],
+ "pinned": {
+  "internal-set-alternative-font-family-alist/0045": "VALUE",
+  "internal-set-alternative-font-family-alist/0046": "VALUE",
+  "internal-set-alternative-font-family-alist/0047": "SIGNAL-VS-VALUE"
+ }
+}

@@ -1,0 +1,28 @@
+;;; small-alloc-gnu.el --- discarded initialized allocations -*- lexical-binding: t; -*-
+(require 'json)
+(defun small-alloc-loop (shape n)
+  (let ((i 0) (name "name") result)
+    (cond
+     ((equal shape "cons") (while (< i n) (setq result (cons nil nil) i (1+ i))))
+     ((equal shape "string8") (while (< i n) (setq result (make-string 8 ?x) i (1+ i))))
+     ((equal shape "string16") (while (< i n) (setq result (make-string 16 ?x) i (1+ i))))
+     ((equal shape "string32") (while (< i n) (setq result (make-string 32 ?x) i (1+ i))))
+     ((equal shape "vector4") (while (< i n) (setq result (make-vector 4 nil) i (1+ i))))
+     ((equal shape "symbol") (while (< i n) (setq result (make-symbol name) i (1+ i))))
+     (t (error "Unknown shape")))
+    result))
+(defun small-alloc-run ()
+  (let* ((shape (pop command-line-args-left))
+         (n (string-to-number (pop command-line-args-left)))
+         (gc (equal (pop command-line-args-left) "gc"))
+         (gc-cons-threshold (if gc 800000 most-positive-fixnum))
+         (gc-cons-percentage (if gc 0.1 1.0)))
+    ;; core-bench protocol: warm up once, full GC before the timed invocation;
+    ;; elapsed includes spontaneous GC and is never reduced by gc-elapsed.
+    (small-alloc-loop shape n)
+    (garbage-collect)
+    (let ((t0 (float-time)) (gcs gcs-done))
+      (small-alloc-loop shape n)
+      (let ((ns (* 1e9 (- (float-time) t0))))
+        (unless (eq (> gcs-done gcs) gc) (error "GC protocol not exercised"))
+        (princ (format "%.0f\n" ns))))))

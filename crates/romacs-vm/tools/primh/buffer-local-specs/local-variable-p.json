@@ -1,0 +1,37 @@
+{
+  "name": "local-variable-p",
+  "arity": [
+    1,
+    2
+  ],
+  "effect": "reads",
+  "gnu_files": [
+    "data.c"
+  ],
+  "gnu_def": "data.c:2416",
+  "rust": "src/prims/buffer_locals.rs:3",
+  "args": [
+    "projected-buffer-locals",
+    "projected-buffer-locals"
+  ],
+  "probes": [
+    "(with-temp-buffer (list (local-variable-p 'major-mode) (local-variable-p 'mode-name) major-mode (equal mode-name \"Fundamental\")))",
+    "(with-temp-buffer (setq fill-column 31 buffer-file-name \"visit\") (kill-local-variable 'fill-column) (list fill-column (local-variable-p 'fill-column) buffer-file-name (local-variable-p 'buffer-file-name)))",
+    "(with-temp-buffer (setq bl-global 4) (make-variable-buffer-local 'bl-auto) (list (local-variable-p 'bl-global) (local-variable-p 'bl-auto) (local-variable-if-set-p 'bl-auto)))",
+    "(let ((b (get-buffer-create \"local-other\"))) (setq bl-x 7) (with-current-buffer b (set (make-local-variable 'bl-x) 12)) (list (buffer-local-value 'bl-x b) bl-x (local-variable-p 'bl-x b) (cdr (assq 'bl-x (buffer-local-variables b)))))",
+    "(with-temp-buffer (setq bl-global 7) (set (make-local-variable 'bl-plain) 3) (set (make-local-variable 'bl-permanent) 5) (put 'bl-permanent 'permanent-local t) (setq buffer-file-name \"visit\" fill-column 31) (kill-all-local-variables) (list (local-variable-p 'bl-plain) bl-permanent (local-variable-p 'bl-permanent) bl-global fill-column buffer-file-name))",
+    "(with-temp-buffer (setq bl-p 7) (set (make-local-variable 'bl-p) 8) (put 'bl-p 'permanent-local t) (kill-local-variable 'bl-p) (list bl-p (local-variable-p 'bl-p)))",
+    "(with-temp-buffer (set (make-local-variable 'bl-p) 8) (put 'bl-p 'permanent-local t) (setq bl-seen nil) (let ((change-major-mode-hook (list (lambda () (setq bl-seen (local-variable-p 'bl-p)))))) (kill-all-local-variables t)) (list bl-seen (local-variable-p 'bl-p)))",
+    "(with-temp-buffer (set (make-local-variable 'buffer-file-coding-system) 'raw-text) (kill-all-local-variables) (list buffer-file-coding-system (local-variable-p 'buffer-file-coding-system)))",
+    "(list (condition-case e (local-variable-p 3) (wrong-type-argument (car e))) (condition-case e (buffer-local-value 'bl-void (current-buffer)) (void-variable e)) (condition-case e (kill-local-variable 3) (wrong-type-argument (car e))))",
+    "(with-temp-buffer (setq fill-column 33) (put 'fill-column 'permanent-local t) (kill-all-local-variables) (list fill-column (local-variable-p 'fill-column)))",
+    "(with-temp-buffer (setq bl-void 2) (make-local-variable 'bl-void) (makunbound 'bl-void) (list (not (null (memq 'bl-void (buffer-local-variables)))) (local-variable-p 'bl-void)))",
+    "(with-temp-buffer (setq bl-x 1) (make-local-variable 'bl-x) (let ((bl-x 2)) (kill-local-variable 'bl-x)) (list bl-x (local-variable-p 'bl-x)))",
+    "(with-temp-buffer (setq fill-column 22) (let ((fill-column 33)) (kill-local-variable 'fill-column)) (list fill-column (local-variable-p 'fill-column)))",
+    "(condition-case e (local-variable-p 'x 3) (error e))",
+    "(list (kill-local-variable nil) (kill-local-variable t) (local-variable-p nil) (local-variable-p t))",
+    "(with-temp-buffer (setq bl-x 3) (defvaralias 'bl-alias 'bl-x) (make-local-variable 'bl-x) (setq bl-x 4) (kill-local-variable 'bl-alias) (list bl-x (local-variable-p 'bl-alias)))",
+    "(list (fboundp 'local-variable-p) (functionp 'local-variable-p))",
+    "(with-temp-buffer (funcall 'local-variable-p 'fill-column))"
+  ]
+}

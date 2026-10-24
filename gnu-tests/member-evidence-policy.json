@@ -1,0 +1,1045 @@
+{
+ "members": {
+  "lisp/color-tests.el::color-tests-blend": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "lisp/color-tests.el::color-tests-clamp": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "lisp/color-tests.el::color-tests-darken-hsl": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "lisp/color-tests.el::color-tests-desaturate-hsl": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "lisp/color-tests.el::color-tests-lighten-hsl": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "lisp/color-tests.el::color-tests-saturate-hsl": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "lisp/emacs-lisp/backquote-tests.el::backquote-test-basic": {
+   "class": "GENUINE",
+   "method": "inspection"
+  },
+  "lisp/emacs-lisp/backquote-tests.el::backquote-test-nested": {
+   "class": "GENUINE",
+   "method": "inspection"
+  },
+  "lisp/emacs-lisp/bindat-tests.el::bindat-test-pack/multibyte-string-fails": {
+   "class": "VACUOUS",
+   "method": "void-catch"
+  },
+  "lisp/emacs-lisp/bindat-tests.el::bindat-test-unpack/multibyte-string-fails": {
+   "class": "VACUOUS",
+   "method": "void-catch"
+  },
+  "lisp/emacs-lisp/byte-run-tests.el::make-obsolete": {
+   "class": "WRONG-ERROR",
+   "method": "void-catch"
+  },
+  "lisp/emacs-lisp/byte-run-tests.el::make-obsolete-variable": {
+   "class": "WRONG-ERROR",
+   "method": "void-catch"
+  },
+  "lisp/emacs-lisp/bytecomp-tests.el::bytecomp-condition-case-success": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "lisp/emacs-lisp/eieio-tests/eieio-tests.el::eieio-test-02-abstract-class": {
+   "class": "VACUOUS",
+   "method": "void-catch"
+  },
+  "lisp/emacs-lisp/ert-tests.el::ert-test-body-runs": {
+   "class": "HARNESS-SELF",
+   "method": "hand"
+  },
+  "lisp/emacs-lisp/ert-tests.el::ert-test-deftest-lexical-binding-t": {
+   "class": "HARNESS-SELF",
+   "method": "hand"
+  },
+  "lisp/emacs-lisp/ert-x-tests.el::ert-x-tests-with-temp-directory/text-signals-error": {
+   "class": "VACUOUS",
+   "method": "void-catch"
+  },
+  "lisp/emacs-lisp/ert-x-tests.el::ert-x-tests-with-temp-file/unknown-kwarg-signals-error": {
+   "class": "VACUOUS",
+   "method": "void-catch"
+  },
+  "lisp/emacs-lisp/faceup-tests/faceup-test-basics.el::faceup-functions": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "lisp/emacs-lisp/lisp-tests.el::core-elisp-tests-2-backquote": {
+   "class": "GENUINE",
+   "method": "inspection"
+  },
+  "lisp/emacs-lisp/lisp-tests.el::lisp-backward-sexp-1-error-mismatch": {
+   "class": "VACUOUS",
+   "method": "void-catch"
+  },
+  "lisp/emacs-lisp/lisp-tests.el::lisp-forward-sexp-1-error-mismatch": {
+   "class": "VACUOUS",
+   "method": "void-catch"
+  },
+  "lisp/emacs-lisp/lisp-tests.el::lisp-forward-sexp-emacs-lisp-quote-char": {
+   "class": "VACUOUS",
+   "method": "void-catch"
+  },
+  "lisp/emacs-lisp/lisp-tests.el::lisp-forward-sexp-emacs-lisp-semi-char-error": {
+   "class": "VACUOUS",
+   "method": "void-catch"
+  },
+  "lisp/emacs-lisp/rx-tests.el::rx-redefine-builtin": {
+   "class": "VACUOUS",
+   "method": "void-catch"
+  },
+  "lisp/emacs-lisp/seq-tests.el::test-seq-random-elt-signal-on-empty": {
+   "class": "VACUOUS",
+   "method": "void-catch"
+  },
+  "lisp/emacs-lisp/subr-x-tests.el::subr-x-test-if-let*-malformed-binding": {
+   "class": "VACUOUS",
+   "method": "void-catch"
+  },
+  "lisp/emacs-lisp/subr-x-tests.el::subr-x-test-when-let*-malformed-binding": {
+   "class": "VACUOUS",
+   "method": "void-catch"
+  },
+  "lisp/emacs-lisp/thunk-tests.el::thunk-let-bad-binding-test": {
+   "class": "VACUOUS",
+   "method": "void-catch"
+  },
+  "lisp/emacs-lisp/thunk-tests.el::thunk-let-bound-vars-cant-be-set-test": {
+   "class": "VACUOUS",
+   "method": "void-catch"
+  },
+  "lisp/epg-config-tests.el::epg-config-test-epg-find-configuration/unknown-protocol": {
+   "class": "VACUOUS",
+   "method": "void-catch"
+  },
+  "lisp/eshell/esh-opt-tests.el::esh-opt-test/eval-using-options-unrecognized": {
+   "class": "VACUOUS",
+   "method": "void-catch"
+  },
+  "lisp/eshell/esh-util-tests.el::esh-util-test/eshell-printable-size/human-readable-arg": {
+   "class": "VACUOUS",
+   "method": "void-catch"
+  },
+  "lisp/files-tests.el::files-tests-file-name-with-extension-bad": {
+   "class": "VACUOUS",
+   "method": "void-catch"
+  },
+  "lisp/find-cmd-tests.el::find-cmd-test-find-cmd/error-unknown-atom": {
+   "class": "VACUOUS",
+   "method": "void-catch"
+  },
+  "lisp/find-cmd-tests.el::find-cmd-test-find-cmd/error-wrong-argnum": {
+   "class": "VACUOUS",
+   "method": "void-catch"
+  },
+  "lisp/follow-tests.el::follow-tests-do-nothing-test": {
+   "class": "VACUOUS",
+   "method": "hand"
+  },
+  "lisp/format-spec-tests.el::format-spec-make": {
+   "class": "WRONG-ERROR",
+   "method": "void-catch"
+  },
+  "lisp/help-fns-tests.el::help-fns-test-describe-keymap/not-keymap": {
+   "class": "VACUOUS",
+   "method": "void-catch"
+  },
+  "lisp/help-mode-tests.el::help-mode-tests-go-back-no-stack": {
+   "class": "VACUOUS",
+   "method": "void-catch"
+  },
+  "lisp/help-mode-tests.el::help-mode-tests-go-forward-no-stack": {
+   "class": "VACUOUS",
+   "method": "void-catch"
+  },
+  "lisp/mail/mail-utils-tests.el::mail-utils-tests-mail-comma-list-regexp": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "lisp/mail/mail-utils-tests.el::mail-utils-tests-mail-dont-reply-to": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "lisp/net/sasl-tests.el::sasl-test-client-set-properties": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "lisp/net/sasl-tests.el::sasl-test-make-client": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "lisp/net/sasl-tests.el::sasl-test-step-data": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "lisp/progmodes/elisp-mode-tests.el::elisp-completes-functions-after-hash-quote": {
+   "class": "VACUOUS",
+   "method": "hand"
+  },
+  "lisp/subr-tests.el::hash-table-contains-p": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "lisp/subr-tests.el::subr--delete-consecutive-dups": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "lisp/subr-tests.el::subr--delete-dups": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "lisp/subr-tests.el::subr-all": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "lisp/subr-tests.el::subr-butlast": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "lisp/subr-tests.el::subr-drop-while": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "lisp/subr-tests.el::subr-member-if": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "lisp/subr-tests.el::subr-take-while": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "lisp/subr-tests.el::subr-test-caaar": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "lisp/subr-tests.el::subr-test-caadr": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "lisp/subr-tests.el::subr-test-define-prefix-command": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "lisp/subr-tests.el::subr-test-defvar-local": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "lisp/subr-tests.el::subr-test-minusp": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "lisp/subr-tests.el::subr-test-plusp": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "lisp/subr-tests.el::subr-test-xor": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "lisp/subr-tests.el::subr-tests--dolist--does-not-shadow-tail-binding": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "lisp/subr-tests.el::subr-tests--dolist--every-element-is-handled": {
+   "class": "GENUINE",
+   "method": "inspection"
+  },
+  "lisp/subr-tests.el::subr-tests--dolist--returns-spec-result": {
+   "class": "GENUINE",
+   "method": "inspection"
+  },
+  "lisp/subr-tests.el::subr-tests--dolist--wrong-number-of-args": {
+   "class": "GENUINE",
+   "method": "inspection"
+  },
+  "lisp/subr-tests.el::subr-tests--gensym": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "lisp/textmodes/po-tests.el::po-tests-find-charset": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "lisp/timezone-tests.el::timezone-tests-absolute-from-gregorian": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "lisp/timezone-tests.el::timezone-tests-day-number": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "lisp/timezone-tests.el::timezone-tests-last-day-of-month": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "lisp/timezone-tests.el::timezone-tests-leap-year-p": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "lisp/timezone-tests.el::timezone-tests-parse-time": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "lisp/use-package/use-package-tests.el::use-package-test/:bind-4": {
+   "class": "VACUOUS",
+   "method": "void-catch"
+  },
+  "lisp/use-package/use-package-tests.el::use-package-test/:delight-2": {
+   "class": "VACUOUS",
+   "method": "void-catch"
+  },
+  "lisp/use-package/use-package-tests.el::use-package-test/:delight-5": {
+   "class": "VACUOUS",
+   "method": "void-catch"
+  },
+  "src/buffer-tests.el::buffer-tests--make-overlay-1-A": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--make-overlay-1-B": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--make-overlay-1-C": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--make-overlay-1-D": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--make-overlay-1-E": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--make-overlay-1-F": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--make-overlay-1-G": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--make-overlay-1-H": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--make-overlay-1-I": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--make-overlay-1-J": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--make-overlay-1-K": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--make-overlay-1-L": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--make-overlay-1-M": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--make-overlay-2-A": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--make-overlay-2-B": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--make-overlay-2-C": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--make-overlay-2-D": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--make-overlay-2-E": {
+   "class": "WRONG-ERROR-DATA",
+   "method": "hand"
+  },
+  "src/buffer-tests.el::buffer-tests--make-overlay-2-F": {
+   "class": "WRONG-ERROR-DATA",
+   "method": "hand"
+  },
+  "src/buffer-tests.el::buffer-tests--make-overlay-2-G": {
+   "class": "WRONG-ERROR-DATA",
+   "method": "hand"
+  },
+  "src/buffer-tests.el::buffer-tests--make-overlay-2-H": {
+   "class": "WRONG-ERROR-DATA",
+   "method": "hand"
+  },
+  "src/buffer-tests.el::buffer-tests--make-overlay-2-I": {
+   "class": "WRONG-ERROR-DATA",
+   "method": "hand"
+  },
+  "src/buffer-tests.el::buffer-tests--next-overlay-change-1-A": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--next-overlay-change-1-B": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--next-overlay-change-1-C": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--next-overlay-change-1-D": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--next-overlay-change-1-D2": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--next-overlay-change-1-E": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--next-overlay-change-1-E2": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--next-overlay-change-1-F": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--next-overlay-change-1-F2": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--next-overlay-change-1-G": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--next-overlay-change-1-G2": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--next-overlay-change-1-H": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--next-overlay-change-1-H2": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--next-overlay-change-1-I": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--next-overlay-change-1-I2": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--next-overlay-change-1-J": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--next-overlay-change-1-J2": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--next-overlay-change-1-K": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--next-overlay-change-1-L": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--next-overlay-change-1-M": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--next-overlay-change-1-N": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--next-overlay-change-1-O": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--next-overlay-change-1-P": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--next-overlay-change-1-Q": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--next-overlay-change-1-R": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--next-overlay-change-1-S": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--next-overlay-change-1-T": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--next-overlay-change-1-U": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--next-overlay-change-1-V": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--next-overlay-change-1-W": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--next-overlay-change-1-a": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--next-overlay-change-1-aa": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--next-overlay-change-1-ab": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--next-overlay-change-1-ac": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--next-overlay-change-1-b": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--next-overlay-change-1-c": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--next-overlay-change-1-d": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--next-overlay-change-1-e": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--next-overlay-change-1-f": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--next-overlay-change-1-g": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--next-overlay-change-1-h": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--next-overlay-change-1-h2": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--next-overlay-change-1-i": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--next-overlay-change-1-i2": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--next-overlay-change-1-j": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--next-overlay-change-1-j2": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--next-overlay-change-1-k": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--next-overlay-change-1-k2": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--next-overlay-change-1-l": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--next-overlay-change-1-l2": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--next-overlay-change-1-m": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--next-overlay-change-1-n": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--next-overlay-change-1-o": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--next-overlay-change-1-p": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--next-overlay-change-1-q": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--next-overlay-change-1-r": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--next-overlay-change-1-s": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--next-overlay-change-1-t": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--next-overlay-change-1-u": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--next-overlay-change-1-v": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--next-overlay-change-1-w": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--next-overlay-change-1-x": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--next-overlay-change-1-y": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--overlay-bug58479": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--overlayp-1-A": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--overlayp-1-B": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--overlayp-1-C": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--overlayp-1-D": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--overlayp-1-E": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--overlayp-1-F": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--overlayp-1-G": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--overlayp-1-H": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--overlayp-1-J": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--overlayp-1-K": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--overlayp-1-L": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--overlayp-1-M": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--overlayp-1-N": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--overlayp-1-O": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--overlays-at-1-A": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::buffer-tests--overlays-in-1-A": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::overlay-evaporation-after-killed-buffer": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::test-make-indirect-buffer-clone-hook": {
+   "class": "VACUOUS",
+   "method": "void-catch"
+  },
+  "src/buffer-tests.el::test-moving-insert-2": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::test-moving-insert-2-a": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::test-overlay-insert-before-markers-at-end": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::test-overlay-insert-before-markers-at-start": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::test-overlay-insert-before-markers-empty": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::test-overlay-priorities-1": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::test-overlay-priorities-2": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::test-overlays-in-empty-range-bug58672": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::test-remove-overlays": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/buffer-tests.el::zero-length-overlays-and-not": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/callint-tests.el::call-interactively-prune-command-history": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/casefiddle-tests.el::casefiddle-invalid-region-extract-function": {
+   "class": "VACUOUS",
+   "method": "void-catch"
+  },
+  "src/charset-tests.el::charset-decode-char": {
+   "class": "VACUOUS",
+   "method": "void-catch"
+  },
+  "src/cmds-tests.el::self-insert-command-with-negative-argument": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/cmds-tests.el::self-insert-zero-newlines": {
+   "class": "VACUOUS",
+   "method": "hand"
+  },
+  "src/data-tests.el::binding-test-defvar-in-let": {
+   "class": "GENUINE",
+   "method": "inspection"
+  },
+  "src/data-tests.el::binding-test-makunbound": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/data-tests.el::binding-test-manual": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/data-tests.el::binding-test-set-constant-itself": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/data-tests.el::binding-test-setq-default": {
+   "class": "GENUINE",
+   "method": "inspection"
+  },
+  "src/data-tests.el::data-tests-<=": {
+   "class": "GENUINE",
+   "method": "hand"
+  },
+  "src/data-tests.el::data-tests->": {
+   "class": "GENUINE",
+   "method": "hand"
+  },
+  "src/data-tests.el::data-tests->=": {
+   "class": "GENUINE",
+   "method": "hand"
+  },
+  "src/data-tests.el::data-tests-defalias": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/data-tests.el::data-tests-fset": {
+   "class": "GENUINE",
+   "method": "inspection"
+  },
+  "src/data-tests.el::data-tests-make_symbol_constant": {
+   "class": "GENUINE",
+   "method": "inspection"
+  },
+  "src/editfns-tests.el::format-c-float": {
+   "class": "WRONG-ERROR-DATA",
+   "method": "hand"
+  },
+  "src/editfns-tests.el::propertize/error-even-number-of-args": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/eval-tests.el::defvar/bug31072": {
+   "class": "WRONG-ERROR-DATA",
+   "method": "hand"
+  },
+  "src/eval-tests.el::eval-bad-specbind": {
+   "class": "VACUOUS",
+   "method": "hand"
+  },
+  "src/eval-tests.el::eval-tests--bug24673": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/eval-tests.el::eval-tests--if-dot-string": {
+   "class": "GENUINE",
+   "method": "inspection"
+  },
+  "src/eval-tests.el::eval-tests--let-with-circular-defs": {
+   "class": "GENUINE",
+   "method": "inspection"
+  },
+  "src/eval-tests.el::eval-tests--mutating-cond": {
+   "class": "GENUINE",
+   "method": "inspection"
+  },
+  "src/eval-tests.el::eval-tests-defvaralias": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/eval-tests.el::eval-tests/default-value": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/floatfns-tests.el::floatfns-tests-abs": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/floatfns-tests.el::floatfns-tests-ceiling": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/floatfns-tests.el::floatfns-tests-round": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/fns-tests.el::fns-tests-nreverse": {
+   "class": "VACUOUS",
+   "method": "void-catch"
+  },
+  "src/fns-tests.el::fns-tests-reverse": {
+   "class": "VACUOUS",
+   "method": "void-catch"
+  },
+  "src/fns-tests.el::fns-tests-safe-length": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/fns-tests.el::fns-tests-string-bytes": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/fns-tests.el::fns-value<-circle": {
+   "class": "VACUOUS",
+   "method": "void-catch"
+  },
+  "src/fns-tests.el::plist-get/odd-number-of-elements": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/fns-tests.el::test-assoc-testfn": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/fns-tests.el::test-clrhash": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/fns-tests.el::test-copy-hash-table": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/fns-tests.el::test-hash-table": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/fns-tests.el::test-hash-table-count": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/fns-tests.el::test-hash-table-p": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/fns-tests.el::test-hash-table-wrong-keywords": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/fns-tests.el::test-nthcdr-simple": {
+   "class": "GENUINE",
+   "method": "inspection"
+  },
+  "src/fns-tests.el::test-remhash": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/fns-tests.el::test-vector-delete": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/keyboard-tests.el::keyboard-inhibit-interaction": {
+   "class": "VACUOUS",
+   "method": "void-catch"
+  },
+  "src/keymap-tests.el::keymap-define-key/keyboard-macro": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/keymap-tests.el::keymap-define-key/keymap": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/keymap-tests.el::keymap-define-key/lambda": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/keymap-tests.el::keymap-define-key/menu-item": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/keymap-tests.el::keymap-define-key/undefined": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/keymap-tests.el::keymap-keymapp": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/keymap-tests.el::keymap-lookup-key": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/keymap-tests.el::keymap-lookup-key/menu-non-symbol": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/keymap-tests.el::keymap-make-keymap": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/keymap-tests.el::keymap-make-sparse-keymap": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/keymap-tests.el::keymap-removal-inherit": {
+   "class": "GENUINE",
+   "method": "mutation"
+  },
+  "src/lread-tests.el::lread-char-escape-eof": {
+   "class": "VACUOUS",
+   "method": "void-catch"
+  },
+  "src/lread-tests.el::lread-char-invalid-name-1": {
+   "class": "VACUOUS",
+   "method": "void-catch"
+  },
+  "src/lread-tests.el::lread-char-invalid-name-2": {
+   "class": "VACUOUS",
+   "method": "void-catch"
+  },
+  "src/lread-tests.el::lread-char-invalid-name-3": {
+   "class": "VACUOUS",
+   "method": "void-catch"
+  },
+  "src/lread-tests.el::lread-char-invalid-name-4": {
+   "class": "VACUOUS",
+   "method": "void-catch"
+  },
+  "src/lread-tests.el::lread-char-invalid-name-5": {
+   "class": "VACUOUS",
+   "method": "void-catch"
+  },
+  "src/lread-tests.el::lread-char-invalid-name-6": {
+   "class": "VACUOUS",
+   "method": "void-catch"
+  },
+  "src/lread-tests.el::lread-char-invalid-name-7": {
+   "class": "VACUOUS",
+   "method": "void-catch"
+  },
+  "src/lread-tests.el::lread-char-invalid-name-8": {
+   "class": "VACUOUS",
+   "method": "void-catch"
+  },
+  "src/lread-tests.el::lread-circular-hash": {
+   "class": "VACUOUS",
+   "method": "void-catch"
+  },
+  "src/lread-tests.el::lread-escaped-lf": {
+   "class": "WRONG-ERROR",
+   "method": "mutation"
+  },
+  "src/lread-tests.el::lread-invalid-bytecodes": {
+   "class": "VACUOUS",
+   "method": "void-catch"
+  },
+  "src/regex-emacs-tests.el::regex-word-cc-fallback-test": {
+   "class": "GENUINE",
+   "method": "mutation"
+  }
+ },
+ "schema": 1
+}

@@ -1,0 +1,138 @@
+{
+  "gnu": {
+    "path": "<recording-path-redacted>/emacs",
+    "resolved": "<recording-path-redacted>/emacs",
+    "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+    "version": "32.0.50",
+    "sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8"
+  },
+  "cases": [
+    {
+      "id": "callable",
+      "source": "(list (fboundp 'reverse) (functionp 'reverse) (funcall 'reverse '(1 2 3)))",
+      "expected": "(t t (3 2 1))"
+    },
+    {
+      "id": "lasso",
+      "source": "(let ((x (list 1 2 3 4))) (setcdr (cdr (cdr (cdr x))) (cdr x)) (condition-case e (reverse x) (circular-list (list (car e) (car (car (cdr e))) (car x) (car (cdr x))))))",
+      "expected": "(circular-list 2 1 2)"
+    },
+    {
+      "id": "vector-shallow",
+      "source": "(let* ((a (list 9)) (x (vector a 2)) (y (reverse x))) (list (eq a (aref y 1)) (eq x y) (aref x 1)))",
+      "expected": "(t nil 2)"
+    },
+    {
+      "id": "nil",
+      "source": "(reverse nil)",
+      "expected": "nil"
+    },
+    {
+      "id": "list-copy",
+      "source": "(let* ((x (list 1 2 3)) (y (reverse x))) (list x y (eq x y) (eq (cdr x) (cdr y))))",
+      "expected": "((1 2 3) (3 2 1) nil nil)"
+    },
+    {
+      "id": "shallow",
+      "source": "(let* ((a (list 9)) (x (list a 2)) (y (reverse x))) (list (eq a (car (cdr y))) x y))",
+      "expected": "(t ((9) 2) (2 (9)))"
+    },
+    {
+      "id": "singleton",
+      "source": "(let* ((x (list 7)) (y (reverse x))) (list y (eq x y)))",
+      "expected": "((7) nil)"
+    },
+    {
+      "id": "dotted",
+      "source": "(condition-case e (reverse '(1 2 . end)) (error e))",
+      "expected": "(wrong-type-argument listp end)"
+    },
+    {
+      "id": "wrong",
+      "source": "(condition-case e (reverse 17) (error e))",
+      "expected": "(wrong-type-argument sequencep 17)"
+    },
+    {
+      "id": "symbol",
+      "source": "(condition-case e (reverse 'abc) (error e))",
+      "expected": "(wrong-type-argument sequencep abc)"
+    },
+    {
+      "id": "cycle",
+      "source": "(let ((x (list 1 2 3))) (setcdr (cdr (cdr x)) x) (condition-case e (reverse x) (circular-list (list (car e) (eq (car (cdr e)) x) (car x) (car (cdr x))))))",
+      "expected": "(circular-list t 1 2)"
+    },
+    {
+      "id": "vector",
+      "source": "(let* ((x (vector 1 2 3)) (y (reverse x))) (list x y (eq x y)))",
+      "expected": "([1 2 3] [3 2 1] nil)"
+    },
+    {
+      "id": "empty-vector",
+      "source": "(let ((x (vector))) (list (reverse x) (eq x (reverse x))))",
+      "expected": "([] t)"
+    },
+    {
+      "id": "string",
+      "source": "(let* ((x (string 97 98 99)) (y (reverse x))) (list (append x nil) (append y nil) (eq x y)))",
+      "expected": "((97 98 99) (99 98 97) nil)"
+    },
+    {
+      "id": "unicode",
+      "source": "(let ((x (string 955 128578 65))) (list (append (reverse x) nil) (multibyte-string-p (reverse x)) (append x nil)))",
+      "expected": "((65 128578 955) t (955 128578 65))"
+    },
+    {
+      "id": "unibyte",
+      "source": "(let ((x (unibyte-string 0 128 255 65))) (list (append (reverse x) nil) (multibyte-string-p (reverse x))))",
+      "expected": "((65 255 128 0) nil)"
+    },
+    {
+      "id": "extended",
+      "source": "(let ((x (string 4194303 1114112 955))) (list (append (reverse x) nil) (multibyte-string-p (reverse x))))",
+      "expected": "((955 1114112 4194303) t)"
+    },
+    {
+      "id": "raw",
+      "source": "(let ((x (string 4194176 955))) (append (reverse x) nil))",
+      "expected": "(955 4194176)"
+    },
+    {
+      "id": "multibyte-ascii",
+      "source": "(let ((x (string-to-multibyte \"abc\"))) (list (multibyte-string-p x) (multibyte-string-p (reverse x)) (append (reverse x) nil)))",
+      "expected": "(t nil (99 98 97))"
+    },
+    {
+      "id": "empty-string",
+      "source": "(let ((x (string-to-multibyte \"\"))) (list (append (reverse x) nil) (multibyte-string-p (reverse x)) (eq x (reverse x))))",
+      "expected": "(nil nil nil)"
+    },
+    {
+      "id": "properties",
+      "source": "(let* ((x (string 955 98 99))) (put-text-property 0 3 'face 'bold x) (let ((y (reverse x))) (list (append y nil) (text-properties-at 0 y) (get-text-property 0 'face x))))",
+      "expected": "((99 98 955) nil bold)"
+    },
+    {
+      "id": "arity-zero",
+      "source": "(condition-case e (reverse) (wrong-number-of-arguments (list (car e) (car (cdr (cdr e))))))",
+      "expected": "(wrong-number-of-arguments 0)"
+    },
+    {
+      "id": "arity-two",
+      "source": "(condition-case e (reverse 1 2) (wrong-number-of-arguments (list (car e) (car (cdr (cdr e))))))",
+      "expected": "(wrong-number-of-arguments 2)"
+    }
+  ],
+  "limitations": [
+    {
+      "id": "bool-vector",
+      "source": "(reverse (make-bool-vector 3 t))",
+      "expected": "#&3\"\u0007\""
+    },
+    {
+      "id": "empty-vector-global-identity",
+      "source": "(eq (reverse (vector)) (reverse (vector)))",
+      "expected": "t"
+    }
+  ]
+}

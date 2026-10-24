@@ -1,0 +1,592 @@
+;;; jabber-activity.el --- show jabber activity in the mode line  -*- lexical-binding: t; -*-
+
+;; Copyright (C) 2004 Carl Henrik Lunde - <chlunde+jabber+@ping.uio.no>
+;; Copyright (C) 2026  Thanos Apollo
+
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
+
+;; This file is a part of jabber.el
+
+;; This program is free software; you can redistribute it and/or modify
+;; it under the terms of the GNU General Public License as published by
+;; the Free Software Foundation; either version 2, or (at your option)
+;; any later version.
+
+;; GNU Emacs is distributed in the hope that it will be useful,
+;; but WITHOUT ANY WARRANTY; without even the implied warranty of
+;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+;; GNU General Public License for more details.
+
+;; You should have received a copy of the GNU General Public License
+;; along with GNU Emacs; see the file COPYING.  If not, write to the
+;; Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+;; Boston, MA 02111-1307, USA.
+
+;;; Commentary:
+
+;; Allows tracking messages from buddies using the global mode line
+;; See (info "(jabber)Tracking activity")
+
+;;; Code:
+
+(require 'cl-lib)
+(require 'fsm)
+(require 'seq)
+(require 'jabber-core)
+(require 'jabber-util)
+(require 'jabber-chat)
+(require 'jabber-muc)
+(require 'jabber-muc-nick-completion)
+
+(defgroup jabber-activity nil
+  "Activity tracking options."
+  :group 'jabber)
+
+;; All the (featurep 'jabber-activity) is so we don't call a function
+;; with an autoloaded cookie while the file is loading, since that
+;; would lead to endless load recursion.
+
+(defcustom jabber-activity-make-string 'jabber-activity-make-string-default
+  "Function to call to show a string in the modeline.
+The default function returns the nick of the user."
+  :set #'(lambda (var val)
+	   (custom-set-default var val)
+	   (when (and (featurep 'jabber-activity)
+		      (fboundp 'jabber-activity-make-name-alist))
+	     (jabber-activity-make-name-alist)
+	     (jabber-activity-mode-line-update)))
+  :type 'function)
+
+(defcustom jabber-activity-shorten-minimum 1
+  "Length of the strings returned by `jabber-activity-make-strings-shorten'.
+All strings returned by `jabber-activity-make-strings-shorten' will be
+at least this long, when possible."
+  :type 'number)
+
+(defcustom jabber-activity-shorten-cutoff 2
+  "Maximum number of JIDs to display in the mode line.
+When non-nil and more JIDs are active than this number, only the
+first CUTOFF entries are shown followed by \", +N\"."
+  :type '(choice (const :tag "No limit" nil)
+		 (integer :tag "Maximum entries")))
+
+(defcustom jabber-activity-shorten-aggressively nil
+  "If non-nil, shorten names more aggressively.
+When set, names may use prefixes shorter than
+`jabber-activity-shorten-minimum' as long as they remain unique."
+  :type 'boolean)
+
+(defcustom jabber-activity-muc-prefix "#"
+  "String prepended to MUC names in the mode line.
+Set to an empty string to disable the prefix."
+  :type 'string)
+
+(defcustom jabber-activity-make-strings #'jabber-activity-make-strings-shorten
+  "Function that turns a list of JID strings into an alist of JID -> string.
+Called separately for each account, with its existing one-argument signature."
+  :set #'(lambda (var val)
+	   (custom-set-default var val)
+	   (when (and (featurep 'jabber-activity)
+		      (fboundp 'jabber-activity-make-name-alist))
+	     (jabber-activity-make-name-alist)
+	     (jabber-activity-mode-line-update)))
+  :type '(choice (function-item :tag "Keep strings"
+				:value jabber-activity-make-strings-default)
+		 (function-item :tag "Shorten strings"
+				:value jabber-activity-make-strings-shorten)
+		 (function :tag "Other function")))
+
+(defcustom jabber-activity-count-in-title nil
+  "If non-nil, display number of active JIDs in frame title."
+  :type 'boolean)
+
+(defcustom jabber-activity-count-in-title-format
+  '(jabber-activity-jids ("[" jabber-activity-count-string "] "))
+  "Format string used for displaying activity in frame titles.
+Same syntax as `mode-line-format'."
+  :type 'sexp)
+
+(defcustom jabber-activity-show-p 'jabber-activity-show-p-default
+  "Function that checks if the given JID should be shown on the mode line.
+Predicate function to call to check if the given JID should be
+shown in the mode line or not."
+  :type 'function)
+
+(defcustom jabber-activity-query-unread t
+  "Whether to confirm exiting Emacs when there are unread messages."
+  :type 'boolean)
+
+(defcustom jabber-activity-banned nil
+  "List of regexps of banned JIDs."
+  :type '(repeat string))
+
+(defface jabber-activity-chat-face
+  '((t :inherit font-lock-warning-face))
+  "Face for 1:1 chat activity in the mode line.")
+
+(defface jabber-activity-mention-face
+  '((t :inherit font-lock-warning-face))
+  "Face for personal mentions (MUC highlight) in the mode line.")
+
+(defface jabber-activity-muc-face
+  '((t :inherit font-lock-keyword-face))
+  "Face for MUC (groupchat) activity in the mode line.")
+
+(define-obsolete-face-alias 'jabber-activity-face
+			    'jabber-activity-chat-face "30.1")
+(define-obsolete-face-alias 'jabber-activity-personal-face
+			    'jabber-activity-mention-face "30.1")
+
+(defvar jabber-activity-jids nil
+  "List of (CONNECTION . JID) pairs which have caused activity.
+Legacy string entries are actionable only with an unambiguous owner.")
+
+(defvar jabber-activity--event-owner nil
+  "Explicit receiving connection bound by message dispatch, never UI scope.")
+
+(defvar jabber-activity--format-owner nil
+  "Owner used by the string-only customization adapters.")
+
+(defvar jabber-activity-personal-jids nil
+  "Subset of `jabber-activity-jids' for JIDs with \"personal\" activity.")
+
+(defvar jabber-activity-name-alist nil
+  "Alist mapping owner-qualified activity entries to mode line names.")
+
+(defvar jabber-activity-mode-string ""
+  "The mode string for jabber activity.")
+
+(defvar jabber-activity-count-string "0"
+  "Number of active JIDs as a string.")
+
+(defvar jabber-activity-update-hook nil
+  "Hook called when `jabber-activity-jids' changes.
+It is called after `jabber-activity-mode-string' and
+`jabber-activity-count-string' are updated.")
+
+(defvar jabber-activity--updating nil
+  "Non-nil while activity code is running.
+Prevents recursive calls from `buffer-list-update-hook' and
+`window-configuration-change-hook' triggered during updates.")
+
+(defvar jabber-activity--shortened-names (make-hash-table :test #'equal)
+  "Cache mapping owners and sorted JID lists to shortened name alists.
+Invalidated when `jabber-activity-make-name-alist' rebuilds.")
+
+;; Global reference declarations
+
+(defvar jabber-buffer-connection)       ; jabber-chatbuffer.el
+(defvar jabber-silent-mode)             ; jabber.el
+
+;;
+
+(defun jabber-activity-make-string-default (jid)
+  "Return the nick of the JID.
+If no nick is available, return the user name part of the JID.  In
+private MUC conversations, return the user's nickname."
+  (if (and jabber-activity--format-owner
+           (jabber-jid-resource jid)
+           (jabber-muc-joined-p (jabber-jid-user jid)
+                                jabber-activity--format-owner))
+      (jabber-jid-resource jid)
+    (let ((nick (jabber-jid-displayname jid jabber-activity--format-owner))
+	  (user (jabber-jid-user jid))
+	  (username (jabber-jid-username jid)))
+      (if (and username (string= nick user))
+	  username
+	nick))))
+
+(defun jabber-activity-make-strings-default (jids)
+  "Apply `jabber-activity-make-string' on JIDS."
+  (mapcar #'(lambda (jid) (cons jid (funcall jabber-activity-make-string jid)))
+	  jids))
+
+(defun jabber-activity-common-prefix (s1 s2)
+  "Return length of common prefix string shared by S1 and S2."
+  (let ((len (min (length s1) (length s2))))
+    (or (cl-dotimes (i len)
+	  (when (not (eq (aref s1 i) (aref s2 i)))
+	    (cl-return i)))
+	;; Substrings, equal, nil, or empty ("")
+	len)))
+
+(defun jabber-activity--compute-shortening (jids)
+  "Compute shortened names for JIDS.
+Return an alist of (JID . short-name).  This is the uncached
+workhorse for `jabber-activity-make-strings-shorten'."
+  (let ((alist
+	 (sort (mapcar
+		(lambda (x) (cons x (funcall jabber-activity-make-string x)))
+		jids)
+	       (lambda (x y) (string-lessp (cdr x) (cdr y)))))
+	(min-len (if jabber-activity-shorten-aggressively
+		     1
+		   jabber-activity-shorten-minimum)))
+    (cl-loop
+     for ((_prev-jid . prev) (cur-jid . cur) (_next-jid . next))
+     on (cons nil alist)
+     until (null cur)
+     collect
+     (cons
+      cur-jid
+      (substring
+       cur
+       0 (min (length cur)
+	      (max min-len
+		   (1+ (jabber-activity-common-prefix cur prev))
+		   (1+ (jabber-activity-common-prefix cur next)))))))))
+
+(defun jabber-activity-make-strings-shorten (jids)
+  "Return an alist of (JID . short-names).
+This is acquired by running `jabber-activity-make-string' on
+JIDS, and then shortening the names as much as possible such that
+all strings still are unique and at least
+`jabber-activity-shorten-minimum' long.
+When `jabber-activity-shorten-aggressively' is non-nil, the
+minimum length constraint is relaxed to 1.
+Results are cached in `jabber-activity--shortened-names'."
+  (let ((key (cons jabber-activity--format-owner
+                   (sort (copy-sequence jids) #'string-lessp))))
+    (or (gethash key jabber-activity--shortened-names)
+	(puthash key (jabber-activity--compute-shortening jids)
+		 jabber-activity--shortened-names))))
+
+(defun jabber-activity--jid (entry)
+  "Return the JID string from activity ENTRY or a legacy string."
+  (if (consp entry) (cdr entry) entry))
+
+(defun jabber-activity--owner (entry)
+  "Return the exact live owner of ENTRY, without an account fallback.
+Legacy strings resolve only when one connection is active."
+  (let ((owner (if (consp entry)
+                   (car entry)
+                 (and (null (cdr jabber-connections))
+                      (car jabber-connections)))))
+    (and (memq owner jabber-connections) owner)))
+
+(defun jabber-activity--buffer (entry)
+  "Return ENTRY's live parent conversation buffer, not a dedicated thread."
+  (when-let* ((jc (jabber-activity--owner entry))
+              (jid (jabber-activity--jid entry)))
+    (seq-find
+     (lambda (buffer)
+       (with-current-buffer buffer
+         (and (eq major-mode 'jabber-chat-mode)
+              (not (bound-and-true-p jabber-message-thread-id))
+              (eq jabber-buffer-connection jc)
+              (or (equal jabber-group jid)
+                  (and jabber-chatting-with
+                       (if jabber-muc-private-p
+                           (equal jabber-chatting-with jid)
+                         (and (not jabber-group)
+                              (equal (jabber-jid-user jabber-chatting-with)
+                                     (jabber-jid-user jid)))))))))
+     (buffer-list))))
+
+(defun jabber-activity-find-buffer-name (jid)
+  "Find the exact-owner buffer for JID, an entry or legacy JID string."
+  (jabber-activity--buffer jid))
+
+(defun jabber-activity--unused-buffer-format (name)
+  "Return a literal unused buffer format derived from NAME.
+Do not let reconstruction adopt another account's same-named buffer."
+  (replace-regexp-in-string
+   "%" "%%" (generate-new-buffer-name
+              (if (bufferp name) (buffer-name name) name)) t t))
+
+(defun jabber-activity--switch-to-missing-buffer (entry)
+  "Recreate ENTRY's buffer only on its original live connection."
+  (when-let* ((jc (jabber-activity--owner entry))
+              (jid (jabber-activity--jid entry)))
+    (cond
+     ((and (jabber-jid-resource jid)
+           (jabber-muc-joined-p (jabber-jid-user jid) jc))
+      (let ((jabber-muc-private-buffer-format
+             (jabber-activity--unused-buffer-format
+              (jabber-muc-private-get-buffer
+               (jabber-jid-user jid) (jabber-jid-resource jid) jc))))
+        (switch-to-buffer
+         (jabber-muc-private-create-buffer jc (jabber-jid-user jid)
+                                           (jabber-jid-resource jid)))))
+     ((jabber-muc-joined-p jid jc)
+      (let ((jabber-groupchat-buffer-format
+             (jabber-activity--unused-buffer-format
+              (jabber-muc-get-buffer jid jc))))
+        (switch-to-buffer (jabber-muc-create-buffer jc jid))))
+     (t
+      (let ((jabber-chat-buffer-format
+             (jabber-activity--unused-buffer-format
+              (jabber-chat-get-buffer jid jc))))
+        (jabber-chat-with jc jid))))))
+
+(defun jabber-activity-show-p-default (jid)
+  "Return non-nil if JID should be shown in the mode line.
+A JID is shown when it is not banned and its owner's buffer is not
+visible.  The customization adapter supplies the explicit owner."
+  (let ((buffer (jabber-activity-find-buffer-name
+                 (if jabber-activity--format-owner
+                     (cons jabber-activity--format-owner jid)
+                   jid))))
+    (and (not (cl-some (lambda (regexp) (string-match-p regexp jid))
+                      jabber-activity-banned))
+         (or (null buffer) (not (get-buffer-window buffer 'visible))))))
+
+(defun jabber-activity--show-p (entry)
+  "Call the string-taking activity predicate for owned ENTRY."
+  (when-let* ((jabber-activity--format-owner (jabber-activity--owner entry)))
+    (funcall jabber-activity-show-p (jabber-activity--jid entry))))
+
+(defun jabber-activity--names (entries)
+  "Format ENTRIES without changing string-only customization signatures.
+Call the list formatter separately for each owner.  Reattach identity
+outside the customization boundary, including when names are identical."
+  (mapcan
+   (lambda (group)
+     (let* ((jabber-activity--format-owner (car group))
+            (entries (cdr group))
+            (names (funcall jabber-activity-make-strings
+                            (mapcar #'jabber-activity--jid entries))))
+       (mapcar (lambda (entry)
+                 (let ((jid (jabber-activity--jid entry)))
+                   (cons entry (or (cdr (assoc jid names)) jid))))
+               entries)))
+   (seq-group-by #'jabber-activity--owner entries)))
+
+(defun jabber-activity-make-name-alist (&optional _jc)
+  "Rebuild the owner-qualified names of currently known activity entries."
+  (clrhash jabber-activity--shortened-names)
+  (setq jabber-activity-name-alist
+        (jabber-activity--names
+         (delete-dups (append jabber-activity-jids
+                              (mapcar #'car jabber-activity-name-alist)))))
+  (clrhash jabber-activity--shortened-names))
+
+(defun jabber-activity-lookup-name (jid)
+  "Return a (JID . STRING) display pair for an entry or legacy JID string."
+  (or (assoc jid jabber-activity-name-alist)
+      (progn
+        (clrhash jabber-activity--shortened-names)
+        (setq jabber-activity-name-alist
+              (jabber-activity--names
+               (cons jid (mapcar #'car jabber-activity-name-alist))))
+        (assoc jid jabber-activity-name-alist))))
+
+(defun jabber-activity--propertize-entry (entry)
+  "Return a propertized mode-line string for ENTRY.
+ENTRY is a (JID . name) cons cell from `jabber-activity-lookup-name'.
+MUC JIDs get a # prefix (not included in the shortening calculation)."
+  (let* ((identity (car entry))
+         (jid (jabber-activity--jid identity))
+         (owner (jabber-activity--owner identity))
+         (name (cdr entry))
+         (mucp (and owner (jabber-muc-joined-p jid owner)))
+         (map (make-sparse-keymap))
+	 (display (if mucp (concat jabber-activity-muc-prefix name) name))
+	 (face (cond
+		((member identity jabber-activity-personal-jids)
+		 'jabber-activity-mention-face)
+		(mucp 'jabber-activity-muc-face)
+		(t 'jabber-activity-chat-face))))
+    (define-key map [mode-line mouse-1]
+                (lambda () (interactive) (jabber-activity-switch-to identity)))
+    (propertize display 'face face 'jabber-modeline t
+                'jabber-activity-entry identity 'local-map map
+                'mouse-face 'mode-line-highlight 'help-echo jid)))
+
+(defun jabber-activity--sort-jids (jids)
+  "Return JIDS sorted with personal mentions first."
+  (let (personal other)
+    (dolist (jid jids)
+      (if (member jid jabber-activity-personal-jids)
+          (push jid personal)
+        (push jid other)))
+    (nconc (nreverse personal) (nreverse other))))
+
+(defun jabber-activity-mode-line-update ()
+  "Update the string shown in the mode line.
+Recomputes `jabber-activity-mode-string' and
+`jabber-activity-count-string' from `jabber-activity-jids'."
+  (unless jabber-activity--updating
+    (let* ((jabber-activity--updating t)
+	   (sorted (jabber-activity--sort-jids jabber-activity-jids))
+	   (entries (mapcar #'jabber-activity-lookup-name sorted))
+	   (total (length entries))
+	   (overflow (when (and jabber-activity-shorten-cutoff
+				(> total jabber-activity-shorten-cutoff))
+		       (- total jabber-activity-shorten-cutoff)))
+	   (visible (if overflow
+			(seq-take entries jabber-activity-shorten-cutoff)
+		      entries))
+	   (new-mode-string
+	    (if jabber-activity-jids
+		(concat
+		 (propertize "[" 'face 'shadow 'jabber-modeline t)
+		 (mapconcat #'jabber-activity--propertize-entry visible
+			    (propertize "," 'face 'shadow 'jabber-modeline t))
+		 (when overflow
+		   (propertize (format ", +%d" overflow)
+			       'face 'shadow 'jabber-modeline t))
+		 (propertize "]" 'face 'shadow 'jabber-modeline t))
+	      ""))
+	   (new-count-string (number-to-string total))
+	   (changed nil))
+      (unless (equal-including-properties jabber-activity-mode-string
+					  new-mode-string)
+	(setq jabber-activity-mode-string new-mode-string
+	      changed t))
+      (unless (string= jabber-activity-count-string new-count-string)
+	(setq jabber-activity-count-string new-count-string
+	      changed t))
+      (when changed
+	(force-mode-line-update 'all)
+	(run-hooks 'jabber-activity-update-hook)))))
+
+;;; Hooks
+
+(defun jabber-activity-clean ()
+  "Remove JIDs where `jabber-activity-show-p' no longer is true."
+  (unless jabber-activity--updating
+    (let* ((jabber-activity--updating t)
+           (new-jids (cl-remove-if-not #'jabber-activity--show-p
+                                       jabber-activity-jids))
+           (new-personal (cl-remove-if-not #'jabber-activity--show-p
+                                           jabber-activity-personal-jids))
+           (changed (or (not (equal new-jids jabber-activity-jids))
+                        (not (equal new-personal jabber-activity-personal-jids)))))
+      (setq jabber-activity-jids new-jids
+            jabber-activity-personal-jids new-personal)
+      (when changed
+        (let ((jabber-activity--updating nil))
+          (jabber-activity-mode-line-update))))))
+
+(defun jabber-activity--event-entry (jid buffer)
+  "Capture JID's owner from explicit BUFFER or the message dispatcher."
+  (let* ((buffer (and buffer (get-buffer buffer)))
+         (owner (or jabber-activity--event-owner
+                    (and (buffer-live-p buffer)
+                         (buffer-local-value 'jabber-buffer-connection buffer)))))
+    (when (memq owner jabber-connections)
+      (cons owner jid))))
+
+(defun jabber-activity-add (from buffer _text _proposed-alert)
+  "Track FROM on the account captured from BUFFER or message dispatch."
+  (when-let* ((entry (jabber-activity--event-entry from buffer))
+              (show (jabber-activity--show-p entry)))
+    (add-to-list 'jabber-activity-jids entry)
+    (add-to-list 'jabber-activity-personal-jids entry)
+    (jabber-activity-mode-line-update)))
+
+(defun jabber-activity-add-muc (_nick group buffer text _proposed-alert)
+  "Track GROUP on BUFFER's owner, preserving personal mentions in TEXT."
+  (when-let* ((entry (jabber-activity--event-entry group buffer))
+              (show (jabber-activity--show-p entry)))
+    (add-to-list 'jabber-activity-jids entry)
+    ;; This is the captured event owner, not the selected UI account.
+    (let ((jabber-buffer-connection (car entry)))
+      (when (jabber-muc-looks-like-personal-p text group)
+        (add-to-list 'jabber-activity-personal-jids entry)))
+    (jabber-activity-mode-line-update)))
+
+(defun jabber-activity-presence (who _oldstatus newstatus _statustext _proposed-alert)
+  "Track subscription WHO using its scoped symbol owner.
+NEWSTATUS is the presence type of the incoming stanza."
+  (when (string= newstatus "subscribe")
+    (when-let* ((owner (jabber-jid-owner who))
+                (entry (cons owner (symbol-name who)))
+                (show (jabber-activity--show-p entry)))
+      (add-to-list 'jabber-activity-jids entry)
+      (add-to-list 'jabber-activity-personal-jids entry)
+      (jabber-activity-mode-line-update))))
+
+(defun jabber-activity-kill-hook ()
+  "Query the user if is sure to kill Emacs when there are unread messages.
+Query the user as to whether killing Emacs should be cancelled
+when there are unread messages which otherwise would be lost, if
+`jabber-activity-query-unread' is t"
+  (if (and jabber-activity-jids
+	   jabber-activity-query-unread)
+      (or jabber-silent-mode (yes-or-no-p
+			      "You have unread Jabber messages, are you sure you want to quit?"))
+    t))
+
+;;; Interactive functions
+
+(defvar jabber-activity-last-buffer nil
+  "Last non-Jabber buffer used.")
+
+(defun jabber-activity-switch-to (&optional jid-param)
+  "Switch to the buffer for JID-PARAM, or the next active JID.
+JID-PARAM may be an owner-qualified activity entry or a legacy JID
+string.  Legacy strings require an unambiguous active connection.
+If no activity, switch back to the last non-Jabber buffer."
+  (interactive)
+  (if (or jid-param jabber-activity-jids)
+      (let* ((jid (or jid-param (car jabber-activity-jids)))
+             (buf (jabber-activity-find-buffer-name jid)))
+        (unless (eq major-mode 'jabber-chat-mode)
+          (setq jabber-activity-last-buffer (current-buffer)))
+        (if buf
+            (switch-to-buffer buf)
+          (unless (jabber-activity--switch-to-missing-buffer jid)
+            (setq jabber-activity-jids (delete jid jabber-activity-jids)
+                  jabber-activity-personal-jids
+                  (delete jid jabber-activity-personal-jids))
+            (jabber-activity-mode-line-update)
+            (message "Buffer for %s no longer exists" (jabber-activity--jid jid))))
+        (jabber-activity-clean))
+    (if (eq major-mode 'jabber-chat-mode)
+        (when (buffer-live-p jabber-activity-last-buffer)
+          (switch-to-buffer jabber-activity-last-buffer))
+      (message "No new activity"))))
+
+;;; Disconnect cleanup
+
+(defun jabber-activity--on-disconnect ()
+  "Remove retired owners without clearing another account's activity."
+  (setq jabber-activity-jids
+        (seq-filter #'jabber-activity--owner jabber-activity-jids)
+        jabber-activity-personal-jids
+        (seq-filter #'jabber-activity--owner jabber-activity-personal-jids)
+        jabber-activity-name-alist
+        (seq-filter (lambda (entry) (jabber-activity--owner (car entry)))
+                    jabber-activity-name-alist))
+  (clrhash jabber-activity--shortened-names)
+  (jabber-activity-mode-line-update))
+
+;;; Init/teardown for jabber-modeline-mode
+
+(defun jabber-activity--init ()
+  "Register activity tracking hooks.
+Called by `jabber-modeline-mode' when enabling."
+  (add-hook 'window-configuration-change-hook
+	    #'jabber-activity-clean)
+  (add-hook 'jabber-message-hooks
+	    #'jabber-activity-add)
+  (add-hook 'jabber-muc-hooks
+	    #'jabber-activity-add-muc)
+  (add-hook 'jabber-presence-hooks
+	    #'jabber-activity-presence)
+  (add-hook 'jabber-post-connect-hooks
+	    #'jabber-activity-make-name-alist)
+  (add-hook 'kill-emacs-query-functions
+	    #'jabber-activity-kill-hook))
+
+(defun jabber-activity--teardown ()
+  "Unregister activity tracking hooks.
+Called by `jabber-modeline-mode' when disabling."
+  (remove-hook 'window-configuration-change-hook
+	       #'jabber-activity-clean)
+  (remove-hook 'jabber-message-hooks
+	       #'jabber-activity-add)
+  (remove-hook 'jabber-muc-hooks
+	       #'jabber-activity-add-muc)
+  (remove-hook 'jabber-presence-hooks
+	       #'jabber-activity-presence)
+  (remove-hook 'jabber-post-connect-hooks
+	       #'jabber-activity-make-name-alist)
+  (remove-hook 'kill-emacs-query-functions
+	       #'jabber-activity-kill-hook))
+
+(provide 'jabber-activity)
+
+;;; jabber-activity.el ends here

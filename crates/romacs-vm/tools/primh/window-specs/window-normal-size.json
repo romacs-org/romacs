@@ -1,0 +1,42 @@
+{
+ "name": "window-normal-size",
+ "arity": [
+  0,
+  2
+ ],
+ "effect": "reads",
+ "gnu_files": [
+  "window.c"
+ ],
+ "gnu_def": "window.c:947",
+ "rust": "src/prims/window.rs:54",
+ "args": [
+  "none",
+  "none"
+ ],
+ "extra": {
+  "0": [
+   "1",
+   "'sym",
+   "(copy-sequence \"s\")"
+  ],
+  "1": [
+   "nil"
+  ]
+ },
+ "probes": [
+  "(window-normal-size)",
+  "(window-normal-size nil t)",
+  "(window-normal-size (minibuffer-window))",
+  "(list (window-normal-size (minibuffer-window) t) (window-normal-size nil nil))",
+  "(let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (list (window-normal-size a) (window-normal-size b) (window-normal-size p) (window-normal-size a t) (window-normal-size b t) (window-normal-size p t)))",
+  "(let* ((a (selected-window)) (h (window-pixel-width a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half t 0.5))) (p (window-parent b))) (list (window-normal-size a t) (window-normal-size b t) (window-normal-size p t) (window-normal-size a) (window-normal-size b)))",
+  "(let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (set-window-new-normal a 0.75) (split-window-internal a half nil 0.25)))) (list (window-normal-size a) (window-normal-size b) (window-normal-size (window-parent a))))",
+  "(let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (set-window-new-normal a 'sym) (split-window-internal a half nil 'other)))) (list (window-normal-size a) (window-normal-size b) (window-new-normal b)))",
+  "(let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (set-window-new-normal a 3) (split-window-internal a half 'above 0.5)))) (list (window-normal-size a) (window-normal-size b) (eq (window-top-child (window-parent a)) b)))",
+  "(let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (progn (set-window-new-normal a 0.25) (set-window-new-normal b 0.75) (set-window-new-pixel p h) (set-window-new-pixel a half) (set-window-new-pixel b (- h half)) (list (window-resize-apply) (window-normal-size a) (window-normal-size b) (window-normal-size a t))))",
+  "(let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (progn (set-window-new-normal a 0.25) (set-window-new-pixel p h) (set-window-new-pixel a h) (delete-window-internal b) (list (window-normal-size a) (window-parent a))))",
+  "(let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (progn (set-window-new-pixel p h) (set-window-new-pixel a h) (delete-window-internal b) (condition-case e (window-normal-size b) (error (list (car e) (car (cdr e)) (eq (car (cdr (cdr e))) b))))))",
+  "(eq (window-normal-size) (window-normal-size))"
+ ]
+}

@@ -1,0 +1,58 @@
+{
+  "name": "string-search",
+  "arity": [
+    2,
+    3
+  ],
+  "effect": "pure",
+  "gnu_files": [
+    "fns.c"
+  ],
+  "gnu_def": "fns.c:6576",
+  "rust": "src/prims/search.rs:18",
+  "args": [
+    "string",
+    "string",
+    "integer"
+  ],
+  "probes": [
+    "(string-search \"b\" \"abc\")",
+    "(string-search \"x\" \"abc\")",
+    "(string-search \"a\" \"abc\")",
+    "(string-search \"c\" \"abc\")",
+    "(string-search \"λ\" \"é🙂λz\")",
+    "(string-search \"z\" \"é🙂λz\")",
+    "(string-search \"é🙂\" \"xé🙂z\")",
+    "(string-search \"\" \"é🙂\" 1)",
+    "(string-search \"\" \"é🙂\" 2)",
+    "(string-search \"\" \"\")",
+    "(string-search \"a\" \"aba\" 0)",
+    "(string-search \"a\" \"aba\" 1)",
+    "(string-search \"a\" \"aba\" 3)",
+    "(string-search \"a\" \"aba\" nil)",
+    "(string-search \"a\" \"aba\" 4)",
+    "(string-search \"a\" \"aba\" -1)",
+    "(string-search \"a\" \"aba\" 1.0)",
+    "(string-search \"a\" \"aba\" 'x)",
+    "(string-search 1 \"a\")",
+    "(string-search \"a\" 1)",
+    "(string-search 1 2 'x)",
+    "(string-search \"A\" \"a\")",
+    "(string-search (unibyte-string 255) (unibyte-string 97 255))",
+    "(string-search (unibyte-string 255) (string 97 #x3fffff))",
+    "(string-search (string #x3fffff) (unibyte-string 97 255))",
+    "(string-search \"é\" (unibyte-string 233))",
+    "(string-search (unibyte-string 233) \"é\")",
+    "(string-search (string #x200000) (string 97 #x200000))",
+    "(string-search (string #xd800) (string 97 #xd800))",
+    "(string-search \"a\" (string-to-multibyte \"ba\"))",
+    "(string-search (propertize \"a\" 'face 'bold) \"ba\")",
+    "(list (fboundp 'string-search) (functionp #'string-search) (funcall #'string-search \"z\" \"éz\"))",
+    "(string-search \"a\" \"a\" #x2000000000000000)",
+    "(string-search (unibyte-string #xc3 #xa9) \"é\")",
+    "(string-search \"é\" (unibyte-string #xc3 #xa9))",
+    "(string-search (string 97 #x3fffff) (unibyte-string 120 97 255))",
+    "(string-search (unibyte-string 97 255) (string 120 97 #x3fffff))",
+    "(string-search \"é\" \"éaé\" 1)"
+  ]
+}

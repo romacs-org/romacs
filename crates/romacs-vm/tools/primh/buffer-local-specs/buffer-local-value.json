@@ -1,0 +1,26 @@
+{
+  "name": "buffer-local-value",
+  "arity": [
+    2,
+    2
+  ],
+  "effect": "reads",
+  "gnu_files": [
+    "buffer.c"
+  ],
+  "gnu_def": "buffer.c:1353",
+  "rust": "src/prims/buffer_locals.rs:10",
+  "args": [
+    "projected-buffer-locals",
+    "projected-buffer-locals"
+  ],
+  "probes": [
+    "(let ((b (get-buffer-create \"local-other\"))) (setq bl-x 7) (with-current-buffer b (set (make-local-variable 'bl-x) 12)) (list (buffer-local-value 'bl-x b) bl-x (local-variable-p 'bl-x b) (cdr (assq 'bl-x (buffer-local-variables b)))))",
+    "(let ((b (get-buffer-create \"untouched\"))) (with-current-buffer b (setq fill-column 43)) (with-temp-buffer (setq fill-column 32) (kill-all-local-variables)) (buffer-local-value 'fill-column b))",
+    "(condition-case e (buffer-local-value 3 nil) (wrong-type-argument e))",
+    "(list (condition-case e (local-variable-p 3) (wrong-type-argument (car e))) (condition-case e (buffer-local-value 'bl-void (current-buffer)) (void-variable e)) (condition-case e (kill-local-variable 3) (wrong-type-argument (car e))))",
+    "(condition-case e (buffer-local-value 'x nil) (error e))",
+    "(list (fboundp 'buffer-local-value) (functionp 'buffer-local-value))",
+    "(with-temp-buffer (funcall 'buffer-local-value 'fill-column (current-buffer)))"
+  ]
+}

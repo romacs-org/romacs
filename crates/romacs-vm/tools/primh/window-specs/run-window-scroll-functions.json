@@ -1,0 +1,33 @@
+{
+ "name": "run-window-scroll-functions",
+ "arity": [
+  0,
+  1
+ ],
+ "effect": "global",
+ "gnu_files": [
+  "window.c"
+ ],
+ "gnu_def": "window.c:3852",
+ "rust": "src/prims/window.rs:119",
+ "args": [
+  "none"
+ ],
+ "extra": {
+  "0": [
+   "1",
+   "'sym",
+   "(copy-sequence \"s\")"
+  ]
+ },
+ "probes": [
+  "(run-window-scroll-functions)",
+  "(run-window-scroll-functions (minibuffer-window))",
+  "(let ((window-scroll-functions nil)) (run-window-scroll-functions (selected-window)))",
+  "(progn (unless (fboundp 'run-hook-with-args) (defalias 'run-hook-with-args (lambda (hook &rest args) (apply (symbol-value hook) args)))) (let* ((other (get-buffer-create \"rwsf\")) (seen nil)) (set-buffer other) (let ((window-scroll-functions (lambda (w s) (setq seen (list (eq w (selected-window)) s (eq (current-buffer) (window-buffer w)))) 'ignored))) (list (run-window-scroll-functions) seen (eq (current-buffer) other)))))",
+  "(progn (unless (fboundp 'run-hook-with-args) (defalias 'run-hook-with-args (lambda (hook &rest args) (apply (symbol-value hook) args)))) (let* ((seen nil) (w0 (selected-window))) (let ((window-scroll-functions (lambda (w s) (setq seen (list (eq w w0) s))))) (list (run-window-scroll-functions w0) seen))))",
+  "(progn (unless (fboundp 'run-hook-with-args) (defalias 'run-hook-with-args (lambda (hook &rest args) (apply (symbol-value hook) args)))) (let* ((other (get-buffer-create \"rwsf\")) (seen nil)) (set-buffer other) (condition-case e (let ((window-scroll-functions (lambda (w s) (setq seen s) (car 1)))) (run-window-scroll-functions)) (error (list e seen (eq (current-buffer) other))))))",
+  "(let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (condition-case e (run-window-scroll-functions p) (error (list (car e) (car (cdr e)) (eq (car (cdr (cdr e))) p)))))",
+  "(let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (progn (set-window-new-pixel p h) (set-window-new-pixel a h) (delete-window-internal b) (condition-case e (run-window-scroll-functions b) (error (list (car e) (car (cdr e)) (eq (car (cdr (cdr e))) b))))))"
+ ]
+}

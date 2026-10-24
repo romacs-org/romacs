@@ -1,0 +1,1166 @@
+{
+ "blob": "9312d268df0eb378054eeb9aa991631672d4b00c",
+ "compiled": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": true,
+  "results": {
+   "eglot-test-auto-detect-running-server": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "eglot-test-auto-reconnect": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "eglot-test-auto-shutdown": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "eglot-test-basic-pull-diagnostics": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (executable-find \"ty\")) :form (executable-find \"ty\") :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "eglot-test-basic-stream-diagnostics": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (executable-find \"rass\")) :form (executable-find \"rass\") :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "eglot-test-basic-symlink": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "eglot-test-basic-xref": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "eglot-test-capabilities": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "eglot-test-dcase": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "eglot-test-dcase-issue-452": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "eglot-test-eclipse-connect": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (executable-find \"jdtls\")) :form (executable-find \"jdtls\") :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "eglot-test-ensure": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "eglot-test-glob-test": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "eglot-test-javascript-basic": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (executable-find \"typescript-language-server\") (executable-find \"tsserver\"))) :form (and (executable-find \"typescript-language-server\") (executable-find \"tsserver\")) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "eglot-test-json-basic": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (executable-find \"vscode-json-languageserver\")) :form (executable-find \"vscode-json-languageserver\") :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "eglot-test-lsp-abiding-column": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "eglot-test-path-to-uri-escape": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "eglot-test-path-to-uri-windows": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (eq system-type 'windows-nt)) :form (eq gnu/linux windows-nt) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "eglot-test-project-wide-diagnostics-rust-analyzer": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (executable-find \"rust-analyzer\")) :form (executable-find \"rust-analyzer\") :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "eglot-test-project-wide-diagnostics-typescript": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (executable-find \"typescript-language-server\") (executable-find \"tsserver\"))) :form (and (executable-find \"typescript-language-server\") (executable-find \"tsserver\")) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "eglot-test-rename-a-symbol": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "eglot-test-rust-analyzer-hover-after-edit": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (executable-find \"rust-analyzer\")) :form (executable-find \"rust-analyzer\") :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "eglot-test-rust-analyzer-watches-files": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (executable-find \"rust-analyzer\")) :form (executable-find \"rust-analyzer\") :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "eglot-test-rust-completion-exit-function": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (executable-find \"rust-analyzer\")) :form (executable-find \"rust-analyzer\") :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "eglot-test-rust-on-type-formatting": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (executable-find \"rust-analyzer\")) :form (executable-find \"rust-analyzer\") :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "eglot-test-same-server-multi-mode": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "eglot-test-semtok-basic": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "eglot-test-semtok-refontify": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "eglot-test-server-programs-class-name-and-contact-spec": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "eglot-test-server-programs-class-name-and-plist": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "eglot-test-server-programs-executable-multiple-major-modes": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "eglot-test-server-programs-executable-with-arg": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "eglot-test-server-programs-executable-with-args-and-autoport": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "eglot-test-server-programs-function": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "eglot-test-server-programs-guess-lang": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "eglot-test-server-programs-host-and-port": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "eglot-test-server-programs-host-and-port-and-tcp-args": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "eglot-test-server-programs-simple-executable": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "eglot-test-server-programs-simple-missing-executable": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "eglot-test-slow-async-connection": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "eglot-test-slow-sync-connection-intime": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "eglot-test-slow-sync-connection-wait": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "eglot-test-slow-sync-timeout": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "eglot-test-snippet-completions": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (executable-find \"clangd\") (functionp 'yas-minor-mode))) :form (and (executable-find \"clangd\") (functionp 'yas-minor-mode)) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "eglot-test-snippet-completions-with-company": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (executable-find \"clangd\") (functionp 'yas-minor-mode) (functionp 'company-complete))) :form (and (executable-find \"clangd\") (functionp 'yas-minor-mode) (functionp 'company-complete)) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "eglot-test-strict-interfaces": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "eglot-test-tramp-test": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "eglot-test-tramp-test-2": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "eglot-test-zig-insert-replace-completion": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (functionp 'zig-ts-mode)) :form (functionp zig-ts-mode) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   }
+  },
+  "timed_out": false
+ },
+ "file": "lisp/progmodes/eglot-tests.el",
+ "gnu": {
+  "emacs": "<recording-path-redacted>/emacs-32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+  "version": "32.0.50"
+ },
+ "harness_sha256": "78c20850429a08af22faadf73b5d164c560230e83d7eb88ef60cb995670703ef",
+ "mini": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": null,
+  "results": {
+   "eglot-test-auto-detect-running-server": {
+    "as_expected": null,
+    "detail": "(void-function ert-test-name)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "eglot-test-auto-reconnect": {
+    "as_expected": null,
+    "detail": "(void-function ert-test-name)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "eglot-test-auto-shutdown": {
+    "as_expected": null,
+    "detail": "(void-function ert-test-name)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "eglot-test-basic-completions": {
+    "as_expected": null,
+    "detail": "(void-function ert-test-name)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "eglot-test-basic-diagnostics": {
+    "as_expected": null,
+    "detail": "(void-function ert-test-name)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "eglot-test-basic-pull-diagnostics": {
+    "as_expected": null,
+    "detail": "((skip-unless (executable-find \"ty\")))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "eglot-test-basic-stream-diagnostics": {
+    "as_expected": null,
+    "detail": "((skip-unless (executable-find \"rass\")))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "eglot-test-basic-symlink": {
+    "as_expected": null,
+    "detail": "(void-function ert-test-name)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "eglot-test-basic-xref": {
+    "as_expected": null,
+    "detail": "(void-function ert-test-name)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "eglot-test-capabilities": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "eglot-test-dcase": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "eglot-test-dcase-issue-452": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "eglot-test-diagnostic-tags-unnecessary-code": {
+    "as_expected": null,
+    "detail": "(void-function ert-test-name)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "eglot-test-eclipse-connect": {
+    "as_expected": null,
+    "detail": "((skip-unless (executable-find \"jdtls\")))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "eglot-test-eldoc-after-completions": {
+    "as_expected": null,
+    "detail": "(void-function ert-test-name)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "eglot-test-ensure": {
+    "as_expected": null,
+    "detail": "(void-function ert-test-name)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "eglot-test-formatting": {
+    "as_expected": null,
+    "detail": "(void-function ert-test-name)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "eglot-test-glob-test": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "eglot-test-javascript-basic": {
+    "as_expected": null,
+    "detail": "((skip-unless (and (executable-find \"typescript-language-server\") (executable-find \"tsserver\"))))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "eglot-test-json-basic": {
+    "as_expected": null,
+    "detail": "((skip-unless (executable-find \"vscode-json-languageserver\")))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "eglot-test-lsp-abiding-column": {
+    "as_expected": null,
+    "detail": "(void-function ert-test-name)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "eglot-test-multiline-eldoc": {
+    "as_expected": null,
+    "detail": "(void-function ert-test-name)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "eglot-test-non-unique-completions": {
+    "as_expected": null,
+    "detail": "(void-function ert-test-name)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "eglot-test-path-to-uri-escape": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "eglot-test-path-to-uri-windows": {
+    "as_expected": null,
+    "detail": "((skip-unless (eq system-type 'windows-nt)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "eglot-test-project-wide-diagnostics-rust-analyzer": {
+    "as_expected": null,
+    "detail": "((skip-unless (executable-find \"rust-analyzer\")))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "eglot-test-project-wide-diagnostics-typescript": {
+    "as_expected": null,
+    "detail": "((skip-unless (and (executable-find \"typescript-language-server\") (executable-find \"tsserver\"))))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "eglot-test-rename-a-symbol": {
+    "as_expected": null,
+    "detail": "(void-function ert-test-name)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "eglot-test-rust-analyzer-hover-after-edit": {
+    "as_expected": null,
+    "detail": "((skip-unless (executable-find \"rust-analyzer\")))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "eglot-test-rust-analyzer-watches-files": {
+    "as_expected": null,
+    "detail": "((skip-unless (executable-find \"rust-analyzer\")))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "eglot-test-rust-completion-exit-function": {
+    "as_expected": null,
+    "detail": "((skip-unless (executable-find \"rust-analyzer\")))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "eglot-test-rust-on-type-formatting": {
+    "as_expected": null,
+    "detail": "((skip-unless (executable-find \"rust-analyzer\")))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "eglot-test-same-server-multi-mode": {
+    "as_expected": null,
+    "detail": "(void-function ert-test-name)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "eglot-test-semtok-basic": {
+    "as_expected": null,
+    "detail": "(void-function ert-test-name)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "eglot-test-semtok-refontify": {
+    "as_expected": null,
+    "detail": "(void-function ert-test-name)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "eglot-test-server-programs-class-name-and-contact-spec": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "eglot-test-server-programs-class-name-and-plist": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "eglot-test-server-programs-executable-multiple-major-modes": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "eglot-test-server-programs-executable-with-arg": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "eglot-test-server-programs-executable-with-args-and-autoport": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "eglot-test-server-programs-function": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "eglot-test-server-programs-guess-lang": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "eglot-test-server-programs-host-and-port": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "eglot-test-server-programs-host-and-port-and-tcp-args": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "eglot-test-server-programs-simple-executable": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "eglot-test-server-programs-simple-missing-executable": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "eglot-test-slow-async-connection": {
+    "as_expected": null,
+    "detail": "(void-function ert-test-name)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "eglot-test-slow-sync-connection-intime": {
+    "as_expected": null,
+    "detail": "(void-function ert-test-name)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "eglot-test-slow-sync-connection-wait": {
+    "as_expected": null,
+    "detail": "(void-function ert-test-name)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "eglot-test-slow-sync-timeout": {
+    "as_expected": null,
+    "detail": "(void-function ert-test-name)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "eglot-test-snippet-completions": {
+    "as_expected": null,
+    "detail": "((skip-unless (and (executable-find \"clangd\") (functionp 'yas-minor-mode))))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "eglot-test-snippet-completions-with-company": {
+    "as_expected": null,
+    "detail": "((skip-unless (and (executable-find \"clangd\") (functionp 'yas-minor-mode) (functionp 'company-complete))))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "eglot-test-stop-completion-on-nonprefix": {
+    "as_expected": null,
+    "detail": "(void-function ert-test-name)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "eglot-test-strict-interfaces": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "eglot-test-tramp-test": {
+    "as_expected": null,
+    "detail": "(void-function ert-test-name)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "eglot-test-tramp-test-2": {
+    "as_expected": null,
+    "detail": "(void-function ert-test-name)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "eglot-test-try-completion-inside-symbol": {
+    "as_expected": null,
+    "detail": "(void-function ert-test-name)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "eglot-test-try-completion-inside-symbol-2": {
+    "as_expected": null,
+    "detail": "(void-function ert-test-name)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "eglot-test-try-completion-nomatch": {
+    "as_expected": null,
+    "detail": "(void-function ert-test-name)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "eglot-test-zig-insert-replace-completion": {
+    "as_expected": null,
+    "detail": "((skip-unless (functionp 'zig-ts-mode)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   }
+  },
+  "timed_out": false
+ },
+ "read_error": null,
+ "real": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": true,
+  "results": {
+   "eglot-test-auto-detect-running-server": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "eglot-test-auto-reconnect": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "eglot-test-auto-shutdown": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "eglot-test-basic-pull-diagnostics": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (executable-find \"ty\")) :form (executable-find \"ty\") :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "eglot-test-basic-stream-diagnostics": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (executable-find \"rass\")) :form (executable-find \"rass\") :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "eglot-test-basic-symlink": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "eglot-test-basic-xref": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "eglot-test-capabilities": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "eglot-test-dcase": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "eglot-test-dcase-issue-452": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "eglot-test-eclipse-connect": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (executable-find \"jdtls\")) :form (executable-find \"jdtls\") :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "eglot-test-ensure": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "eglot-test-glob-test": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "eglot-test-javascript-basic": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (executable-find \"typescript-language-server\") (executable-find \"tsserver\"))) :form (and (executable-find \"typescript-language-server\") (executable-find \"tsserver\")) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "eglot-test-json-basic": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (executable-find \"vscode-json-languageserver\")) :form (executable-find \"vscode-json-languageserver\") :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "eglot-test-lsp-abiding-column": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "eglot-test-path-to-uri-escape": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "eglot-test-path-to-uri-windows": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (eq system-type 'windows-nt)) :form (eq gnu/linux windows-nt) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "eglot-test-project-wide-diagnostics-rust-analyzer": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (executable-find \"rust-analyzer\")) :form (executable-find \"rust-analyzer\") :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "eglot-test-project-wide-diagnostics-typescript": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (executable-find \"typescript-language-server\") (executable-find \"tsserver\"))) :form (and (executable-find \"typescript-language-server\") (executable-find \"tsserver\")) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "eglot-test-rename-a-symbol": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "eglot-test-rust-analyzer-hover-after-edit": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (executable-find \"rust-analyzer\")) :form (executable-find \"rust-analyzer\") :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "eglot-test-rust-analyzer-watches-files": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (executable-find \"rust-analyzer\")) :form (executable-find \"rust-analyzer\") :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "eglot-test-rust-completion-exit-function": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (executable-find \"rust-analyzer\")) :form (executable-find \"rust-analyzer\") :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "eglot-test-rust-on-type-formatting": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (executable-find \"rust-analyzer\")) :form (executable-find \"rust-analyzer\") :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "eglot-test-same-server-multi-mode": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "eglot-test-semtok-basic": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "eglot-test-semtok-refontify": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "eglot-test-server-programs-class-name-and-contact-spec": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "eglot-test-server-programs-class-name-and-plist": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "eglot-test-server-programs-executable-multiple-major-modes": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "eglot-test-server-programs-executable-with-arg": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "eglot-test-server-programs-executable-with-args-and-autoport": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "eglot-test-server-programs-function": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "eglot-test-server-programs-guess-lang": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "eglot-test-server-programs-host-and-port": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "eglot-test-server-programs-host-and-port-and-tcp-args": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "eglot-test-server-programs-simple-executable": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "eglot-test-server-programs-simple-missing-executable": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "eglot-test-slow-async-connection": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "eglot-test-slow-sync-connection-intime": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "eglot-test-slow-sync-connection-wait": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "eglot-test-slow-sync-timeout": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "eglot-test-snippet-completions": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (executable-find \"clangd\") (functionp 'yas-minor-mode))) :form (and (executable-find \"clangd\") (functionp 'yas-minor-mode)) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "eglot-test-snippet-completions-with-company": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (executable-find \"clangd\") (functionp 'yas-minor-mode) (functionp 'company-complete))) :form (and (executable-find \"clangd\") (functionp 'yas-minor-mode) (functionp 'company-complete)) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "eglot-test-strict-interfaces": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "eglot-test-tramp-test": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "eglot-test-tramp-test-2": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "eglot-test-zig-insert-replace-completion": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (functionp 'zig-ts-mode)) :form (functionp zig-ts-mode) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   }
+  },
+  "timed_out": false
+ },
+ "schema": 1,
+ "toplevel_deftests": 60
+}

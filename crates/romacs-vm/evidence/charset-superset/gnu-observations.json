@@ -1,0 +1,71 @@
+{
+  "oracle": "<recording-path-redacted>/emacs-32.0.50",
+  "sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+  "cases": [
+    {
+      "id": "plain",
+      "source": "(condition-case e (progn (define-charset-internal 'superset-probe nil [0 255 0 0 0 0 0 0] nil nil nil nil nil nil nil nil nil nil nil '(ascii) nil '(:saved t)) (charset-plist 'superset-probe)) (error e))",
+      "expected": "(:saved t)"
+    },
+    {
+      "id": "offset",
+      "source": "(condition-case e (progn (define-charset-internal 'superset-probe nil [0 255 0 0 0 0 0 0] nil nil nil nil nil nil nil nil nil nil nil '(ascii (iso-8859-1 . 128)) nil '(:saved t)) (charset-plist 'superset-probe)) (error e))",
+      "expected": "(:saved t)"
+    },
+    {
+      "id": "unknown",
+      "source": "(condition-case e (progn (define-charset-internal 'superset-probe nil [0 255 0 0 0 0 0 0] nil nil nil nil nil nil nil nil nil nil nil '(no-such-parent) nil '(:saved t)) (charset-plist 'superset-probe)) (error e))",
+      "expected": "(wrong-type-argument charsetp no-such-parent)"
+    },
+    {
+      "id": "wrong_offset",
+      "source": "(condition-case e (progn (define-charset-internal 'superset-probe nil [0 255 0 0 0 0 0 0] nil nil nil nil nil nil nil nil nil nil nil '((ascii . 1.0)) nil '(:saved t)) (charset-plist 'superset-probe)) (error e))",
+      "expected": "(wrong-type-argument integerp 1.0)"
+    },
+    {
+      "id": "offset_high",
+      "source": "(condition-case e (progn (define-charset-internal 'superset-probe nil [0 255 0 0 0 0 0 0] nil nil nil nil nil nil nil nil nil nil nil '((ascii . 2147483648)) nil '(:saved t)) (charset-plist 'superset-probe)) (error e))",
+      "expected": "(args-out-of-range 2147483648 -2147483648 2147483647)"
+    },
+    {
+      "id": "offset_low",
+      "source": "(condition-case e (progn (define-charset-internal 'superset-probe nil [0 255 0 0 0 0 0 0] nil nil nil nil nil nil nil nil nil nil nil '((ascii . -2147483649)) nil '(:saved t)) (charset-plist 'superset-probe)) (error e))",
+      "expected": "(args-out-of-range -2147483649 -2147483648 2147483647)"
+    },
+    {
+      "id": "offset_min",
+      "source": "(condition-case e (progn (define-charset-internal 'superset-probe nil [0 255 0 0 0 0 0 0] nil nil nil nil nil nil nil nil nil nil nil '((ascii . -2147483648)) nil '(:saved t)) (charset-plist 'superset-probe)) (error e))",
+      "expected": "(:saved t)"
+    },
+    {
+      "id": "atom",
+      "source": "(condition-case e (progn (define-charset-internal 'superset-probe nil [0 255 0 0 0 0 0 0] nil nil nil nil nil nil nil nil nil nil nil 12 nil '(:saved t)) (charset-plist 'superset-probe)) (error e))",
+      "expected": "(wrong-type-argument sequencep 12)"
+    },
+    {
+      "id": "vector",
+      "source": "(condition-case e (progn (define-charset-internal 'superset-probe nil [0 255 0 0 0 0 0 0] nil nil nil nil nil nil nil nil nil nil nil [ascii] nil '(:saved t)) (charset-plist 'superset-probe)) (error e))",
+      "expected": "(wrong-type-argument listp [ascii])"
+    },
+    {
+      "id": "string",
+      "source": "(condition-case e (progn (define-charset-internal 'superset-probe nil [0 255 0 0 0 0 0 0] nil nil nil nil nil nil nil nil nil nil nil \"ascii\" nil '(:saved t)) (charset-plist 'superset-probe)) (error e))",
+      "expected": "(wrong-type-argument listp \"ascii\")"
+    },
+    {
+      "id": "dotted",
+      "source": "(condition-case e (progn (define-charset-internal 'superset-probe nil [0 255 0 0 0 0 0 0] nil nil nil nil nil nil nil nil nil nil nil '(ascii . 5) nil '(:saved t)) (charset-plist 'superset-probe)) (error e))",
+      "expected": "(wrong-type-argument listp 5)"
+    },
+    {
+      "id": "dotted_before_unknown",
+      "source": "(condition-case e (progn (define-charset-internal 'superset-probe nil [0 255 0 0 0 0 0 0] nil nil nil nil nil nil nil nil nil nil nil '(no-such-parent . 5) nil '(:saved t)) (charset-plist 'superset-probe)) (error e))",
+      "expected": "(wrong-type-argument listp 5)"
+    },
+    {
+      "id": "input_unmodified",
+      "source": "(let ((parents (list 'ascii (cons 'iso-8859-1 128)))) (let ((first (car parents)) (second (car (cdr parents)))) (define-charset-internal 'superset-probe nil [0 255 0 0 0 0 0 0] nil nil nil nil nil nil nil nil nil nil nil parents nil '(:saved t)) (list (eq first (car parents)) (eq second (car (cdr parents))) parents)))",
+      "expected": "(t t (ascii (iso-8859-1 . 128)))"
+    }
+  ]
+}

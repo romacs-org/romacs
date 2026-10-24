@@ -1,0 +1,620 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "mapc",
+ "spec_sha256": "8e731c02a4ebf8ad3bceced1aa14c6f876e0a684222c32de73dd4a2290d4ee16",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "mapc",
+    "subr",
+    2,
+    2
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "fns.c": "db81c235d7c63f312128ad84c11d55ae4665a2599099be1229dbaa329afdb3bf"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "mapc/0000",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapc #'identity nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "mapc/0001",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapc #'identity '(1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok (1 2 3))"
+  },
+  {
+   "id": "mapc/0002",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapc #'identity '(1 . 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "mapc/0003",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapc #'identity [])) (error (list 'sig e))))",
+   "expected": "(ok [])"
+  },
+  {
+   "id": "mapc/0004",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapc #'identity [1 2 3])) (error (list 'sig e))))",
+   "expected": "(ok [1 2 3])"
+  },
+  {
+   "id": "mapc/0005",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapc #'identity (string ?a ?\u03bb ?\u96ea))) (error (list 'sig e))))",
+   "expected": "(ok \"a\u03bb\u96ea\")"
+  },
+  {
+   "id": "mapc/0006",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapc #'identity (unibyte-string 0 128 255))) (error (list 'sig e))))",
+   "expected": "(ok \"\u0000\\200\\377\")"
+  },
+  {
+   "id": "mapc/0007",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapc #'identity 7)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 7))"
+  },
+  {
+   "id": "mapc/0008",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapc (lambda (x) (cons x x)) nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "mapc/0009",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapc (lambda (x) (cons x x)) '(1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok (1 2 3))"
+  },
+  {
+   "id": "mapc/0010",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapc (lambda (x) (cons x x)) '(1 . 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "mapc/0011",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapc (lambda (x) (cons x x)) [])) (error (list 'sig e))))",
+   "expected": "(ok [])"
+  },
+  {
+   "id": "mapc/0012",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapc (lambda (x) (cons x x)) [1 2 3])) (error (list 'sig e))))",
+   "expected": "(ok [1 2 3])"
+  },
+  {
+   "id": "mapc/0013",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapc (lambda (x) (cons x x)) (string ?a ?\u03bb ?\u96ea))) (error (list 'sig e))))",
+   "expected": "(ok \"a\u03bb\u96ea\")"
+  },
+  {
+   "id": "mapc/0014",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapc (lambda (x) (cons x x)) (unibyte-string 0 128 255))) (error (list 'sig e))))",
+   "expected": "(ok \"\u0000\\200\\377\")"
+  },
+  {
+   "id": "mapc/0015",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapc (lambda (x) (cons x x)) 7)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 7))"
+  },
+  {
+   "id": "mapc/0016",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapc 'absent-mapc-callback nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "mapc/0017",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapc 'absent-mapc-callback '(1 2 3))) (error (list 'sig e))))",
+   "expected": "(sig (void-function absent-mapc-callback))"
+  },
+  {
+   "id": "mapc/0018",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapc 'absent-mapc-callback '(1 . 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "mapc/0019",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapc 'absent-mapc-callback [])) (error (list 'sig e))))",
+   "expected": "(ok [])"
+  },
+  {
+   "id": "mapc/0020",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapc 'absent-mapc-callback [1 2 3])) (error (list 'sig e))))",
+   "expected": "(sig (void-function absent-mapc-callback))"
+  },
+  {
+   "id": "mapc/0021",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapc 'absent-mapc-callback (string ?a ?\u03bb ?\u96ea))) (error (list 'sig e))))",
+   "expected": "(sig (void-function absent-mapc-callback))"
+  },
+  {
+   "id": "mapc/0022",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapc 'absent-mapc-callback (unibyte-string 0 128 255))) (error (list 'sig e))))",
+   "expected": "(sig (void-function absent-mapc-callback))"
+  },
+  {
+   "id": "mapc/0023",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapc 'absent-mapc-callback 7)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 7))"
+  },
+  {
+   "id": "mapc/0024",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapc nil nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "mapc/0025",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapc nil '(1 2 3))) (error (list 'sig e))))",
+   "expected": "(sig (void-function nil))"
+  },
+  {
+   "id": "mapc/0026",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapc nil '(1 . 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "mapc/0027",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapc nil [])) (error (list 'sig e))))",
+   "expected": "(ok [])"
+  },
+  {
+   "id": "mapc/0028",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapc nil [1 2 3])) (error (list 'sig e))))",
+   "expected": "(sig (void-function nil))"
+  },
+  {
+   "id": "mapc/0029",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapc nil (string ?a ?\u03bb ?\u96ea))) (error (list 'sig e))))",
+   "expected": "(sig (void-function nil))"
+  },
+  {
+   "id": "mapc/0030",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapc nil (unibyte-string 0 128 255))) (error (list 'sig e))))",
+   "expected": "(sig (void-function nil))"
+  },
+  {
+   "id": "mapc/0031",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapc nil 7)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 7))"
+  },
+  {
+   "id": "mapc/0032",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapc 7 nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "mapc/0033",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapc 7 '(1 2 3))) (error (list 'sig e))))",
+   "expected": "(sig (invalid-function 7))"
+  },
+  {
+   "id": "mapc/0034",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapc 7 '(1 . 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "mapc/0035",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapc 7 [])) (error (list 'sig e))))",
+   "expected": "(ok [])"
+  },
+  {
+   "id": "mapc/0036",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapc 7 [1 2 3])) (error (list 'sig e))))",
+   "expected": "(sig (invalid-function 7))"
+  },
+  {
+   "id": "mapc/0037",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapc 7 (string ?a ?\u03bb ?\u96ea))) (error (list 'sig e))))",
+   "expected": "(sig (invalid-function 7))"
+  },
+  {
+   "id": "mapc/0038",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapc 7 (unibyte-string 0 128 255))) (error (list 'sig e))))",
+   "expected": "(sig (invalid-function 7))"
+  },
+  {
+   "id": "mapc/0039",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapc 7 7)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 7))"
+  },
+  {
+   "id": "mapc/0040",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapc (lambda () 1) nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "mapc/0041",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapc (lambda () 1) '(1 2 3))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments (0 . 0) 1))",
+   "gnu_regime_variant": "(sig (wrong-number-of-arguments #[nil (1) (t)] 1))"
+  },
+  {
+   "id": "mapc/0042",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapc (lambda () 1) '(1 . 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "mapc/0043",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapc (lambda () 1) [])) (error (list 'sig e))))",
+   "expected": "(ok [])"
+  },
+  {
+   "id": "mapc/0044",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapc (lambda () 1) [1 2 3])) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments (0 . 0) 1))",
+   "gnu_regime_variant": "(sig (wrong-number-of-arguments #[nil (1) (t)] 1))"
+  },
+  {
+   "id": "mapc/0045",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapc (lambda () 1) (string ?a ?\u03bb ?\u96ea))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments (0 . 0) 1))",
+   "gnu_regime_variant": "(sig (wrong-number-of-arguments #[nil (1) (t)] 1))"
+  },
+  {
+   "id": "mapc/0046",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapc (lambda () 1) (unibyte-string 0 128 255))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments (0 . 0) 1))",
+   "gnu_regime_variant": "(sig (wrong-number-of-arguments #[nil (1) (t)] 1))"
+  },
+  {
+   "id": "mapc/0047",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapc (lambda () 1) 7)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 7))"
+  },
+  {
+   "id": "mapc/0048",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'mapc '(1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr mapc> 1))"
+  },
+  {
+   "id": "mapc/0049",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'mapc '(1 1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr mapc> 3))"
+  },
+  {
+   "id": "mapc/0050",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 #'identity) (a1 nil)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (mapc a0 a1))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "mapc/0051",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 7) (a1 (string ?a ?\u03bb ?\u96ea))) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (mapc a0 a1))) (error (list 'sig e))))",
+   "expected": "(sig (invalid-function 7))"
+  },
+  {
+   "id": "mapc/0052",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 #'identity) (a1 nil)) (let ((r (mapc a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "mapc/0053",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 #'identity) (a1 [])) (let ((r (mapc a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "mapc/0054",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 #'identity) (a1 (unibyte-string 0 128 255))) (let ((r (mapc a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "mapc/0055",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (lambda (x) (cons x x))) (a1 '(1 2 3))) (let ((r (mapc a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "mapc/0056",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (lambda (x) (cons x x))) (a1 [1 2 3])) (let ((r (mapc a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "mapc/0057",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (lambda (x) (cons x x))) (a1 7)) (let ((r (mapc a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 7))"
+  },
+  {
+   "id": "mapc/0058",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'absent-mapc-callback) (a1 '(1 . 2))) (let ((r (mapc a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "mapc/0059",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'absent-mapc-callback) (a1 (string ?a ?\u03bb ?\u96ea))) (let ((r (mapc a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (void-function absent-mapc-callback))"
+  },
+  {
+   "id": "mapc/0060",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 nil)) (let ((r (mapc a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (t t))"
+  },
+  {
+   "id": "mapc/0061",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 [])) (let ((r (mapc a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "mapc/0062",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 (unibyte-string 0 128 255))) (let ((r (mapc a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (void-function nil))"
+  },
+  {
+   "id": "mapc/0063",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 7) (a1 '(1 2 3))) (let ((r (mapc a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (invalid-function 7))"
+  },
+  {
+   "id": "mapc/0064",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 7) (a1 [1 2 3])) (let ((r (mapc a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (invalid-function 7))"
+  },
+  {
+   "id": "mapc/0065",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 7) (a1 7)) (let ((r (mapc a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 7))"
+  },
+  {
+   "id": "mapc/0066",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (lambda () 1)) (a1 '(1 . 2))) (let ((r (mapc a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "mapc/0067",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (lambda () 1)) (a1 (string ?a ?\u03bb ?\u96ea))) (let ((r (mapc a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments (0 . 0) 1))",
+   "gnu_regime_variant": "(sig (wrong-number-of-arguments #[nil (1) (t)] 1))"
+  },
+  {
+   "id": "mapc/0068",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (fboundp 'mapc) (functionp #'mapc) (funcall #'mapc #'identity nil))) (error (list 'sig e))))",
+   "expected": "(ok (t t nil))"
+  },
+  {
+   "id": "mapc/0069",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((s (list 1 2 3)) calls) (list (eq s (mapc (lambda (x) (setq calls (cons x calls)) (cons x x)) s)) calls))) (error (list 'sig e))))",
+   "expected": "(ok (t (3 2 1)))"
+  },
+  {
+   "id": "mapc/0070",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((s (vector 1 2 3)) calls) (list (eq s (mapc (lambda (x) (setq calls (cons x calls)) (aset s 2 'z)) s)) calls))) (error (list 'sig e))))",
+   "expected": "(ok (t (z 2 1)))"
+  },
+  {
+   "id": "mapc/0071",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((s (list 1 2 3)) calls) (mapc (lambda (x) (setq calls (cons x calls)) (setcdr s nil)) s) calls)) (error (list 'sig e))))",
+   "expected": "(ok (1))"
+  },
+  {
+   "id": "mapc/0072",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((s (list 1 2)) calls) (mapc (lambda (x) (setq calls (cons x calls)) (setcdr (cdr s) (list 9))) s) calls)) (error (list 'sig e))))",
+   "expected": "(ok (2 1))"
+  },
+  {
+   "id": "mapc/0073",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let (calls) (mapc (lambda (x) (setq calls (cons x calls))) (string ?a ?\u03bb ?\u96ea)) calls)) (error (list 'sig e))))",
+   "expected": "(ok (38634 955 97))"
+  },
+  {
+   "id": "mapc/0074",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let (calls) (mapc (lambda (x) (setq calls (cons x calls))) (unibyte-string 0 128 255)) calls)) (error (list 'sig e))))",
+   "expected": "(ok (255 128 0))"
+  },
+  {
+   "id": "mapc/0075",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapc 'absent-mapc-callback [])) (error (list 'sig e))))",
+   "expected": "(ok [])"
+  },
+  {
+   "id": "mapc/0076",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (condition-case e (mapc #'identity '(1 . 2)) (error e))) (error (list 'sig e))))",
+   "expected": "(ok (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "mapc/0077",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (condition-case e (mapc #'identity 7) (error e))) (error (list 'sig e))))",
+   "expected": "(ok (wrong-type-argument sequencep 7))"
+  },
+  {
+   "id": "mapc/0078",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (condition-case e (apply #'mapc '(identity)) (error e))) (error (list 'sig e))))",
+   "expected": "(ok (wrong-number-of-arguments #<subr mapc> 1))"
+  },
+  {
+   "id": "mapc/0079",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (catch 'done (mapc (lambda (x) (if (eq x 2) (throw 'done x))) '(1 2 3)))) (error (list 'sig e))))",
+   "expected": "(ok 2)"
+  },
+  {
+   "id": "mapc/0080",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapc (lambda (x) nil) (make-bool-vector 3 t))) (error (list 'sig e))))",
+   "expected": "(ok #&3\"\u0007\")"
+  },
+  {
+   "id": "mapc/0081",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapc (lambda (x) nil) (lambda () 1))) (error (list 'sig e))))",
+   "expected": "(ok #[0 \"\\300\\207\" [1] 1])",
+   "gnu_regime_variant": "(ok #[nil (1) (t)])"
+  },
+  {
+   "id": "mapc/0082",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (condition-case e (mapc #'list (car (cdr (make-keymap)))) (error (list (car e) (car (cdr e)))))) (error (list 'sig e))))",
+   "expected": "(ok (wrong-type-argument listp))"
+  },
+  {
+   "id": "mapc/0083",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (condition-case e (mapc (lambda (x) (signal 'error (list x))) '(1 2)) (error e))) (error (list 'sig e))))",
+   "expected": "(ok (error 1))"
+  },
+  {
+   "id": "mapc/0084",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok #'identity) (error (list 'sig e))))",
+   "expected": "(ok identity)"
+  },
+  {
+   "id": "mapc/0085",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok '(1 . 2)) (error (list 'sig e))))",
+   "expected": "(ok (1 . 2))"
+  },
+  {
+   "id": "mapc/0086",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok '(1 2 3)) (error (list 'sig e))))",
+   "expected": "(ok (1 2 3))"
+  },
+  {
+   "id": "mapc/0087",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 'absent-mapc-callback) (error (list 'sig e))))",
+   "expected": "(ok absent-mapc-callback)"
+  },
+  {
+   "id": "mapc/0088",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (lambda () 1)) (error (list 'sig e))))",
+   "expected": "(ok #[0 \"\\300\\207\" [1] 1])",
+   "gnu_regime_variant": "(ok #[nil (1) (t)])"
+  },
+  {
+   "id": "mapc/0089",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (lambda (x) (cons x x))) (error (list 'sig e))))",
+   "expected": "(ok #[257 \"\\211\u0001B\\207\" [] 3 \"\n\n(fn X)\"])",
+   "gnu_regime_variant": "(ok #[(x) ((cons x x)) (t)])"
+  },
+  {
+   "id": "mapc/0090",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string ?a ?\u03bb ?\u96ea)) (error (list 'sig e))))",
+   "expected": "(ok \"a\u03bb\u96ea\")"
+  },
+  {
+   "id": "mapc/0091",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (unibyte-string 0 128 255)) (error (list 'sig e))))",
+   "expected": "(ok \"\u0000\\200\\377\")"
+  },
+  {
+   "id": "mapc/0092",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 7) (error (list 'sig e))))",
+   "expected": "(ok 7)"
+  },
+  {
+   "id": "mapc/0093",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok [1 2 3]) (error (list 'sig e))))",
+   "expected": "(ok [1 2 3])"
+  },
+  {
+   "id": "mapc/0094",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok []) (error (list 'sig e))))",
+   "expected": "(ok [])"
+  },
+  {
+   "id": "mapc/0095",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok nil) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  }
+ ],
+ "pinned": {
+  "mapc/0081": "SIGNAL-VS-VALUE",
+  "mapc/0088": "PRINTER",
+  "mapc/0089": "PRINTER"
+ }
+}

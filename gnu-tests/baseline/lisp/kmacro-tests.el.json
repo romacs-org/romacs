@@ -1,0 +1,1220 @@
+{
+ "blob": "b7667fad8785646ab75575977b21c98fcfd8adb3",
+ "compiled": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": true,
+  "results": {
+   "kmacro-tests--cl-print": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-append-end-at-end-appends": {
+    "as_expected": true,
+    "detail": "(ert-test-failed ((should (equal last-kbd-macro (string-to-vector macro-result))) :form (equal [120 dummy-event 1 3 120 117 5 121] [120 1 3 120 117 5 121]) :value nil :explanation (arrays-of-different-length 8 7 [120 dummy-event 1 3 120 117 5 121] [120 1 3 120 117 5 121] first-mismatch-at 1)))",
+    "expected": ":failed",
+    "outcome": "failed",
+    "tags": []
+   },
+   "kmacro-tests-bind-to-key-bad-key-sequence": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-bind-to-key-when-recording": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-bind-to-key-with-key-sequence-in-use": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-call-macro-hint-and-repeat": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-end-and-call-macro": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-end-and-call-macro-mouse": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-end-call-macro-prefix-args": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-fill-ring-and-rotate": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-kmacro-bind-to-single-key": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-name-last-macro-bind-and-rebind": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-name-last-macro-key-parse-syntax": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-name-last-macro-unable-to-bind": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-name-or-bind-to-key-when-no-macro": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-repeat-on-last-key": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-repeat-view-and-run": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-run-macro-command-recorded-in-macro": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped \"Skipping due to Bug#24921 (an ERT bug)\")",
+    "expected": ":failed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "kmacro-tests-set-macro-counter-while-defining": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-start-insert-counter-appends-to-macro": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-step-edit-act": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-step-edit-append": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-step-edit-cleans-up-hook": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-step-edit-ignores-qr-map-commands": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-step-edit-quit": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-step-edit-replace": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-step-edit-replace-digit-argument": {
+    "as_expected": true,
+    "detail": "(ert-test-failed ((should (equal result (buffer-string))) :form (equal \"XXXXXXXX\" \"8XB\") :value nil :explanation (arrays-of-different-length 8 3 \"XXXXXXXX\" \"8XB\" first-mismatch-at 0)))",
+    "expected": ":failed",
+    "outcome": "failed",
+    "tags": []
+   },
+   "kmacro-tests-step-edit-skip": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-step-edit-skip-entire": {
+    "as_expected": true,
+    "detail": "(ert-test-failed ((should (equal last-kbd-macro (string-to-vector macro-result))) :form (equal \"\" [120 121 122 122 121]) :value nil :explanation (different-types \"\" [120 121 122 122 121])))",
+    "expected": ":failed",
+    "outcome": "failed",
+    "tags": []
+   },
+   "kmacro-tests-step-edit-step-through-isearch": {
+    "as_expected": true,
+    "detail": "(ert-test-failed ((should (equal last-kbd-macro (string-to-vector macro-result))) :form (equal [116 101 115 116 32 73 110 112 117 116 return 18 105 110 112 return 3 100] [116 101 115 116 32 105 110 112 117 116 return 18 105 110 112 return 3 100]) :value nil :explanation (array-elt 5 (different-atoms (73 \"#x49\" \"?I\") (105 \"#x69\" \"?i\")))))",
+    "expected": ":failed",
+    "outcome": "failed",
+    "tags": []
+   },
+   "kmacro-tests-step-edit-with-quoted-insert": {
+    "as_expected": true,
+    "detail": "(ert-test-failed ((should (equal result (buffer-string))) :form (equal \"\u1e29i there\" \"\u1e29ii there\") :value nil :explanation (arrays-of-different-length 8 9 \"\u1e29i there\" \"\u1e29ii there\" first-mismatch-at 2)))",
+    "expected": ":failed",
+    "outcome": "failed",
+    "tags": []
+   },
+   "kmacro-tests-step-insert": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-store-in-register": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-test-insert-counter-01-nil": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-test-insert-counter-02-int": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-test-insert-counter-03-list": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-test-insert-counter-04-neg": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-test-quit-counter-equal-01": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-test-quit-counter-equal-02": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-test-quit-counter-equal-03": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-test-quit-counter-equal-04": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-test-quit-counter-greater": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-test-quit-counter-less": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-test-reg-add-counter-equal-01": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-test-reg-add-counter-equal-02": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-test-reg-add-counter-equal-03": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-test-reg-add-counter-equal-04": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-test-reg-add-counter-greater": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-test-reg-add-counter-less": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-test-reg-load": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-test-reg-save": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-test-ring-2nd-commands": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-test-ring-commands-when-no-macros": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-test-start-format-counter": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-test-start-macro-when-defining-macro": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   }
+  },
+  "timed_out": false
+ },
+ "file": "lisp/kmacro-tests.el",
+ "gnu": {
+  "emacs": "<recording-path-redacted>/emacs-32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+  "version": "32.0.50"
+ },
+ "harness_sha256": "78c20850429a08af22faadf73b5d164c560230e83d7eb88ef60cb995670703ef",
+ "mini": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": null,
+  "results": {
+   "kmacro-tests--cl-print": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "kmacro-tests-append-end-at-end-appends": {
+    "as_expected": null,
+    "detail": "(void-function ert-with-test-buffer)",
+    "expected": ":failed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "kmacro-tests-bind-to-key-bad-key-sequence": {
+    "as_expected": null,
+    "detail": "(void-function ert-with-test-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "kmacro-tests-bind-to-key-when-recording": {
+    "as_expected": null,
+    "detail": "(void-function ert-with-test-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "kmacro-tests-bind-to-key-with-key-sequence-in-use": {
+    "as_expected": null,
+    "detail": "(void-function ert-with-test-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "kmacro-tests-call-macro-hint-and-repeat": {
+    "as_expected": null,
+    "detail": "(void-function ert-with-test-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "kmacro-tests-end-and-call-macro": {
+    "as_expected": null,
+    "detail": "(void-function ert-with-test-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "kmacro-tests-end-and-call-macro-mouse": {
+    "as_expected": null,
+    "detail": "(void-function ert-with-test-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "kmacro-tests-end-call-macro-prefix-args": {
+    "as_expected": null,
+    "detail": "(void-function ert-with-test-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "kmacro-tests-fill-ring-and-rotate": {
+    "as_expected": null,
+    "detail": "(void-function ert-with-test-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "kmacro-tests-kmacro-bind-to-single-key": {
+    "as_expected": null,
+    "detail": "(void-function ert-with-test-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "kmacro-tests-name-last-macro-bind-and-rebind": {
+    "as_expected": null,
+    "detail": "(void-function ert-with-test-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "kmacro-tests-name-last-macro-key-parse-syntax": {
+    "as_expected": null,
+    "detail": "(void-function ert-with-test-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "kmacro-tests-name-last-macro-unable-to-bind": {
+    "as_expected": null,
+    "detail": "(void-function ert-with-test-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "kmacro-tests-name-or-bind-to-key-when-no-macro": {
+    "as_expected": null,
+    "detail": "(void-function ert-with-test-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "kmacro-tests-repeat-on-last-key": {
+    "as_expected": null,
+    "detail": "(void-function ert-with-test-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "kmacro-tests-repeat-view-and-run": {
+    "as_expected": null,
+    "detail": "(void-function ert-with-test-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "kmacro-tests-run-macro-command-recorded-in-macro": {
+    "as_expected": null,
+    "detail": "(void-function ert-with-test-buffer)",
+    "expected": ":failed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "kmacro-tests-set-macro-counter-while-defining": {
+    "as_expected": null,
+    "detail": "(void-function ert-with-test-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "kmacro-tests-start-insert-counter-appends-to-macro": {
+    "as_expected": null,
+    "detail": "(void-function ert-with-test-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "kmacro-tests-step-edit-act": {
+    "as_expected": null,
+    "detail": "(void-function ert-with-test-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "kmacro-tests-step-edit-append": {
+    "as_expected": null,
+    "detail": "(void-function ert-with-test-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "kmacro-tests-step-edit-can-replace-meta-keys": {
+    "as_expected": null,
+    "detail": "(void-function ert-with-test-buffer)",
+    "expected": ":failed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "kmacro-tests-step-edit-cleans-up-hook": {
+    "as_expected": null,
+    "detail": "(void-function ert-with-test-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "kmacro-tests-step-edit-edits-macro-with-extended-command": {
+    "as_expected": null,
+    "detail": "(void-function ert-with-test-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "kmacro-tests-step-edit-ignores-qr-map-commands": {
+    "as_expected": null,
+    "detail": "(void-function ert-with-test-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "kmacro-tests-step-edit-quit": {
+    "as_expected": null,
+    "detail": "(void-function ert-with-test-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "kmacro-tests-step-edit-replace": {
+    "as_expected": null,
+    "detail": "(void-function ert-with-test-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "kmacro-tests-step-edit-replace-digit-argument": {
+    "as_expected": null,
+    "detail": "(void-function ert-with-test-buffer)",
+    "expected": ":failed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "kmacro-tests-step-edit-skip": {
+    "as_expected": null,
+    "detail": "(void-function ert-with-test-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "kmacro-tests-step-edit-skip-entire": {
+    "as_expected": null,
+    "detail": "(void-function ert-with-test-buffer)",
+    "expected": ":failed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "kmacro-tests-step-edit-step-through-isearch": {
+    "as_expected": null,
+    "detail": "(void-function ert-with-test-buffer)",
+    "expected": ":failed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "kmacro-tests-step-edit-step-through-negative-argument": {
+    "as_expected": null,
+    "detail": "(void-function ert-with-test-buffer)",
+    "expected": ":failed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "kmacro-tests-step-edit-with-quoted-insert": {
+    "as_expected": null,
+    "detail": "(void-function ert-with-test-buffer)",
+    "expected": ":failed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "kmacro-tests-step-insert": {
+    "as_expected": null,
+    "detail": "(void-function ert-with-test-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "kmacro-tests-store-in-register": {
+    "as_expected": null,
+    "detail": "(void-function ert-with-test-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "kmacro-tests-test-insert-counter-01-nil": {
+    "as_expected": null,
+    "detail": "(void-function ert-with-test-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "kmacro-tests-test-insert-counter-02-int": {
+    "as_expected": null,
+    "detail": "(void-function ert-with-test-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "kmacro-tests-test-insert-counter-03-list": {
+    "as_expected": null,
+    "detail": "(void-function ert-with-test-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "kmacro-tests-test-insert-counter-04-neg": {
+    "as_expected": null,
+    "detail": "(void-function ert-with-test-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "kmacro-tests-test-quit-counter-equal-01": {
+    "as_expected": null,
+    "detail": "(void-function ert-with-test-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "kmacro-tests-test-quit-counter-equal-02": {
+    "as_expected": null,
+    "detail": "(void-function ert-with-test-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "kmacro-tests-test-quit-counter-equal-03": {
+    "as_expected": null,
+    "detail": "(void-function ert-with-test-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "kmacro-tests-test-quit-counter-equal-04": {
+    "as_expected": null,
+    "detail": "(void-function ert-with-test-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "kmacro-tests-test-quit-counter-greater": {
+    "as_expected": null,
+    "detail": "(void-function ert-with-test-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "kmacro-tests-test-quit-counter-less": {
+    "as_expected": null,
+    "detail": "(void-function ert-with-test-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "kmacro-tests-test-reg-add-counter-equal-01": {
+    "as_expected": null,
+    "detail": "(void-function ert-with-test-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "kmacro-tests-test-reg-add-counter-equal-02": {
+    "as_expected": null,
+    "detail": "(void-function ert-with-test-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "kmacro-tests-test-reg-add-counter-equal-03": {
+    "as_expected": null,
+    "detail": "(void-function ert-with-test-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "kmacro-tests-test-reg-add-counter-equal-04": {
+    "as_expected": null,
+    "detail": "(void-function ert-with-test-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "kmacro-tests-test-reg-add-counter-greater": {
+    "as_expected": null,
+    "detail": "(void-function ert-with-test-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "kmacro-tests-test-reg-add-counter-less": {
+    "as_expected": null,
+    "detail": "(void-function ert-with-test-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "kmacro-tests-test-reg-load": {
+    "as_expected": null,
+    "detail": "(void-function ert-with-test-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "kmacro-tests-test-reg-save": {
+    "as_expected": null,
+    "detail": "(void-function ert-with-test-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "kmacro-tests-test-ring-2nd-commands": {
+    "as_expected": null,
+    "detail": "(void-function ert-with-test-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "kmacro-tests-test-ring-commands-when-no-macros": {
+    "as_expected": null,
+    "detail": "(void-function ert-with-test-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "kmacro-tests-test-start-format-counter": {
+    "as_expected": null,
+    "detail": "(void-function ert-with-test-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "kmacro-tests-test-start-macro-when-defining-macro": {
+    "as_expected": null,
+    "detail": "(void-function ert-with-test-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   }
+  },
+  "timed_out": false
+ },
+ "read_error": null,
+ "real": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": true,
+  "results": {
+   "kmacro-tests--cl-print": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-append-end-at-end-appends": {
+    "as_expected": true,
+    "detail": "(ert-test-failed ((should (equal last-kbd-macro (string-to-vector macro-result))) :form (equal [120 dummy-event 1 3 120 117 5 121] [120 1 3 120 117 5 121]) :value nil :explanation (arrays-of-different-length 8 7 [120 dummy-event 1 3 120 117 5 121] [120 1 3 120 117 5 121] first-mismatch-at 1)))",
+    "expected": ":failed",
+    "outcome": "failed",
+    "tags": []
+   },
+   "kmacro-tests-bind-to-key-bad-key-sequence": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-bind-to-key-when-recording": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-bind-to-key-with-key-sequence-in-use": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-call-macro-hint-and-repeat": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-end-and-call-macro": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-end-and-call-macro-mouse": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-end-call-macro-prefix-args": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-fill-ring-and-rotate": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-kmacro-bind-to-single-key": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-name-last-macro-bind-and-rebind": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-name-last-macro-key-parse-syntax": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-name-last-macro-unable-to-bind": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-name-or-bind-to-key-when-no-macro": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-repeat-on-last-key": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-repeat-view-and-run": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-run-macro-command-recorded-in-macro": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped \"Skipping due to Bug#24921 (an ERT bug)\")",
+    "expected": ":failed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "kmacro-tests-set-macro-counter-while-defining": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-start-insert-counter-appends-to-macro": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-step-edit-act": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-step-edit-append": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-step-edit-cleans-up-hook": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-step-edit-ignores-qr-map-commands": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-step-edit-quit": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-step-edit-replace": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-step-edit-replace-digit-argument": {
+    "as_expected": true,
+    "detail": "(ert-test-failed ((should (equal result (buffer-string))) :form (equal \"XXXXXXXX\" \"8XB\") :value nil :explanation (arrays-of-different-length 8 3 \"XXXXXXXX\" \"8XB\" first-mismatch-at 0)))",
+    "expected": ":failed",
+    "outcome": "failed",
+    "tags": []
+   },
+   "kmacro-tests-step-edit-skip": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-step-edit-skip-entire": {
+    "as_expected": true,
+    "detail": "(ert-test-failed ((should (equal last-kbd-macro (string-to-vector macro-result))) :form (equal \"\" [120 121 122 122 121]) :value nil :explanation (different-types \"\" [120 121 122 122 121])))",
+    "expected": ":failed",
+    "outcome": "failed",
+    "tags": []
+   },
+   "kmacro-tests-step-edit-step-through-isearch": {
+    "as_expected": true,
+    "detail": "(ert-test-failed ((should (equal last-kbd-macro (string-to-vector macro-result))) :form (equal [116 101 115 116 32 73 110 112 117 116 return 18 105 110 112 return 3 100] [116 101 115 116 32 105 110 112 117 116 return 18 105 110 112 return 3 100]) :value nil :explanation (array-elt 5 (different-atoms (73 \"#x49\" \"?I\") (105 \"#x69\" \"?i\")))))",
+    "expected": ":failed",
+    "outcome": "failed",
+    "tags": []
+   },
+   "kmacro-tests-step-edit-with-quoted-insert": {
+    "as_expected": true,
+    "detail": "(ert-test-failed ((should (equal result (buffer-string))) :form (equal \"\u1e29i there\" \"\u1e29ii there\") :value nil :explanation (arrays-of-different-length 8 9 \"\u1e29i there\" \"\u1e29ii there\" first-mismatch-at 2)))",
+    "expected": ":failed",
+    "outcome": "failed",
+    "tags": []
+   },
+   "kmacro-tests-step-insert": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-store-in-register": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-test-insert-counter-01-nil": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-test-insert-counter-02-int": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-test-insert-counter-03-list": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-test-insert-counter-04-neg": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-test-quit-counter-equal-01": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-test-quit-counter-equal-02": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-test-quit-counter-equal-03": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-test-quit-counter-equal-04": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-test-quit-counter-greater": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-test-quit-counter-less": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-test-reg-add-counter-equal-01": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-test-reg-add-counter-equal-02": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-test-reg-add-counter-equal-03": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-test-reg-add-counter-equal-04": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-test-reg-add-counter-greater": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-test-reg-add-counter-less": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-test-reg-load": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-test-reg-save": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-test-ring-2nd-commands": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-test-ring-commands-when-no-macros": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-test-start-format-counter": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "kmacro-tests-test-start-macro-when-defining-macro": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   }
+  },
+  "timed_out": false
+ },
+ "schema": 1,
+ "toplevel_deftests": 1
+}

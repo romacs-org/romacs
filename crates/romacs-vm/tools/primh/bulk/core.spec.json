@@ -1,0 +1,718 @@
+{
+ "comment": "Bulk differential group `core`: the highest file-impact pure primitives from GNU fns.c/data.c/alloc.c. Values are Lisp SOURCE, read freshly per case on both sides. Expectations come ONLY from GNU via `bulk.py record`; this file names inputs, never answers. Tags select the domain of an argument position. Bignums are deliberately absent from the shared domains (VM2 has no bignum reader, VM2-READ4: every such case would measure the reader, not the primitive).",
+ "values": [
+  {
+   "src": "nil",
+   "tags": [
+    "any",
+    "eqv",
+    "list",
+    "seq",
+    "int",
+    "small",
+    "func",
+    "fseq",
+    "elt"
+   ]
+  },
+  {
+   "src": "t",
+   "tags": [
+    "any",
+    "eqv",
+    "small",
+    "elt"
+   ]
+  },
+  {
+   "src": "0",
+   "tags": [
+    "any",
+    "eqv",
+    "int",
+    "small",
+    "elt",
+    "fseq"
+   ]
+  },
+  {
+   "src": "1",
+   "tags": [
+    "any",
+    "eqv",
+    "int",
+    "small",
+    "elt"
+   ]
+  },
+  {
+   "src": "-1",
+   "tags": [
+    "any",
+    "eqv",
+    "int"
+   ]
+  },
+  {
+   "src": "2",
+   "tags": [
+    "any",
+    "eqv",
+    "int",
+    "elt"
+   ]
+  },
+  {
+   "src": "3",
+   "tags": [
+    "int"
+   ]
+  },
+  {
+   "src": "-4",
+   "tags": [
+    "int"
+   ]
+  },
+  {
+   "src": "100",
+   "tags": [
+    "any",
+    "int"
+   ]
+  },
+  {
+   "src": "most-positive-fixnum",
+   "tags": [
+    "any",
+    "eqv",
+    "int"
+   ]
+  },
+  {
+   "src": "most-negative-fixnum",
+   "tags": [
+    "any",
+    "int"
+   ]
+  },
+  {
+   "src": "1.0",
+   "tags": [
+    "eqv",
+    "elt"
+   ]
+  },
+  {
+   "src": "1.5",
+   "tags": [
+    "any",
+    "eqv",
+    "int",
+    "small",
+    "elt"
+   ]
+  },
+  {
+   "src": "-0.0",
+   "tags": [
+    "any",
+    "eqv"
+   ]
+  },
+  {
+   "src": "0.0",
+   "tags": [
+    "eqv"
+   ]
+  },
+  {
+   "src": "1.0e+INF",
+   "tags": [
+    "any",
+    "eqv"
+   ]
+  },
+  {
+   "src": "0.0e+NaN",
+   "tags": [
+    "any",
+    "eqv"
+   ]
+  },
+  {
+   "src": "'sym",
+   "tags": [
+    "any",
+    "eqv",
+    "int",
+    "small",
+    "elt",
+    "func"
+   ]
+  },
+  {
+   "src": "'a",
+   "tags": [
+    "eqv",
+    "elt"
+   ]
+  },
+  {
+   "src": ":kw",
+   "tags": [
+    "any",
+    "eqv"
+   ]
+  },
+  {
+   "src": "?a",
+   "tags": [
+    "any"
+   ]
+  },
+  {
+   "src": "(make-symbol \"sym\")",
+   "tags": [
+    "any",
+    "eqv"
+   ]
+  },
+  {
+   "src": "\"\"",
+   "tags": [
+    "any",
+    "eqv",
+    "seq",
+    "str",
+    "fseq"
+   ]
+  },
+  {
+   "src": "\"abc\"",
+   "tags": [
+    "any",
+    "eqv",
+    "seq",
+    "str",
+    "small",
+    "fseq",
+    "elt"
+   ]
+  },
+  {
+   "src": "\"ABC\"",
+   "tags": [
+    "eqv"
+   ]
+  },
+  {
+   "src": "\"κόσμε\"",
+   "tags": [
+    "any",
+    "eqv",
+    "seq",
+    "str"
+   ]
+  },
+  {
+   "src": "\"\\377\"",
+   "tags": [
+    "any",
+    "str"
+   ]
+  },
+  {
+   "src": "[]",
+   "tags": [
+    "any",
+    "seq",
+    "str"
+   ]
+  },
+  {
+   "src": "[1 2 3]",
+   "tags": [
+    "any",
+    "eqv",
+    "seq",
+    "str",
+    "small",
+    "fseq"
+   ]
+  },
+  {
+   "src": "[a [b c]]",
+   "tags": [
+    "any",
+    "seq"
+   ]
+  },
+  {
+   "src": "'(a)",
+   "tags": [
+    "any",
+    "list",
+    "seq"
+   ]
+  },
+  {
+   "src": "'(1 2 3)",
+   "tags": [
+    "any",
+    "eqv",
+    "list",
+    "seq",
+    "str",
+    "small",
+    "fseq"
+   ]
+  },
+  {
+   "src": "'(a b c d e)",
+   "tags": [
+    "list"
+   ]
+  },
+  {
+   "src": "'((a . 1) (b . 2))",
+   "tags": [
+    "any",
+    "eqv",
+    "list",
+    "seq"
+   ]
+  },
+  {
+   "src": "'((1 2) (3 (4 5)) [6])",
+   "tags": [
+    "any",
+    "eqv",
+    "list",
+    "seq",
+    "fseq"
+   ]
+  },
+  {
+   "src": "'(1 . 2)",
+   "tags": [
+    "any",
+    "eqv",
+    "list",
+    "seq",
+    "small",
+    "fseq"
+   ]
+  },
+  {
+   "src": "'(1 2 . 3)",
+   "tags": [
+    "any",
+    "list",
+    "seq"
+   ]
+  },
+  {
+   "src": "'(a b c . d)",
+   "tags": [
+    "list"
+   ]
+  },
+  {
+   "src": "'(nil)",
+   "tags": [
+    "list",
+    "fseq"
+   ]
+  },
+  {
+   "src": "'((nil) nil . nil)",
+   "tags": [
+    "list"
+   ]
+  },
+  {
+   "src": "'(\"a\" \"κ\")",
+   "tags": [
+    "list",
+    "fseq"
+   ]
+  },
+  {
+   "src": "'([1] [2 3])",
+   "tags": [
+    "list"
+   ]
+  },
+  {
+   "src": "'(1.5 . -0.0)",
+   "tags": [
+    "list"
+   ]
+  },
+  {
+   "src": "'(sym . sym)",
+   "tags": [
+    "list"
+   ]
+  },
+  {
+   "src": "(list (list (list 'deep)))",
+   "tags": [
+    "list"
+   ]
+  },
+  {
+   "src": "'(0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53 54 55 56 57 58 59 60 61 62 63 64 65 66 67 68 69 70 71 72 73 74 75 76 77 78 79 80 81 82 83 84 85 86 87 88 89 90 91 92 93 94 95 96 97 98 99)",
+   "tags": [
+    "any",
+    "list",
+    "seq",
+    "fseq"
+   ]
+  },
+  {
+   "src": "(let ((s (list 1 2))) (list s s s))",
+   "tags": [
+    "any",
+    "eqv",
+    "list",
+    "seq"
+   ]
+  },
+  {
+   "src": "(make-hash-table)",
+   "tags": [
+    "any"
+   ]
+  },
+  {
+   "src": "#'car",
+   "tags": [
+    "any",
+    "func"
+   ]
+  },
+  {
+   "src": "(let ((x (list 1 2))) (setcdr (cdr x) x) x)",
+   "tags": [
+    "circ"
+   ],
+   "printable": false
+  },
+  {
+   "src": "(lambda (x) (cons x x))",
+   "tags": [
+    "func"
+   ],
+   "printable": false
+  },
+  {
+   "src": "#'list",
+   "tags": [
+    "func"
+   ]
+  },
+  {
+   "src": "#'car-safe",
+   "tags": [
+    "func"
+   ]
+  },
+  {
+   "src": "'stringp",
+   "tags": [
+    "func"
+   ]
+  },
+  {
+   "src": "#'cons",
+   "tags": [
+    "func"
+   ]
+  },
+  {
+   "src": "(lambda () 1)",
+   "tags": [
+    "func"
+   ],
+   "printable": false
+  },
+  {
+   "src": "'no-such-function-anywhere",
+   "tags": [
+    "func"
+   ]
+  },
+  {
+   "src": "\"abc\"",
+   "tags": [
+    "func"
+   ],
+   "note": "a string is not a function"
+  }
+ ],
+ "primitives": {
+  "car": {
+   "args": [
+    [
+     "any",
+     "list",
+     "circ"
+    ]
+   ]
+  },
+  "cdr": {
+   "args": [
+    [
+     "any",
+     "list",
+     "circ"
+    ]
+   ]
+  },
+  "null": {
+   "args": [
+    [
+     "any",
+     "circ"
+    ]
+   ]
+  },
+  "stringp": {
+   "args": [
+    [
+     "any",
+     "circ"
+    ]
+   ]
+  },
+  "length": {
+   "args": [
+    [
+     "any",
+     "circ"
+    ]
+   ]
+  },
+  "cons": {
+   "args": [
+    [
+     "small"
+    ],
+    [
+     "small"
+    ]
+   ]
+  },
+  "list": {
+   "variadic": [
+    [
+     "small"
+    ],
+    3
+   ],
+   "max_tuples": 300
+  },
+  "eq": {
+   "args": [
+    [
+     "eqv"
+    ],
+    [
+     "eqv"
+    ]
+   ]
+  },
+  "equal": {
+   "args": [
+    [
+     "eqv"
+    ],
+    [
+     "eqv"
+    ]
+   ]
+  },
+  "memq": {
+   "args": [
+    [
+     "elt"
+    ],
+    [
+     "list",
+     "circ"
+    ]
+   ]
+  },
+  "nth": {
+   "args": [
+    [
+     "int"
+    ],
+    [
+     "list",
+     "circ"
+    ]
+   ]
+  },
+  "append": {
+   "variadic": [
+    [
+     "seq"
+    ],
+    3
+   ],
+   "max_tuples": 700
+  },
+  "substring": {
+   "args": [
+    [
+     "str"
+    ],
+    [
+     "int"
+    ],
+    [
+     "int"
+    ]
+   ]
+  },
+  "nreverse": {
+   "args": [
+    [
+     "seq"
+    ]
+   ]
+  },
+  "mapcar": {
+   "args": [
+    [
+     "func"
+    ],
+    [
+     "fseq",
+     "circ"
+    ]
+   ]
+  }
+ },
+ "probes": {
+  "eq": [
+   "(let ((x (list 1))) (eq x x))",
+   "(let ((x \"abc\")) (eq x x))",
+   "(eq (make-symbol \"a\") (make-symbol \"a\"))",
+   "(eq 'nil nil)",
+   "(let ((x 1.5)) (eq x x))"
+  ],
+  "equal": [
+   "(equal (list 1 (vector 2 \"x\")) (list 1 (vector 2 \"x\")))",
+   "(equal (make-symbol \"a\") (make-symbol \"a\"))",
+   "(equal (list 1 2) (vector 1 2))",
+   "(equal \"abc\" (string-to-multibyte \"abc\"))",
+   "(let ((x (list 1 2))) (equal x (copy-sequence x)))",
+   "(equal '(1 2 . 3) '(1 2 . 3))",
+   "(equal '(1 2 . 3) '(1 2 . 4))"
+  ],
+  "length": [
+   "(length (list 1 2 3 4 5 6 7 8 9 10 11 12))",
+   "(length (vector))",
+   "(length (make-string 3 ?x))",
+   "(let ((x (let ((y (list 1 2))) (setcdr (cdr y) y) y))) (condition-case e (length x) (circular-list (list (eq (car (cdr e)) x) (eq (car (cdr e)) (cdr x))))))",
+   "(let ((x (list 0 1 2 3 4 5 6))) (setcdr (nthcdr 6 x) x) (condition-case e (length x) (circular-list (let ((k 0) (p x)) (while (and (< k 20) (not (eq p (car (cdr e))))) (setq p (cdr p) k (1+ k))) k))))",
+   "(let* ((tail (list 3 4 5)) (x (cons 1 (cons 2 tail)))) (setcdr (cdr (cdr tail)) tail) (condition-case e (length x) (circular-list (list (eq (car (cdr e)) x) (eq (car (cdr e)) tail) (eq (car (cdr e)) (cdr tail)) (eq (car (cdr e)) (cdr (cdr tail)))))))",
+   "(let ((x (list 1 2 3))) (setcdr (cdr (cdr x)) 4) (condition-case e (length x) (wrong-type-argument (list (car (cdr e)) (eq (car (cdr e)) x)))))",
+   "(condition-case nil (length (lambda (x) x)) (wrong-type-argument -99))"
+  ],
+  "nth": [
+   "(nth 2 (list 'a 'b))",
+   "(nth 0 (list (list 'x)))",
+   "(let ((l (list 1 2 3))) (eq (nth 1 l) (car (cdr l))))"
+  ],
+  "memq": [
+   "(let ((l (list 'a 'b 'c))) (eq (memq 'b l) (cdr l)))",
+   "(memq 'z (list 'a 'b))",
+   "(memq 'c (cons 'a (cons 'b 'c)))",
+   "(memq 'a (cons 'a 'b))",
+   "(let ((x (let ((y (list 1 2))) (setcdr (cdr y) y) y))) (condition-case e (memq 'z x) (circular-list (list (eq (car (cdr e)) x) (eq (car (cdr e)) (cdr x))))))",
+   "(let ((x (list 0 1 2 3 4 5 6))) (setcdr (nthcdr 6 x) x) (condition-case e (memq 'z x) (circular-list (let ((k 0) (p x)) (while (and (< k 20) (not (eq p (car (cdr e))))) (setq p (cdr p) k (1+ k))) k))))",
+   "(let* ((tail (list 3 4 5)) (x (cons 1 (cons 2 tail)))) (setcdr (cdr (cdr tail)) tail) (condition-case e (memq 'z x) (circular-list (list (eq (car (cdr e)) x) (eq (car (cdr e)) tail) (eq (car (cdr e)) (cdr tail)) (eq (car (cdr e)) (cdr (cdr tail)))))))",
+   "(let ((x (let ((y (list 1 2))) (setcdr (cdr y) y) y))) (eq (memq 2 x) (cdr x)))"
+  ],
+  "cons": [
+   "(let ((a (list 1)) (b (list 2))) (let ((c (cons a b))) (list (eq (car c) a) (eq (cdr c) b))))"
+  ],
+  "list": [
+   "(let ((a (list 1))) (eq (car (list a)) a))",
+   "(list 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25)"
+  ],
+  "append": [
+   "(let ((tail (list 3 4))) (eq (cdr (cdr (append (list 1 2) tail))) tail))",
+   "(let ((a (list 1 2))) (eq (append a) a))",
+   "(let ((a (list 1 2))) (eq (append a nil) a))",
+   "(append (list 1) (vector 2 3) \"ab\" nil)",
+   "(append nil nil 5)",
+   "(append (list 1 2) 5)",
+   "(let ((x (let ((y (list 1 2))) (setcdr (cdr y) y) y))) (condition-case e (append x nil) (circular-list (list (eq (car (cdr e)) x) (eq (car (cdr e)) (cdr x))))))",
+   "(let ((x (list 1 2 3))) (setcdr (cdr (cdr x)) 4) (condition-case e (append nil x nil) (wrong-type-argument (list e (eq (car (cdr e)) x)))))",
+   "(append \"κa\" nil)",
+   "(append nil \"abc\")",
+   "(condition-case nil (length (append (lambda (x) x) nil)) (wrong-type-argument -99))"
+  ],
+  "substring": [
+   "(let ((s \"abc\")) (eq (substring s 0) s))",
+   "(substring \"κόσμε\" 1 3)",
+   "(substring \"κόσμε\" -2)",
+   "(substring (vector 1 2 3 4) 1 -1)",
+   "(substring \"abc\")",
+   "(let ((s \"abc\")) (eq (substring s) s))",
+   "(substring [a b c])",
+   "(substring \"abc\" 1 1)",
+   "(condition-case e (substring 'sym 0) (error e))",
+   "(condition-case e (substring \"abc\" 0 4) (error e))",
+   "(condition-case e (substring \"abc\" 2 1) (error e))"
+  ],
+  "nreverse": [
+   "(let ((l (list 1 2 3))) (let ((r (nreverse l))) (list r l)))",
+   "(let ((v (vector 1 2 3))) (let ((r (nreverse v))) (list r v (eq r v))))",
+   "(let ((s (copy-sequence \"abc\"))) (let ((r (nreverse s))) (list r s (eq r s))))",
+   "(nreverse (copy-sequence \"κόσμε\"))",
+   "(nreverse (cons 1 2))",
+   "(nreverse (list 1 2 3 4 5 6 7 8 9 10 11))",
+   "(let ((x (list 1 2 3))) (setcdr (cdr (cdr x)) x) (condition-case e (nreverse x) (circular-list (list (eq (car (cdr e)) x) (car x) (car (cdr x)) (car (cdr (cdr x)))))))",
+   "(let ((x (list 1 2 3))) (setcdr (cdr (cdr x)) 4) (condition-case e (nreverse x) (wrong-type-argument (list e x))))",
+   "(let ((x (list 1 2))) (condition-case e (nreverse 5) (wrong-type-argument e)))",
+   "(nreverse (vector))",
+   "(nreverse (copy-sequence \"\\377a\"))"
+  ],
+  "mapcar": [
+   "(mapcar (lambda (x) (* x 10)) (list 1 2 3))",
+   "(mapcar #'car (list (list 1) (list 2)))",
+   "(let ((l (list 1 2 3 4))) (mapcar (lambda (x) (setcdr l nil) x) l))",
+   "(mapcar (lambda (c) (+ c 1)) \"abc\")",
+   "(mapcar (lambda (x) (list x)) (vector 'a 'b))",
+   "(let ((n 0)) (mapcar (lambda (x) (setq n (1+ n))) (list 'a 'b 'c)) n)",
+   "(catch 'out (mapcar (lambda (x) (if (eq x 2) (throw 'out 'thrown) x)) (list 1 2 3)))",
+   "(condition-case e (mapcar (lambda (x) (car x)) (list (list 1) 2)) (error (list 'caught e)))",
+   "(let ((x (list 0 1 2 3 4 5 6))) (setcdr (nthcdr 6 x) x) (condition-case e (mapcar (lambda (v) v) x) (circular-list (let ((k 0) (p x)) (while (and (< k 20) (not (eq p (car (cdr e))))) (setq p (cdr p) k (1+ k))) k))))",
+   "(let* ((tail (list 3 4 5)) (x (cons 1 (cons 2 tail)))) (setcdr (cdr (cdr tail)) tail) (condition-case e (mapcar (lambda (v) v) x) (circular-list (list (eq (car (cdr e)) x) (eq (car (cdr e)) tail) (eq (car (cdr e)) (cdr tail)) (eq (car (cdr e)) (cdr (cdr tail)))))))",
+   "(condition-case e (mapcar 1 (list 1)) (error e))",
+   "(condition-case e (mapcar t (list 1)) (error e))",
+   "(condition-case e (mapcar [1] (list 1)) (error e))",
+   "(condition-case e (mapcar 1.5 (list 1)) (error e))",
+   "(condition-case e (mapcar (lambda (a b) a) (list 1)) (error e))",
+   "(condition-case e (mapcar (lambda (a b &optional c) a) (list 1)) (error e))",
+   "(condition-case e (mapcar (lambda (a b &rest c) a) (list 1)) (error e))",
+   "(mapcar (lambda (a &optional b) (list a b)) (list 1 2))",
+   "(mapcar (lambda (&rest r) r) (vector 1 2))",
+   "(mapcar '(1 2) (list 1))",
+   "(mapcar '(lambda-not 1) (list 1))",
+   "(mapcar 'bulk-undefined-function (list 1))",
+   "(progn (fset 'bulk-fn-integer 5) (bulk-fn-integer 1))",
+   "(progn (fset 'bulk-fn-cons '(1 2)) (bulk-fn-cons))",
+   "(progn (fset 'bulk-fn-string \"abc\") (bulk-fn-string))",
+   "(progn (fset 'bulk-fn-nil nil) (bulk-fn-nil))",
+   "(condition-case nil (length (mapcar #'ignore (lambda (x) x))) (wrong-type-argument -99))"
+  ]
+ }
+}

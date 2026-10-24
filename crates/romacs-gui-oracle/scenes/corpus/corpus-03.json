@@ -1,0 +1,211 @@
+{
+ "name": "corpus-03",
+ "frame": {
+  "width": 480,
+  "height": 168,
+  "bg": "#ffffff",
+  "fg": "#000000"
+ },
+ "font": {
+  "family": "Liberation Mono",
+  "pixel_size": 20,
+  "regular": "/usr/share/fonts/liberation/LiberationMono-Regular.ttf",
+  "bold": "/usr/share/fonts/liberation/LiberationMono-Bold.ttf",
+  "italic": "/usr/share/fonts/liberation/LiberationMono-Italic.ttf"
+ },
+ "cursor_color": "#00a000",
+ "buffer": [
+  {
+   "text": "R2D2"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "C:\\tmp"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "a&b",
+   "fg": "#696969",
+   "bg": "#ffff00"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "καλημέρα"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "καλημέρα"
+  },
+  {
+   "text": "\n"
+  },
+  {
+   "text": "ξένος"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "[0-9]+",
+   "bg": "#ffff00"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "#if",
+   "fg": "#2e8b57",
+   "bg": "#d0ffd0"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "κόσμε",
+   "fg": "#2e8b57",
+   "italic": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "(car)",
+   "italic": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "brown"
+  },
+  {
+   "text": "\n"
+  },
+  {
+   "text": "cursor",
+   "italic": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "@user",
+   "fg": "#1e90ff"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "φως"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "ζωή"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "ΔΕΛΤΑ",
+   "underline": true,
+   "bg": "#ffff00"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "φως",
+   "fg": "#a020f0"
+  },
+  {
+   "text": "\n"
+  }
+ ],
+ "point": 100,
+ "expect": {
+  "origin": [
+   0,
+   0
+  ],
+  "rows": [
+   {
+    "text": "R2D2 C:\\tmp a&b καλημέρα καλημέρα",
+    "runs": [
+     {
+      "start": 12,
+      "end": 15,
+      "fg": "#696969",
+      "bg": "#ffff00"
+     }
+    ]
+   },
+   {
+    "text": "ξένος [0-9]+ #if κόσμε (car) brown",
+    "runs": [
+     {
+      "start": 6,
+      "end": 12,
+      "bg": "#ffff00"
+     },
+     {
+      "start": 13,
+      "end": 16,
+      "fg": "#2e8b57",
+      "bg": "#d0ffd0"
+     },
+     {
+      "start": 17,
+      "end": 22,
+      "fg": "#2e8b57",
+      "italic": true
+     },
+     {
+      "start": 23,
+      "end": 28,
+      "italic": true
+     }
+    ]
+   },
+   {
+    "text": "cursor @user φως ζωή ΔΕΛΤΑ φως",
+    "runs": [
+     {
+      "start": 0,
+      "end": 6,
+      "italic": true
+     },
+     {
+      "start": 7,
+      "end": 12,
+      "fg": "#1e90ff"
+     },
+     {
+      "start": 21,
+      "end": 26,
+      "underline": true,
+      "bg": "#ffff00"
+     },
+     {
+      "start": 27,
+      "end": 30,
+      "fg": "#a020f0"
+     }
+    ]
+   }
+  ],
+  "cursor": {
+   "row": 2,
+   "col": 30
+  }
+ }
+}

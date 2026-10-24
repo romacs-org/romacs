@@ -1,0 +1,301 @@
+//! Core-free Seam P host using the existing native event loop and compositor.
+//! `FrameGlyphBuffer` owns both font tables; no evaluator or font handle crosses
+//! the native-thread boundary. Construct and run on the process main thread.
+
+use crate::render_thread::{self, InitialWindowReply, InitialWindowSize};
+use crate::thread_comm::{
+    EmacsComms, FrameRef, LifecycleCommand, RenderCommand, RenderComms, ThreadComms, WindowCommand,
+};
+use romacs_display_protocol::FrameGlyphBuffer;
+
+pub const PRIMARY_FRAME: u64 = 1;
+
+/// A sample from the live window atlas after queue presentation. Cumulative
+/// within that atlas lifetime, not a per-frame delta or compositor confirmation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PaintDiagnostic {
+    pub presentation: u64,
+    pub unresolved_face_text_total: u64,
+}
+
+#[derive(Default)]
+pub(crate) struct PaintDiagnostics {
+    latest: std::sync::Mutex<Option<PaintDiagnostic>>,
+    changed: std::sync::Condvar,
+}
+
+impl PaintDiagnostics {
+    pub(crate) fn publish(&self, diagnostic: PaintDiagnostic) {
+        *self.latest.lock().unwrap() = Some(diagnostic);
+        self.changed.notify_all();
+    }
+
+    fn wait(
+        &self,
+        presentation: u64,
+        timeout: std::time::Duration,
+    ) -> Result<PaintDiagnostic, String> {
+        let (latest, _) = self
+            .changed
+            .wait_timeout_while(
+                self.latest
+                    .lock()
+                    .map_err(|_| "paint diagnostic lock poisoned")?,
+                timeout,
+                |latest| latest.is_none_or(|sample| sample.presentation != presentation),
+            )
+            .map_err(|_| "paint diagnostic lock poisoned")?;
+        latest
+            .filter(|sample| sample.presentation == presentation)
+            .ok_or_else(|| format!("no rendered atlas diagnostic for presentation {presentation}"))
+    }
+}
+
+#[cfg(test)]
+mod diagnostic_tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn diagnostic_preserves_nonzero_renderer_sample_and_identity() {
+        let state = PaintDiagnostics::default();
+        assert!(state.wait(1, Duration::ZERO).is_err());
+        state.publish(PaintDiagnostic {
+            presentation: 1,
+            unresolved_face_text_total: 19,
+        });
+        assert_eq!(
+            state
+                .wait(1, Duration::ZERO)
+                .unwrap()
+                .unresolved_face_text_total,
+            19
+        );
+        assert!(
+            state.wait(2, Duration::ZERO).is_err(),
+            "stale samples are not evidence"
+        );
+        state.publish(PaintDiagnostic {
+            presentation: 2,
+            unresolved_face_text_total: 27,
+        });
+        assert_eq!(
+            state.wait(2, Duration::ZERO).unwrap(),
+            PaintDiagnostic {
+                presentation: 2,
+                unresolved_face_text_total: 27,
+            }
+        );
+    }
+
+    #[test]
+    fn diagnostic_wait_observes_native_thread_publication() {
+        let state = std::sync::Arc::new(PaintDiagnostics::default());
+        let producer = state.clone();
+        let worker = std::thread::spawn(move || {
+            producer.publish(PaintDiagnostic {
+                presentation: 7,
+                unresolved_face_text_total: 3,
+            })
+        });
+        assert_eq!(
+            state
+                .wait(7, Duration::from_secs(5))
+                .unwrap()
+                .unresolved_face_text_total,
+            3
+        );
+        worker.join().unwrap();
+    }
+}
+
+pub struct PaintHost {
+    event_loop: render_thread::RenderEventLoop,
+    render: RenderComms,
+    initial: render_thread::InitialWindowReceiver,
+    _lifetime: render_thread::InitialWindowLifetime,
+    title: String,
+}
+
+pub struct PaintSender {
+    comms: EmacsComms,
+    proxy: render_thread::RenderEventLoopProxy,
+    diagnostics: std::sync::Arc<PaintDiagnostics>,
+}
+
+impl PaintHost {
+    /// Connect to this exact compositor, never the user's ambient X11 display.
+    #[cfg(target_os = "linux")]
+    pub fn wayland(
+        socket: &std::path::Path,
+        width: u32,
+        height: u32,
+        title: String,
+    ) -> Result<(Self, PaintSender), String> {
+        if width == 0 || height == 0 {
+            return Err("paint host size must be nonzero".into());
+        }
+        let event_loop = render_thread::build_render_event_loop_wayland(socket)?;
+        let proxy = event_loop.create_proxy();
+        let (reply, initial) = InitialWindowReply::channel(proxy.clone());
+        let lifetime = reply
+            .ready(InitialWindowSize { width, height })
+            .ok_or("initial window receiver closed")?;
+        let (comms, mut render) = ThreadComms::new().split();
+        let diagnostics = std::sync::Arc::new(PaintDiagnostics::default());
+        render.paint_diagnostics = Some(diagnostics.clone());
+        comms
+            .cmd_tx
+            .try_send(RenderCommand::Window(WindowCommand::AdoptPrimaryFrame {
+                frame: FrameRef::Frame(PRIMARY_FRAME),
+            }))
+            .map_err(|error| error.to_string())?;
+        Ok((
+            Self {
+                event_loop,
+                render,
+                initial,
+                _lifetime: lifetime,
+                title,
+            },
+            PaintSender {
+                comms,
+                proxy,
+                diagnostics,
+            },
+        ))
+    }
+
+    pub fn run(self) -> Result<render_thread::RenderLoopExit, render_thread::RenderLoopError> {
+        render_thread::run_render_loop_current_thread(
+            self.event_loop,
+            self.render,
+            self.initial,
+            self.title,
+            std::sync::Arc::default(),
+            std::sync::Arc::default(),
+        )
+    }
+}
+
+// Enabled only by the standalone paint-host latency probe.
+// Pair by the actual read receipt, never by FIFO position: native admission
+// may discard events before delivery, so a positional side queue can invent lag.
+static TRACE_KEYS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static KEY_TIMES: std::sync::Mutex<Vec<(romacs_display_protocol::input_progress::InputReceipt, std::time::Instant)>> =
+    std::sync::Mutex::new(Vec::new());
+
+pub fn enable_key_latency_trace() {
+    TRACE_KEYS.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+pub(crate) fn trace_key_enqueue(event: &crate::thread_comm::InputEvent, delivery: Option<&romacs_display_protocol::input_progress::InputDelivery>) {
+    if TRACE_KEYS.load(std::sync::atomic::Ordering::Relaxed)
+        && matches!(event, crate::thread_comm::InputEvent::Key { pressed: true, .. })
+        && let Some(delivery) = delivery {
+        let mut times = KEY_TIMES.lock().unwrap();
+        times.retain(|(receipt, _)| !receipt.cancelled());
+        times.push((delivery.receipt(), std::time::Instant::now()));
+    }
+}
+pub fn take_key_enqueue_time(event: &crate::thread_comm::InputEvent) -> Option<std::time::Instant> {
+    match event {
+        crate::thread_comm::InputEvent::Observed { event, .. } => take_key_enqueue_time(event),
+        crate::thread_comm::InputEvent::Tracked { receipt, .. } => {
+            let actual = receipt.receipt();
+            let mut times = KEY_TIMES.lock().unwrap();
+            let index = times.iter().position(|(queued, _)| queued.same_input(&actual))?;
+            Some(times.remove(index).1)
+        }
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn latency_receipt_does_not_pair_a_discarded_native_event() {
+    use crate::thread_comm::InputEvent;
+    use romacs_display_protocol::input_progress::InputDelivery;
+    let discarded = InputDelivery::for_read();
+    let delivered = InputDelivery::for_read();
+    let first = std::time::Instant::now();
+    let second = first + std::time::Duration::from_millis(1);
+    KEY_TIMES.lock().unwrap().extend([(discarded.receipt(), first), (delivered.receipt(), second)]);
+    drop(discarded);
+    let event = InputEvent::Tracked { receipt: delivered, event: Box::new(InputEvent::Key {
+        key: crate::host_types::FrontendKey::Character('k'), modifiers: 0,
+        pressed: true, emacs_frame_id: 1,
+    }) };
+    assert_eq!(take_key_enqueue_time(&event), Some(second));
+    assert_eq!(take_key_enqueue_time(&event), None, "one event has one timestamp");
+    KEY_TIMES.lock().unwrap().retain(|(receipt, _)| !receipt.cancelled());
+}
+
+impl PaintSender {
+    /// Wait for a successfully rendered primary presentation, not merely ingress
+    /// activation. Submit sequentially: this bounded snapshot retains only the
+    /// latest presentation. No sample exists before the first successful render.
+    pub fn wait_for_render(
+        &self,
+        presentation: u64,
+        timeout: std::time::Duration,
+    ) -> Result<PaintDiagnostic, String> {
+        self.diagnostics.wait(presentation, timeout)
+    }
+
+    /// Queue one complete frame, including `fonts` and `char_fonts`. Returns
+    /// backpressure rather than silently dropping a repaint. The producer must
+    /// use PRIMARY_FRAME and a fresh nonzero presentation ID for every revision.
+    pub fn submit(&self, frame: FrameGlyphBuffer) -> Result<(), String> {
+        validate_frame(&frame)?;
+        let result = self
+            .comms
+            .cmd_tx
+            .try_send(RenderCommand::Paint(Box::new(frame)))
+            .map_err(|error| error.to_string());
+        self.proxy.wake_up();
+        result
+    }
+
+    pub fn input(&self) -> &crossbeam_channel::Receiver<crate::thread_comm::InputEvent> {
+        &self.comms.input_rx
+    }
+
+    pub fn shutdown(&self) -> Result<(), String> {
+        let result = self
+            .comms
+            .cmd_tx
+            .try_send(RenderCommand::Lifecycle(LifecycleCommand::Shutdown))
+            .map_err(|error| error.to_string());
+        self.proxy.wake_up();
+        result
+    }
+}
+
+impl Drop for PaintSender {
+    fn drop(&mut self) {
+        let _ = self.shutdown();
+    }
+}
+
+pub(crate) fn validate_frame(frame: &FrameGlyphBuffer) -> Result<(), String> {
+    let rect = frame.frame_placement.outer_in_parent();
+    if !frame.width.is_finite()
+        || !frame.height.is_finite()
+        || frame.width <= 0.0
+        || frame.height <= 0.0
+        || rect.x() != 0.0
+        || rect.y() != 0.0
+        || rect.width() != frame.width
+        || rect.height() != frame.height
+    {
+        return Err("paint host requires coherent positive root geometry".into());
+    }
+    if frame.frame_placement.frame().get() != PRIMARY_FRAME
+        || frame.frame_placement.parent().is_some()
+        || frame.presentation_id.get() == 0
+        || frame.frame_placement.presentation() != frame.presentation_id
+    {
+        return Err("paint host requires coherent nonzero primary presentation".into());
+    }
+    Ok(())
+}

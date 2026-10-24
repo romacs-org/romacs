@@ -1,0 +1,245 @@
+{
+ "name": "corpus-05",
+ "frame": {
+  "width": 480,
+  "height": 168,
+  "bg": "#ffffff",
+  "fg": "#000000"
+ },
+ "font": {
+  "family": "Liberation Mono",
+  "pixel_size": 20,
+  "regular": "/usr/share/fonts/liberation/LiberationMono-Regular.ttf",
+  "bold": "/usr/share/fonts/liberation/LiberationMono-Bold.ttf",
+  "italic": "/usr/share/fonts/liberation/LiberationMono-Italic.ttf"
+ },
+ "cursor_color": "#00a000",
+ "buffer": [
+  {
+   "text": "frame",
+   "fg": "#b8860b",
+   "bold": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "buffer",
+   "bold": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "ΣΟΦΙΑ",
+   "fg": "#2e8b57"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "δέντρο",
+   "italic": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "@user",
+   "fg": "#8b0000"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "ζωή"
+  },
+  {
+   "text": "\n"
+  },
+  {
+   "text": "a&b",
+   "bold": true,
+   "underline": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "[0-9]+",
+   "italic": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "q?"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "q?",
+   "fg": "#a020f0"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "ζωή"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "Αθήνα",
+   "italic": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "(car)"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "#if",
+   "fg": "#b8860b"
+  },
+  {
+   "text": "\n"
+  },
+  {
+   "text": "καλημέρα"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "Emacs",
+   "bold": true,
+   "underline": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "world"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "Quick",
+   "bold": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "cursor",
+   "italic": true
+  },
+  {
+   "text": "\n"
+  }
+ ],
+ "point": 20,
+ "expect": {
+  "origin": [
+   0,
+   0
+  ],
+  "rows": [
+   {
+    "text": "frame buffer ΣΟΦΙΑ δέντρο @user ζωή",
+    "runs": [
+     {
+      "start": 0,
+      "end": 5,
+      "fg": "#b8860b",
+      "bold": true
+     },
+     {
+      "start": 6,
+      "end": 12,
+      "bold": true
+     },
+     {
+      "start": 13,
+      "end": 18,
+      "fg": "#2e8b57"
+     },
+     {
+      "start": 19,
+      "end": 25,
+      "italic": true
+     },
+     {
+      "start": 26,
+      "end": 31,
+      "fg": "#8b0000"
+     }
+    ]
+   },
+   {
+    "text": "a&b [0-9]+ q? q? ζωή Αθήνα (car) #if",
+    "runs": [
+     {
+      "start": 0,
+      "end": 3,
+      "bold": true,
+      "underline": true
+     },
+     {
+      "start": 4,
+      "end": 10,
+      "italic": true
+     },
+     {
+      "start": 14,
+      "end": 16,
+      "fg": "#a020f0"
+     },
+     {
+      "start": 21,
+      "end": 26,
+      "italic": true
+     },
+     {
+      "start": 33,
+      "end": 36,
+      "fg": "#b8860b"
+     }
+    ]
+   },
+   {
+    "text": "καλημέρα Emacs world Quick cursor",
+    "runs": [
+     {
+      "start": 9,
+      "end": 14,
+      "bold": true,
+      "underline": true
+     },
+     {
+      "start": 21,
+      "end": 26,
+      "bold": true
+     },
+     {
+      "start": 27,
+      "end": 33,
+      "italic": true
+     }
+    ]
+   }
+  ],
+  "cursor": {
+   "row": 0,
+   "col": 19
+  }
+ }
+}

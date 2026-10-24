@@ -1,0 +1,13 @@
+insertion
+deletion
+replacement
+erase
+ticks
+multibyte
+unibyte
+partial-eob
+terminal-eob
+lines
+empty
+edges
+raw-boundaries

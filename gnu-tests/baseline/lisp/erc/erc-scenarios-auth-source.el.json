@@ -1,0 +1,294 @@
+{
+ "blob": "be651ee9c45bd5d796a492eeb1d42c21ec265889",
+ "compiled": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": true,
+  "results": {
+   "erc-scenarios-base-auth-source-server--dialed": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "erc-scenarios-base-auth-source-server--netid": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "erc-scenarios-base-auth-source-server--netid-custom": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "erc-scenarios-base-auth-source-server--nopass": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "erc-scenarios-base-auth-source-server--nopass-netid": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "erc-scenarios-services-auth-source--announced": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "erc-scenarios-services-auth-source--custom": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "erc-scenarios-services-auth-source--dialed": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "erc-scenarios-services-auth-source--network": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "erc-scenarios-services-auth-source--network-connect-lookup": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   }
+  },
+  "timed_out": false
+ },
+ "file": "lisp/erc/erc-scenarios-auth-source.el",
+ "gnu": {
+  "emacs": "<recording-path-redacted>/emacs-32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+  "version": "32.0.50"
+ },
+ "harness_sha256": "78c20850429a08af22faadf73b5d164c560230e83d7eb88ef60cb995670703ef",
+ "mini": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": null,
+  "results": {
+   "erc-scenarios-base-auth-source-server--dialed": {
+    "as_expected": null,
+    "detail": "(void-function erc-scenarios-common-with-cleanup)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "erc-scenarios-base-auth-source-server--netid": {
+    "as_expected": null,
+    "detail": "(void-function erc-scenarios-common-with-cleanup)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "erc-scenarios-base-auth-source-server--netid-custom": {
+    "as_expected": null,
+    "detail": "(void-function erc-scenarios-common-with-cleanup)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "erc-scenarios-base-auth-source-server--nopass": {
+    "as_expected": null,
+    "detail": "(void-function erc-scenarios-common-with-cleanup)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "erc-scenarios-base-auth-source-server--nopass-netid": {
+    "as_expected": null,
+    "detail": "(void-function erc-scenarios-common-with-cleanup)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "erc-scenarios-services-auth-source--announced": {
+    "as_expected": null,
+    "detail": "(void-function erc-scenarios-common-with-cleanup)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "erc-scenarios-services-auth-source--custom": {
+    "as_expected": null,
+    "detail": "(void-function erc-scenarios-common-with-cleanup)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "erc-scenarios-services-auth-source--dialed": {
+    "as_expected": null,
+    "detail": "(void-function erc-scenarios-common-with-cleanup)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "erc-scenarios-services-auth-source--network": {
+    "as_expected": null,
+    "detail": "(void-function erc-scenarios-common-with-cleanup)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "erc-scenarios-services-auth-source--network-connect-lookup": {
+    "as_expected": null,
+    "detail": "(void-function erc-scenarios-common-with-cleanup)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   }
+  },
+  "timed_out": false
+ },
+ "read_error": null,
+ "real": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": true,
+  "results": {
+   "erc-scenarios-base-auth-source-server--dialed": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "erc-scenarios-base-auth-source-server--netid": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "erc-scenarios-base-auth-source-server--netid-custom": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "erc-scenarios-base-auth-source-server--nopass": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "erc-scenarios-base-auth-source-server--nopass-netid": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "erc-scenarios-services-auth-source--announced": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "erc-scenarios-services-auth-source--custom": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "erc-scenarios-services-auth-source--dialed": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "erc-scenarios-services-auth-source--network": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "erc-scenarios-services-auth-source--network-connect-lookup": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   }
+  },
+  "timed_out": false
+ },
+ "schema": 1,
+ "toplevel_deftests": 10
+}

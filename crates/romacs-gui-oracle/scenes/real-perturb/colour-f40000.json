@@ -1,0 +1,53 @@
+{
+ "name": "colour-f40000",
+ "frame": {
+  "width": 480,
+  "height": 168,
+  "bg": "#ffffff",
+  "fg": "#000000"
+ },
+ "font": {
+  "family": "Liberation Mono",
+  "pixel_size": 20,
+  "regular": "/usr/share/fonts/liberation/LiberationMono-Regular.ttf",
+  "bold": "/usr/share/fonts/liberation/LiberationMono-Bold.ttf",
+  "italic": "/usr/share/fonts/liberation/LiberationMono-Italic.ttf"
+ },
+ "cursor_color": "#00a000",
+ "buffer": [
+  {
+   "text": "Ωμέγα "
+  },
+  {
+   "text": "Hello",
+   "fg": "#f40000"
+  },
+  {
+   "text": "\n"
+  }
+ ],
+ "point": 1,
+ "expect": {
+  "origin": [
+   0,
+   0
+  ],
+  "rows": [
+   {
+    "text": "Ωμέγα Hello",
+    "runs": [
+     {
+      "start": 6,
+      "end": 11,
+      "fg": "#ff0000"
+     }
+    ]
+   }
+  ],
+  "cursor": {
+   "row": 0,
+   "col": 0
+  }
+ },
+ "perturbation": "Hello drawn #f40000 (11 levels, just over the 8-level tolerance)"
+}

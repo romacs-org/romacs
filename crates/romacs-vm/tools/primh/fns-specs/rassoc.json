@@ -1,0 +1,37 @@
+{
+ "name": "rassoc",
+ "arity": [
+  2,
+  2
+ ],
+ "effect": "pure",
+ "gnu_files": [
+  "fns.c"
+ ],
+ "gnu_def": "fns.c:2062",
+ "rust": "src/prims/fns_rassoc.rs:4",
+ "args": [
+  "atom",
+  "list"
+ ],
+ "extra": {
+  "1": [
+   "'(nil atom (a . 1) (b . 2) (c 1 2))",
+   "'((a . 1) . bad)",
+   "42"
+  ]
+ },
+ "probes": [
+  "(rassoc '(1 2) '((a 1 2) (b 3)))",
+  "(rassoc nil '(nil a (a) (b . 2)))",
+  "(rassoc 2 '((a . 1) (b . 2)))",
+  "(let* ((entry (cons 'key (list 1 2))) (xs (list entry))) (eq entry (rassoc (list 1 2) xs)))",
+  "(condition-case e (rassoc 1 '((a . 2) . bad)) (error e))",
+  "(rassoc 1 '((a . 1) . bad))",
+  "(let ((xs (list (cons 'a 1)))) (setcdr xs xs) (condition-case e (rassoc 2 xs) (circular-list (eq (car (cdr e)) xs))))",
+  "(funcall #'rassoc 2 '((a . 2)))",
+  "(rassoc (copy-sequence \"yes\") (list (cons 'a (copy-sequence \"yes\"))))",
+  "(rassoc [1 2] '((a . [1 2])))",
+  "(rassoc 1.5 '((a . 1.5)))"
+ ]
+}

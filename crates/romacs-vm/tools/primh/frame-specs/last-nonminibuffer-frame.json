@@ -1,0 +1,20 @@
+{
+ "name": "last-nonminibuffer-frame",
+ "arity": [
+  0,
+  0
+ ],
+ "effect": "reads",
+ "gnu_files": [
+  "frame.c"
+ ],
+ "gnu_def": "frame.c:2467",
+ "args": [],
+ "extra": {},
+ "probes": [
+  "(fboundp 'last-nonminibuffer-frame)",
+  "(eq (last-nonminibuffer-frame) (selected-frame))",
+  "(eq (funcall #'last-nonminibuffer-frame) (selected-frame))"
+ ],
+ "rust": "src/prims/frame.rs:12"
+}

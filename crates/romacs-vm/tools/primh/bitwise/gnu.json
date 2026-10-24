@@ -1,0 +1,188 @@
+{
+  "protocol": "bitwise-v1",
+  "oracle": {
+    "path": "<recording-path-redacted>/emacs",
+    "resolved": "<recording-path-redacted>/emacs-32.0.50",
+    "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+    "version": "32.0.50",
+    "sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8"
+  },
+  "cases_sha256": "fe9ae2988296f40c0960c4597c99ce33755b62433356e787740468e51651b424",
+  "recorder_sha256": "34bcb94f68441083f6fd09c92abe20d69469d881e2f0f28588cfc985aecef555",
+  "cases": [
+    {
+      "id": "logior-0",
+      "expression": "(logior)",
+      "form": "(condition-case e (logior) (error e))",
+      "gnu": "0"
+    },
+    {
+      "id": "logior-1",
+      "expression": "(logior 7)",
+      "form": "(condition-case e (logior 7) (error e))",
+      "gnu": "7"
+    },
+    {
+      "id": "logior-2",
+      "expression": "(logior 128 134217728)",
+      "form": "(condition-case e (logior 128 134217728) (error e))",
+      "gnu": "134217856"
+    },
+    {
+      "id": "logior-3",
+      "expression": "(logior 1 2 4 8)",
+      "form": "(condition-case e (logior 1 2 4 8) (error e))",
+      "gnu": "15"
+    },
+    {
+      "id": "logior-4",
+      "expression": "(logior -16 3)",
+      "form": "(condition-case e (logior -16 3) (error e))",
+      "gnu": "-13"
+    },
+    {
+      "id": "logior-5",
+      "expression": "(logior #x10000000000000000000000000 1)",
+      "form": "(condition-case e (logior #x10000000000000000000000000 1) (error e))",
+      "gnu": "1267650600228229401496703205377"
+    },
+    {
+      "id": "logior-6",
+      "expression": "(logior 1 #x10000000000000000000000000)",
+      "form": "(condition-case e (logior 1 #x10000000000000000000000000) (error e))",
+      "gnu": "1267650600228229401496703205377"
+    },
+    {
+      "id": "logior-7",
+      "expression": "(logior #x-10000000000000000000000000 3)",
+      "form": "(condition-case e (logior #x-10000000000000000000000000 3) (error e))",
+      "gnu": "-1267650600228229401496703205373"
+    },
+    {
+      "id": "logior-8",
+      "expression": "(logior #xFFFFFFFFFFFFFFFFFFFFFFFF #x10000000000000000000000000)",
+      "form": "(condition-case e (logior #xFFFFFFFFFFFFFFFFFFFFFFFF #x10000000000000000000000000) (error e))",
+      "gnu": "1346878762742493739090247155711"
+    },
+    {
+      "id": "logior-9",
+      "expression": "(logior 1.0)",
+      "form": "(condition-case e (logior 1.0) (error e))",
+      "gnu": "(wrong-type-argument integer-or-marker-p 1.0)"
+    },
+    {
+      "id": "logior-10",
+      "expression": "(logior 'bad)",
+      "form": "(condition-case e (logior 'bad) (error e))",
+      "gnu": "(wrong-type-argument integer-or-marker-p bad)"
+    },
+    {
+      "id": "logior-11",
+      "expression": "(logior 1 'bad)",
+      "form": "(condition-case e (logior 1 'bad) (error e))",
+      "gnu": "(wrong-type-argument number-or-marker-p bad)"
+    },
+    {
+      "id": "logior-12",
+      "expression": "(logior 1 2.0)",
+      "form": "(condition-case e (logior 1 2.0) (error e))",
+      "gnu": "(wrong-type-argument integer-or-marker-p 2.0)"
+    },
+    {
+      "id": "logior-13",
+      "expression": "(logior #x10000000000000000000000000 'bad)",
+      "form": "(condition-case e (logior #x10000000000000000000000000 'bad) (error e))",
+      "gnu": "(wrong-type-argument number-or-marker-p bad)"
+    },
+    {
+      "id": "logior-14",
+      "expression": "(logior #x10000000000000000000000000 2.0)",
+      "form": "(condition-case e (logior #x10000000000000000000000000 2.0) (error e))",
+      "gnu": "(wrong-type-argument integer-or-marker-p 2.0)"
+    },
+    {
+      "id": "logior-15",
+      "expression": "(logior 1 2.0 'bad)",
+      "form": "(condition-case e (logior 1 2.0 'bad) (error e))",
+      "gnu": "(wrong-type-argument integer-or-marker-p 2.0)"
+    },
+    {
+      "id": "logior-16",
+      "expression": "(logior (copy-marker 1) 8)",
+      "form": "(condition-case e (logior (copy-marker 1) 8) (error e))",
+      "gnu": "9"
+    },
+    {
+      "id": "logior-17",
+      "expression": "(logior 8 (copy-marker 1))",
+      "form": "(condition-case e (logior 8 (copy-marker 1)) (error e))",
+      "gnu": "9"
+    },
+    {
+      "id": "logior-18",
+      "expression": "(logior (make-marker))",
+      "form": "(condition-case e (logior (make-marker)) (error e))",
+      "gnu": "(error \"Marker does not point anywhere\")"
+    },
+    {
+      "id": "logior-19",
+      "expression": "(let ((x #x10000000000000000000000000)) (eq x (logior x)))",
+      "form": "(condition-case e (let ((x #x10000000000000000000000000)) (eq x (logior x))) (error e))",
+      "gnu": "t"
+    },
+    {
+      "id": "logior-20",
+      "expression": "(logior #x-10000000000000000000000000 -1)",
+      "form": "(condition-case e (logior #x-10000000000000000000000000 -1) (error e))",
+      "gnu": "-1"
+    },
+    {
+      "id": "logior-21",
+      "expression": "(logior most-positive-fixnum)",
+      "form": "(condition-case e (logior most-positive-fixnum) (error e))",
+      "gnu": "2305843009213693951"
+    },
+    {
+      "id": "logior-22",
+      "expression": "(logior most-negative-fixnum -1)",
+      "form": "(condition-case e (logior most-negative-fixnum -1) (error e))",
+      "gnu": "-1"
+    },
+    {
+      "id": "logior-23",
+      "expression": "(logior 'bad 1)",
+      "form": "(condition-case e (logior 'bad 1) (error e))",
+      "gnu": "(wrong-type-argument integer-or-marker-p bad)"
+    },
+    {
+      "id": "logior-24",
+      "expression": "(logior #x10000000000000000000000000 (copy-marker 1))",
+      "form": "(condition-case e (logior #x10000000000000000000000000 (copy-marker 1)) (error e))",
+      "gnu": "1267650600228229401496703205377"
+    },
+    {
+      "id": "logior-25",
+      "expression": "(logior 1 (make-marker))",
+      "form": "(condition-case e (logior 1 (make-marker)) (error e))",
+      "gnu": "(error \"Marker does not point anywhere\")"
+    },
+    {
+      "id": "logior-26",
+      "expression": "(fixnump (logior #x-10000000000000000000000000 -1))",
+      "form": "(condition-case e (fixnump (logior #x-10000000000000000000000000 -1)) (error e))",
+      "gnu": "t"
+    },
+    {
+      "id": "logior-27",
+      "expression": "(bignump (logior #x10000000000000000000000000 1))",
+      "form": "(condition-case e (bignump (logior #x10000000000000000000000000 1)) (error e))",
+      "gnu": "t"
+    },
+    {
+      "id": "logior-28",
+      "expression": "(logior 7 3)",
+      "form": "(condition-case e (logior 7 3) (error e))",
+      "gnu": "7"
+    }
+  ]
+}

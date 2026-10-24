@@ -1,0 +1,3455 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "run-hook-with-args",
+ "spec_sha256": "aac3eb560ea42857765483e7b89b5b75e8883accc61e7f2a79ee8d00bf825bcc",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "run-hook-with-args",
+    "subr",
+    1,
+    "many"
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "eval.c": "db894444b2edc1e7e675d5d8f97cba7e6f77f2beb0e5c3a130afc505c6f387b4"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "run-hook-with-args/0000",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args nil nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "run-hook-with-args/0001",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args nil t)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "run-hook-with-args/0002",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args nil 0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "run-hook-with-args/0003",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args nil 1)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "run-hook-with-args/0004",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args nil 2)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "run-hook-with-args/0005",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args nil -1)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "run-hook-with-args/0006",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args nil most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "run-hook-with-args/0007",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args nil 1.5)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "run-hook-with-args/0008",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args nil 'sym)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "run-hook-with-args/0009",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args nil :kw)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "run-hook-with-args/0010",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args nil (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "run-hook-with-args/0011",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args nil (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "run-hook-with-args/0012",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args nil (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "run-hook-with-args/0013",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args nil (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "run-hook-with-args/0014",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args nil (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "run-hook-with-args/0015",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args nil (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "run-hook-with-args/0016",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args nil (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "run-hook-with-args/0017",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args nil (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "run-hook-with-args/0018",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args nil (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "run-hook-with-args/0019",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args t nil)) (error (list 'sig e))))",
+   "expected": "(sig (void-function t))"
+  },
+  {
+   "id": "run-hook-with-args/0020",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args t t)) (error (list 'sig e))))",
+   "expected": "(sig (void-function t))"
+  },
+  {
+   "id": "run-hook-with-args/0021",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args t 0)) (error (list 'sig e))))",
+   "expected": "(sig (void-function t))"
+  },
+  {
+   "id": "run-hook-with-args/0022",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args t 1)) (error (list 'sig e))))",
+   "expected": "(sig (void-function t))"
+  },
+  {
+   "id": "run-hook-with-args/0023",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args t 2)) (error (list 'sig e))))",
+   "expected": "(sig (void-function t))"
+  },
+  {
+   "id": "run-hook-with-args/0024",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args t -1)) (error (list 'sig e))))",
+   "expected": "(sig (void-function t))"
+  },
+  {
+   "id": "run-hook-with-args/0025",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args t most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (void-function t))"
+  },
+  {
+   "id": "run-hook-with-args/0026",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args t 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (void-function t))"
+  },
+  {
+   "id": "run-hook-with-args/0027",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args t 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (void-function t))"
+  },
+  {
+   "id": "run-hook-with-args/0028",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args t :kw)) (error (list 'sig e))))",
+   "expected": "(sig (void-function t))"
+  },
+  {
+   "id": "run-hook-with-args/0029",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args t (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (void-function t))"
+  },
+  {
+   "id": "run-hook-with-args/0030",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args t (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (void-function t))"
+  },
+  {
+   "id": "run-hook-with-args/0031",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args t (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (void-function t))"
+  },
+  {
+   "id": "run-hook-with-args/0032",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args t (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(sig (void-function t))"
+  },
+  {
+   "id": "run-hook-with-args/0033",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args t (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(sig (void-function t))"
+  },
+  {
+   "id": "run-hook-with-args/0034",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args t (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (void-function t))"
+  },
+  {
+   "id": "run-hook-with-args/0035",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args t (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (void-function t))"
+  },
+  {
+   "id": "run-hook-with-args/0036",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args t (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (void-function t))"
+  },
+  {
+   "id": "run-hook-with-args/0037",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args t (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (void-function t))"
+  },
+  {
+   "id": "run-hook-with-args/0038",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 0 nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 0))"
+  },
+  {
+   "id": "run-hook-with-args/0039",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 0 t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 0))"
+  },
+  {
+   "id": "run-hook-with-args/0040",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 0 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 0))"
+  },
+  {
+   "id": "run-hook-with-args/0041",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 0 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 0))"
+  },
+  {
+   "id": "run-hook-with-args/0042",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 0 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 0))"
+  },
+  {
+   "id": "run-hook-with-args/0043",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 0 -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 0))"
+  },
+  {
+   "id": "run-hook-with-args/0044",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 0 most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 0))"
+  },
+  {
+   "id": "run-hook-with-args/0045",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 0 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 0))"
+  },
+  {
+   "id": "run-hook-with-args/0046",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 0 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 0))"
+  },
+  {
+   "id": "run-hook-with-args/0047",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 0 :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 0))"
+  },
+  {
+   "id": "run-hook-with-args/0048",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 0 (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 0))"
+  },
+  {
+   "id": "run-hook-with-args/0049",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 0 (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 0))"
+  },
+  {
+   "id": "run-hook-with-args/0050",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 0 (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 0))"
+  },
+  {
+   "id": "run-hook-with-args/0051",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 0 (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 0))"
+  },
+  {
+   "id": "run-hook-with-args/0052",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 0 (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 0))"
+  },
+  {
+   "id": "run-hook-with-args/0053",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 0 (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 0))"
+  },
+  {
+   "id": "run-hook-with-args/0054",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 0 (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 0))"
+  },
+  {
+   "id": "run-hook-with-args/0055",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 0 (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 0))"
+  },
+  {
+   "id": "run-hook-with-args/0056",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 0 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 0))"
+  },
+  {
+   "id": "run-hook-with-args/0057",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 1 nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1))"
+  },
+  {
+   "id": "run-hook-with-args/0058",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 1 t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1))"
+  },
+  {
+   "id": "run-hook-with-args/0059",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 1 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1))"
+  },
+  {
+   "id": "run-hook-with-args/0060",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 1 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1))"
+  },
+  {
+   "id": "run-hook-with-args/0061",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 1 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1))"
+  },
+  {
+   "id": "run-hook-with-args/0062",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 1 -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1))"
+  },
+  {
+   "id": "run-hook-with-args/0063",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 1 most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1))"
+  },
+  {
+   "id": "run-hook-with-args/0064",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 1 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1))"
+  },
+  {
+   "id": "run-hook-with-args/0065",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 1 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1))"
+  },
+  {
+   "id": "run-hook-with-args/0066",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 1 :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1))"
+  },
+  {
+   "id": "run-hook-with-args/0067",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 1 (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1))"
+  },
+  {
+   "id": "run-hook-with-args/0068",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 1 (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1))"
+  },
+  {
+   "id": "run-hook-with-args/0069",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 1 (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1))"
+  },
+  {
+   "id": "run-hook-with-args/0070",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 1 (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1))"
+  },
+  {
+   "id": "run-hook-with-args/0071",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 1 (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1))"
+  },
+  {
+   "id": "run-hook-with-args/0072",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 1 (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1))"
+  },
+  {
+   "id": "run-hook-with-args/0073",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 1 (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1))"
+  },
+  {
+   "id": "run-hook-with-args/0074",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 1 (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1))"
+  },
+  {
+   "id": "run-hook-with-args/0075",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1))"
+  },
+  {
+   "id": "run-hook-with-args/0076",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 2 nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 2))"
+  },
+  {
+   "id": "run-hook-with-args/0077",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 2 t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 2))"
+  },
+  {
+   "id": "run-hook-with-args/0078",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 2 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 2))"
+  },
+  {
+   "id": "run-hook-with-args/0079",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 2 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 2))"
+  },
+  {
+   "id": "run-hook-with-args/0080",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 2 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 2))"
+  },
+  {
+   "id": "run-hook-with-args/0081",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 2 -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 2))"
+  },
+  {
+   "id": "run-hook-with-args/0082",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 2 most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 2))"
+  },
+  {
+   "id": "run-hook-with-args/0083",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 2 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 2))"
+  },
+  {
+   "id": "run-hook-with-args/0084",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 2 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 2))"
+  },
+  {
+   "id": "run-hook-with-args/0085",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 2 :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 2))"
+  },
+  {
+   "id": "run-hook-with-args/0086",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 2 (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 2))"
+  },
+  {
+   "id": "run-hook-with-args/0087",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 2 (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 2))"
+  },
+  {
+   "id": "run-hook-with-args/0088",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 2 (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 2))"
+  },
+  {
+   "id": "run-hook-with-args/0089",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 2 (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 2))"
+  },
+  {
+   "id": "run-hook-with-args/0090",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 2 (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 2))"
+  },
+  {
+   "id": "run-hook-with-args/0091",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 2 (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 2))"
+  },
+  {
+   "id": "run-hook-with-args/0092",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 2 (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 2))"
+  },
+  {
+   "id": "run-hook-with-args/0093",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 2 (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 2))"
+  },
+  {
+   "id": "run-hook-with-args/0094",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 2 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 2))"
+  },
+  {
+   "id": "run-hook-with-args/0095",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args -1 nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp -1))"
+  },
+  {
+   "id": "run-hook-with-args/0096",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args -1 t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp -1))"
+  },
+  {
+   "id": "run-hook-with-args/0097",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args -1 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp -1))"
+  },
+  {
+   "id": "run-hook-with-args/0098",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args -1 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp -1))"
+  },
+  {
+   "id": "run-hook-with-args/0099",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args -1 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp -1))"
+  },
+  {
+   "id": "run-hook-with-args/0100",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args -1 -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp -1))"
+  },
+  {
+   "id": "run-hook-with-args/0101",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args -1 most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp -1))"
+  },
+  {
+   "id": "run-hook-with-args/0102",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args -1 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp -1))"
+  },
+  {
+   "id": "run-hook-with-args/0103",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args -1 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp -1))"
+  },
+  {
+   "id": "run-hook-with-args/0104",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args -1 :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp -1))"
+  },
+  {
+   "id": "run-hook-with-args/0105",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args -1 (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp -1))"
+  },
+  {
+   "id": "run-hook-with-args/0106",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args -1 (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp -1))"
+  },
+  {
+   "id": "run-hook-with-args/0107",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args -1 (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp -1))"
+  },
+  {
+   "id": "run-hook-with-args/0108",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args -1 (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp -1))"
+  },
+  {
+   "id": "run-hook-with-args/0109",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args -1 (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp -1))"
+  },
+  {
+   "id": "run-hook-with-args/0110",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args -1 (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp -1))"
+  },
+  {
+   "id": "run-hook-with-args/0111",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args -1 (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp -1))"
+  },
+  {
+   "id": "run-hook-with-args/0112",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args -1 (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp -1))"
+  },
+  {
+   "id": "run-hook-with-args/0113",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args -1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp -1))"
+  },
+  {
+   "id": "run-hook-with-args/0114",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args most-positive-fixnum nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 2305843009213693951))"
+  },
+  {
+   "id": "run-hook-with-args/0115",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args most-positive-fixnum t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 2305843009213693951))"
+  },
+  {
+   "id": "run-hook-with-args/0116",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args most-positive-fixnum 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 2305843009213693951))"
+  },
+  {
+   "id": "run-hook-with-args/0117",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args most-positive-fixnum 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 2305843009213693951))"
+  },
+  {
+   "id": "run-hook-with-args/0118",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args most-positive-fixnum 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 2305843009213693951))"
+  },
+  {
+   "id": "run-hook-with-args/0119",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args most-positive-fixnum -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 2305843009213693951))"
+  },
+  {
+   "id": "run-hook-with-args/0120",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args most-positive-fixnum most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 2305843009213693951))"
+  },
+  {
+   "id": "run-hook-with-args/0121",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args most-positive-fixnum 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 2305843009213693951))"
+  },
+  {
+   "id": "run-hook-with-args/0122",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args most-positive-fixnum 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 2305843009213693951))"
+  },
+  {
+   "id": "run-hook-with-args/0123",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args most-positive-fixnum :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 2305843009213693951))"
+  },
+  {
+   "id": "run-hook-with-args/0124",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args most-positive-fixnum (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 2305843009213693951))"
+  },
+  {
+   "id": "run-hook-with-args/0125",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args most-positive-fixnum (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 2305843009213693951))"
+  },
+  {
+   "id": "run-hook-with-args/0126",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args most-positive-fixnum (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 2305843009213693951))"
+  },
+  {
+   "id": "run-hook-with-args/0127",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args most-positive-fixnum (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 2305843009213693951))"
+  },
+  {
+   "id": "run-hook-with-args/0128",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args most-positive-fixnum (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 2305843009213693951))"
+  },
+  {
+   "id": "run-hook-with-args/0129",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args most-positive-fixnum (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 2305843009213693951))"
+  },
+  {
+   "id": "run-hook-with-args/0130",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args most-positive-fixnum (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 2305843009213693951))"
+  },
+  {
+   "id": "run-hook-with-args/0131",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args most-positive-fixnum (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 2305843009213693951))"
+  },
+  {
+   "id": "run-hook-with-args/0132",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args most-positive-fixnum (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 2305843009213693951))"
+  },
+  {
+   "id": "run-hook-with-args/0133",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 1.5 nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1.5))"
+  },
+  {
+   "id": "run-hook-with-args/0134",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 1.5 t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1.5))"
+  },
+  {
+   "id": "run-hook-with-args/0135",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 1.5 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1.5))"
+  },
+  {
+   "id": "run-hook-with-args/0136",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 1.5 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1.5))"
+  },
+  {
+   "id": "run-hook-with-args/0137",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 1.5 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1.5))"
+  },
+  {
+   "id": "run-hook-with-args/0138",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 1.5 -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1.5))"
+  },
+  {
+   "id": "run-hook-with-args/0139",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 1.5 most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1.5))"
+  },
+  {
+   "id": "run-hook-with-args/0140",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 1.5 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1.5))"
+  },
+  {
+   "id": "run-hook-with-args/0141",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 1.5 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1.5))"
+  },
+  {
+   "id": "run-hook-with-args/0142",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 1.5 :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1.5))"
+  },
+  {
+   "id": "run-hook-with-args/0143",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 1.5 (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1.5))"
+  },
+  {
+   "id": "run-hook-with-args/0144",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 1.5 (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1.5))"
+  },
+  {
+   "id": "run-hook-with-args/0145",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 1.5 (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1.5))"
+  },
+  {
+   "id": "run-hook-with-args/0146",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 1.5 (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1.5))"
+  },
+  {
+   "id": "run-hook-with-args/0147",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 1.5 (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1.5))"
+  },
+  {
+   "id": "run-hook-with-args/0148",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 1.5 (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1.5))"
+  },
+  {
+   "id": "run-hook-with-args/0149",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 1.5 (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1.5))"
+  },
+  {
+   "id": "run-hook-with-args/0150",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 1.5 (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1.5))"
+  },
+  {
+   "id": "run-hook-with-args/0151",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 1.5 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1.5))"
+  },
+  {
+   "id": "run-hook-with-args/0152",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 'sym nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "run-hook-with-args/0153",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 'sym t)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "run-hook-with-args/0154",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 'sym 0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "run-hook-with-args/0155",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 'sym 1)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "run-hook-with-args/0156",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 'sym 2)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "run-hook-with-args/0157",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 'sym -1)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "run-hook-with-args/0158",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 'sym most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "run-hook-with-args/0159",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 'sym 1.5)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "run-hook-with-args/0160",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 'sym 'sym)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "run-hook-with-args/0161",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 'sym :kw)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "run-hook-with-args/0162",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 'sym (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "run-hook-with-args/0163",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 'sym (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "run-hook-with-args/0164",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 'sym (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "run-hook-with-args/0165",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 'sym (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "run-hook-with-args/0166",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 'sym (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "run-hook-with-args/0167",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 'sym (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "run-hook-with-args/0168",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 'sym (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "run-hook-with-args/0169",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 'sym (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "run-hook-with-args/0170",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 'sym (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "run-hook-with-args/0171",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args :kw nil)) (error (list 'sig e))))",
+   "expected": "(sig (void-function :kw))"
+  },
+  {
+   "id": "run-hook-with-args/0172",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args :kw t)) (error (list 'sig e))))",
+   "expected": "(sig (void-function :kw))"
+  },
+  {
+   "id": "run-hook-with-args/0173",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args :kw 0)) (error (list 'sig e))))",
+   "expected": "(sig (void-function :kw))"
+  },
+  {
+   "id": "run-hook-with-args/0174",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args :kw 1)) (error (list 'sig e))))",
+   "expected": "(sig (void-function :kw))"
+  },
+  {
+   "id": "run-hook-with-args/0175",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args :kw 2)) (error (list 'sig e))))",
+   "expected": "(sig (void-function :kw))"
+  },
+  {
+   "id": "run-hook-with-args/0176",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args :kw -1)) (error (list 'sig e))))",
+   "expected": "(sig (void-function :kw))"
+  },
+  {
+   "id": "run-hook-with-args/0177",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args :kw most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (void-function :kw))"
+  },
+  {
+   "id": "run-hook-with-args/0178",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args :kw 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (void-function :kw))"
+  },
+  {
+   "id": "run-hook-with-args/0179",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args :kw 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (void-function :kw))"
+  },
+  {
+   "id": "run-hook-with-args/0180",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args :kw :kw)) (error (list 'sig e))))",
+   "expected": "(sig (void-function :kw))"
+  },
+  {
+   "id": "run-hook-with-args/0181",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args :kw (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (void-function :kw))"
+  },
+  {
+   "id": "run-hook-with-args/0182",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args :kw (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (void-function :kw))"
+  },
+  {
+   "id": "run-hook-with-args/0183",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args :kw (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (void-function :kw))"
+  },
+  {
+   "id": "run-hook-with-args/0184",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args :kw (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(sig (void-function :kw))"
+  },
+  {
+   "id": "run-hook-with-args/0185",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args :kw (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(sig (void-function :kw))"
+  },
+  {
+   "id": "run-hook-with-args/0186",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args :kw (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (void-function :kw))"
+  },
+  {
+   "id": "run-hook-with-args/0187",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args :kw (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (void-function :kw))"
+  },
+  {
+   "id": "run-hook-with-args/0188",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args :kw (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (void-function :kw))"
+  },
+  {
+   "id": "run-hook-with-args/0189",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args :kw (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (void-function :kw))"
+  },
+  {
+   "id": "run-hook-with-args/0190",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (copy-sequence \"\") nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"\"))"
+  },
+  {
+   "id": "run-hook-with-args/0191",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (copy-sequence \"\") t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"\"))"
+  },
+  {
+   "id": "run-hook-with-args/0192",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (copy-sequence \"\") 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"\"))"
+  },
+  {
+   "id": "run-hook-with-args/0193",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (copy-sequence \"\") 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"\"))"
+  },
+  {
+   "id": "run-hook-with-args/0194",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (copy-sequence \"\") 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"\"))"
+  },
+  {
+   "id": "run-hook-with-args/0195",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (copy-sequence \"\") -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"\"))"
+  },
+  {
+   "id": "run-hook-with-args/0196",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (copy-sequence \"\") most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"\"))"
+  },
+  {
+   "id": "run-hook-with-args/0197",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (copy-sequence \"\") 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"\"))"
+  },
+  {
+   "id": "run-hook-with-args/0198",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (copy-sequence \"\") 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"\"))"
+  },
+  {
+   "id": "run-hook-with-args/0199",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (copy-sequence \"\") :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"\"))"
+  },
+  {
+   "id": "run-hook-with-args/0200",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (copy-sequence \"\") (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"\"))"
+  },
+  {
+   "id": "run-hook-with-args/0201",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (copy-sequence \"\") (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"\"))"
+  },
+  {
+   "id": "run-hook-with-args/0202",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (copy-sequence \"\") (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"\"))"
+  },
+  {
+   "id": "run-hook-with-args/0203",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (copy-sequence \"\") (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"\"))"
+  },
+  {
+   "id": "run-hook-with-args/0204",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (copy-sequence \"\") (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"\"))"
+  },
+  {
+   "id": "run-hook-with-args/0205",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (copy-sequence \"\") (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"\"))"
+  },
+  {
+   "id": "run-hook-with-args/0206",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (copy-sequence \"\") (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"\"))"
+  },
+  {
+   "id": "run-hook-with-args/0207",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (copy-sequence \"\") (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"\"))"
+  },
+  {
+   "id": "run-hook-with-args/0208",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (copy-sequence \"\") (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"\"))"
+  },
+  {
+   "id": "run-hook-with-args/0209",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (copy-sequence \"abc\") nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"abc\"))"
+  },
+  {
+   "id": "run-hook-with-args/0210",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (copy-sequence \"abc\") t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"abc\"))"
+  },
+  {
+   "id": "run-hook-with-args/0211",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (copy-sequence \"abc\") 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"abc\"))"
+  },
+  {
+   "id": "run-hook-with-args/0212",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (copy-sequence \"abc\") 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"abc\"))"
+  },
+  {
+   "id": "run-hook-with-args/0213",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (copy-sequence \"abc\") 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"abc\"))"
+  },
+  {
+   "id": "run-hook-with-args/0214",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (copy-sequence \"abc\") -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"abc\"))"
+  },
+  {
+   "id": "run-hook-with-args/0215",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (copy-sequence \"abc\") most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"abc\"))"
+  },
+  {
+   "id": "run-hook-with-args/0216",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (copy-sequence \"abc\") 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"abc\"))"
+  },
+  {
+   "id": "run-hook-with-args/0217",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (copy-sequence \"abc\") 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"abc\"))"
+  },
+  {
+   "id": "run-hook-with-args/0218",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (copy-sequence \"abc\") :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"abc\"))"
+  },
+  {
+   "id": "run-hook-with-args/0219",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (copy-sequence \"abc\") (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"abc\"))"
+  },
+  {
+   "id": "run-hook-with-args/0220",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (copy-sequence \"abc\") (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"abc\"))"
+  },
+  {
+   "id": "run-hook-with-args/0221",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (copy-sequence \"abc\") (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"abc\"))"
+  },
+  {
+   "id": "run-hook-with-args/0222",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (copy-sequence \"abc\") (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"abc\"))"
+  },
+  {
+   "id": "run-hook-with-args/0223",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (copy-sequence \"abc\") (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"abc\"))"
+  },
+  {
+   "id": "run-hook-with-args/0224",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (copy-sequence \"abc\") (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"abc\"))"
+  },
+  {
+   "id": "run-hook-with-args/0225",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (copy-sequence \"abc\") (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"abc\"))"
+  },
+  {
+   "id": "run-hook-with-args/0226",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (copy-sequence \"abc\") (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"abc\"))"
+  },
+  {
+   "id": "run-hook-with-args/0227",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (copy-sequence \"abc\") (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"abc\"))"
+  },
+  {
+   "id": "run-hook-with-args/0228",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (copy-sequence \"λx\") nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"λx\"))"
+  },
+  {
+   "id": "run-hook-with-args/0229",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (copy-sequence \"λx\") t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"λx\"))"
+  },
+  {
+   "id": "run-hook-with-args/0230",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (copy-sequence \"λx\") 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"λx\"))"
+  },
+  {
+   "id": "run-hook-with-args/0231",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (copy-sequence \"λx\") 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"λx\"))"
+  },
+  {
+   "id": "run-hook-with-args/0232",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (copy-sequence \"λx\") 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"λx\"))"
+  },
+  {
+   "id": "run-hook-with-args/0233",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (copy-sequence \"λx\") -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"λx\"))"
+  },
+  {
+   "id": "run-hook-with-args/0234",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (copy-sequence \"λx\") most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"λx\"))"
+  },
+  {
+   "id": "run-hook-with-args/0235",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (copy-sequence \"λx\") 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"λx\"))"
+  },
+  {
+   "id": "run-hook-with-args/0236",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (copy-sequence \"λx\") 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"λx\"))"
+  },
+  {
+   "id": "run-hook-with-args/0237",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (copy-sequence \"λx\") :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"λx\"))"
+  },
+  {
+   "id": "run-hook-with-args/0238",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (copy-sequence \"λx\") (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"λx\"))"
+  },
+  {
+   "id": "run-hook-with-args/0239",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (copy-sequence \"λx\") (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"λx\"))"
+  },
+  {
+   "id": "run-hook-with-args/0240",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (copy-sequence \"λx\") (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"λx\"))"
+  },
+  {
+   "id": "run-hook-with-args/0241",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (copy-sequence \"λx\") (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"λx\"))"
+  },
+  {
+   "id": "run-hook-with-args/0242",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (copy-sequence \"λx\") (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"λx\"))"
+  },
+  {
+   "id": "run-hook-with-args/0243",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (copy-sequence \"λx\") (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"λx\"))"
+  },
+  {
+   "id": "run-hook-with-args/0244",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (copy-sequence \"λx\") (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"λx\"))"
+  },
+  {
+   "id": "run-hook-with-args/0245",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (copy-sequence \"λx\") (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"λx\"))"
+  },
+  {
+   "id": "run-hook-with-args/0246",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (copy-sequence \"λx\") (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"λx\"))"
+  },
+  {
+   "id": "run-hook-with-args/0247",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (list 1 2 3) nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 3)))"
+  },
+  {
+   "id": "run-hook-with-args/0248",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (list 1 2 3) t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 3)))"
+  },
+  {
+   "id": "run-hook-with-args/0249",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (list 1 2 3) 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 3)))"
+  },
+  {
+   "id": "run-hook-with-args/0250",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (list 1 2 3) 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 3)))"
+  },
+  {
+   "id": "run-hook-with-args/0251",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (list 1 2 3) 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 3)))"
+  },
+  {
+   "id": "run-hook-with-args/0252",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (list 1 2 3) -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 3)))"
+  },
+  {
+   "id": "run-hook-with-args/0253",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (list 1 2 3) most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 3)))"
+  },
+  {
+   "id": "run-hook-with-args/0254",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (list 1 2 3) 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 3)))"
+  },
+  {
+   "id": "run-hook-with-args/0255",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (list 1 2 3) 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 3)))"
+  },
+  {
+   "id": "run-hook-with-args/0256",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (list 1 2 3) :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 3)))"
+  },
+  {
+   "id": "run-hook-with-args/0257",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (list 1 2 3) (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 3)))"
+  },
+  {
+   "id": "run-hook-with-args/0258",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (list 1 2 3) (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 3)))"
+  },
+  {
+   "id": "run-hook-with-args/0259",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (list 1 2 3) (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 3)))"
+  },
+  {
+   "id": "run-hook-with-args/0260",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (list 1 2 3) (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 3)))"
+  },
+  {
+   "id": "run-hook-with-args/0261",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (list 1 2 3) (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 3)))"
+  },
+  {
+   "id": "run-hook-with-args/0262",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (list 1 2 3) (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 3)))"
+  },
+  {
+   "id": "run-hook-with-args/0263",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (list 1 2 3) (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 3)))"
+  },
+  {
+   "id": "run-hook-with-args/0264",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (list 1 2 3) (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 3)))"
+  },
+  {
+   "id": "run-hook-with-args/0265",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (list 1 2 3) (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 3)))"
+  },
+  {
+   "id": "run-hook-with-args/0266",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (list 'a (list 'b)) nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (a (b))))"
+  },
+  {
+   "id": "run-hook-with-args/0267",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (list 'a (list 'b)) t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (a (b))))"
+  },
+  {
+   "id": "run-hook-with-args/0268",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (list 'a (list 'b)) 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (a (b))))"
+  },
+  {
+   "id": "run-hook-with-args/0269",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (list 'a (list 'b)) 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (a (b))))"
+  },
+  {
+   "id": "run-hook-with-args/0270",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (list 'a (list 'b)) 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (a (b))))"
+  },
+  {
+   "id": "run-hook-with-args/0271",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (list 'a (list 'b)) -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (a (b))))"
+  },
+  {
+   "id": "run-hook-with-args/0272",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (list 'a (list 'b)) most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (a (b))))"
+  },
+  {
+   "id": "run-hook-with-args/0273",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (list 'a (list 'b)) 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (a (b))))"
+  },
+  {
+   "id": "run-hook-with-args/0274",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (list 'a (list 'b)) 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (a (b))))"
+  },
+  {
+   "id": "run-hook-with-args/0275",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (list 'a (list 'b)) :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (a (b))))"
+  },
+  {
+   "id": "run-hook-with-args/0276",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (list 'a (list 'b)) (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (a (b))))"
+  },
+  {
+   "id": "run-hook-with-args/0277",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (list 'a (list 'b)) (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (a (b))))"
+  },
+  {
+   "id": "run-hook-with-args/0278",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (list 'a (list 'b)) (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (a (b))))"
+  },
+  {
+   "id": "run-hook-with-args/0279",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (list 'a (list 'b)) (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (a (b))))"
+  },
+  {
+   "id": "run-hook-with-args/0280",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (list 'a (list 'b)) (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (a (b))))"
+  },
+  {
+   "id": "run-hook-with-args/0281",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (list 'a (list 'b)) (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (a (b))))"
+  },
+  {
+   "id": "run-hook-with-args/0282",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (list 'a (list 'b)) (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (a (b))))"
+  },
+  {
+   "id": "run-hook-with-args/0283",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (list 'a (list 'b)) (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (a (b))))"
+  },
+  {
+   "id": "run-hook-with-args/0284",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (list 'a (list 'b)) (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (a (b))))"
+  },
+  {
+   "id": "run-hook-with-args/0285",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (cons 1 2) nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 . 2)))"
+  },
+  {
+   "id": "run-hook-with-args/0286",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (cons 1 2) t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 . 2)))"
+  },
+  {
+   "id": "run-hook-with-args/0287",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (cons 1 2) 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 . 2)))"
+  },
+  {
+   "id": "run-hook-with-args/0288",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (cons 1 2) 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 . 2)))"
+  },
+  {
+   "id": "run-hook-with-args/0289",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (cons 1 2) 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 . 2)))"
+  },
+  {
+   "id": "run-hook-with-args/0290",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (cons 1 2) -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 . 2)))"
+  },
+  {
+   "id": "run-hook-with-args/0291",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (cons 1 2) most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 . 2)))"
+  },
+  {
+   "id": "run-hook-with-args/0292",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (cons 1 2) 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 . 2)))"
+  },
+  {
+   "id": "run-hook-with-args/0293",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (cons 1 2) 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 . 2)))"
+  },
+  {
+   "id": "run-hook-with-args/0294",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (cons 1 2) :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 . 2)))"
+  },
+  {
+   "id": "run-hook-with-args/0295",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (cons 1 2) (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 . 2)))"
+  },
+  {
+   "id": "run-hook-with-args/0296",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (cons 1 2) (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 . 2)))"
+  },
+  {
+   "id": "run-hook-with-args/0297",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (cons 1 2) (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 . 2)))"
+  },
+  {
+   "id": "run-hook-with-args/0298",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (cons 1 2) (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 . 2)))"
+  },
+  {
+   "id": "run-hook-with-args/0299",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (cons 1 2) (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 . 2)))"
+  },
+  {
+   "id": "run-hook-with-args/0300",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (cons 1 2) (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 . 2)))"
+  },
+  {
+   "id": "run-hook-with-args/0301",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (cons 1 2) (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 . 2)))"
+  },
+  {
+   "id": "run-hook-with-args/0302",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (cons 1 2) (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 . 2)))"
+  },
+  {
+   "id": "run-hook-with-args/0303",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (cons 1 2) (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 . 2)))"
+  },
+  {
+   "id": "run-hook-with-args/0304",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (cons 1 (cons 2 3)) nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 . 3)))"
+  },
+  {
+   "id": "run-hook-with-args/0305",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (cons 1 (cons 2 3)) t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 . 3)))"
+  },
+  {
+   "id": "run-hook-with-args/0306",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (cons 1 (cons 2 3)) 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 . 3)))"
+  },
+  {
+   "id": "run-hook-with-args/0307",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (cons 1 (cons 2 3)) 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 . 3)))"
+  },
+  {
+   "id": "run-hook-with-args/0308",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (cons 1 (cons 2 3)) 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 . 3)))"
+  },
+  {
+   "id": "run-hook-with-args/0309",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (cons 1 (cons 2 3)) -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 . 3)))"
+  },
+  {
+   "id": "run-hook-with-args/0310",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (cons 1 (cons 2 3)) most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 . 3)))"
+  },
+  {
+   "id": "run-hook-with-args/0311",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (cons 1 (cons 2 3)) 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 . 3)))"
+  },
+  {
+   "id": "run-hook-with-args/0312",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (cons 1 (cons 2 3)) 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 . 3)))"
+  },
+  {
+   "id": "run-hook-with-args/0313",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (cons 1 (cons 2 3)) :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 . 3)))"
+  },
+  {
+   "id": "run-hook-with-args/0314",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (cons 1 (cons 2 3)) (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 . 3)))"
+  },
+  {
+   "id": "run-hook-with-args/0315",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (cons 1 (cons 2 3)) (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 . 3)))"
+  },
+  {
+   "id": "run-hook-with-args/0316",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (cons 1 (cons 2 3)) (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 . 3)))"
+  },
+  {
+   "id": "run-hook-with-args/0317",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (cons 1 (cons 2 3)) (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 . 3)))"
+  },
+  {
+   "id": "run-hook-with-args/0318",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (cons 1 (cons 2 3)) (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 . 3)))"
+  },
+  {
+   "id": "run-hook-with-args/0319",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (cons 1 (cons 2 3)) (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 . 3)))"
+  },
+  {
+   "id": "run-hook-with-args/0320",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (cons 1 (cons 2 3)) (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 . 3)))"
+  },
+  {
+   "id": "run-hook-with-args/0321",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (cons 1 (cons 2 3)) (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 . 3)))"
+  },
+  {
+   "id": "run-hook-with-args/0322",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (cons 1 (cons 2 3)) (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 . 3)))"
+  },
+  {
+   "id": "run-hook-with-args/0323",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (vector 1 2) nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp [1 2]))"
+  },
+  {
+   "id": "run-hook-with-args/0324",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (vector 1 2) t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp [1 2]))"
+  },
+  {
+   "id": "run-hook-with-args/0325",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (vector 1 2) 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp [1 2]))"
+  },
+  {
+   "id": "run-hook-with-args/0326",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (vector 1 2) 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp [1 2]))"
+  },
+  {
+   "id": "run-hook-with-args/0327",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (vector 1 2) 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp [1 2]))"
+  },
+  {
+   "id": "run-hook-with-args/0328",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (vector 1 2) -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp [1 2]))"
+  },
+  {
+   "id": "run-hook-with-args/0329",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (vector 1 2) most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp [1 2]))"
+  },
+  {
+   "id": "run-hook-with-args/0330",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (vector 1 2) 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp [1 2]))"
+  },
+  {
+   "id": "run-hook-with-args/0331",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (vector 1 2) 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp [1 2]))"
+  },
+  {
+   "id": "run-hook-with-args/0332",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (vector 1 2) :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp [1 2]))"
+  },
+  {
+   "id": "run-hook-with-args/0333",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (vector 1 2) (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp [1 2]))"
+  },
+  {
+   "id": "run-hook-with-args/0334",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (vector 1 2) (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp [1 2]))"
+  },
+  {
+   "id": "run-hook-with-args/0335",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (vector 1 2) (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp [1 2]))"
+  },
+  {
+   "id": "run-hook-with-args/0336",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (vector 1 2) (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp [1 2]))"
+  },
+  {
+   "id": "run-hook-with-args/0337",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (vector 1 2) (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp [1 2]))"
+  },
+  {
+   "id": "run-hook-with-args/0338",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (vector 1 2) (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp [1 2]))"
+  },
+  {
+   "id": "run-hook-with-args/0339",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (vector 1 2) (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp [1 2]))"
+  },
+  {
+   "id": "run-hook-with-args/0340",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (vector 1 2) (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp [1 2]))"
+  },
+  {
+   "id": "run-hook-with-args/0341",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (vector 1 2) (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp [1 2]))"
+  },
+  {
+   "id": "run-hook-with-args/0342",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (let ((x (list 1 2))) (setcdr (cdr x) x) x) nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "run-hook-with-args/0343",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (let ((x (list 1 2))) (setcdr (cdr x) x) x) t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "run-hook-with-args/0344",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (let ((x (list 1 2))) (setcdr (cdr x) x) x) 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "run-hook-with-args/0345",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (let ((x (list 1 2))) (setcdr (cdr x) x) x) 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "run-hook-with-args/0346",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (let ((x (list 1 2))) (setcdr (cdr x) x) x) 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "run-hook-with-args/0347",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (let ((x (list 1 2))) (setcdr (cdr x) x) x) -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "run-hook-with-args/0348",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (let ((x (list 1 2))) (setcdr (cdr x) x) x) most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "run-hook-with-args/0349",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (let ((x (list 1 2))) (setcdr (cdr x) x) x) 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "run-hook-with-args/0350",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (let ((x (list 1 2))) (setcdr (cdr x) x) x) 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "run-hook-with-args/0351",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (let ((x (list 1 2))) (setcdr (cdr x) x) x) :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "run-hook-with-args/0352",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (let ((x (list 1 2))) (setcdr (cdr x) x) x) (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "run-hook-with-args/0353",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (let ((x (list 1 2))) (setcdr (cdr x) x) x) (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "run-hook-with-args/0354",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (let ((x (list 1 2))) (setcdr (cdr x) x) x) (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "run-hook-with-args/0355",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (let ((x (list 1 2))) (setcdr (cdr x) x) x) (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "run-hook-with-args/0356",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (let ((x (list 1 2))) (setcdr (cdr x) x) x) (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "run-hook-with-args/0357",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (let ((x (list 1 2))) (setcdr (cdr x) x) x) (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "run-hook-with-args/0358",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (let ((x (list 1 2))) (setcdr (cdr x) x) x) (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "run-hook-with-args/0359",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (let ((x (list 1 2))) (setcdr (cdr x) x) x) (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "run-hook-with-args/0360",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args (let ((x (list 1 2))) (setcdr (cdr x) x) x) (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "run-hook-with-args/0361",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'run-hook-with-args '())) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr run-hook-with-args> 0))"
+  },
+  {
+   "id": "run-hook-with-args/0362",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 nil)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (run-hook-with-args a0 a1))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "run-hook-with-args/0363",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (run-hook-with-args a0 a1))) (error (list 'sig e))))",
+   "expected": "(sig (void-function t))"
+  },
+  {
+   "id": "run-hook-with-args/0364",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 (vector 1 2))) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (run-hook-with-args a0 a1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1))"
+  },
+  {
+   "id": "run-hook-with-args/0365",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1) (a1 (cons 1 (cons 2 3)))) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (run-hook-with-args a0 a1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp -1))"
+  },
+  {
+   "id": "run-hook-with-args/0366",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.5) (a1 (cons 1 2))) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (run-hook-with-args a0 a1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1.5))"
+  },
+  {
+   "id": "run-hook-with-args/0367",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :kw) (a1 (list 'a (list 'b)))) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (run-hook-with-args a0 a1))) (error (list 'sig e))))",
+   "expected": "(sig (void-function :kw))"
+  },
+  {
+   "id": "run-hook-with-args/0368",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 (list 1 2 3))) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (run-hook-with-args a0 a1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"abc\"))"
+  },
+  {
+   "id": "run-hook-with-args/0369",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 1 2 3)) (a1 (copy-sequence \"λx\"))) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (run-hook-with-args a0 a1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 3)))"
+  },
+  {
+   "id": "run-hook-with-args/0370",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 2)) (a1 (copy-sequence \"abc\"))) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (run-hook-with-args a0 a1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 . 2)))"
+  },
+  {
+   "id": "run-hook-with-args/0371",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (vector 1 2)) (a1 (copy-sequence \"\"))) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (run-hook-with-args a0 a1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp [1 2]))"
+  },
+  {
+   "id": "run-hook-with-args/0372",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 nil)) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (t t))"
+  },
+  {
+   "id": "run-hook-with-args/0373",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 1)) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (t nil))"
+  },
+  {
+   "id": "run-hook-with-args/0374",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 most-positive-fixnum)) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (t nil))"
+  },
+  {
+   "id": "run-hook-with-args/0375",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 :kw)) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (t nil))"
+  },
+  {
+   "id": "run-hook-with-args/0376",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 (copy-sequence \"λx\"))) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (t nil))"
+  },
+  {
+   "id": "run-hook-with-args/0377",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 (cons 1 2))) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (t nil))"
+  },
+  {
+   "id": "run-hook-with-args/0378",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (t nil))"
+  },
+  {
+   "id": "run-hook-with-args/0379",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 0)) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (void-function t))"
+  },
+  {
+   "id": "run-hook-with-args/0380",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 -1)) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (void-function t))"
+  },
+  {
+   "id": "run-hook-with-args/0381",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 'sym)) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (void-function t))"
+  },
+  {
+   "id": "run-hook-with-args/0382",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 (copy-sequence \"abc\"))) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (void-function t))"
+  },
+  {
+   "id": "run-hook-with-args/0383",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 (list 'a (list 'b)))) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (void-function t))"
+  },
+  {
+   "id": "run-hook-with-args/0384",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 (vector 1 2))) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (void-function t))"
+  },
+  {
+   "id": "run-hook-with-args/0385",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0) (a1 t)) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 0))"
+  },
+  {
+   "id": "run-hook-with-args/0386",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0) (a1 2)) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 0))"
+  },
+  {
+   "id": "run-hook-with-args/0387",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0) (a1 1.5)) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 0))"
+  },
+  {
+   "id": "run-hook-with-args/0388",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0) (a1 (copy-sequence \"\"))) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 0))"
+  },
+  {
+   "id": "run-hook-with-args/0389",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0) (a1 (list 1 2 3))) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 0))"
+  },
+  {
+   "id": "run-hook-with-args/0390",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0) (a1 (cons 1 (cons 2 3)))) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 0))"
+  },
+  {
+   "id": "run-hook-with-args/0391",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 nil)) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1))"
+  },
+  {
+   "id": "run-hook-with-args/0392",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 1)) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1))"
+  },
+  {
+   "id": "run-hook-with-args/0393",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 most-positive-fixnum)) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1))"
+  },
+  {
+   "id": "run-hook-with-args/0394",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 :kw)) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1))"
+  },
+  {
+   "id": "run-hook-with-args/0395",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 (copy-sequence \"λx\"))) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1))"
+  },
+  {
+   "id": "run-hook-with-args/0396",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 (cons 1 2))) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1))"
+  },
+  {
+   "id": "run-hook-with-args/0397",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1))"
+  },
+  {
+   "id": "run-hook-with-args/0398",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 2) (a1 0)) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 2))"
+  },
+  {
+   "id": "run-hook-with-args/0399",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 2) (a1 -1)) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 2))"
+  },
+  {
+   "id": "run-hook-with-args/0400",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 2) (a1 'sym)) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 2))"
+  },
+  {
+   "id": "run-hook-with-args/0401",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 2) (a1 (copy-sequence \"abc\"))) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 2))"
+  },
+  {
+   "id": "run-hook-with-args/0402",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 2) (a1 (list 'a (list 'b)))) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 2))"
+  },
+  {
+   "id": "run-hook-with-args/0403",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 2) (a1 (vector 1 2))) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 2))"
+  },
+  {
+   "id": "run-hook-with-args/0404",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1) (a1 t)) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp -1))"
+  },
+  {
+   "id": "run-hook-with-args/0405",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1) (a1 2)) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp -1))"
+  },
+  {
+   "id": "run-hook-with-args/0406",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1) (a1 1.5)) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp -1))"
+  },
+  {
+   "id": "run-hook-with-args/0407",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1) (a1 (copy-sequence \"\"))) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp -1))"
+  },
+  {
+   "id": "run-hook-with-args/0408",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1) (a1 (list 1 2 3))) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp -1))"
+  },
+  {
+   "id": "run-hook-with-args/0409",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1) (a1 (cons 1 (cons 2 3)))) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp -1))"
+  },
+  {
+   "id": "run-hook-with-args/0410",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-positive-fixnum) (a1 nil)) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 2305843009213693951))"
+  },
+  {
+   "id": "run-hook-with-args/0411",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-positive-fixnum) (a1 1)) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 2305843009213693951))"
+  },
+  {
+   "id": "run-hook-with-args/0412",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-positive-fixnum) (a1 most-positive-fixnum)) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 2305843009213693951))"
+  },
+  {
+   "id": "run-hook-with-args/0413",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-positive-fixnum) (a1 :kw)) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 2305843009213693951))"
+  },
+  {
+   "id": "run-hook-with-args/0414",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-positive-fixnum) (a1 (copy-sequence \"λx\"))) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 2305843009213693951))"
+  },
+  {
+   "id": "run-hook-with-args/0415",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-positive-fixnum) (a1 (cons 1 2))) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 2305843009213693951))"
+  },
+  {
+   "id": "run-hook-with-args/0416",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-positive-fixnum) (a1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 2305843009213693951))"
+  },
+  {
+   "id": "run-hook-with-args/0417",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.5) (a1 0)) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1.5))"
+  },
+  {
+   "id": "run-hook-with-args/0418",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.5) (a1 -1)) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1.5))"
+  },
+  {
+   "id": "run-hook-with-args/0419",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.5) (a1 'sym)) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1.5))"
+  },
+  {
+   "id": "run-hook-with-args/0420",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.5) (a1 (copy-sequence \"abc\"))) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1.5))"
+  },
+  {
+   "id": "run-hook-with-args/0421",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.5) (a1 (list 'a (list 'b)))) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1.5))"
+  },
+  {
+   "id": "run-hook-with-args/0422",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.5) (a1 (vector 1 2))) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1.5))"
+  },
+  {
+   "id": "run-hook-with-args/0423",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'sym) (a1 t)) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "run-hook-with-args/0424",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'sym) (a1 2)) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "run-hook-with-args/0425",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'sym) (a1 1.5)) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "run-hook-with-args/0426",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'sym) (a1 (copy-sequence \"\"))) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "run-hook-with-args/0427",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'sym) (a1 (list 1 2 3))) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "run-hook-with-args/0428",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'sym) (a1 (cons 1 (cons 2 3)))) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "run-hook-with-args/0429",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :kw) (a1 nil)) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (void-function :kw))"
+  },
+  {
+   "id": "run-hook-with-args/0430",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :kw) (a1 1)) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (void-function :kw))"
+  },
+  {
+   "id": "run-hook-with-args/0431",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :kw) (a1 most-positive-fixnum)) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (void-function :kw))"
+  },
+  {
+   "id": "run-hook-with-args/0432",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :kw) (a1 :kw)) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (void-function :kw))"
+  },
+  {
+   "id": "run-hook-with-args/0433",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :kw) (a1 (copy-sequence \"λx\"))) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (void-function :kw))"
+  },
+  {
+   "id": "run-hook-with-args/0434",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :kw) (a1 (cons 1 2))) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (void-function :kw))"
+  },
+  {
+   "id": "run-hook-with-args/0435",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :kw) (a1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (void-function :kw))"
+  },
+  {
+   "id": "run-hook-with-args/0436",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\")) (a1 0)) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"\"))"
+  },
+  {
+   "id": "run-hook-with-args/0437",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\")) (a1 -1)) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"\"))"
+  },
+  {
+   "id": "run-hook-with-args/0438",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\")) (a1 'sym)) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"\"))"
+  },
+  {
+   "id": "run-hook-with-args/0439",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\")) (a1 (copy-sequence \"abc\"))) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"\"))"
+  },
+  {
+   "id": "run-hook-with-args/0440",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\")) (a1 (list 'a (list 'b)))) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"\"))"
+  },
+  {
+   "id": "run-hook-with-args/0441",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\")) (a1 (vector 1 2))) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"\"))"
+  },
+  {
+   "id": "run-hook-with-args/0442",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 t)) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"abc\"))"
+  },
+  {
+   "id": "run-hook-with-args/0443",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 2)) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"abc\"))"
+  },
+  {
+   "id": "run-hook-with-args/0444",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 1.5)) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"abc\"))"
+  },
+  {
+   "id": "run-hook-with-args/0445",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 (copy-sequence \"\"))) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"abc\"))"
+  },
+  {
+   "id": "run-hook-with-args/0446",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 (list 1 2 3))) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"abc\"))"
+  },
+  {
+   "id": "run-hook-with-args/0447",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 (cons 1 (cons 2 3)))) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"abc\"))"
+  },
+  {
+   "id": "run-hook-with-args/0448",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 nil)) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"λx\"))"
+  },
+  {
+   "id": "run-hook-with-args/0449",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 1)) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"λx\"))"
+  },
+  {
+   "id": "run-hook-with-args/0450",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 most-positive-fixnum)) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"λx\"))"
+  },
+  {
+   "id": "run-hook-with-args/0451",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 :kw)) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"λx\"))"
+  },
+  {
+   "id": "run-hook-with-args/0452",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 (copy-sequence \"λx\"))) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"λx\"))"
+  },
+  {
+   "id": "run-hook-with-args/0453",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 (cons 1 2))) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"λx\"))"
+  },
+  {
+   "id": "run-hook-with-args/0454",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"λx\"))"
+  },
+  {
+   "id": "run-hook-with-args/0455",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 1 2 3)) (a1 0)) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 3)))"
+  },
+  {
+   "id": "run-hook-with-args/0456",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 1 2 3)) (a1 -1)) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 3)))"
+  },
+  {
+   "id": "run-hook-with-args/0457",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 1 2 3)) (a1 'sym)) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 3)))"
+  },
+  {
+   "id": "run-hook-with-args/0458",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 1 2 3)) (a1 (copy-sequence \"abc\"))) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 3)))"
+  },
+  {
+   "id": "run-hook-with-args/0459",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 1 2 3)) (a1 (list 'a (list 'b)))) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 3)))"
+  },
+  {
+   "id": "run-hook-with-args/0460",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 1 2 3)) (a1 (vector 1 2))) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 3)))"
+  },
+  {
+   "id": "run-hook-with-args/0461",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 'a (list 'b))) (a1 t)) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (a (b))))"
+  },
+  {
+   "id": "run-hook-with-args/0462",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 'a (list 'b))) (a1 2)) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (a (b))))"
+  },
+  {
+   "id": "run-hook-with-args/0463",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 'a (list 'b))) (a1 1.5)) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (a (b))))"
+  },
+  {
+   "id": "run-hook-with-args/0464",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 'a (list 'b))) (a1 (copy-sequence \"\"))) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (a (b))))"
+  },
+  {
+   "id": "run-hook-with-args/0465",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 'a (list 'b))) (a1 (list 1 2 3))) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (a (b))))"
+  },
+  {
+   "id": "run-hook-with-args/0466",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 'a (list 'b))) (a1 (cons 1 (cons 2 3)))) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (a (b))))"
+  },
+  {
+   "id": "run-hook-with-args/0467",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 2)) (a1 nil)) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 . 2)))"
+  },
+  {
+   "id": "run-hook-with-args/0468",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 2)) (a1 1)) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 . 2)))"
+  },
+  {
+   "id": "run-hook-with-args/0469",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 2)) (a1 most-positive-fixnum)) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 . 2)))"
+  },
+  {
+   "id": "run-hook-with-args/0470",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 2)) (a1 :kw)) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 . 2)))"
+  },
+  {
+   "id": "run-hook-with-args/0471",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 2)) (a1 (copy-sequence \"λx\"))) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 . 2)))"
+  },
+  {
+   "id": "run-hook-with-args/0472",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 2)) (a1 (cons 1 2))) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 . 2)))"
+  },
+  {
+   "id": "run-hook-with-args/0473",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 2)) (a1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 . 2)))"
+  },
+  {
+   "id": "run-hook-with-args/0474",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 (cons 2 3))) (a1 0)) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 . 3)))"
+  },
+  {
+   "id": "run-hook-with-args/0475",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 (cons 2 3))) (a1 -1)) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 . 3)))"
+  },
+  {
+   "id": "run-hook-with-args/0476",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 (cons 2 3))) (a1 'sym)) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 . 3)))"
+  },
+  {
+   "id": "run-hook-with-args/0477",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 (cons 2 3))) (a1 (copy-sequence \"abc\"))) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 . 3)))"
+  },
+  {
+   "id": "run-hook-with-args/0478",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 (cons 2 3))) (a1 (list 'a (list 'b)))) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 . 3)))"
+  },
+  {
+   "id": "run-hook-with-args/0479",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 (cons 2 3))) (a1 (vector 1 2))) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 . 3)))"
+  },
+  {
+   "id": "run-hook-with-args/0480",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (vector 1 2)) (a1 t)) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp [1 2]))"
+  },
+  {
+   "id": "run-hook-with-args/0481",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (vector 1 2)) (a1 2)) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp [1 2]))"
+  },
+  {
+   "id": "run-hook-with-args/0482",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (vector 1 2)) (a1 1.5)) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp [1 2]))"
+  },
+  {
+   "id": "run-hook-with-args/0483",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (vector 1 2)) (a1 (copy-sequence \"\"))) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp [1 2]))"
+  },
+  {
+   "id": "run-hook-with-args/0484",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (vector 1 2)) (a1 (list 1 2 3))) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp [1 2]))"
+  },
+  {
+   "id": "run-hook-with-args/0485",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (vector 1 2)) (a1 (cons 1 (cons 2 3)))) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp [1 2]))"
+  },
+  {
+   "id": "run-hook-with-args/0486",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (a1 nil)) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "run-hook-with-args/0487",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (a1 1)) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "run-hook-with-args/0488",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (a1 most-positive-fixnum)) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "run-hook-with-args/0489",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (a1 :kw)) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "run-hook-with-args/0490",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (a1 (copy-sequence \"λx\"))) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "run-hook-with-args/0491",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (a1 (cons 1 2))) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "run-hook-with-args/0492",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (a1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (run-hook-with-args a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "run-hook-with-args/0493",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 'cl-never-bound-hook 1 2)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "run-hook-with-args/0494",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args nil 1)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "run-hook-with-args/0495",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args t 1)) (error (list 'sig e))))",
+   "expected": "(sig (void-function t))"
+  },
+  {
+   "id": "run-hook-with-args/0496",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args 5 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 5))"
+  },
+  {
+   "id": "run-hook-with-args/0497",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args \"h\")) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"h\"))"
+  },
+  {
+   "id": "run-hook-with-args/0498",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args :cl-key 1)) (error (list 'sig e))))",
+   "expected": "(sig (void-function :cl-key))"
+  },
+  {
+   "id": "run-hook-with-args/0499",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (run-hook-with-args '(cl-h) 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (cl-h)))"
+  },
+  {
+   "id": "run-hook-with-args/0500",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set 'cl-log nil) (list (condition-case e (progn (set 'cl-h nil) (run-hook-with-args 'cl-h 1)) (error (list 'err e))) (nreverse (symbol-value 'cl-log))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "run-hook-with-args/0501",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set 'cl-log nil) (list (condition-case e (progn (set 'cl-h (lambda (&rest a) (set 'cl-log (cons a (symbol-value 'cl-log))) a)) (run-hook-with-args 'cl-h 1 2)) (error (list 'err e))) (nreverse (symbol-value 'cl-log))))) (error (list 'sig e))))",
+   "expected": "(ok (nil ((1 2))))"
+  },
+  {
+   "id": "run-hook-with-args/0502",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set 'cl-log nil) (list (condition-case e (progn (defalias 'cl-f (lambda (&rest a) (set 'cl-log (cons a (symbol-value 'cl-log))) a)) (set 'cl-h 'cl-f) (run-hook-with-args 'cl-h 'x \"y\" 3.5)) (error (list 'err e))) (nreverse (symbol-value 'cl-log))))) (error (list 'sig e))))",
+   "expected": "(ok (nil ((x \"y\" 3.5))))"
+  },
+  {
+   "id": "run-hook-with-args/0503",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set 'cl-log nil) (list (condition-case e (progn (set 'cl-h 'cl-no-such-function) (run-hook-with-args 'cl-h 1)) (error (list 'err e))) (nreverse (symbol-value 'cl-log))))) (error (list 'sig e))))",
+   "expected": "(ok ((err (void-function cl-no-such-function)) nil))"
+  },
+  {
+   "id": "run-hook-with-args/0504",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set 'cl-log nil) (list (condition-case e (progn (set 'cl-h 5) (run-hook-with-args 'cl-h 1)) (error (list 'err e))) (nreverse (symbol-value 'cl-log))))) (error (list 'sig e))))",
+   "expected": "(ok ((err (invalid-function 5)) nil))"
+  },
+  {
+   "id": "run-hook-with-args/0505",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set 'cl-log nil) (list (condition-case e (progn (set 'cl-h (lambda (a b) (list a b))) (run-hook-with-args 'cl-h 1 2)) (error (list 'err e))) (nreverse (symbol-value 'cl-log))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "run-hook-with-args/0506",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set 'cl-log nil) (list (condition-case e (progn (set 'cl-h (lambda (a) (set 'cl-log (cons a (symbol-value 'cl-log))))) (run-hook-with-args 'cl-h 1 2)) (error (list 'err e))) (nreverse (symbol-value 'cl-log))))) (error (list 'sig e))))",
+   "expected": "(ok ((err (wrong-number-of-arguments (1 . 1) 2)) nil))",
+   "gnu_regime_variant": "(ok ((err (wrong-number-of-arguments #[(a) ((set 'cl-log (cons a (symbol-value 'cl-log)))) (t)] 2)) nil))"
+  },
+  {
+   "id": "run-hook-with-args/0507",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set 'cl-log nil) (list (condition-case e (progn (set 'cl-h (lambda (a b c) (set 'cl-log (cons a (symbol-value 'cl-log))))) (run-hook-with-args 'cl-h 1 2)) (error (list 'err e))) (nreverse (symbol-value 'cl-log))))) (error (list 'sig e))))",
+   "expected": "(ok ((err (wrong-number-of-arguments (3 . 3) 2)) nil))",
+   "gnu_regime_variant": "(ok ((err (wrong-number-of-arguments #[(a b c) ((set 'cl-log (cons a (symbol-value 'cl-log)))) (t)] 2)) nil))"
+  },
+  {
+   "id": "run-hook-with-args/0508",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set 'cl-log nil) (list (condition-case e (progn (set 'cl-h (lambda (a &optional b) (set 'cl-log (cons (list a b) (symbol-value 'cl-log))))) (run-hook-with-args 'cl-h 1)) (error (list 'err e))) (nreverse (symbol-value 'cl-log))))) (error (list 'sig e))))",
+   "expected": "(ok (nil ((1 nil))))"
+  },
+  {
+   "id": "run-hook-with-args/0509",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set 'cl-log nil) (list (condition-case e (progn (set 'cl-h (lambda () (set 'cl-log (cons 'none (symbol-value 'cl-log))))) (run-hook-with-args 'cl-h)) (error (list 'err e))) (nreverse (symbol-value 'cl-log))))) (error (list 'sig e))))",
+   "expected": "(ok (nil (none)))"
+  },
+  {
+   "id": "run-hook-with-args/0510",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set 'cl-log nil) (list (condition-case e (progn (set 'cl-h (list (lambda (&rest a) (set 'cl-log (cons a (symbol-value 'cl-log))) a) (lambda (&rest a) (set 'cl-log (cons a (symbol-value 'cl-log))) a))) (run-hook-with-args 'cl-h 'a 'b)) (error (list 'err e))) (nreverse (symbol-value 'cl-log))))) (error (list 'sig e))))",
+   "expected": "(ok (nil ((a b) (a b))))"
+  },
+  {
+   "id": "run-hook-with-args/0511",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set 'cl-log nil) (list (condition-case e (progn (defalias 'cl-f (lambda (&rest a) (set 'cl-log (cons a (symbol-value 'cl-log))) a)) (set 'cl-h (list 'cl-f (lambda (x) (set 'cl-log (cons (list 'second x) (symbol-value 'cl-log)))))) (run-hook-with-args 'cl-h 7)) (error (list 'err e))) (nreverse (symbol-value 'cl-log))))) (error (list 'sig e))))",
+   "expected": "(ok (nil ((7) (second 7))))"
+  },
+  {
+   "id": "run-hook-with-args/0512",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set 'cl-log nil) (list (condition-case e (progn (set 'cl-h (list (lambda (&rest a) (set 'cl-log (cons a (symbol-value 'cl-log))) a) 'cl-no-such-function (lambda (&rest a) (set 'cl-log (cons a (symbol-value 'cl-log))) a))) (run-hook-with-args 'cl-h 1)) (error (list 'err e))) (nreverse (symbol-value 'cl-log))))) (error (list 'sig e))))",
+   "expected": "(ok ((err (void-function cl-no-such-function)) ((1))))"
+  },
+  {
+   "id": "run-hook-with-args/0513",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set 'cl-log nil) (list (condition-case e (progn (set 'cl-h (list (lambda (&rest a) (set 'cl-log (cons a (symbol-value 'cl-log))) a) 5 (lambda (&rest a) (set 'cl-log (cons a (symbol-value 'cl-log))) a))) (run-hook-with-args 'cl-h 1)) (error (list 'err e))) (nreverse (symbol-value 'cl-log))))) (error (list 'sig e))))",
+   "expected": "(ok ((err (invalid-function 5)) ((1))))"
+  },
+  {
+   "id": "run-hook-with-args/0514",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set 'cl-log nil) (list (condition-case e (progn (set 'cl-h (list (lambda (&rest a) (set 'cl-log (cons a (symbol-value 'cl-log))) a) nil (lambda (&rest a) (set 'cl-log (cons a (symbol-value 'cl-log))) a))) (run-hook-with-args 'cl-h 1)) (error (list 'err e))) (nreverse (symbol-value 'cl-log))))) (error (list 'sig e))))",
+   "expected": "(ok ((err (void-function nil)) ((1))))"
+  },
+  {
+   "id": "run-hook-with-args/0515",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set 'cl-log nil) (list (condition-case e (progn (set 'cl-h (list (lambda (&rest a) (set 'cl-log (cons a (symbol-value 'cl-log))) a) (lambda (x) (error \"cl-boom %s\" x)) (lambda (&rest a) (set 'cl-log (cons a (symbol-value 'cl-log))) a))) (run-hook-with-args 'cl-h 1)) (error (list 'err e))) (nreverse (symbol-value 'cl-log))))) (error (list 'sig e))))",
+   "expected": "(ok ((err (error \"cl-boom 1\")) ((1))))"
+  },
+  {
+   "id": "run-hook-with-args/0516",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set 'cl-log nil) (list (condition-case e (progn (set 'cl-h (cons (lambda (&rest a) (set 'cl-log (cons a (symbol-value 'cl-log))) a) (lambda (&rest a) (set 'cl-log (cons a (symbol-value 'cl-log))) a))) (run-hook-with-args 'cl-h 1)) (error (list 'err e))) (nreverse (symbol-value 'cl-log))))) (error (list 'sig e))))",
+   "expected": "(ok (nil ((1))))"
+  },
+  {
+   "id": "run-hook-with-args/0517",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set 'cl-log nil) (list (condition-case e (progn (set 'cl-h (cons (lambda (&rest a) (set 'cl-log (cons a (symbol-value 'cl-log))) a) 5)) (run-hook-with-args 'cl-h 1)) (error (list 'err e))) (nreverse (symbol-value 'cl-log))))) (error (list 'sig e))))",
+   "expected": "(ok (nil ((1))))"
+  },
+  {
+   "id": "run-hook-with-args/0518",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set 'cl-log nil) (list (condition-case e (progn (set 'cl-h (list '(lambda (x) (set 'cl-log (cons (list 'lam x) (symbol-value 'cl-log)))))) (run-hook-with-args 'cl-h 1)) (error (list 'err e))) (nreverse (symbol-value 'cl-log))))) (error (list 'sig e))))",
+   "expected": "(ok (nil ((lam 1))))"
+  },
+  {
+   "id": "run-hook-with-args/0519",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set 'cl-log nil) (list (condition-case e (progn (set 'cl-h '(lambda (x) (set 'cl-log (cons (list 'lam x) (symbol-value 'cl-log))))) (run-hook-with-args 'cl-h 1)) (error (list 'err e))) (nreverse (symbol-value 'cl-log))))) (error (list 'sig e))))",
+   "expected": "(ok (nil ((lam 1))))"
+  },
+  {
+   "id": "run-hook-with-args/0520",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set 'cl-h (list (lambda (x) (list 'ret x)) (lambda (x) t))) (run-hook-with-args 'cl-h 1))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "run-hook-with-args/0521",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set 'cl-h (lambda (x) (list 'ret x))) (run-hook-with-args 'cl-h 1))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "run-hook-with-args/0522",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set 'cl-log nil) (list (condition-case e (progn (set 'cl-h (list (lambda (&rest a) (set 'cl-log (cons a (symbol-value 'cl-log))) a) t (lambda (&rest a) (set 'cl-log (cons a (symbol-value 'cl-log))) a))) (run-hook-with-args 'cl-h 1)) (error (list 'err e))) (nreverse (symbol-value 'cl-log))))) (error (list 'sig e))))",
+   "expected": "(ok (nil ((1) (1) (1) (1))))"
+  },
+  {
+   "id": "run-hook-with-args/0523",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set 'cl-log nil) (list (condition-case e (progn (set 'cl-h (list t t (lambda (&rest a) (set 'cl-log (cons a (symbol-value 'cl-log))) a))) (run-hook-with-args 'cl-h 1)) (error (list 'err e))) (nreverse (symbol-value 'cl-log))))) (error (list 'sig e))))",
+   "expected": "(ok (nil ((1) (1) (1))))"
+  },
+  {
+   "id": "run-hook-with-args/0524",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set 'cl-log nil) (list (condition-case e (with-temp-buffer (set 'cl-h (list (lambda (&rest a) (set 'cl-log (cons (cons 'global a) (symbol-value 'cl-log)))))) (make-local-variable 'cl-h) (set 'cl-h (list (lambda (&rest a) (set 'cl-log (cons a (symbol-value 'cl-log))) a) t (lambda (&rest a) (set 'cl-log (cons a (symbol-value 'cl-log))) a))) (run-hook-with-args 'cl-h 'arg 2)) (error (list 'err e))) (nreverse (symbol-value 'cl-log))))) (error (list 'sig e))))",
+   "expected": "(ok (nil ((arg 2) (global arg 2) (arg 2))))"
+  },
+  {
+   "id": "run-hook-with-args/0525",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set 'cl-log nil) (list (condition-case e (with-temp-buffer (set 'cl-h (list (lambda (&rest a) (set 'cl-log (cons (cons 'global a) (symbol-value 'cl-log)))))) (make-local-variable 'cl-h) (set 'cl-h (list (lambda (&rest a) (set 'cl-log (cons a (symbol-value 'cl-log))) a) (lambda (&rest a) (set 'cl-log (cons a (symbol-value 'cl-log))) a))) (run-hook-with-args 'cl-h 'arg 2)) (error (list 'err e))) (nreverse (symbol-value 'cl-log))))) (error (list 'sig e))))",
+   "expected": "(ok (nil ((arg 2) (arg 2))))"
+  },
+  {
+   "id": "run-hook-with-args/0526",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set 'cl-log nil) (list (condition-case e (with-temp-buffer (set 'cl-h (list (lambda (&rest a) (set 'cl-log (cons (cons 'global a) (symbol-value 'cl-log)))))) (make-local-variable 'cl-h) (set 'cl-h (list t)) (run-hook-with-args 'cl-h 'arg 2)) (error (list 'err e))) (nreverse (symbol-value 'cl-log))))) (error (list 'sig e))))",
+   "expected": "(ok (nil ((global arg 2))))"
+  },
+  {
+   "id": "run-hook-with-args/0527",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set 'cl-log nil) (list (condition-case e (with-temp-buffer (set 'cl-h nil) (make-local-variable 'cl-h) (set 'cl-h (list (lambda (&rest a) (set 'cl-log (cons a (symbol-value 'cl-log))) a) t)) (run-hook-with-args 'cl-h 'arg 2)) (error (list 'err e))) (nreverse (symbol-value 'cl-log))))) (error (list 'sig e))))",
+   "expected": "(ok (nil ((arg 2))))"
+  },
+  {
+   "id": "run-hook-with-args/0528",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set 'cl-log nil) (list (condition-case e (with-temp-buffer (set 'cl-h (lambda (&rest a) (set 'cl-log (cons (cons 'whole a) (symbol-value 'cl-log))))) (make-local-variable 'cl-h) (set 'cl-h (list t (lambda (&rest a) (set 'cl-log (cons a (symbol-value 'cl-log))) a))) (run-hook-with-args 'cl-h 'arg 2)) (error (list 'err e))) (nreverse (symbol-value 'cl-log))))) (error (list 'sig e))))",
+   "expected": "(ok (nil ((whole arg 2) (arg 2))))"
+  },
+  {
+   "id": "run-hook-with-args/0529",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set 'cl-log nil) (list (condition-case e (with-temp-buffer (set 'cl-h '(lambda (&rest a) (set 'cl-log (cons (cons 'lam a) (symbol-value 'cl-log))))) (make-local-variable 'cl-h) (set 'cl-h (list t (lambda (&rest a) (set 'cl-log (cons a (symbol-value 'cl-log))) a))) (run-hook-with-args 'cl-h 'arg 2)) (error (list 'err e))) (nreverse (symbol-value 'cl-log))))) (error (list 'sig e))))",
+   "expected": "(ok (nil ((lam arg 2) (arg 2))))"
+  },
+  {
+   "id": "run-hook-with-args/0530",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set 'cl-log nil) (list (condition-case e (with-temp-buffer (set 'cl-h 5) (make-local-variable 'cl-h) (set 'cl-h (list t (lambda (&rest a) (set 'cl-log (cons a (symbol-value 'cl-log))) a))) (run-hook-with-args 'cl-h 'arg 2)) (error (list 'err e))) (nreverse (symbol-value 'cl-log))))) (error (list 'sig e))))",
+   "expected": "(ok ((err (invalid-function 5)) nil))"
+  },
+  {
+   "id": "run-hook-with-args/0531",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set 'cl-log nil) (list (condition-case e (with-temp-buffer (set 'cl-h (list t (lambda (&rest a) (set 'cl-log (cons (cons 'g1 a) (symbol-value 'cl-log)))) t (lambda (&rest a) (set 'cl-log (cons (cons 'g2 a) (symbol-value 'cl-log)))))) (make-local-variable 'cl-h) (set 'cl-h (list t)) (run-hook-with-args 'cl-h 'arg 2)) (error (list 'err e))) (nreverse (symbol-value 'cl-log))))) (error (list 'sig e))))",
+   "expected": "(ok (nil ((g1 arg 2) (g2 arg 2))))"
+  },
+  {
+   "id": "run-hook-with-args/0532",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set 'cl-log nil) (list (condition-case e (with-temp-buffer (set 'cl-h (cons (lambda (&rest a) (set 'cl-log (cons (cons 'g1 a) (symbol-value 'cl-log)))) 7)) (make-local-variable 'cl-h) (set 'cl-h (list t (lambda (&rest a) (set 'cl-log (cons a (symbol-value 'cl-log))) a))) (run-hook-with-args 'cl-h 'arg 2)) (error (list 'err e))) (nreverse (symbol-value 'cl-log))))) (error (list 'sig e))))",
+   "expected": "(ok (nil ((g1 arg 2) (arg 2))))"
+  },
+  {
+   "id": "run-hook-with-args/0533",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set 'cl-log nil) (list (condition-case e (with-temp-buffer (set 'cl-h (list (lambda (&rest a) (set 'cl-log (cons (cons 'g a) (symbol-value 'cl-log)))))) (make-local-variable 'cl-h) (set 'cl-h (cons (lambda (&rest a) (set 'cl-log (cons a (symbol-value 'cl-log))) a) t)) (run-hook-with-args 'cl-h 'arg 2)) (error (list 'err e))) (nreverse (symbol-value 'cl-log))))) (error (list 'sig e))))",
+   "expected": "(ok (nil ((arg 2))))"
+  },
+  {
+   "id": "run-hook-with-args/0534",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set 'cl-log nil) (list (condition-case e (with-temp-buffer (set 'cl-h (list (lambda (&rest a) (set 'cl-log (cons (cons 'g a) (symbol-value 'cl-log)))))) (make-local-variable 'cl-h) (set 'cl-h (lambda (&rest a) (set 'cl-log (cons a (symbol-value 'cl-log))) a)) (run-hook-with-args 'cl-h 'arg 2)) (error (list 'err e))) (nreverse (symbol-value 'cl-log))))) (error (list 'sig e))))",
+   "expected": "(ok (nil ((arg 2))))"
+  },
+  {
+   "id": "run-hook-with-args/0535",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set 'cl-log nil) (list (condition-case e (with-temp-buffer (make-local-variable 'cl-void-global) (set 'cl-void-global (list (lambda (&rest a) (set 'cl-log (cons a (symbol-value 'cl-log))) a) t (lambda (&rest a) (set 'cl-log (cons a (symbol-value 'cl-log))) a))) (run-hook-with-args 'cl-void-global 1)) (error (list 'err e))) (nreverse (symbol-value 'cl-log))))) (error (list 'sig e))))",
+   "expected": "(ok ((err (void-variable cl-void-global)) ((1))))"
+  },
+  {
+   "id": "run-hook-with-args/0536",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set 'cl-log nil) (list (condition-case e (progn (defalias 'cl-m (lambda (x) (set 'cl-log (cons (list 'm x) (symbol-value 'cl-log))) (setcdr (symbol-value 'cl-h) (list (lambda (y) (set 'cl-log (cons (list 'added y) (symbol-value 'cl-log)))))))) (set 'cl-h (list 'cl-m (lambda (y) (set 'cl-log (cons (list 'dropped y) (symbol-value 'cl-log)))))) (run-hook-with-args 'cl-h 1)) (error (list 'err e))) (nreverse (symbol-value 'cl-log))))) (error (list 'sig e))))",
+   "expected": "(ok (nil ((m 1) (added 1))))"
+  },
+  {
+   "id": "run-hook-with-args/0537",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set 'cl-log nil) (list (condition-case e (progn (defalias 'cl-m (lambda (x) (set 'cl-log (cons (list 'm x) (symbol-value 'cl-log))) (set 'cl-h nil))) (set 'cl-h (list 'cl-m (lambda (y) (set 'cl-log (cons (list 'still y) (symbol-value 'cl-log)))))) (run-hook-with-args 'cl-h 1)) (error (list 'err e))) (nreverse (symbol-value 'cl-log))))) (error (list 'sig e))))",
+   "expected": "(ok (nil ((m 1) (still 1))))"
+  },
+  {
+   "id": "run-hook-with-args/0538",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set 'cl-log nil) (list (condition-case e (with-temp-buffer (set 'cl-h (list 'cl-m (lambda (y) (set 'cl-log (cons (list 'gtail y) (symbol-value 'cl-log)))))) (defalias 'cl-m (lambda (x) (set 'cl-log (cons (list 'm x) (symbol-value 'cl-log))) (setcdr (default-value 'cl-h) (list (lambda (y) (set 'cl-log (cons (list 'gadded y) (symbol-value 'cl-log)))))))) (make-local-variable 'cl-h) (set 'cl-h (list t)) (run-hook-with-args 'cl-h 1)) (error (list 'err e))) (nreverse (symbol-value 'cl-log))))) (error (list 'sig e))))",
+   "expected": "(ok (nil ((m 1) (gadded 1))))"
+  },
+  {
+   "id": "run-hook-with-args/0539",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set 'cl-log nil) (list (condition-case e (let ((x (list 1 2))) (set 'cl-h (list (lambda (a) (setcar a 'changed)) (lambda (a) (set 'cl-log (cons (eq a x) (symbol-value 'cl-log)))))) (run-hook-with-args 'cl-h x) x) (error (list 'err e))) (nreverse (symbol-value 'cl-log))))) (error (list 'sig e))))",
+   "expected": "(ok ((changed 2) (t)))"
+  },
+  {
+   "id": "run-hook-with-args/0540",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set 'cl-log nil) (list (condition-case e (progn (set 'cl-h (list (lambda (&rest a) (set 'cl-log (cons a (symbol-value 'cl-log))) a))) (defvaralias 'cl-alias 'cl-h) (run-hook-with-args 'cl-alias 1)) (error (list 'err e))) (nreverse (symbol-value 'cl-log))))) (error (list 'sig e))))",
+   "expected": "(ok (nil ((1))))"
+  },
+  {
+   "id": "run-hook-with-args/0541",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set 'cl-log nil) (list (condition-case e (progn (defvar cl-dyn nil) (let ((cl-dyn (list (lambda (&rest a) (set 'cl-log (cons a (symbol-value 'cl-log))) a)))) (run-hook-with-args 'cl-dyn 'dyn))) (error (list 'err e))) (nreverse (symbol-value 'cl-log))))) (error (list 'sig e))))",
+   "expected": "(ok (nil ((dyn))))"
+  },
+  {
+   "id": "run-hook-with-args/0542",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set 'cl-log nil) (list (condition-case e (progn (set 'cl-h (list (lambda (n) (set 'cl-log (cons n (symbol-value 'cl-log))) (if (< n 3) (run-hook-with-args 'cl-h (1+ n)))))) (run-hook-with-args 'cl-h 0)) (error (list 'err e))) (nreverse (symbol-value 'cl-log))))) (error (list 'sig e))))",
+   "expected": "(ok (nil (0 1 2 3)))"
+  },
+  {
+   "id": "run-hook-with-args/0543",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set 'cl-log nil) (list (condition-case e (catch 'cl-tag (set 'cl-h (list (lambda (x) (set 'cl-log (cons x (symbol-value 'cl-log))) (throw 'cl-tag 'thrown)) (lambda (x) (set 'cl-log (cons 'after (symbol-value 'cl-log)))))) (run-hook-with-args 'cl-h 1)) (error (list 'err e))) (nreverse (symbol-value 'cl-log))))) (error (list 'sig e))))",
+   "expected": "(ok (thrown (1)))"
+  },
+  {
+   "id": "run-hook-with-args/0544",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (run-hook-with-args 'cl-unbound) (funcall #'run-hook-with-args 'cl-unbound 1) (apply #'run-hook-with-args '(cl-unbound 1 2)))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil nil))"
+  },
+  {
+   "id": "run-hook-with-args/0545",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set 'cl-log nil) (list (condition-case e (let ((x (list 1 (make-string 2 ?z)))) (set 'cl-h (list (lambda (a) (let ((i 0)) (while (< i 3000) (list i (make-string 3 ?x) (vector i)) (setq i (1+ i)))) (set 'cl-log (cons (eq a x) (symbol-value 'cl-log)))) t (lambda (a) {GC} (set 'cl-log (cons (equal a (list 1 \"zz\")) (symbol-value 'cl-log)))))) (with-temp-buffer (make-local-variable 'cl-h) (set 'cl-h (list (lambda (a) {GC} (set 'cl-log (cons (eq a x) (symbol-value 'cl-log)))) t)) (run-hook-with-args 'cl-h x))) (error (list 'err e))) (nreverse (symbol-value 'cl-log))))) (error (list 'sig e))))",
+   "expected": "(ok ((err (void-variable {GC})) nil))"
+  },
+  {
+   "id": "run-hook-with-args/0546",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 'sym) (error (list 'sig e))))",
+   "expected": "(ok sym)"
+  },
+  {
+   "id": "run-hook-with-args/0547",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (cons 1 (cons 2 3))) (error (list 'sig e))))",
+   "expected": "(ok (1 2 . 3))"
+  },
+  {
+   "id": "run-hook-with-args/0548",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (cons 1 2)) (error (list 'sig e))))",
+   "expected": "(ok (1 . 2))"
+  },
+  {
+   "id": "run-hook-with-args/0549",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"\")) (error (list 'sig e))))",
+   "expected": "(ok \"\")"
+  },
+  {
+   "id": "run-hook-with-args/0550",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"abc\")) (error (list 'sig e))))",
+   "expected": "(ok \"abc\")"
+  },
+  {
+   "id": "run-hook-with-args/0551",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"λx\")) (error (list 'sig e))))",
+   "expected": "(ok \"λx\")"
+  },
+  {
+   "id": "run-hook-with-args/0552",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (error (list 'sig e))))",
+   "expected": "(ok (1 2 1 2 . #2))"
+  },
+  {
+   "id": "run-hook-with-args/0553",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list 'a (list 'b))) (error (list 'sig e))))",
+   "expected": "(ok (a (b)))"
+  },
+  {
+   "id": "run-hook-with-args/0554",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list 1 2 3)) (error (list 'sig e))))",
+   "expected": "(ok (1 2 3))"
+  },
+  {
+   "id": "run-hook-with-args/0555",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vector 1 2)) (error (list 'sig e))))",
+   "expected": "(ok [1 2])"
+  },
+  {
+   "id": "run-hook-with-args/0556",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok -1) (error (list 'sig e))))",
+   "expected": "(ok -1)"
+  },
+  {
+   "id": "run-hook-with-args/0557",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 0) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "run-hook-with-args/0558",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1) (error (list 'sig e))))",
+   "expected": "(ok 1)"
+  },
+  {
+   "id": "run-hook-with-args/0559",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1.5) (error (list 'sig e))))",
+   "expected": "(ok 1.5)"
+  },
+  {
+   "id": "run-hook-with-args/0560",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 2) (error (list 'sig e))))",
+   "expected": "(ok 2)"
+  },
+  {
+   "id": "run-hook-with-args/0561",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok :kw) (error (list 'sig e))))",
+   "expected": "(ok :kw)"
+  },
+  {
+   "id": "run-hook-with-args/0562",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok most-positive-fixnum) (error (list 'sig e))))",
+   "expected": "(ok 2305843009213693951)"
+  },
+  {
+   "id": "run-hook-with-args/0563",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok nil) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "run-hook-with-args/0564",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok t) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  }
+ ],
+ "pinned": {
+  "run-hook-with-args/0342": "PRINTER",
+  "run-hook-with-args/0343": "PRINTER",
+  "run-hook-with-args/0344": "PRINTER",
+  "run-hook-with-args/0345": "PRINTER",
+  "run-hook-with-args/0346": "PRINTER",
+  "run-hook-with-args/0347": "PRINTER",
+  "run-hook-with-args/0348": "PRINTER",
+  "run-hook-with-args/0349": "PRINTER",
+  "run-hook-with-args/0350": "PRINTER",
+  "run-hook-with-args/0351": "PRINTER",
+  "run-hook-with-args/0352": "PRINTER",
+  "run-hook-with-args/0353": "PRINTER",
+  "run-hook-with-args/0354": "PRINTER",
+  "run-hook-with-args/0355": "PRINTER",
+  "run-hook-with-args/0356": "PRINTER",
+  "run-hook-with-args/0357": "PRINTER",
+  "run-hook-with-args/0358": "PRINTER",
+  "run-hook-with-args/0359": "PRINTER",
+  "run-hook-with-args/0360": "PRINTER",
+  "run-hook-with-args/0486": "PRINTER",
+  "run-hook-with-args/0487": "PRINTER",
+  "run-hook-with-args/0488": "PRINTER",
+  "run-hook-with-args/0489": "PRINTER",
+  "run-hook-with-args/0490": "PRINTER",
+  "run-hook-with-args/0491": "PRINTER",
+  "run-hook-with-args/0492": "PRINTER",
+  "run-hook-with-args/0518": "VALUE",
+  "run-hook-with-args/0519": "VALUE",
+  "run-hook-with-args/0529": "VALUE",
+  "run-hook-with-args/0552": "PRINTER"
+ }
+}

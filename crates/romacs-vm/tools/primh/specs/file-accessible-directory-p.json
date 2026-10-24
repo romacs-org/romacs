@@ -1,0 +1,17 @@
+{
+  "name": "file-accessible-directory-p",
+  "arity": [1, 1],
+  "effect": "global",
+  "gnu_files": ["fileio.c"],
+  "gnu_def": "fileio.c:3255",
+  "rust": "src/prims/file_accessible_directory.rs:4",
+  "args": ["string"],
+  "extra": {"0": ["nil", "t", "1", "'symbol", "[1]", "'(1)", "\"/\"", "\"/dev\"", "\"/dev/\"", "\"/dev/null\"", "\"/dev/null/\"", "\"/proc/self\"", "\"/proc/self/exe\"", "\"/this-romacs-accessible-path-does-not-exist\""]},
+  "probes": [
+    "(list (fboundp 'file-accessible-directory-p) (functionp 'file-accessible-directory-p))",
+    "(funcall 'file-accessible-directory-p \"/dev\")",
+    "(progn (setq default-directory \"/dev/\") (list (file-accessible-directory-p \"\") (file-accessible-directory-p \".\") (file-accessible-directory-p \"null\") (file-accessible-directory-p \"../dev\")))",
+    "(file-accessible-directory-p \"/dev//./../dev/\")",
+    "(file-accessible-directory-p (string 47 100 101 118 0 47 110 117 108 108))"
+  ]
+}

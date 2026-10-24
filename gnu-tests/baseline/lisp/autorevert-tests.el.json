@@ -1,0 +1,184 @@
+{
+ "blob": "dfdfbafc5fac72b10f92deb4bd9496d4dac6827c",
+ "compiled": {
+  "complete": false,
+  "exit": 255,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": true,
+  "results": {
+   "auto-revert-test00-auto-revert-mode": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   }
+  },
+  "timed_out": false
+ },
+ "file": "lisp/autorevert-tests.el",
+ "gnu": {
+  "emacs": "<recording-path-redacted>/emacs-32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+  "version": "32.0.50"
+ },
+ "harness_sha256": "78c20850429a08af22faadf73b5d164c560230e83d7eb88ef60cb995670703ef",
+ "mini": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": null,
+  "results": {
+   "auto-revert-test00-auto-revert-mode": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "auto-revert-test00-auto-revert-mode-remote": {
+    "as_expected": null,
+    "detail": "(void-function ert-get-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "auto-revert-test01-auto-revert-several-files": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "auto-revert-test01-auto-revert-several-files-remote": {
+    "as_expected": null,
+    "detail": "(void-function ert-get-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "auto-revert-test02-auto-revert-deleted-file": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "auto-revert-test02-auto-revert-deleted-file-remote": {
+    "as_expected": null,
+    "detail": "(void-function ert-get-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "auto-revert-test03-auto-revert-tail-mode": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "auto-revert-test03-auto-revert-tail-mode-remote": {
+    "as_expected": null,
+    "detail": "(void-function ert-get-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "auto-revert-test04-auto-revert-mode-dired": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "auto-revert-test04-auto-revert-mode-dired-remote": {
+    "as_expected": null,
+    "detail": "(void-function ert-get-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "auto-revert-test05-global-notify": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "auto-revert-test05-global-notify-remote": {
+    "as_expected": null,
+    "detail": "(void-function ert-get-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "auto-revert-test06-write-file": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "auto-revert-test06-write-file-remote": {
+    "as_expected": null,
+    "detail": "(void-function ert-get-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "auto-revert-test07-auto-revert-several-buffers": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "auto-revert-test07-auto-revert-several-buffers-remote": {
+    "as_expected": null,
+    "detail": "(void-function ert-get-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "auto-revert-test08-auto-revert-inhibit-auto-revert": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "auto-revert-test08-auto-revert-inhibit-auto-revert-remote": {
+    "as_expected": null,
+    "detail": "(void-function ert-get-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   }
+  },
+  "timed_out": false
+ },
+ "read_error": null,
+ "real": {
+  "complete": false,
+  "exit": 255,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": true,
+  "results": {
+   "auto-revert-test00-auto-revert-mode": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   }
+  },
+  "timed_out": false
+ },
+ "schema": 1,
+ "toplevel_deftests": 9
+}

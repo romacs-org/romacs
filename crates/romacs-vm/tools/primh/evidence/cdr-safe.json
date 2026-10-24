@@ -1,0 +1,323 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "cdr-safe",
+ "spec_sha256": "3b17b5386471c91f5eed811b4fc020fbbe33da86d1231048a84e036429f0ba5f",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "cdr-safe",
+    "subr",
+    1,
+    1
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "data.c": "eca7895a8043cd0a960dfe037a46028374d1a40cc6ee4d0cf6de90ac56c242ae"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "cdr-safe/0000",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (cdr-safe nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "cdr-safe/0001",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (cdr-safe t)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "cdr-safe/0002",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (cdr-safe 0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "cdr-safe/0003",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (cdr-safe 1)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "cdr-safe/0004",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (cdr-safe 2)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "cdr-safe/0005",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (cdr-safe -1)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "cdr-safe/0006",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (cdr-safe most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "cdr-safe/0007",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (cdr-safe 1.5)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "cdr-safe/0008",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (cdr-safe 'sym)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "cdr-safe/0009",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (cdr-safe :kw)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "cdr-safe/0010",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (cdr-safe (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "cdr-safe/0011",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (cdr-safe (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "cdr-safe/0012",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (cdr-safe (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "cdr-safe/0013",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (cdr-safe (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok (2 3))"
+  },
+  {
+   "id": "cdr-safe/0014",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (cdr-safe (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok ((b)))"
+  },
+  {
+   "id": "cdr-safe/0015",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (cdr-safe (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(ok 2)"
+  },
+  {
+   "id": "cdr-safe/0016",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (cdr-safe (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(ok (2 . 3))"
+  },
+  {
+   "id": "cdr-safe/0017",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (cdr-safe (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "cdr-safe/0018",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (cdr-safe (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(ok (2 1 2 1 . #2))"
+  },
+  {
+   "id": "cdr-safe/0019",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'cdr-safe '())) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr cdr-safe> 0))"
+  },
+  {
+   "id": "cdr-safe/0020",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'cdr-safe '(1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr cdr-safe> 2))"
+  },
+  {
+   "id": "cdr-safe/0021",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (cdr-safe a0))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "cdr-safe/0022",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil)) (let ((r (cdr-safe a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (t))"
+  },
+  {
+   "id": "cdr-safe/0023",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1)) (let ((r (cdr-safe a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "cdr-safe/0024",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-positive-fixnum)) (let ((r (cdr-safe a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "cdr-safe/0025",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :kw)) (let ((r (cdr-safe a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "cdr-safe/0026",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\"))) (let ((r (cdr-safe a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "cdr-safe/0027",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 2))) (let ((r (cdr-safe a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "cdr-safe/0028",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (cdr-safe a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "cdr-safe/0029",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 'sym) (error (list 'sig e))))",
+   "expected": "(ok sym)"
+  },
+  {
+   "id": "cdr-safe/0030",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (cons 1 (cons 2 3))) (error (list 'sig e))))",
+   "expected": "(ok (1 2 . 3))"
+  },
+  {
+   "id": "cdr-safe/0031",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (cons 1 2)) (error (list 'sig e))))",
+   "expected": "(ok (1 . 2))"
+  },
+  {
+   "id": "cdr-safe/0032",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"\")) (error (list 'sig e))))",
+   "expected": "(ok \"\")"
+  },
+  {
+   "id": "cdr-safe/0033",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"abc\")) (error (list 'sig e))))",
+   "expected": "(ok \"abc\")"
+  },
+  {
+   "id": "cdr-safe/0034",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"λx\")) (error (list 'sig e))))",
+   "expected": "(ok \"λx\")"
+  },
+  {
+   "id": "cdr-safe/0035",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (error (list 'sig e))))",
+   "expected": "(ok (1 2 1 2 . #2))"
+  },
+  {
+   "id": "cdr-safe/0036",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list 'a (list 'b))) (error (list 'sig e))))",
+   "expected": "(ok (a (b)))"
+  },
+  {
+   "id": "cdr-safe/0037",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list 1 2 3)) (error (list 'sig e))))",
+   "expected": "(ok (1 2 3))"
+  },
+  {
+   "id": "cdr-safe/0038",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vector 1 2)) (error (list 'sig e))))",
+   "expected": "(ok [1 2])"
+  },
+  {
+   "id": "cdr-safe/0039",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok -1) (error (list 'sig e))))",
+   "expected": "(ok -1)"
+  },
+  {
+   "id": "cdr-safe/0040",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 0) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "cdr-safe/0041",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1) (error (list 'sig e))))",
+   "expected": "(ok 1)"
+  },
+  {
+   "id": "cdr-safe/0042",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1.5) (error (list 'sig e))))",
+   "expected": "(ok 1.5)"
+  },
+  {
+   "id": "cdr-safe/0043",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 2) (error (list 'sig e))))",
+   "expected": "(ok 2)"
+  },
+  {
+   "id": "cdr-safe/0044",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok :kw) (error (list 'sig e))))",
+   "expected": "(ok :kw)"
+  },
+  {
+   "id": "cdr-safe/0045",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok most-positive-fixnum) (error (list 'sig e))))",
+   "expected": "(ok 2305843009213693951)"
+  },
+  {
+   "id": "cdr-safe/0046",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok nil) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "cdr-safe/0047",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok t) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  }
+ ],
+ "pinned": {
+  "cdr-safe/0018": "PRINTER",
+  "cdr-safe/0035": "PRINTER"
+ }
+}

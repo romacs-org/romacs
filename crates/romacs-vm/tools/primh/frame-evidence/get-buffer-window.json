@@ -1,0 +1,259 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "get-buffer-window",
+ "spec_sha256": "dd3bf2d57e5bb70936dd0c5b94d73c8f0f29d4ef7229029ce7c6fb8655a5e98a",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "get-buffer-window",
+    "subr",
+    0,
+    2
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "window.c": "9bbd2274831c6cee89f1aff0464e0b2695f966d00ff7d1518dc9411cf64b64d8"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "get-buffer-window/0000",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (get-buffer-window nil nil)) (error (list 'sig e))))",
+   "expected": "(ok #<window 1 on *scratch*>)"
+  },
+  {
+   "id": "get-buffer-window/0001",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (get-buffer-window nil t)) (error (list 'sig e))))",
+   "expected": "(ok #<window 1 on *scratch*>)"
+  },
+  {
+   "id": "get-buffer-window/0002",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (get-buffer-window nil 0)) (error (list 'sig e))))",
+   "expected": "(ok #<window 1 on *scratch*>)"
+  },
+  {
+   "id": "get-buffer-window/0003",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (get-buffer-window nil 'visible)) (error (list 'sig e))))",
+   "expected": "(ok #<window 1 on *scratch*>)"
+  },
+  {
+   "id": "get-buffer-window/0004",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (get-buffer-window 1 nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 1))"
+  },
+  {
+   "id": "get-buffer-window/0005",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (get-buffer-window 1 t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 1))"
+  },
+  {
+   "id": "get-buffer-window/0006",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (get-buffer-window 1 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 1))"
+  },
+  {
+   "id": "get-buffer-window/0007",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (get-buffer-window 1 'visible)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 1))"
+  },
+  {
+   "id": "get-buffer-window/0008",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (get-buffer-window 'symbol nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp symbol))"
+  },
+  {
+   "id": "get-buffer-window/0009",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (get-buffer-window 'symbol t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp symbol))"
+  },
+  {
+   "id": "get-buffer-window/0010",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (get-buffer-window 'symbol 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp symbol))"
+  },
+  {
+   "id": "get-buffer-window/0011",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (get-buffer-window 'symbol 'visible)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp symbol))"
+  },
+  {
+   "id": "get-buffer-window/0012",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'get-buffer-window '(1 1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr get-buffer-window> 3))"
+  },
+  {
+   "id": "get-buffer-window/0013",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 nil)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (get-buffer-window a0 a1))) (error (list 'sig e))))",
+   "expected": "(ok #<window 1 on *scratch*>)"
+  },
+  {
+   "id": "get-buffer-window/0014",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 nil)) (let ((r (get-buffer-window a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "get-buffer-window/0015",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 'visible)) (let ((r (get-buffer-window a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "get-buffer-window/0016",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 0)) (let ((r (get-buffer-window a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 1))"
+  },
+  {
+   "id": "get-buffer-window/0017",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'symbol) (a1 t)) (let ((r (get-buffer-window a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp symbol))"
+  },
+  {
+   "id": "get-buffer-window/0018",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (fboundp 'get-buffer-window)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "get-buffer-window/0019",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eq (get-buffer-window) (selected-window))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "get-buffer-window/0020",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eq (get-buffer-window (current-buffer)) (selected-window))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "get-buffer-window/0021",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eq (get-buffer-window (buffer-name)) (selected-window))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "get-buffer-window/0022",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (get-buffer-window \"frame-probe-missing-buffer\")) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "get-buffer-window/0023",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (get-buffer-window (get-buffer-create \"frame-probe-undisplayed\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "get-buffer-window/0024",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eq (funcall #'get-buffer-window nil t) (selected-window))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "get-buffer-window/0025",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eq (get-buffer-window nil nil) (selected-window))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "get-buffer-window/0026",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eq (get-buffer-window nil t) (selected-window))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "get-buffer-window/0027",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eq (get-buffer-window nil 0) (selected-window))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "get-buffer-window/0028",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eq (get-buffer-window nil 'visible) (selected-window))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "get-buffer-window/0029",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eq (get-buffer-window nil (selected-frame)) (selected-window))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "get-buffer-window/0030",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (let ((buf (get-buffer-create \"frame-probe-other\"))) (set-window-buffer b buf) (list (eq (get-buffer-window buf) b) (eq (get-buffer-window nil) a))))) (error (list 'sig e))))",
+   "expected": "(ok (t t))"
+  },
+  {
+   "id": "get-buffer-window/0031",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (let* ((hb (window-pixel-height b)) (half-b (/ hb 2)) (c (progn (set-window-new-pixel b (- hb half-b)) (split-window-internal b half-b nil 0.5))) (x (get-buffer-create \"frame-search-cyclic\"))) (set-window-buffer a x) (set-window-buffer c x) (select-window b) (eq (get-buffer-window x) c)))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "get-buffer-window/0032",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 'symbol) (error (list 'sig e))))",
+   "expected": "(ok symbol)"
+  },
+  {
+   "id": "get-buffer-window/0033",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 'visible) (error (list 'sig e))))",
+   "expected": "(ok visible)"
+  },
+  {
+   "id": "get-buffer-window/0034",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 0) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "get-buffer-window/0035",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1) (error (list 'sig e))))",
+   "expected": "(ok 1)"
+  },
+  {
+   "id": "get-buffer-window/0036",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok nil) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "get-buffer-window/0037",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok t) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  }
+ ]
+}

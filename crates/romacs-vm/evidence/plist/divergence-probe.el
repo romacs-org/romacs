@@ -1,0 +1,7 @@
+(setq r1 (let ((s (make-symbol "c"))) (define-error s "Made") (list (symbol-plist s) (get s 'error-message))))
+(setq r2 (let ((s (make-symbol "c"))) (setplist s (list 'error-conditions '(c error) 'error-message "C!")) (condition-case e (signal s '(1)) (error (list 'caught (car e) (condition-case e2 (error-message-string e) (error e2)))))))
+(defun plist-cmd () (interactive) 1)
+(setq r3 (symbol-plist 'plist-cmd))
+(setq r4 (progn (setplist 'plist-cmd nil) (condition-case e (commandp 'plist-cmd) (error e))))
+(setq r5 (condition-case e (let ((overriding-plist-environment '((foo p 9)))) (get 'foo 'p)) (error e)))
+(funcall (intern (prin1-to-string (list r1 r2 r3 r4 r5))))

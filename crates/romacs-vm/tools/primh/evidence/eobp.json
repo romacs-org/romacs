@@ -1,0 +1,217 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "eobp",
+ "spec_sha256": "a12d9ad9dd42780e7077abe3d5ab2696395d00a57fe9598ce4f9f9081ea8ff8c",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "eobp",
+    "subr",
+    0,
+    0
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "editfns.c": "4ea567918bb8e3ba8bc5d144dce9ee2908bf7a108780cb63a4040daa353217c1"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "eobp/0000",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eobp )) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "eobp/0001",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'eobp '(1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr eobp> 1))"
+  },
+  {
+   "id": "eobp/0002",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let () (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (eobp ))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "eobp/0003",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let () (let ((r (eobp ))) (list )))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eobp/0004",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (eobp))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "eobp/0005",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (insert \"\") (goto-char 1) (eobp))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "eobp/0006",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (insert \"abc\") (goto-char 1) (eobp))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eobp/0007",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (insert \"abc\") (goto-char 2) (eobp))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eobp/0008",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (insert \"abc\") (goto-char 3) (eobp))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eobp/0009",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (insert \"abc\") (goto-char 4) (eobp))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "eobp/0010",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (insert \"a\\nb\") (goto-char 1) (eobp))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eobp/0011",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (insert \"a\\nb\") (goto-char 2) (eobp))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eobp/0012",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (insert \"a\\nb\") (goto-char 3) (eobp))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eobp/0013",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (insert \"a\\nb\") (goto-char 4) (eobp))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "eobp/0014",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (insert \"é🙂a\\nЖb\") (goto-char 1) (eobp))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eobp/0015",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (insert \"é🙂a\\nЖb\") (goto-char 2) (eobp))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eobp/0016",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (insert \"é🙂a\\nЖb\") (goto-char 3) (eobp))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eobp/0017",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (insert \"é🙂a\\nЖb\") (goto-char 4) (eobp))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eobp/0018",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (insert \"é🙂a\\nЖb\") (goto-char 5) (eobp))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eobp/0019",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (insert \"é🙂a\\nЖb\") (goto-char 6) (eobp))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eobp/0020",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (insert \"é🙂a\\nЖb\") (goto-char 7) (eobp))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "eobp/0021",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (insert \"é🙂a\\nЖb\") (narrow-to-region 3 6) (goto-char 3) (eobp))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eobp/0022",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (insert \"é🙂a\\nЖb\") (narrow-to-region 3 6) (goto-char 4) (eobp))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eobp/0023",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (insert \"é🙂a\\nЖb\") (narrow-to-region 2 3) (goto-char 3) (eobp))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "eobp/0024",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (insert \"é🙂a\\nЖb\") (narrow-to-region 3 3) (goto-char 3) (eobp))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "eobp/0025",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (insert \"é🙂a\\nЖb\") (narrow-to-region 2 6) (goto-char 5) (eobp))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eobp/0026",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (set-buffer-multibyte nil) (insert (unibyte-string 255 10 254)) (goto-char 1) (eobp))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eobp/0027",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (set-buffer-multibyte nil) (insert (unibyte-string 255 10 254)) (goto-char 2) (eobp))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eobp/0028",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (set-buffer-multibyte nil) (insert (unibyte-string 255 10 254)) (goto-char 3) (eobp))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eobp/0029",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (set-buffer-multibyte nil) (insert (unibyte-string 255 10 254)) (goto-char 4) (eobp))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "eobp/0030",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (fboundp 'eobp) (functionp #'eobp) (funcall #'eobp))) (error (list 'sig e))))",
+   "expected": "(ok (t t t))"
+  }
+ ]
+}

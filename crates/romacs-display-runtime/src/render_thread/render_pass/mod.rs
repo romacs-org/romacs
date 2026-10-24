@@ -1,0 +1,606 @@
+//! The draw order for one frame.
+//!
+//! Owns: the *sequence*, and only the sequence — acquire the surface, sample
+//! the pane motion, pick a composition strategy, draw through it, and return a
+//! [`RenderedFrameSurface`] for `present` to hand to the platform. Each phase
+//! lives in a submodule with its own charter:
+//!
+//! - `surface` — getting the swapchain texture, and naming how that fails.
+//! - `composition_targets` — the offscreen textures a frame composes through.
+//! - `retained_static`, `full_render` — the three composition strategies: the
+//!   compositor-only fast path, and the two that run the glyph pipeline.
+//! - `scene` — the editor's own picture: glyphs, child frames, content overlays.
+//! - `chrome` — the window-level overlays drawn over it.
+//! - `present` — handing the result to the platform and publishing what it
+//!   says about the screen.
+//!
+//! Must not: know how any single phase draws. When a body here grows past
+//! "call the phase, check the outcome", it belongs in a phase.
+//!
+//! Three orderings are load-bearing, and each is commented where it happens
+//! because the `?` between them is what makes it matter:
+//!
+//! 1. The frame itself is materialized *after* the surface is acquired.
+//!    Acquisition has several early returns, so taking the frame first is work
+//!    thrown away outright on any lost, outdated or occluded surface.
+//! 2. The pane-layout sample runs *after* acquisition too, for a stronger
+//!    reason: it advances the motion and produces the projection hit testing
+//!    will answer from. Sampling above the early returns would leave a
+//!    projection describing a frame nobody composed.
+//! 3. The continuity drain runs *after* the surface-loss paths — it is in
+//!    `full_render::detect_transitions`, below every `?` here. An observation
+//!    dropped on one of those returns would lose the scroll measured at
+//!    install, with no later chance to plan it.
+//!
+//! All three are enforced by [`surface::SurfaceAcquired`], which only
+//! `surface::acquire_current_texture` can construct and which each of the three
+//! phases requires. Moving one of them above acquisition does not compile.
+
+// Several render entry points carry the recurring `bg_gradient` RGB-pair tuple
+// parameter, which mirrors the renderer-wgpu API surface; a local type alias
+// would not be reused, so the type-complexity lint is allowed module-wide.
+#![allow(clippy::type_complexity)]
+
+pub(in crate::render_thread) mod chrome;
+mod composition_targets;
+mod full_render;
+pub(in crate::render_thread) mod model_provenance;
+mod present;
+mod retained_scroll;
+pub(in crate::render_thread) mod retained_static;
+pub(super) use retained_scroll::RetainedScroll;
+mod scene;
+pub(in crate::render_thread) mod surface;
+
+use self::surface::FrameRenderFailure;
+use super::RenderApp;
+use super::frame_windows::{
+    FrameLifecycle, GuiFrameNativeWindowState, GuiFrameRenderState, GuiFrameWindowState,
+};
+use super::state::{ChildFrameStyle, ToolbarResources};
+use crate::core::types::DisplayFrameId;
+use romacs_renderer_wgpu::{SnapshotSize, WgpuRenderer};
+
+/// A frame drawn and ready to present.
+///
+/// `projection` rides here rather than being stored when it is computed. It
+/// describes where the panes were placed *in this frame*, and it is the answer
+/// hit testing must give — so it becomes visible only once the pixels it
+/// describes have actually been presented. Publishing it at sample time
+/// instead would leave it describing a frame that a later `?` abandoned, and a
+/// pointer event arriving before the next successful render would resolve
+/// against pixels nobody saw.
+struct RenderedFrameSurface {
+    output: wgpu::SurfaceTexture,
+    frame: crate::core::frame_glyphs::FrameGlyphBuffer,
+    projection: Option<romacs_display_protocol::InteractionProjection>,
+    /// What the composed picture holds of the native models (design §6.2).
+    models: super::models::ModelPicture,
+    /// Whether the composition also shows an older picture than its fresh
+    /// glyph passes, which `models` cannot describe
+    /// ([`model_provenance::blends_older_pictures`]).
+    blends_older: bool,
+}
+
+/// The inputs one frame's content draw needs that are fixed for the whole
+/// frame, whichever composition strategy runs.
+///
+/// Bundled rather than threaded positionally because two of the fields have
+/// the same type and different scope — `root_animated_cursor` is
+/// `animated_cursor` filtered to the root frame — and a positional list makes
+/// swapping them trivially easy to write and impossible to see. The two flags
+/// that genuinely differ per call, `cursor_visible` and `include_overlays`,
+/// stay explicit arguments for the same reason: they are the choice, not the
+/// context.
+struct FrameDrawInputs<'a> {
+    present_mapping: romacs_display_protocol::PresentMapping,
+    root_animated_cursor: Option<crate::core::types::AnimatedCursor>,
+    animated_cursor: Option<crate::core::types::AnimatedCursor>,
+    bg_gradient: Option<((f32, f32, f32), (f32, f32, f32))>,
+    child_frame_style: &'a ChildFrameStyle,
+    scroll_indicators_enabled: bool,
+    retain_scroll_body: bool,
+    toolbar: &'a ToolbarResources,
+    /// What every native model's texture shows for this frame.
+    models: &'a super::models::ModelPicture,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_frame_window_contents(
+    renderer: &mut WgpuRenderer,
+    native: &GuiFrameNativeWindowState,
+    render: &mut GuiFrameRenderState,
+    surface_view: &wgpu::TextureView,
+    frame: &crate::core::frame_glyphs::FrameGlyphBuffer,
+    inputs: &FrameDrawInputs<'_>,
+    cursor_visible: bool,
+    include_overlays: bool,
+) -> Result<(), FrameRenderFailure> {
+    scene::render_frame_root_glyphs(
+        renderer,
+        render,
+        surface_view,
+        frame,
+        inputs.present_mapping,
+        cursor_visible,
+        inputs.root_animated_cursor,
+        inputs.bg_gradient,
+        inputs.retain_scroll_body,
+    );
+    let _non_root = romacs_renderer_wgpu::diagnostics::Span::new(
+        romacs_display_protocol::present_trace::Stage::NonRootStart,
+        romacs_display_protocol::present_trace::Stage::NonRootEnd,
+        render.emacs_frame_id,
+        frame.presentation_id,
+    );
+    let renderer_effects_still_active = render.compositor.renderer_effects.needs_redraw();
+
+    if !include_overlays {
+        render.set_dirty(renderer_effects_still_active);
+        return Ok(());
+    }
+
+    chrome::render_frame_window_overlays_with_toolbar_resources(
+        renderer,
+        native,
+        render,
+        surface_view,
+        frame,
+        cursor_visible,
+        inputs.animated_cursor,
+        inputs.child_frame_style,
+        inputs.scroll_indicators_enabled,
+        inputs.toolbar,
+    )?;
+    if renderer_effects_still_active {
+        render.mark_dirty();
+    }
+    Ok(())
+}
+
+fn composition_surface(
+    render: &mut GuiFrameRenderState,
+    surface_state: romacs_display_protocol::SurfaceState,
+) -> Result<romacs_display_protocol::DrawableSurface, FrameRenderFailure> {
+    // Native readiness precedes editor-content and scratch-admission checks.
+    render.set_surface_state(surface_state);
+    if matches!(
+        surface_state,
+        romacs_display_protocol::SurfaceState::Suspended
+    ) {
+        return Err(FrameRenderFailure::WindowNotReady);
+    }
+    render
+        .present_mapping()
+        .map(|mapping| mapping.surface())
+        .ok_or(FrameRenderFailure::AwaitingContent)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_frame_window_contents_to_surface(
+    renderer: &mut WgpuRenderer,
+    window_state: &mut GuiFrameWindowState,
+    bg_gradient: Option<((f32, f32, f32), (f32, f32, f32))>,
+    child_frame_style: &ChildFrameStyle,
+    scroll_indicators_enabled: bool,
+    toolbar: &ToolbarResources,
+    extra_line_spacing: f32,
+    extra_letter_spacing: f32,
+    compositor_only_hint: bool,
+    render_policy: &crate::render_thread::render_quality::RenderQualityPolicy,
+    device_lost: &mut crate::render_thread::device_loss::DeviceLossDetector,
+    models: &super::models::ModelPicture,
+) -> Result<RenderedFrameSurface, FrameRenderFailure> {
+    // Reserve interactive child composition before acquiring a swapchain,
+    // sampling motion, publishing projections or consuming presentation hints.
+    let FrameLifecycle::Active { native, .. } = &window_state.lifecycle else {
+        return Err(FrameRenderFailure::WindowNotReady);
+    };
+    let surface = composition_surface(&mut window_state.render, native.surface_state())?;
+    let frame_has_theme_transition = window_state
+        .render
+        .pending_theme_change()
+        .ok_or(FrameRenderFailure::AwaitingContent)?;
+    let feature_plan =
+        render_policy.plan_frame(frame_has_theme_transition, renderer.has_frame_post());
+    let targets = composition_targets::prepare_frame_targets_for_scene(
+        renderer,
+        &mut window_state.render,
+        surface,
+        &feature_plan,
+        compositor_only_hint,
+        bg_gradient.is_some() || extra_line_spacing != 0.0 || extra_letter_spacing != 0.0,
+    )?;
+    window_state.render.child_opacity_src = targets.picture;
+    window_state.render.child_resize_src = targets.resize;
+    let result = render_frame_window_contents_reserved(
+        renderer,
+        window_state,
+        bg_gradient,
+        child_frame_style,
+        scroll_indicators_enabled,
+        toolbar,
+        extra_line_spacing,
+        extra_letter_spacing,
+        compositor_only_hint,
+        feature_plan,
+        device_lost,
+        targets.native,
+        models,
+    );
+    window_state.render.child_opacity_src = None;
+    window_state.render.child_resize_src = None;
+    result
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_frame_window_contents_reserved(
+    renderer: &mut WgpuRenderer,
+    window_state: &mut GuiFrameWindowState,
+    bg_gradient: Option<((f32, f32, f32), (f32, f32, f32))>,
+    child_frame_style: &ChildFrameStyle,
+    scroll_indicators_enabled: bool,
+    toolbar: &ToolbarResources,
+    extra_line_spacing: f32,
+    extra_letter_spacing: f32,
+    compositor_only_hint: bool,
+    feature_plan: crate::render_thread::render_quality::RenderFeaturePlan,
+    device_lost: &mut crate::render_thread::device_loss::DeviceLossDetector,
+    native_content: Option<romacs_renderer_wgpu::SnapshotLease>,
+    models: &super::models::ModelPicture,
+) -> Result<RenderedFrameSurface, FrameRenderFailure> {
+    let render = &mut window_state.render;
+    let native = match &mut window_state.lifecycle {
+        FrameLifecycle::Active { native, .. } => native,
+        _ => return Err(FrameRenderFailure::WindowNotReady),
+    };
+    let surface_state = native.surface_state();
+    render.set_surface_state(surface_state);
+    if matches!(
+        surface_state,
+        romacs_display_protocol::SurfaceState::Suspended
+    ) {
+        return Err(FrameRenderFailure::WindowNotReady);
+    }
+    RenderApp::begin_fps_cpu_span(&mut render.overlays.fps);
+    RenderApp::update_fps_counter(&mut render.overlays.fps, renderer.frame_sample());
+
+    let animated_cursor = render.cursor.animated_cursor();
+    let root_animated_cursor = animated_cursor.filter(|cursor| {
+        cursor.frame_id == DisplayFrameId::new(render.emacs_frame_id)
+            && !render.compositor.input_scroll.active()
+    });
+    // The slide animation is composed at draw time: emit_cursor_visual reads
+    // the interpolated rect from animated_cursor for the active window's
+    // cursor. The frame's stored cursor geometry is no longer mutated here,
+    // so the materialized frame stays a pure function of the layout snapshot.
+
+    // Targets were admitted without draining the retained frame or continuity.
+    // Validate geometry before acquisition; obscured content is not drawable.
+    let native_mapping = render
+        .present_mapping()
+        .ok_or(FrameRenderFailure::AwaitingContent)?;
+    let content_surface = native_mapping
+        .surface()
+        .content_surface()
+        .ok_or(FrameRenderFailure::WindowNotReady)?;
+
+    let present_mapping = romacs_display_protocol::PresentMapping::top_left_clip(
+        content_surface,
+        romacs_display_protocol::PresentationExtent::new(
+            native_mapping.presentation(),
+            native_mapping.content_logical_size(),
+        ),
+    );
+    let surface = native
+        .surface
+        .as_ref()
+        .ok_or(FrameRenderFailure::WindowNotReady)?;
+    let surface::AcquiredSurface { output, acquired } = {
+        let _acquire = romacs_renderer_wgpu::diagnostics::Span::new(
+            romacs_display_protocol::present_trace::Stage::AcquireStart,
+            romacs_display_protocol::present_trace::Stage::AcquireEnd,
+            render.emacs_frame_id,
+            present_mapping.presentation(),
+        );
+        surface::acquire_current_texture(surface, device_lost, render.emacs_frame_id)?
+    };
+
+    // Placed here, after the surface is in hand: `sample_pane_layout`
+    // advances the motion and republishes the projection, and every path
+    // above returns without drawing. Sampling before them would leave the
+    // projection describing a frame that was never composed, so a pointer
+    // event arriving before the next successful render would resolve
+    // against pixels nobody saw — the one thing the projection exists to
+    // prevent.
+    //
+    // It still runs before anything reads a pane's position, so the
+    // transform hit testing uses and the geometry this pass draws come
+    // from one sample of one motion rather than from two evaluations that
+    // could land on different sides of a frame boundary.
+    let composition = render.sample_pane_layout(
+        &acquired,
+        renderer.frame_sample(),
+        crate::render_thread::frame_compositor::continuity::pane_layout::PixelGrid::new(
+            native.scale_factor,
+        ),
+    );
+    let pane_projection = composition.projection.clone();
+    let pane_blits = composition.blits;
+    if !pane_blits.is_empty() {
+        render.mark_dirty();
+    }
+    // Re-resolve what the pointer is over, but only while panes are moving.
+    //
+    // Hover is otherwise resolved when a pointer event arrives, which is
+    // correct at that instant and goes stale immediately afterwards if the
+    // pointer holds still while a pane slides under it: no event fires, so the
+    // shader keeps the `u`/`v` of a pane position that has since moved on. The
+    // projection this frame just sampled is the answer, so ask it here.
+    //
+    // Costs nothing when nothing is moving, which is almost always: an empty
+    // placement list skips it, and so does a frame with no shader surface to
+    // route to — the search reads every glyph in the frame.
+    if !pane_blits.is_empty()
+        && renderer.has_shader_surfaces()
+        && let Some((x, y)) =
+            render.root_frame_point_from_surface(render.mouse_pos.0, render.mouse_pos.1)
+        && let Some((glyphs, point)) = render.glyph_hit_target(render.emacs_frame_id, x, y)
+        && let Some((surface_id, u, v)) =
+            super::pointer_events::surface_glyph_hit_test(glyphs, point)
+    {
+        renderer.surface_mouse_hover(surface_id, u, v);
+    }
+
+    // A morph draws the composed frame once and then places it a pane at a
+    // time, which needs the frame in a texture rather than straight on the
+    // surface. The plan is what usually decides this, and it says yes for
+    // whole frames before a morph begins so the picture the morph fades *from*
+    // has been kept; the blits are a floor for the case where one is already
+    // running.
+    let need_offscreen = feature_plan.compose_offscreen || !pane_blits.is_empty();
+
+    let mut frame = render
+        .take_current_frame_for_render(&acquired)
+        .ok_or(FrameRenderFailure::AwaitingContent)?;
+    romacs_display_protocol::present_trace::record(
+        romacs_display_protocol::present_trace::Stage::RenderStart,
+        render.emacs_frame_id,
+        frame.presentation_id,
+    );
+    feature_plan.prepare_frame(&mut frame);
+    render.begin_presentable_render();
+    if extra_line_spacing != 0.0 || extra_letter_spacing != 0.0 {
+        RenderApp::apply_extra_spacing(
+            &mut frame.glyphs,
+            &mut frame.window_cursors,
+            extra_line_spacing,
+            extra_letter_spacing,
+        );
+    }
+
+    let native_surface_view = output
+        .texture
+        .create_view(&wgpu::TextureViewDescriptor::default());
+    let surface_view = native_content
+        .as_ref()
+        .map_or_else(|| native_surface_view.clone(), |lease| lease.view().clone());
+    let native_placement = native_content
+        .as_ref()
+        .map(|content| {
+            romacs_renderer_wgpu::renderer::NativeContentPlacement::new(
+                romacs_renderer_wgpu::renderer::RenderTarget::new(
+                    &native_surface_view,
+                    native_mapping.surface(),
+                ),
+                content,
+            )
+        })
+        .transpose()
+        .map_err(|error| {
+            tracing::error!(?error, "native content placement rejected");
+            FrameRenderFailure::WindowNotReady
+        })?;
+    // Full-frame post shader: compose the ENTIRE frame (content,
+    // transitions, overlays, cursor) into an intermediate texture and
+    // shade it into the swapchain as the LAST step, so every present is
+    // uniformly post-processed (Ghostty semantics — cursor included) and
+    // partial-damage frames cannot mix shaded and unshaded regions.
+    let surface_size = SnapshotSize::new(native.content_size().0, native.content_size().1);
+    let frame_post_src = feature_plan
+        .apply_frame_post
+        .then(|| {
+            surface_size
+                .and_then(|size| composition_targets::ensure_frame_post_src(renderer, render, size))
+        })
+        .flatten();
+    let frame_post_active = frame_post_src.is_some();
+    let composition_view = frame_post_src.unwrap_or_else(|| surface_view.clone());
+    let old_scale_factor = renderer.scale_factor();
+    let old_width = renderer.width();
+    let old_height = renderer.height();
+    renderer.set_scale_factor(native.scale_factor as f32);
+    renderer.resize(native.content_size().0, native.content_size().1);
+    let cursor_visible = render.cursor.blink_on;
+    composition_targets::report_unpooled_gpu_textures(renderer, render);
+
+    let inputs = FrameDrawInputs {
+        present_mapping,
+        root_animated_cursor,
+        animated_cursor,
+        bg_gradient,
+        child_frame_style,
+        scroll_indicators_enabled,
+        retain_scroll_body: extra_line_spacing == 0.0 && extra_letter_spacing == 0.0,
+        toolbar,
+        models,
+    };
+
+    // The retained-static fast path is a whole composition strategy; it
+    // owns its own eligibility rule and its own draw. What the draw order
+    // keeps is the decision to take it and the tail every strategy shares.
+    // Read once, so the composite and the frame-post step provably see one
+    // value. The scroll-bar highlight takes the *projected* answer rather than
+    // this raw position — the two differ whenever a pane is in motion, which is
+    // the bug that put the highlight on the wrong thumb.
+    let mouse_pos = render
+        .root_frame_point_from_surface(render.mouse_pos.0, render.mouse_pos.1)
+        .unwrap_or((-1.0, -1.0));
+    if retained_static::is_eligible(compositor_only_hint, &pane_blits, render) {
+        let hovered_scroll_bar = render.hovered_scroll_bar(&frame);
+        let draw_result = retained_static::draw(
+            renderer,
+            native,
+            render,
+            &composition_view,
+            &frame,
+            &inputs,
+            cursor_visible,
+            hovered_scroll_bar,
+        );
+        let models = match draw_result {
+            Ok(models) => models,
+            Err(error) => {
+                // Submit what was drawn into `output` before it is dropped.
+                renderer.flush_frame_submission();
+                renderer.set_scale_factor(old_scale_factor);
+                renderer.resize(old_width, old_height);
+                render.mark_dirty();
+                return Err(error);
+            }
+        };
+        let _non_root = romacs_renderer_wgpu::diagnostics::Span::new(
+            romacs_display_protocol::present_trace::Stage::NonRootStart,
+            romacs_display_protocol::present_trace::Stage::NonRootEnd,
+            render.emacs_frame_id,
+            frame.presentation_id,
+        );
+        if frame_post_active {
+            renderer.frame_post_to_view(
+                &composition_view,
+                &surface_view,
+                native.content_size().0,
+                native.content_size().1,
+                mouse_pos,
+            );
+        }
+        render.finish_pointer_paint_render();
+        if let Some(placement) = native_placement {
+            renderer.place_native_content_with_opacity(
+                placement,
+                frame.background,
+                render.applied_frame_alpha,
+            );
+        }
+        renderer.set_scale_factor(old_scale_factor);
+        renderer.resize(old_width, old_height);
+        // Forwarded, not discarded. Eligibility requires only that this frame
+        // *places* nothing — and `sample_pane_layout` has one path that places
+        // nothing while still producing a projection: a retarget that leaves
+        // the panes already where the new layout wants them ends the motion and
+        // publishes the settled transform. Hardcoding `None` here dropped it,
+        // so hit testing went on using the morph's last mid-motion transform
+        // for every frame afterwards, until some later morph happened to
+        // publish again.
+        // Eligibility excludes every composition that shows an older
+        // picture (pane placement, transitions, child crossfades): the
+        // raster's own provenance is the whole picture.
+        return Ok(RenderedFrameSurface {
+            output,
+            frame,
+            projection: pane_projection,
+            models,
+            blends_older: false,
+        });
+    }
+
+    // Rotated here rather than at the top of the frame: every path above
+    // returns without composing anything, and advancing for a frame that
+    // is never drawn would retire the picture a transition still needs.
+    let composition = need_offscreen
+        .then(|| composition_targets::advance_frame_composition(renderer, render, surface_size))
+        .flatten();
+    let draw_result = match composition.as_ref() {
+        Some(composition) => full_render::through_composition_ring(
+            &acquired,
+            renderer,
+            native,
+            render,
+            composition,
+            &composition_view,
+            &mut frame,
+            &inputs,
+            cursor_visible,
+            feature_plan.accept_derived_effects,
+            &pane_blits,
+        ),
+        None => full_render::onto_target(
+            &acquired,
+            renderer,
+            native,
+            render,
+            &composition_view,
+            &mut frame,
+            &inputs,
+            cursor_visible,
+            feature_plan.accept_derived_effects,
+        ),
+    };
+    if let Err(error) = draw_result {
+        // Submit what was drawn into `output` before it is dropped.
+        renderer.flush_frame_submission();
+        renderer.set_scale_factor(old_scale_factor);
+        renderer.resize(old_width, old_height);
+        render.mark_dirty();
+        return Err(error);
+    }
+
+    // A full composition replaces the whole picture: it holds exactly the
+    // models its glyph passes (root and child frames) composited now, so a
+    // fully clipped glyph pictures nothing.
+    let models = super::models::picture_of(renderer.take_drawn_surfaces(), models);
+    // Asked after the composition, so a transition or child crossfade that
+    // finished this frame (showing the new picture alone) no longer counts.
+    let blends_older = model_provenance::blends_older_pictures(
+        render,
+        !pane_blits.is_empty(),
+        renderer.frame_sample(),
+    );
+
+    let _non_root = romacs_renderer_wgpu::diagnostics::Span::new(
+        romacs_display_protocol::present_trace::Stage::NonRootStart,
+        romacs_display_protocol::present_trace::Stage::NonRootEnd,
+        render.emacs_frame_id,
+        frame.presentation_id,
+    );
+    if frame_post_active {
+        renderer.frame_post_to_view(
+            &composition_view,
+            &surface_view,
+            native.content_size().0,
+            native.content_size().1,
+            mouse_pos,
+        );
+    }
+    render.finish_pointer_paint_render();
+    if let Some(placement) = native_placement {
+        renderer.place_native_content_with_opacity(
+            placement,
+            frame.background,
+            render.applied_frame_alpha,
+        );
+    }
+    renderer.set_scale_factor(old_scale_factor);
+    renderer.resize(old_width, old_height);
+    Ok(RenderedFrameSurface {
+        output,
+        frame,
+        projection: pane_projection,
+        models,
+        blends_older,
+    })
+}
+
+#[cfg(test)]
+#[path = "tests/render_pass_test.rs"]
+mod tests;

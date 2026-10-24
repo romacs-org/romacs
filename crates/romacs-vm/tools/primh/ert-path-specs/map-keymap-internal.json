@@ -1,0 +1,22 @@
+{
+  "name": "map-keymap-internal",
+  "arity": [
+    2,
+    2
+  ],
+  "args": [
+    "boundary-no-domain",
+    "boundary-no-domain"
+  ],
+  "effect": "global",
+  "gnu_files": [
+    "keymap.c",
+    "chartab.c"
+  ],
+  "probes": [
+    "(let ((p '(keymap (p . q))) (seen nil)) (list (eq p (map-keymap-internal (lambda (k v) (setq seen (cons (cons k v) seen))) (cons 'keymap (cons '(a . b) p)))) (nreverse seen)))",
+    "(let ((seen nil)) (map-keymap-internal (lambda (k v) (setq seen (cons (cons k v) seen))) '(keymap (a . t) (b . nil))) (nreverse seen))"
+  ],
+  "gnu_def": "keymap.c:613",
+  "rust": "src/prims/map_keymap.rs:42"
+}

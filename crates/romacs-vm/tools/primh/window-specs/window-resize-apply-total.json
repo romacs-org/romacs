@@ -1,0 +1,35 @@
+{
+ "name": "window-resize-apply-total",
+ "arity": [
+  0,
+  2
+ ],
+ "effect": "global",
+ "gnu_files": [
+  "window.c"
+ ],
+ "gnu_def": "window.c:5003",
+ "rust": "src/prims/window.rs:171",
+ "args": [
+  "none",
+  "none"
+ ],
+ "extra": {
+  "0": [
+   "1",
+   "'sym"
+  ],
+  "1": [
+   "nil"
+  ]
+ },
+ "probes": [
+  "(window-resize-apply-total)",
+  "(window-resize-apply-total nil t)",
+  "(window-resize-apply-total (selected-frame))",
+  "(condition-case e (window-resize-apply-total (selected-window)) (error (list (car e) (car (cdr e)) (eq (car (cdr (cdr e))) (selected-window)))))",
+  "(let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (list (window-resize-apply-total) (window-live-p a) (window-live-p b) (eq (window-parent a) p)))",
+  "(progn (set-window-new-total (frame-root-window) 7) (window-resize-apply-total) (window-total-height))",
+  "(progn (set-window-new-total (frame-root-window) (window-total-height)) (set-window-new-total (minibuffer-window) 1) (list (window-resize-apply-total) (window-total-height (minibuffer-window))))"
+ ]
+}

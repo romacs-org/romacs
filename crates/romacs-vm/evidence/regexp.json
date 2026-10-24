@@ -1,0 +1,5337 @@
+{
+ "protocol": "vm2-regexp-compiled-v1",
+ "generator_sha256": "fce0e14df651dc28017c9787b1cc55e3753d5326df644000906e7ea800f6f4d7",
+ "regime": "fresh process each case; GNU byte-compiled; VM2 compiled",
+ "gc": "VM2 floor 1; GNU default; no timing claim",
+ "gnu_sources": {
+  "search.c": "3b9dda9f663ba44c64823daac395c38b46cc3cf47b72b370af864be075ef8375",
+  "regex-emacs.c": "a3ddba20193e09699c1851ce23f481bef43635e47b460b17fb0387152b0f73a7"
+ },
+ "gnu_sha256": "20a94ee7abc04960e3296deead030a37866d1d1e1522f3efd818838af7fffbe4",
+ "cases": [
+  {
+   "family": "string",
+   "source": "(string-match \"b\" \"abc\")",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "string-match",
+     {
+      "string": "b"
+     },
+     {
+      "string": "abc"
+     }
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "1"
+  },
+  {
+   "family": "string",
+   "source": "(string-match \"x\" \"abc\")",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "string-match",
+     {
+      "string": "x"
+     },
+     {
+      "string": "abc"
+     }
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "nil"
+  },
+  {
+   "family": "string",
+   "source": "(string-match \"b\" \"ab ab\" 2)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "string-match",
+     {
+      "string": "b"
+     },
+     {
+      "string": "ab ab"
+     },
+     2
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "4"
+  },
+  {
+   "family": "string",
+   "source": "(string-match \"b\" \"ab ab\" -2)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "string-match",
+     {
+      "string": "b"
+     },
+     {
+      "string": "ab ab"
+     },
+     -2
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "4"
+  },
+  {
+   "family": "string",
+   "source": "(string-match \"\" \"abc\" 3)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "string-match",
+     {
+      "string": ""
+     },
+     {
+      "string": "abc"
+     },
+     3
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "3"
+  },
+  {
+   "family": "string",
+   "source": "(string-match \"a\" \"abc\" 4)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "string-match",
+     {
+      "string": "a"
+     },
+     {
+      "string": "abc"
+     },
+     4
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(signal (args-out-of-range \"abc\" 4))"
+  },
+  {
+   "family": "string",
+   "source": "(string-match \"a\" \"abc\" -4)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "string-match",
+     {
+      "string": "a"
+     },
+     {
+      "string": "abc"
+     },
+     -4
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(signal (args-out-of-range \"abc\" -4))"
+  },
+  {
+   "family": "string",
+   "source": "(string-match 3 \"abc\")",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "string-match",
+     3,
+     {
+      "string": "abc"
+     }
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(signal (wrong-type-argument stringp 3))"
+  },
+  {
+   "family": "string",
+   "source": "(string-match \"a\" 3)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "string-match",
+     {
+      "string": "a"
+     },
+     3
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(signal (wrong-type-argument stringp 3))"
+  },
+  {
+   "family": "string",
+   "source": "(string-match \"a\" \"abc\" 'bad)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "string-match",
+     {
+      "string": "a"
+     },
+     {
+      "string": "abc"
+     },
+     [
+      "quote",
+      "bad"
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(signal (wrong-type-argument fixnump bad))"
+  },
+  {
+   "family": "groups",
+   "source": "(progn (string-match \"\\\\(a\\\\)\\\\(b\\\\)?\\\\(c\\\\)\" \"ac\") (list (match-beginning 0) (match-end 0) (match-beginning 1) (match-end 1) (match-beginning 2) (match-end 2) (match-string 3 \"ac\") (match-data)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "progn",
+     [
+      "string-match",
+      {
+       "string": "\\(a\\)\\(b\\)?\\(c\\)"
+      },
+      {
+       "string": "ac"
+      }
+     ],
+     [
+      "list",
+      [
+       "match-beginning",
+       0
+      ],
+      [
+       "match-end",
+       0
+      ],
+      [
+       "match-beginning",
+       1
+      ],
+      [
+       "match-end",
+       1
+      ],
+      [
+       "match-beginning",
+       2
+      ],
+      [
+       "match-end",
+       2
+      ],
+      [
+       "match-string",
+       3,
+       {
+        "string": "ac"
+       }
+      ],
+      [
+       "match-data"
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(0 2 0 1 nil nil \"c\" (0 2 0 1 nil nil 1 2))"
+  },
+  {
+   "family": "groups",
+   "source": "(progn (string-match \"a\\\\(b\\\\)?\" \"a\") (list (match-string 1 \"a\") (match-beginning 99) (match-data)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "progn",
+     [
+      "string-match",
+      {
+       "string": "a\\(b\\)?"
+      },
+      {
+       "string": "a"
+      }
+     ],
+     [
+      "list",
+      [
+       "match-string",
+       1,
+       {
+        "string": "a"
+       }
+      ],
+      [
+       "match-beginning",
+       99
+      ],
+      [
+       "match-data"
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(nil nil (0 1))"
+  },
+  {
+   "family": "groups",
+   "source": "(progn (string-match \"b\" \"abc\") (match-string 0 \"xyz\"))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "progn",
+     [
+      "string-match",
+      {
+       "string": "b"
+      },
+      {
+       "string": "abc"
+      }
+     ],
+     [
+      "match-string",
+      0,
+      {
+       "string": "xyz"
+      }
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "\"y\""
+  },
+  {
+   "family": "groups",
+   "source": "(progn (string-match \"b\" \"abc\") (match-beginning -1))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "progn",
+     [
+      "string-match",
+      {
+       "string": "b"
+      },
+      {
+       "string": "abc"
+      }
+     ],
+     [
+      "match-beginning",
+      -1
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(signal (args-out-of-range -1 0))"
+  },
+  {
+   "family": "groups",
+   "source": "(progn (string-match \"b\" \"abc\") (match-end 'bad))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "progn",
+     [
+      "string-match",
+      {
+       "string": "b"
+      },
+      {
+       "string": "abc"
+      }
+     ],
+     [
+      "match-end",
+      [
+       "quote",
+       "bad"
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(signal (wrong-type-argument fixnump bad))"
+  },
+  {
+   "family": "gc",
+   "source": "(let ((s (copy-sequence \"αabcβ\"))) (string-match \"\\\\(ab\\\\)c\" s) (dotimes (i 50) (cons i i)) (list (match-string 0 s) (match-string 1 s) (match-data)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "let",
+     [
+      [
+       "s",
+       [
+        "copy-sequence",
+        {
+         "string": "αabcβ"
+        }
+       ]
+      ]
+     ],
+     [
+      "string-match",
+      {
+       "string": "\\(ab\\)c"
+      },
+      "s"
+     ],
+     [
+      "dotimes",
+      [
+       "i",
+       50
+      ],
+      [
+       "cons",
+       "i",
+       "i"
+      ]
+     ],
+     [
+      "list",
+      [
+       "match-string",
+       0,
+       "s"
+      ],
+      [
+       "match-string",
+       1,
+       "s"
+      ],
+      [
+       "match-data"
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(\"abc\" \"ab\" (1 4 1 3))"
+  },
+  {
+   "family": "fold",
+   "source": "(let ((case-fold-search t)) (string-match \"ÄB\" \"xäb\"))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "let",
+     [
+      [
+       "case-fold-search",
+       "t"
+      ]
+     ],
+     [
+      "string-match",
+      {
+       "string": "ÄB"
+      },
+      {
+       "string": "xäb"
+      }
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "1"
+  },
+  {
+   "family": "fold",
+   "source": "(let ((case-fold-search nil)) (string-match \"ÄB\" \"xäb\"))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "let",
+     [
+      [
+       "case-fold-search",
+       "nil"
+      ]
+     ],
+     [
+      "string-match",
+      {
+       "string": "ÄB"
+      },
+      {
+       "string": "xäb"
+      }
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "nil"
+  },
+  {
+   "family": "fold",
+   "source": "(let ((case-fold-search t)) (string-match \"[A-Z]+\" \"abc\"))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "let",
+     [
+      [
+       "case-fold-search",
+       "t"
+      ]
+     ],
+     [
+      "string-match",
+      {
+       "string": "[A-Z]+"
+      },
+      {
+       "string": "abc"
+      }
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "0"
+  },
+  {
+   "family": "syntax",
+   "source": "(string-match \"\\\\bfoo\\\\b\" \"x foo!\")",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "string-match",
+     {
+      "string": "\\bfoo\\b"
+     },
+     {
+      "string": "x foo!"
+     }
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "2"
+  },
+  {
+   "family": "syntax",
+   "source": "(string-match \"\\\\_<foo\\\\_>\" \"foo_bar foo\")",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "string-match",
+     {
+      "string": "\\_<foo\\_>"
+     },
+     {
+      "string": "foo_bar foo"
+     }
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "8"
+  },
+  {
+   "family": "syntax",
+   "source": "(string-match \"\\\\w+\\\\s-+\\\\w+\" \"foo bar\")",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "string-match",
+     {
+      "string": "\\w+\\s-+\\w+"
+     },
+     {
+      "string": "foo bar"
+     }
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "0"
+  },
+  {
+   "family": "engine",
+   "source": "(progn (string-match \"\\\\(ab\\\\)\\\\1\" \"zabab\") (match-string 0 \"zabab\"))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "progn",
+     [
+      "string-match",
+      {
+       "string": "\\(ab\\)\\1"
+      },
+      {
+       "string": "zabab"
+      }
+     ],
+     [
+      "match-string",
+      0,
+      {
+       "string": "zabab"
+      }
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "\"abab\""
+  },
+  {
+   "family": "engine",
+   "source": "(string-match \"[\" \"abc\")",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "string-match",
+     {
+      "string": "["
+     },
+     {
+      "string": "abc"
+     }
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(signal (invalid-regexp \"Unmatched [ or [^\"))"
+  },
+  {
+   "family": "engine",
+   "source": "(string-match \"a\\\\{2,3\\\\}\" \"aaaa\")",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "string-match",
+     {
+      "string": "a\\{2,3\\}"
+     },
+     {
+      "string": "aaaa"
+     }
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "0"
+  },
+  {
+   "family": "engine",
+   "source": "(string-match \"a.*?b\" \"a1b2b\")",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "string-match",
+     {
+      "string": "a.*?b"
+     },
+     {
+      "string": "a1b2b"
+     }
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "0"
+  },
+  {
+   "family": "unicode",
+   "source": "(progn (string-match \"\\\\(β😀\\\\)\" \"αβ😀x\") (list (match-beginning 0) (match-end 0) (match-string 1 \"αβ😀x\")))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "progn",
+     [
+      "string-match",
+      {
+       "string": "\\(β😀\\)"
+      },
+      {
+       "string": "αβ😀x"
+      }
+     ],
+     [
+      "list",
+      [
+       "match-beginning",
+       0
+      ],
+      [
+       "match-end",
+       0
+      ],
+      [
+       "match-string",
+       1,
+       {
+        "string": "αβ😀x"
+       }
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(1 3 \"β😀\")"
+  },
+  {
+   "family": "inhibit",
+   "source": "(progn (string-match \"b\" \"abc\") (string-match \"x\" \"xyz\" nil t) (match-data))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "progn",
+     [
+      "string-match",
+      {
+       "string": "b"
+      },
+      {
+       "string": "abc"
+      }
+     ],
+     [
+      "string-match",
+      {
+       "string": "x"
+      },
+      {
+       "string": "xyz"
+      },
+      "nil",
+      "t"
+     ],
+     [
+      "match-data"
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(1 2)"
+  },
+  {
+   "family": "inhibit",
+   "source": "(progn (string-match \"b\" \"abc\") (let ((inhibit-changing-match-data t)) (string-match \"x\" \"xyz\")) (match-data))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "progn",
+     [
+      "string-match",
+      {
+       "string": "b"
+      },
+      {
+       "string": "abc"
+      }
+     ],
+     [
+      "let",
+      [
+       [
+        "inhibit-changing-match-data",
+        "t"
+       ]
+      ],
+      [
+       "string-match",
+       {
+        "string": "x"
+       },
+       {
+        "string": "xyz"
+       }
+      ]
+     ],
+     [
+      "match-data"
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(1 2)"
+  },
+  {
+   "family": "edge",
+   "source": "(with-temp-buffer (insert \"XYZ\") (goto-char 1) (string-match \"b\" \"abc\") (match-string 0))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "with-temp-buffer",
+     [
+      "insert",
+      {
+       "string": "XYZ"
+      }
+     ],
+     [
+      "goto-char",
+      1
+     ],
+     [
+      "string-match",
+      {
+       "string": "b"
+      },
+      {
+       "string": "abc"
+      }
+     ],
+     [
+      "match-string",
+      0
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "\"X\""
+  },
+  {
+   "family": "edge",
+   "source": "(with-temp-buffer (insert \"XYZ\") (goto-char 1) (string-match \"a\" \"abc\") (condition-case e (match-string 0) (args-out-of-range (list (car e) (cdr (cdr e))))))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "with-temp-buffer",
+     [
+      "insert",
+      {
+       "string": "XYZ"
+      }
+     ],
+     [
+      "goto-char",
+      1
+     ],
+     [
+      "string-match",
+      {
+       "string": "a"
+      },
+      {
+       "string": "abc"
+      }
+     ],
+     [
+      "condition-case",
+      "e",
+      [
+       "match-string",
+       0
+      ],
+      [
+       "args-out-of-range",
+       [
+        "list",
+        [
+         "car",
+         "e"
+        ],
+        [
+         "cdr",
+         [
+          "cdr",
+          "e"
+         ]
+        ]
+       ]
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(args-out-of-range (0 1))"
+  },
+  {
+   "family": "looking",
+   "source": "(with-temp-buffer (insert \"ab ab ac\") (goto-char 1) (list (looking-at \"ab\") (point) (match-beginning 0) (match-end 0) (match-string 0)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "with-temp-buffer",
+     [
+      "insert",
+      {
+       "string": "ab ab ac"
+      }
+     ],
+     [
+      "goto-char",
+      1
+     ],
+     [
+      "list",
+      [
+       "looking-at",
+       {
+        "string": "ab"
+       }
+      ],
+      [
+       "point"
+      ],
+      [
+       "match-beginning",
+       0
+      ],
+      [
+       "match-end",
+       0
+      ],
+      [
+       "match-string",
+       0
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(t 1 1 3 \"ab\")"
+  },
+  {
+   "family": "looking",
+   "source": "(with-temp-buffer (insert \"ab ab ac\") (goto-char 1) (goto-char 2) (list (looking-at \"ab\") (point)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "with-temp-buffer",
+     [
+      "insert",
+      {
+       "string": "ab ab ac"
+      }
+     ],
+     [
+      "goto-char",
+      1
+     ],
+     [
+      "goto-char",
+      2
+     ],
+     [
+      "list",
+      [
+       "looking-at",
+       {
+        "string": "ab"
+       }
+      ],
+      [
+       "point"
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(nil 2)"
+  },
+  {
+   "family": "looking",
+   "source": "(with-temp-buffer (insert \"ab ab ac\") (goto-char 1) (goto-char 4) (list (looking-at \"\\\\(a\\\\)b\") (point) (match-string 1)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "with-temp-buffer",
+     [
+      "insert",
+      {
+       "string": "ab ab ac"
+      }
+     ],
+     [
+      "goto-char",
+      1
+     ],
+     [
+      "goto-char",
+      4
+     ],
+     [
+      "list",
+      [
+       "looking-at",
+       {
+        "string": "\\(a\\)b"
+       }
+      ],
+      [
+       "point"
+      ],
+      [
+       "match-string",
+       1
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(t 4 \"a\")"
+  },
+  {
+   "family": "looking",
+   "source": "(with-temp-buffer (insert \"ab ab ac\") (goto-char 1) (looking-at \"a\") (looking-at \"ab\" t) (match-end 0))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "with-temp-buffer",
+     [
+      "insert",
+      {
+       "string": "ab ab ac"
+      }
+     ],
+     [
+      "goto-char",
+      1
+     ],
+     [
+      "looking-at",
+      {
+       "string": "a"
+      }
+     ],
+     [
+      "looking-at",
+      {
+       "string": "ab"
+      },
+      "t"
+     ],
+     [
+      "match-end",
+      0
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "2"
+  },
+  {
+   "family": "narrow",
+   "source": "(with-temp-buffer (insert \"ab ab ac\") (goto-char 1) (narrow-to-region 4 6) (goto-char 4) (list (looking-at \"\\\\`ab\\\\'\") (match-beginning 0) (match-end 0) (point)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "with-temp-buffer",
+     [
+      "insert",
+      {
+       "string": "ab ab ac"
+      }
+     ],
+     [
+      "goto-char",
+      1
+     ],
+     [
+      "narrow-to-region",
+      4,
+      6
+     ],
+     [
+      "goto-char",
+      4
+     ],
+     [
+      "list",
+      [
+       "looking-at",
+       {
+        "string": "\\`ab\\'"
+       }
+      ],
+      [
+       "match-beginning",
+       0
+      ],
+      [
+       "match-end",
+       0
+      ],
+      [
+       "point"
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(t 4 6 4)"
+  },
+  {
+   "family": "forward",
+   "source": "(with-temp-buffer (insert \"ab ab ac\") (goto-char 1) (list (re-search-forward \"ab\") (point) (match-string 0)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "with-temp-buffer",
+     [
+      "insert",
+      {
+       "string": "ab ab ac"
+      }
+     ],
+     [
+      "goto-char",
+      1
+     ],
+     [
+      "list",
+      [
+       "re-search-forward",
+       {
+        "string": "ab"
+       }
+      ],
+      [
+       "point"
+      ],
+      [
+       "match-string",
+       0
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(3 3 \"ab\")"
+  },
+  {
+   "family": "forward",
+   "source": "(with-temp-buffer (insert \"ab ab ac\") (goto-char 1) (list (re-search-forward \"ab\" nil nil 2) (point) (match-beginning 0) (match-end 0)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "with-temp-buffer",
+     [
+      "insert",
+      {
+       "string": "ab ab ac"
+      }
+     ],
+     [
+      "goto-char",
+      1
+     ],
+     [
+      "list",
+      [
+       "re-search-forward",
+       {
+        "string": "ab"
+       },
+       "nil",
+       "nil",
+       2
+      ],
+      [
+       "point"
+      ],
+      [
+       "match-beginning",
+       0
+      ],
+      [
+       "match-end",
+       0
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(6 6 4 6)"
+  },
+  {
+   "family": "backward",
+   "source": "(with-temp-buffer (insert \"ab ab ac\") (goto-char 1) (goto-char (point-max)) (list (re-search-backward \"ab\") (point) (match-string 0)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "with-temp-buffer",
+     [
+      "insert",
+      {
+       "string": "ab ab ac"
+      }
+     ],
+     [
+      "goto-char",
+      1
+     ],
+     [
+      "goto-char",
+      [
+       "point-max"
+      ]
+     ],
+     [
+      "list",
+      [
+       "re-search-backward",
+       {
+        "string": "ab"
+       }
+      ],
+      [
+       "point"
+      ],
+      [
+       "match-string",
+       0
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(4 4 \"ab\")"
+  },
+  {
+   "family": "backward",
+   "source": "(with-temp-buffer (insert \"ab ab ac\") (goto-char 1) (goto-char (point-max)) (list (re-search-backward \"ab\" nil nil 2) (point)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "with-temp-buffer",
+     [
+      "insert",
+      {
+       "string": "ab ab ac"
+      }
+     ],
+     [
+      "goto-char",
+      1
+     ],
+     [
+      "goto-char",
+      [
+       "point-max"
+      ]
+     ],
+     [
+      "list",
+      [
+       "re-search-backward",
+       {
+        "string": "ab"
+       },
+       "nil",
+       "nil",
+       2
+      ],
+      [
+       "point"
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(1 1)"
+  },
+  {
+   "family": "backward",
+   "source": "(with-temp-buffer (insert \"ab ab ac\") (goto-char 1) (goto-char 5) (list (re-search-backward \"ab\" nil t) (point)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "with-temp-buffer",
+     [
+      "insert",
+      {
+       "string": "ab ab ac"
+      }
+     ],
+     [
+      "goto-char",
+      1
+     ],
+     [
+      "goto-char",
+      5
+     ],
+     [
+      "list",
+      [
+       "re-search-backward",
+       {
+        "string": "ab"
+       },
+       "nil",
+       "t"
+      ],
+      [
+       "point"
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(1 1)"
+  },
+  {
+   "family": "backward",
+   "source": "(with-temp-buffer (insert \"ab ab ac\") (goto-char 1) (goto-char 4) (list (re-search-backward \"ab\" nil t) (point)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "with-temp-buffer",
+     [
+      "insert",
+      {
+       "string": "ab ab ac"
+      }
+     ],
+     [
+      "goto-char",
+      1
+     ],
+     [
+      "goto-char",
+      4
+     ],
+     [
+      "list",
+      [
+       "re-search-backward",
+       {
+        "string": "ab"
+       },
+       "nil",
+       "t"
+      ],
+      [
+       "point"
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(1 1)"
+  },
+  {
+   "family": "count",
+   "source": "(with-temp-buffer (insert \"ab ab ac\") (goto-char 1) (goto-char (point-max)) (list (re-search-forward \"ab\" nil nil -1) (point)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "with-temp-buffer",
+     [
+      "insert",
+      {
+       "string": "ab ab ac"
+      }
+     ],
+     [
+      "goto-char",
+      1
+     ],
+     [
+      "goto-char",
+      [
+       "point-max"
+      ]
+     ],
+     [
+      "list",
+      [
+       "re-search-forward",
+       {
+        "string": "ab"
+       },
+       "nil",
+       "nil",
+       -1
+      ],
+      [
+       "point"
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(4 4)"
+  },
+  {
+   "family": "count",
+   "source": "(with-temp-buffer (insert \"ab ab ac\") (goto-char 1) (list (re-search-backward \"ab\" nil nil -1) (point)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "with-temp-buffer",
+     [
+      "insert",
+      {
+       "string": "ab ab ac"
+      }
+     ],
+     [
+      "goto-char",
+      1
+     ],
+     [
+      "list",
+      [
+       "re-search-backward",
+       {
+        "string": "ab"
+       },
+       "nil",
+       "nil",
+       -1
+      ],
+      [
+       "point"
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(3 3)"
+  },
+  {
+   "family": "count",
+   "source": "(with-temp-buffer (insert \"ab ab ac\") (goto-char 1) (list (re-search-forward \"[\" nil nil 0) (point)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "with-temp-buffer",
+     [
+      "insert",
+      {
+       "string": "ab ab ac"
+      }
+     ],
+     [
+      "goto-char",
+      1
+     ],
+     [
+      "list",
+      [
+       "re-search-forward",
+       {
+        "string": "["
+       },
+       "nil",
+       "nil",
+       0
+      ],
+      [
+       "point"
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(1 1)"
+  },
+  {
+   "family": "count",
+   "source": "(with-temp-buffer (insert \"ab ab ac\") (goto-char 1) (list (re-search-forward \"\" nil nil 3) (point)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "with-temp-buffer",
+     [
+      "insert",
+      {
+       "string": "ab ab ac"
+      }
+     ],
+     [
+      "goto-char",
+      1
+     ],
+     [
+      "list",
+      [
+       "re-search-forward",
+       {
+        "string": ""
+       },
+       "nil",
+       "nil",
+       3
+      ],
+      [
+       "point"
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(1 1)"
+  },
+  {
+   "family": "bound",
+   "source": "(with-temp-buffer (insert \"ab ab ac\") (goto-char 1) (list (re-search-forward \"ab\" 2 t) (point)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "with-temp-buffer",
+     [
+      "insert",
+      {
+       "string": "ab ab ac"
+      }
+     ],
+     [
+      "goto-char",
+      1
+     ],
+     [
+      "list",
+      [
+       "re-search-forward",
+       {
+        "string": "ab"
+       },
+       2,
+       "t"
+      ],
+      [
+       "point"
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(nil 1)"
+  },
+  {
+   "family": "bound",
+   "source": "(with-temp-buffer (insert \"ab ab ac\") (goto-char 1) (list (re-search-forward \"ab\" 3 t) (point)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "with-temp-buffer",
+     [
+      "insert",
+      {
+       "string": "ab ab ac"
+      }
+     ],
+     [
+      "goto-char",
+      1
+     ],
+     [
+      "list",
+      [
+       "re-search-forward",
+       {
+        "string": "ab"
+       },
+       3,
+       "t"
+      ],
+      [
+       "point"
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(3 3)"
+  },
+  {
+   "family": "bound",
+   "source": "(with-temp-buffer (insert \"ab ab ac\") (goto-char 1) (goto-char 4) (re-search-forward \"ab\" 2 t))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "with-temp-buffer",
+     [
+      "insert",
+      {
+       "string": "ab ab ac"
+      }
+     ],
+     [
+      "goto-char",
+      1
+     ],
+     [
+      "goto-char",
+      4
+     ],
+     [
+      "re-search-forward",
+      {
+       "string": "ab"
+      },
+      2,
+      "t"
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(signal (error \"Invalid search bound (wrong side of point)\"))"
+  },
+  {
+   "family": "bound",
+   "source": "(with-temp-buffer (insert \"ab ab ac\") (goto-char 1) (re-search-backward \"ab\" 4 t))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "with-temp-buffer",
+     [
+      "insert",
+      {
+       "string": "ab ab ac"
+      }
+     ],
+     [
+      "goto-char",
+      1
+     ],
+     [
+      "re-search-backward",
+      {
+       "string": "ab"
+      },
+      4,
+      "t"
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(signal (error \"Invalid search bound (wrong side of point)\"))"
+  },
+  {
+   "family": "bound",
+   "source": "(with-temp-buffer (insert \"ab ab ac\") (goto-char 1) (goto-char (point-max)) (list (re-search-backward \"ab\" 5 t) (point)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "with-temp-buffer",
+     [
+      "insert",
+      {
+       "string": "ab ab ac"
+      }
+     ],
+     [
+      "goto-char",
+      1
+     ],
+     [
+      "goto-char",
+      [
+       "point-max"
+      ]
+     ],
+     [
+      "list",
+      [
+       "re-search-backward",
+       {
+        "string": "ab"
+       },
+       5,
+       "t"
+      ],
+      [
+       "point"
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(nil 9)"
+  },
+  {
+   "family": "noerror",
+   "source": "(with-temp-buffer (insert \"ab ab ac\") (goto-char 1) (list (re-search-forward \"z\" nil t) (point)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "with-temp-buffer",
+     [
+      "insert",
+      {
+       "string": "ab ab ac"
+      }
+     ],
+     [
+      "goto-char",
+      1
+     ],
+     [
+      "list",
+      [
+       "re-search-forward",
+       {
+        "string": "z"
+       },
+       "nil",
+       "t"
+      ],
+      [
+       "point"
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(nil 1)"
+  },
+  {
+   "family": "noerror",
+   "source": "(with-temp-buffer (insert \"ab ab ac\") (goto-char 1) (list (re-search-forward \"z\" 6 'move) (point)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "with-temp-buffer",
+     [
+      "insert",
+      {
+       "string": "ab ab ac"
+      }
+     ],
+     [
+      "goto-char",
+      1
+     ],
+     [
+      "list",
+      [
+       "re-search-forward",
+       {
+        "string": "z"
+       },
+       6,
+       [
+        "quote",
+        "move"
+       ]
+      ],
+      [
+       "point"
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(nil 6)"
+  },
+  {
+   "family": "noerror",
+   "source": "(with-temp-buffer (insert \"ab ab ac\") (goto-char 1) (re-search-forward \"z\"))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "with-temp-buffer",
+     [
+      "insert",
+      {
+       "string": "ab ab ac"
+      }
+     ],
+     [
+      "goto-char",
+      1
+     ],
+     [
+      "re-search-forward",
+      {
+       "string": "z"
+      }
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(signal (search-failed \"z\"))"
+  },
+  {
+   "family": "noerror",
+   "source": "(with-temp-buffer (insert \"ab ab ac\") (goto-char 1) (goto-char (point-max)) (list (re-search-backward \"z\" 3 'move) (point)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "with-temp-buffer",
+     [
+      "insert",
+      {
+       "string": "ab ab ac"
+      }
+     ],
+     [
+      "goto-char",
+      1
+     ],
+     [
+      "goto-char",
+      [
+       "point-max"
+      ]
+     ],
+     [
+      "list",
+      [
+       "re-search-backward",
+       {
+        "string": "z"
+       },
+       3,
+       [
+        "quote",
+        "move"
+       ]
+      ],
+      [
+       "point"
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(nil 3)"
+  },
+  {
+   "family": "noerror",
+   "source": "(with-temp-buffer (insert \"ab ab ac\") (goto-char 1) (list (re-search-forward \"ab\" nil t 3) (point) (match-beginning 0)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "with-temp-buffer",
+     [
+      "insert",
+      {
+       "string": "ab ab ac"
+      }
+     ],
+     [
+      "goto-char",
+      1
+     ],
+     [
+      "list",
+      [
+       "re-search-forward",
+       {
+        "string": "ab"
+       },
+       "nil",
+       "t",
+       3
+      ],
+      [
+       "point"
+      ],
+      [
+       "match-beginning",
+       0
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(nil 1 4)"
+  },
+  {
+   "family": "narrow",
+   "source": "(with-temp-buffer (insert \"ab ab ac\") (goto-char 1) (narrow-to-region 4 6) (goto-char 4) (list (re-search-forward \"ab\") (point-min) (point-max) (match-beginning 0)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "with-temp-buffer",
+     [
+      "insert",
+      {
+       "string": "ab ab ac"
+      }
+     ],
+     [
+      "goto-char",
+      1
+     ],
+     [
+      "narrow-to-region",
+      4,
+      6
+     ],
+     [
+      "goto-char",
+      4
+     ],
+     [
+      "list",
+      [
+       "re-search-forward",
+       {
+        "string": "ab"
+       }
+      ],
+      [
+       "point-min"
+      ],
+      [
+       "point-max"
+      ],
+      [
+       "match-beginning",
+       0
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(6 4 6 4)"
+  },
+  {
+   "family": "narrow",
+   "source": "(with-temp-buffer (insert \"ab ab ac\") (goto-char 1) (narrow-to-region 4 6) (goto-char 6) (list (re-search-backward \"ab\") (point-min) (point-max)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "with-temp-buffer",
+     [
+      "insert",
+      {
+       "string": "ab ab ac"
+      }
+     ],
+     [
+      "goto-char",
+      1
+     ],
+     [
+      "narrow-to-region",
+      4,
+      6
+     ],
+     [
+      "goto-char",
+      6
+     ],
+     [
+      "list",
+      [
+       "re-search-backward",
+       {
+        "string": "ab"
+       }
+      ],
+      [
+       "point-min"
+      ],
+      [
+       "point-max"
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(4 4 6)"
+  },
+  {
+   "family": "narrow",
+   "source": "(with-temp-buffer (insert \"ab ab ac\") (goto-char 1) (narrow-to-region 4 6) (goto-char 4) (list (re-search-forward \"ac\" nil t) (point)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "with-temp-buffer",
+     [
+      "insert",
+      {
+       "string": "ab ab ac"
+      }
+     ],
+     [
+      "goto-char",
+      1
+     ],
+     [
+      "narrow-to-region",
+      4,
+      6
+     ],
+     [
+      "goto-char",
+      4
+     ],
+     [
+      "list",
+      [
+       "re-search-forward",
+       {
+        "string": "ac"
+       },
+       "nil",
+       "t"
+      ],
+      [
+       "point"
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(nil 4)"
+  },
+  {
+   "family": "fold",
+   "source": "(with-temp-buffer (insert \"ab ab ac\") (goto-char 1) (let ((case-fold-search nil)) (list (looking-at \"AB\") (re-search-forward \"AB\" nil t))))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "with-temp-buffer",
+     [
+      "insert",
+      {
+       "string": "ab ab ac"
+      }
+     ],
+     [
+      "goto-char",
+      1
+     ],
+     [
+      "let",
+      [
+       [
+        "case-fold-search",
+        "nil"
+       ]
+      ],
+      [
+       "list",
+       [
+        "looking-at",
+        {
+         "string": "AB"
+        }
+       ],
+       [
+        "re-search-forward",
+        {
+         "string": "AB"
+        },
+        "nil",
+        "t"
+       ]
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(nil nil)"
+  },
+  {
+   "family": "gc",
+   "source": "(with-temp-buffer (insert \"ab ab ac\") (goto-char 1) (looking-at \"\\\\(a\\\\)b\") (dotimes (i 50) (cons i i)) (list (match-string 0) (match-string 1) (point)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "with-temp-buffer",
+     [
+      "insert",
+      {
+       "string": "ab ab ac"
+      }
+     ],
+     [
+      "goto-char",
+      1
+     ],
+     [
+      "looking-at",
+      {
+       "string": "\\(a\\)b"
+      }
+     ],
+     [
+      "dotimes",
+      [
+       "i",
+       50
+      ],
+      [
+       "cons",
+       "i",
+       "i"
+      ]
+     ],
+     [
+      "list",
+      [
+       "match-string",
+       0
+      ],
+      [
+       "match-string",
+       1
+      ],
+      [
+       "point"
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(\"ab\" \"a\" 1)"
+  },
+  {
+   "family": "syntax",
+   "source": "(with-temp-buffer (set-syntax-table (copy-syntax-table)) (modify-syntax-entry 45 \"w\") (modify-syntax-entry 95 \"w\") (string-match \"\\\\w+\" \"foo-bar _\"))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "with-temp-buffer",
+     [
+      "set-syntax-table",
+      [
+       "copy-syntax-table"
+      ]
+     ],
+     [
+      "modify-syntax-entry",
+      45,
+      {
+       "string": "w"
+      }
+     ],
+     [
+      "modify-syntax-entry",
+      95,
+      {
+       "string": "w"
+      }
+     ],
+     [
+      "string-match",
+      {
+       "string": "\\w+"
+      },
+      {
+       "string": "foo-bar _"
+      }
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "0"
+  },
+  {
+   "family": "syntax",
+   "source": "(with-temp-buffer (set-syntax-table (copy-syntax-table)) (modify-syntax-entry 45 \"w\") (modify-syntax-entry 95 \"w\") (string-match \"\\\\b_\\\\b\" \"foo-bar _\"))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "with-temp-buffer",
+     [
+      "set-syntax-table",
+      [
+       "copy-syntax-table"
+      ]
+     ],
+     [
+      "modify-syntax-entry",
+      45,
+      {
+       "string": "w"
+      }
+     ],
+     [
+      "modify-syntax-entry",
+      95,
+      {
+       "string": "w"
+      }
+     ],
+     [
+      "string-match",
+      {
+       "string": "\\b_\\b"
+      },
+      {
+       "string": "foo-bar _"
+      }
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "8"
+  },
+  {
+   "family": "syntax",
+   "source": "(with-temp-buffer (set-syntax-table (copy-syntax-table)) (modify-syntax-entry 45 \"w\") (modify-syntax-entry 95 \"w\") (string-match \"\\\\s_\" \"foo-bar _\"))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "with-temp-buffer",
+     [
+      "set-syntax-table",
+      [
+       "copy-syntax-table"
+      ]
+     ],
+     [
+      "modify-syntax-entry",
+      45,
+      {
+       "string": "w"
+      }
+     ],
+     [
+      "modify-syntax-entry",
+      95,
+      {
+       "string": "w"
+      }
+     ],
+     [
+      "string-match",
+      {
+       "string": "\\s_"
+      },
+      {
+       "string": "foo-bar _"
+      }
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "nil"
+  },
+  {
+   "family": "syntax",
+   "source": "(with-temp-buffer (set-syntax-table (copy-syntax-table)) (modify-syntax-entry 45 \"w\") (modify-syntax-entry 95 \"w\") (string-match \"\\\\_<foo-bar\\\\_>\" \"foo-bar _\"))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "with-temp-buffer",
+     [
+      "set-syntax-table",
+      [
+       "copy-syntax-table"
+      ]
+     ],
+     [
+      "modify-syntax-entry",
+      45,
+      {
+       "string": "w"
+      }
+     ],
+     [
+      "modify-syntax-entry",
+      95,
+      {
+       "string": "w"
+      }
+     ],
+     [
+      "string-match",
+      {
+       "string": "\\_<foo-bar\\_>"
+      },
+      {
+       "string": "foo-bar _"
+      }
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "0"
+  },
+  {
+   "family": "syntax",
+   "source": "(with-temp-buffer (set-syntax-table (copy-syntax-table)) (modify-syntax-entry 45 \"w\") (modify-syntax-entry 95 \"w\") (string-match \"[[:word:]]+\" \"foo-bar _\"))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "with-temp-buffer",
+     [
+      "set-syntax-table",
+      [
+       "copy-syntax-table"
+      ]
+     ],
+     [
+      "modify-syntax-entry",
+      45,
+      {
+       "string": "w"
+      }
+     ],
+     [
+      "modify-syntax-entry",
+      95,
+      {
+       "string": "w"
+      }
+     ],
+     [
+      "string-match",
+      {
+       "string": "[[:word:]]+"
+      },
+      {
+       "string": "foo-bar _"
+      }
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "0"
+  },
+  {
+   "family": "syntax",
+   "source": "(with-temp-buffer (set-syntax-table (copy-syntax-table)) (modify-syntax-entry 45 \"w\") (insert \"foo-bar\") (goto-char 1) (list (looking-at \"\\\\w+\") (match-string 0) (re-search-forward \"\\\\w+\")))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "with-temp-buffer",
+     [
+      "set-syntax-table",
+      [
+       "copy-syntax-table"
+      ]
+     ],
+     [
+      "modify-syntax-entry",
+      45,
+      {
+       "string": "w"
+      }
+     ],
+     [
+      "insert",
+      {
+       "string": "foo-bar"
+      }
+     ],
+     [
+      "goto-char",
+      1
+     ],
+     [
+      "list",
+      [
+       "looking-at",
+       {
+        "string": "\\w+"
+       }
+      ],
+      [
+       "match-string",
+       0
+      ],
+      [
+       "re-search-forward",
+       {
+        "string": "\\w+"
+       }
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(t \"foo-bar\" 8)"
+  },
+  {
+   "family": "syntax",
+   "source": "(let ((a (generate-new-buffer \"a\")) (b (generate-new-buffer \"b\"))) (set-buffer a) (set-syntax-table (copy-syntax-table)) (modify-syntax-entry 45 \"w\") (set-buffer b) (list (string-match \"\\\\w+\" \"-\") (progn (set-buffer a) (string-match \"\\\\w+\" \"-\"))))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "let",
+     [
+      [
+       "a",
+       [
+        "generate-new-buffer",
+        {
+         "string": "a"
+        }
+       ]
+      ],
+      [
+       "b",
+       [
+        "generate-new-buffer",
+        {
+         "string": "b"
+        }
+       ]
+      ]
+     ],
+     [
+      "set-buffer",
+      "a"
+     ],
+     [
+      "set-syntax-table",
+      [
+       "copy-syntax-table"
+      ]
+     ],
+     [
+      "modify-syntax-entry",
+      45,
+      {
+       "string": "w"
+      }
+     ],
+     [
+      "set-buffer",
+      "b"
+     ],
+     [
+      "list",
+      [
+       "string-match",
+       {
+        "string": "\\w+"
+       },
+       {
+        "string": "-"
+       }
+      ],
+      [
+       "progn",
+       [
+        "set-buffer",
+        "a"
+       ],
+       [
+        "string-match",
+        {
+         "string": "\\w+"
+        },
+        {
+         "string": "-"
+        }
+       ]
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(nil 0)"
+  },
+  {
+   "family": "syntax",
+   "source": "(with-temp-buffer (insert \"a-b\") (put-text-property 2 3 'syntax-table '(2)) (goto-char 1) (let ((parse-sexp-lookup-properties t)) (looking-at \"\\\\w+\") (let ((s (match-string 0))) (list (length s) (get-text-property 1 'syntax-table s)))))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "with-temp-buffer",
+     [
+      "insert",
+      {
+       "string": "a-b"
+      }
+     ],
+     [
+      "put-text-property",
+      2,
+      3,
+      [
+       "quote",
+       "syntax-table"
+      ],
+      [
+       "quote",
+       [
+        2
+       ]
+      ]
+     ],
+     [
+      "goto-char",
+      1
+     ],
+     [
+      "let",
+      [
+       [
+        "parse-sexp-lookup-properties",
+        "t"
+       ]
+      ],
+      [
+       "looking-at",
+       {
+        "string": "\\w+"
+       }
+      ],
+      [
+       "let",
+       [
+        [
+         "s",
+         [
+          "match-string",
+          0
+         ]
+        ]
+       ],
+       [
+        "list",
+        [
+         "length",
+         "s"
+        ],
+        [
+         "get-text-property",
+         1,
+         [
+          "quote",
+          "syntax-table"
+         ],
+         "s"
+        ]
+       ]
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(3 (2))"
+  },
+  {
+   "family": "groups",
+   "source": "(with-temp-buffer (insert \"abc\") (goto-char 1) (looking-at \"\\\\(ab\\\\)c\") (let ((m (match-data))) (list (marker-position (car m)) (marker-position (car (cdr m))) (eq (marker-buffer (car m)) (current-buffer)))))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "with-temp-buffer",
+     [
+      "insert",
+      {
+       "string": "abc"
+      }
+     ],
+     [
+      "goto-char",
+      1
+     ],
+     [
+      "looking-at",
+      {
+       "string": "\\(ab\\)c"
+      }
+     ],
+     [
+      "let",
+      [
+       [
+        "m",
+        [
+         "match-data"
+        ]
+       ]
+      ],
+      [
+       "list",
+       [
+        "marker-position",
+        [
+         "car",
+         "m"
+        ]
+       ],
+       [
+        "marker-position",
+        [
+         "car",
+         [
+          "cdr",
+          "m"
+         ]
+        ]
+       ],
+       [
+        "eq",
+        [
+         "marker-buffer",
+         [
+          "car",
+          "m"
+         ]
+        ],
+        [
+         "current-buffer"
+        ]
+       ]
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(1 4 t)"
+  },
+  {
+   "family": "groups",
+   "source": "(with-temp-buffer (insert \"abc\") (goto-char 1) (looking-at \"a\") (let ((m (match-data t))) (list (car m) (car (cdr m)) (eq (car (cdr (cdr m))) (current-buffer)))))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "with-temp-buffer",
+     [
+      "insert",
+      {
+       "string": "abc"
+      }
+     ],
+     [
+      "goto-char",
+      1
+     ],
+     [
+      "looking-at",
+      {
+       "string": "a"
+      }
+     ],
+     [
+      "let",
+      [
+       [
+        "m",
+        [
+         "match-data",
+         "t"
+        ]
+       ]
+      ],
+      [
+       "list",
+       [
+        "car",
+        "m"
+       ],
+       [
+        "car",
+        [
+         "cdr",
+         "m"
+        ]
+       ],
+       [
+        "eq",
+        [
+         "car",
+         [
+          "cdr",
+          [
+           "cdr",
+           "m"
+          ]
+         ]
+        ],
+        [
+         "current-buffer"
+        ]
+       ]
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(1 2 t)"
+  },
+  {
+   "family": "groups",
+   "source": "(progn (string-match \"b\" \"abc\") (let ((r (list 8 8 8 8))) (list (eq r (match-data t r)) r)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "progn",
+     [
+      "string-match",
+      {
+       "string": "b"
+      },
+      {
+       "string": "abc"
+      }
+     ],
+     [
+      "let",
+      [
+       [
+        "r",
+        [
+         "list",
+         8,
+         8,
+         8,
+         8
+        ]
+       ]
+      ],
+      [
+       "list",
+       [
+        "eq",
+        "r",
+        [
+         "match-data",
+         "t",
+         "r"
+        ]
+       ],
+       "r"
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(t (1 2 nil nil))"
+  },
+  {
+   "family": "groups",
+   "source": "(progn (string-match \"\\\\(b\\\\)\" \"abc\") (let ((r (list 8))) (list (eq r (match-data t r)) r)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "progn",
+     [
+      "string-match",
+      {
+       "string": "\\(b\\)"
+      },
+      {
+       "string": "abc"
+      }
+     ],
+     [
+      "let",
+      [
+       [
+        "r",
+        [
+         "list",
+         8
+        ]
+       ]
+      ],
+      [
+       "list",
+       [
+        "eq",
+        "r",
+        [
+         "match-data",
+         "t",
+         "r"
+        ]
+       ],
+       "r"
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(t (1 2 1 2))"
+  },
+  {
+   "family": "edge",
+   "source": "(with-temp-buffer (insert \"XYZ\") (goto-char 1) (looking-at \"XY\") (string-match \"b\" \"abc\") (list (match-beginning 0) (match-string 0) (match-string 0 \"abc\")))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "with-temp-buffer",
+     [
+      "insert",
+      {
+       "string": "XYZ"
+      }
+     ],
+     [
+      "goto-char",
+      1
+     ],
+     [
+      "looking-at",
+      {
+       "string": "XY"
+      }
+     ],
+     [
+      "string-match",
+      {
+       "string": "b"
+      },
+      {
+       "string": "abc"
+      }
+     ],
+     [
+      "list",
+      [
+       "match-beginning",
+       0
+      ],
+      [
+       "match-string",
+       0
+      ],
+      [
+       "match-string",
+       0,
+       {
+        "string": "abc"
+       }
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(1 \"X\" \"b\")"
+  },
+  {
+   "family": "bound",
+   "source": "(with-temp-buffer (insert \"a\nb\") (goto-char 1) (list (re-search-forward \"a$\" 2 t) (point)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "with-temp-buffer",
+     [
+      "insert",
+      {
+       "string": "a\nb"
+      }
+     ],
+     [
+      "goto-char",
+      1
+     ],
+     [
+      "list",
+      [
+       "re-search-forward",
+       {
+        "string": "a$"
+       },
+       2,
+       "t"
+      ],
+      [
+       "point"
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(2 2)"
+  },
+  {
+   "family": "bound",
+   "source": "(with-temp-buffer (insert \"ab\") (goto-char 1) (list (re-search-forward \"a$\" 2 t) (point)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "with-temp-buffer",
+     [
+      "insert",
+      {
+       "string": "ab"
+      }
+     ],
+     [
+      "goto-char",
+      1
+     ],
+     [
+      "list",
+      [
+       "re-search-forward",
+       {
+        "string": "a$"
+       },
+       2,
+       "t"
+      ],
+      [
+       "point"
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(nil 1)"
+  },
+  {
+   "family": "engine",
+   "source": "(progn (string-match \"b\" \"abc\") (apply #'string-match '(\"a\")))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "progn",
+     [
+      "string-match",
+      {
+       "string": "b"
+      },
+      {
+       "string": "abc"
+      }
+     ],
+     [
+      "apply",
+      [
+       "function",
+       "string-match"
+      ],
+      [
+       "quote",
+       [
+        {
+         "string": "a"
+        }
+       ]
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(signal (wrong-number-of-arguments #<subr string-match> 1))"
+  },
+  {
+   "family": "engine",
+   "source": "(apply #'looking-at nil)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "apply",
+     [
+      "function",
+      "looking-at"
+     ],
+     "nil"
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(signal (wrong-number-of-arguments #<subr looking-at> 0))"
+  },
+  {
+   "family": "engine",
+   "source": "(apply #'match-string '(0 \"abc\" 1))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "apply",
+     [
+      "function",
+      "match-string"
+     ],
+     [
+      "quote",
+      [
+       0,
+       {
+        "string": "abc"
+       },
+       1
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(signal (wrong-number-of-arguments #<subr match-string> 3))"
+  },
+  {
+   "family": "engine",
+   "source": "(progn (string-match \"b\" \"abc\") (match-string 0 3))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "progn",
+     [
+      "string-match",
+      {
+       "string": "b"
+      },
+      {
+       "string": "abc"
+      }
+     ],
+     [
+      "match-string",
+      0,
+      3
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(signal (wrong-type-argument arrayp 3))"
+  },
+  {
+   "family": "engine",
+   "source": "(progn (string-match \"b\" \"abc\") (match-string 0 \"\"))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "progn",
+     [
+      "string-match",
+      {
+       "string": "b"
+      },
+      {
+       "string": "abc"
+      }
+     ],
+     [
+      "match-string",
+      0,
+      {
+       "string": ""
+      }
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(signal (args-out-of-range \"\" 1 2))"
+  },
+  {
+   "family": "unicode",
+   "source": "(progn (string-match \"a\" (unibyte-string 255 97 0)) (list (match-beginning 0) (match-end 0) (aref (match-string 0 (unibyte-string 255 97 0)) 0)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "progn",
+     [
+      "string-match",
+      {
+       "string": "a"
+      },
+      [
+       "unibyte-string",
+       255,
+       97,
+       0
+      ]
+     ],
+     [
+      "list",
+      [
+       "match-beginning",
+       0
+      ],
+      [
+       "match-end",
+       0
+      ],
+      [
+       "aref",
+       [
+        "match-string",
+        0,
+        [
+         "unibyte-string",
+         255,
+         97,
+         0
+        ]
+       ],
+       0
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(1 2 97)"
+  },
+  {
+   "family": "unicode",
+   "source": "(with-temp-buffer (set-buffer-multibyte nil) (insert (unibyte-string 255 97 0)) (goto-char 1) (list (re-search-forward \"a\") (match-beginning 0) (aref (match-string 0) 0)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "with-temp-buffer",
+     [
+      "set-buffer-multibyte",
+      "nil"
+     ],
+     [
+      "insert",
+      [
+       "unibyte-string",
+       255,
+       97,
+       0
+      ]
+     ],
+     [
+      "goto-char",
+      1
+     ],
+     [
+      "list",
+      [
+       "re-search-forward",
+       {
+        "string": "a"
+       }
+      ],
+      [
+       "match-beginning",
+       0
+      ],
+      [
+       "aref",
+       [
+        "match-string",
+        0
+       ],
+       0
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(3 2 97)"
+  },
+  {
+   "family": "bound",
+   "source": "(with-temp-buffer (insert \"abc\") (goto-char 1) (re-search-forward \"b\" (copy-marker 3)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "with-temp-buffer",
+     [
+      "insert",
+      {
+       "string": "abc"
+      }
+     ],
+     [
+      "goto-char",
+      1
+     ],
+     [
+      "re-search-forward",
+      {
+       "string": "b"
+      },
+      [
+       "copy-marker",
+       3
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "3"
+  },
+  {
+   "family": "bound",
+   "source": "(with-temp-buffer (insert \"abc\") (goto-char 1) (re-search-forward \"b\" 'bad))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "with-temp-buffer",
+     [
+      "insert",
+      {
+       "string": "abc"
+      }
+     ],
+     [
+      "goto-char",
+      1
+     ],
+     [
+      "re-search-forward",
+      {
+       "string": "b"
+      },
+      [
+       "quote",
+       "bad"
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(signal (wrong-type-argument integer-or-marker-p bad))"
+  },
+  {
+   "family": "bound",
+   "source": "(with-temp-buffer (insert \"abc\") (goto-char 1) (re-search-forward \"b\" (make-marker)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "with-temp-buffer",
+     [
+      "insert",
+      {
+       "string": "abc"
+      }
+     ],
+     [
+      "goto-char",
+      1
+     ],
+     [
+      "re-search-forward",
+      {
+       "string": "b"
+      },
+      [
+       "make-marker"
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(signal (error \"Marker does not point anywhere\"))"
+  },
+  {
+   "family": "groups",
+   "source": "(progn (string-match \"b\" \"abc\") (match-string 0 [1 2 3]))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "progn",
+     [
+      "string-match",
+      {
+       "string": "b"
+      },
+      {
+       "string": "abc"
+      }
+     ],
+     [
+      "match-string",
+      0,
+      {
+       "vector": [
+        1,
+        2,
+        3
+       ]
+      }
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "[2]"
+  },
+  {
+   "family": "syntax",
+   "source": "(with-temp-buffer (set-syntax-table (copy-syntax-table)) (modify-syntax-entry 45 \"w\") (dotimes (i 100) (copy-sequence \"dead\")) (string-match \"\\\\w\" \"-\"))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "with-temp-buffer",
+     [
+      "set-syntax-table",
+      [
+       "copy-syntax-table"
+      ]
+     ],
+     [
+      "modify-syntax-entry",
+      45,
+      {
+       "string": "w"
+      }
+     ],
+     [
+      "dotimes",
+      [
+       "i",
+       100
+      ],
+      [
+       "copy-sequence",
+       {
+        "string": "dead"
+       }
+      ]
+     ],
+     [
+      "string-match",
+      {
+       "string": "\\w"
+      },
+      {
+       "string": "-"
+      }
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "0"
+  },
+  {
+   "family": "groups",
+   "source": "(with-temp-buffer (insert \"abc\") (goto-char 1) (looking-at \"a\") (let* ((r (match-data)) (m (car r))) (string-match \"b\" \"abc\") (match-data t r t) (list (marker-position m) r)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "with-temp-buffer",
+     [
+      "insert",
+      {
+       "string": "abc"
+      }
+     ],
+     [
+      "goto-char",
+      1
+     ],
+     [
+      "looking-at",
+      {
+       "string": "a"
+      }
+     ],
+     [
+      "let*",
+      [
+       [
+        "r",
+        [
+         "match-data"
+        ]
+       ],
+       [
+        "m",
+        [
+         "car",
+         "r"
+        ]
+       ]
+      ],
+      [
+       "string-match",
+       {
+        "string": "b"
+       },
+       {
+        "string": "abc"
+       }
+      ],
+      [
+       "match-data",
+       "t",
+       "r",
+       "t"
+      ],
+      [
+       "list",
+       [
+        "marker-position",
+        "m"
+       ],
+       "r"
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(nil (1 2))"
+  },
+  {
+   "family": "syntax",
+   "source": "(with-temp-buffer (set-syntax-table (copy-syntax-table)) (modify-syntax-entry 45 \"w\") (string-match \"[[:word:]]+\" \"-\"))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "with-temp-buffer",
+     [
+      "set-syntax-table",
+      [
+       "copy-syntax-table"
+      ]
+     ],
+     [
+      "modify-syntax-entry",
+      45,
+      {
+       "string": "w"
+      }
+     ],
+     [
+      "string-match",
+      {
+       "string": "[[:word:]]+"
+      },
+      {
+       "string": "-"
+      }
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "0"
+  },
+  {
+   "family": "gc",
+   "source": "(progn (set-buffer (generate-new-buffer \"source\")) (insert \"abc\") (goto-char 1) (looking-at \"a\") (set-buffer (generate-new-buffer \"other\")) (dotimes (i 100) (copy-sequence \"dead\")) (let ((m (match-data))) (list (marker-position (car m)) (eq (marker-buffer (car m)) (current-buffer)))))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "progn",
+     [
+      "set-buffer",
+      [
+       "generate-new-buffer",
+       {
+        "string": "source"
+       }
+      ]
+     ],
+     [
+      "insert",
+      {
+       "string": "abc"
+      }
+     ],
+     [
+      "goto-char",
+      1
+     ],
+     [
+      "looking-at",
+      {
+       "string": "a"
+      }
+     ],
+     [
+      "set-buffer",
+      [
+       "generate-new-buffer",
+       {
+        "string": "other"
+       }
+      ]
+     ],
+     [
+      "dotimes",
+      [
+       "i",
+       100
+      ],
+      [
+       "copy-sequence",
+       {
+        "string": "dead"
+       }
+      ]
+     ],
+     [
+      "let",
+      [
+       [
+        "m",
+        [
+         "match-data"
+        ]
+       ]
+      ],
+      [
+       "list",
+       [
+        "marker-position",
+        [
+         "car",
+         "m"
+        ]
+       ],
+       [
+        "eq",
+        [
+         "marker-buffer",
+         [
+          "car",
+          "m"
+         ]
+        ],
+        [
+         "current-buffer"
+        ]
+       ]
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "(1 nil)"
+  },
+  {
+   "family": "engine",
+   "source": "(string-match \"\\\\=\" \"abc\" 2)",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "string-match",
+     {
+      "string": "\\="
+     },
+     {
+      "string": "abc"
+     },
+     2
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "nil"
+  },
+  {
+   "family": "engine",
+   "source": "(with-temp-buffer (insert \"abcdef\") (goto-char 4) (string-match \"\\\\=\" \"abc\"))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "with-temp-buffer",
+     [
+      "insert",
+      {
+       "string": "abcdef"
+      }
+     ],
+     [
+      "goto-char",
+      4
+     ],
+     [
+      "string-match",
+      {
+       "string": "\\="
+      },
+      {
+       "string": "abc"
+      }
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "nil"
+  },
+  {
+   "family": "engine",
+   "source": "(with-temp-buffer (insert \"abcdef\") (goto-char 4) (string-match \"\\\\=\" \"abc\" 2))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "with-temp-buffer",
+     [
+      "insert",
+      {
+       "string": "abcdef"
+      }
+     ],
+     [
+      "goto-char",
+      4
+     ],
+     [
+      "string-match",
+      {
+       "string": "\\="
+      },
+      {
+       "string": "abc"
+      },
+      2
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "nil"
+  },
+  {
+   "family": "syntax",
+   "source": "(with-temp-buffer (insert \"a-b\") (let ((table (copy-syntax-table))) (modify-syntax-entry 45 \"w\" table) (put-text-property 2 3 'syntax-table table)) (goto-char 1) (let ((parse-sexp-lookup-properties t)) (looking-at \"\\\\w+\") (length (match-string 0))))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "with-temp-buffer",
+     [
+      "insert",
+      {
+       "string": "a-b"
+      }
+     ],
+     [
+      "let",
+      [
+       [
+        "table",
+        [
+         "copy-syntax-table"
+        ]
+       ]
+      ],
+      [
+       "modify-syntax-entry",
+       45,
+       {
+        "string": "w"
+       },
+       "table"
+      ],
+      [
+       "put-text-property",
+       2,
+       3,
+       [
+        "quote",
+        "syntax-table"
+       ],
+       "table"
+      ]
+     ],
+     [
+      "goto-char",
+      1
+     ],
+     [
+      "let",
+      [
+       [
+        "parse-sexp-lookup-properties",
+        "t"
+       ]
+      ],
+      [
+       "looking-at",
+       {
+        "string": "\\w+"
+       }
+      ],
+      [
+       "length",
+       [
+        "match-string",
+        0
+       ]
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "3"
+  },
+  {
+   "family": "syntax",
+   "source": "(with-temp-buffer (let ((s (copy-sequence \"a-b\"))) (put-text-property 1 2 'syntax-table '(2) s) (let ((parse-sexp-lookup-properties t)) (string-match \"\\\\w+\" s) (length (match-string 0 s)))))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "with-temp-buffer",
+     [
+      "let",
+      [
+       [
+        "s",
+        [
+         "copy-sequence",
+         {
+          "string": "a-b"
+         }
+        ]
+       ]
+      ],
+      [
+       "put-text-property",
+       1,
+       2,
+       [
+        "quote",
+        "syntax-table"
+       ],
+       [
+        "quote",
+        [
+         2
+        ]
+       ],
+       "s"
+      ],
+      [
+       "let",
+       [
+        [
+         "parse-sexp-lookup-properties",
+         "t"
+        ]
+       ],
+       [
+        "string-match",
+        {
+         "string": "\\w+"
+        },
+        "s"
+       ],
+       [
+        "length",
+        [
+         "match-string",
+         0,
+         "s"
+        ]
+       ]
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "3"
+  },
+  {
+   "family": "syntax",
+   "source": "(with-temp-buffer (let ((s (copy-sequence \"a-b\")) (table (copy-syntax-table))) (modify-syntax-entry 45 \"w\" table) (put-text-property 1 2 'syntax-table table s) (let ((parse-sexp-lookup-properties t)) (string-match \"\\\\w+\" s) (length (match-string 0 s)))))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "with-temp-buffer",
+     [
+      "let",
+      [
+       [
+        "s",
+        [
+         "copy-sequence",
+         {
+          "string": "a-b"
+         }
+        ]
+       ],
+       [
+        "table",
+        [
+         "copy-syntax-table"
+        ]
+       ]
+      ],
+      [
+       "modify-syntax-entry",
+       45,
+       {
+        "string": "w"
+       },
+       "table"
+      ],
+      [
+       "put-text-property",
+       1,
+       2,
+       [
+        "quote",
+        "syntax-table"
+       ],
+       "table",
+       "s"
+      ],
+      [
+       "let",
+       [
+        [
+         "parse-sexp-lookup-properties",
+         "t"
+        ]
+       ],
+       [
+        "string-match",
+        {
+         "string": "\\w+"
+        },
+        "s"
+       ],
+       [
+        "length",
+        [
+         "match-string",
+         0,
+         "s"
+        ]
+       ]
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "3"
+  },
+  {
+   "family": "syntax",
+   "source": "(with-temp-buffer (set-syntax-table (copy-syntax-table)) (modify-syntax-entry 45 \"w\") (insert \"a-b\") (put-text-property 2 3 'syntax-table (copy-syntax-table (standard-syntax-table))) (goto-char 1) (let ((parse-sexp-lookup-properties t)) (looking-at \"\\\\w+\") (length (match-string 0))))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "with-temp-buffer",
+     [
+      "set-syntax-table",
+      [
+       "copy-syntax-table"
+      ]
+     ],
+     [
+      "modify-syntax-entry",
+      45,
+      {
+       "string": "w"
+      }
+     ],
+     [
+      "insert",
+      {
+       "string": "a-b"
+      }
+     ],
+     [
+      "put-text-property",
+      2,
+      3,
+      [
+       "quote",
+       "syntax-table"
+      ],
+      [
+       "copy-syntax-table",
+       [
+        "standard-syntax-table"
+       ]
+      ]
+     ],
+     [
+      "goto-char",
+      1
+     ],
+     [
+      "let",
+      [
+       [
+        "parse-sexp-lookup-properties",
+        "t"
+       ]
+      ],
+      [
+       "looking-at",
+       {
+        "string": "\\w+"
+       }
+      ],
+      [
+       "length",
+       [
+        "match-string",
+        0
+       ]
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "1"
+  },
+  {
+   "family": "syntax",
+   "source": "(with-temp-buffer (let ((s (copy-sequence \"a-b\"))) (put-text-property 1 2 'syntax-table '(2) s) (let ((parse-sexp-lookup-properties nil)) (string-match \"\\\\w+\" s) (length (match-string 0 s)))))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "with-temp-buffer",
+     [
+      "let",
+      [
+       [
+        "s",
+        [
+         "copy-sequence",
+         {
+          "string": "a-b"
+         }
+        ]
+       ]
+      ],
+      [
+       "put-text-property",
+       1,
+       2,
+       [
+        "quote",
+        "syntax-table"
+       ],
+       [
+        "quote",
+        [
+         2
+        ]
+       ],
+       "s"
+      ],
+      [
+       "let",
+       [
+        [
+         "parse-sexp-lookup-properties",
+         "nil"
+        ]
+       ],
+       [
+        "string-match",
+        {
+         "string": "\\w+"
+        },
+        "s"
+       ],
+       [
+        "length",
+        [
+         "match-string",
+         0,
+         "s"
+        ]
+       ]
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "1"
+  },
+  {
+   "family": "syntax",
+   "source": "(with-temp-buffer (insert \"-\") (put-text-property 1 2 'syntax-table '(2)) (goto-char 1) (let ((parse-sexp-lookup-properties t)) (re-search-forward \"[[:word:]]+\" nil t)))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "with-temp-buffer",
+     [
+      "insert",
+      {
+       "string": "-"
+      }
+     ],
+     [
+      "put-text-property",
+      1,
+      2,
+      [
+       "quote",
+       "syntax-table"
+      ],
+      [
+       "quote",
+       [
+        2
+       ]
+      ]
+     ],
+     [
+      "goto-char",
+      1
+     ],
+     [
+      "let",
+      [
+       [
+        "parse-sexp-lookup-properties",
+        "t"
+       ]
+      ],
+      [
+       "re-search-forward",
+       {
+        "string": "[[:word:]]+"
+       },
+       "nil",
+       "t"
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "nil"
+  },
+  {
+   "family": "syntax",
+   "source": "(with-temp-buffer (set-buffer-multibyte nil) (insert \"a-b\") (put-text-property 2 3 'syntax-table '(2)) (goto-char 1) (let ((parse-sexp-lookup-properties t)) (looking-at \"\\\\w+\") (length (match-string 0))))",
+   "version": "32.0.50",
+   "revision": "b28750b822dc45ffdceda3ea44a3c8b93f4e5a6b",
+   "transport": [
+    "condition-case",
+    "e",
+    [
+     "with-temp-buffer",
+     [
+      "set-buffer-multibyte",
+      "nil"
+     ],
+     [
+      "insert",
+      {
+       "string": "a-b"
+      }
+     ],
+     [
+      "put-text-property",
+      2,
+      3,
+      [
+       "quote",
+       "syntax-table"
+      ],
+      [
+       "quote",
+       [
+        2
+       ]
+      ]
+     ],
+     [
+      "goto-char",
+      1
+     ],
+     [
+      "let",
+      [
+       [
+        "parse-sexp-lookup-properties",
+        "t"
+       ]
+      ],
+      [
+       "looking-at",
+       {
+        "string": "\\w+"
+       }
+      ],
+      [
+       "length",
+       [
+        "match-string",
+        0
+       ]
+      ]
+     ]
+    ],
+    [
+     "error",
+     [
+      "list",
+      [
+       "quote",
+       "signal"
+      ],
+      "e"
+     ]
+    ]
+   ],
+   "expected": "3"
+  }
+ ]
+}

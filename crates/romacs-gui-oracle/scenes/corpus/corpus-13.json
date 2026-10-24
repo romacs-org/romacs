@@ -1,0 +1,298 @@
+{
+ "name": "corpus-13",
+ "frame": {
+  "width": 480,
+  "height": 168,
+  "bg": "#ffffff",
+  "fg": "#000000"
+ },
+ "font": {
+  "family": "Liberation Mono",
+  "pixel_size": 20,
+  "regular": "/usr/share/fonts/liberation/LiberationMono-Regular.ttf",
+  "bold": "/usr/share/fonts/liberation/LiberationMono-Bold.ttf",
+  "italic": "/usr/share/fonts/liberation/LiberationMono-Italic.ttf"
+ },
+ "cursor_color": "#00a000",
+ "buffer": [
+  {
+   "text": "[0-9]+"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "window",
+   "underline": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "ψυχή",
+   "fg": "#b8860b"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "fox",
+   "fg": "#ff0000",
+   "bold": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "ήλιος",
+   "fg": "#a020f0"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "Χάος",
+   "fg": "#008000",
+   "italic": true,
+   "bg": "#e0e0ff"
+  },
+  {
+   "text": "\n"
+  },
+  {
+   "text": "{ok}"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "Emacs",
+   "fg": "#ff0000"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "buffer",
+   "fg": "#ff8c00"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "κόσμε"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "ΣΟΦΙΑ"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "βιβλίο",
+   "fg": "#ff0000"
+  },
+  {
+   "text": "\n"
+  },
+  {
+   "text": "λόγος"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "dog",
+   "fg": "#696969",
+   "italic": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "@user",
+   "bold": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "frame"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "jumps",
+   "fg": "#696969"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "Emacs"
+  },
+  {
+   "text": "\n"
+  },
+  {
+   "text": "Ωμέγα"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "ξένος",
+   "fg": "#0000ff"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "ήλιος",
+   "fg": "#0000ff",
+   "underline": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "@user",
+   "fg": "#ff0000",
+   "italic": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "δέντρο"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "fox",
+   "italic": true
+  },
+  {
+   "text": "\n"
+  }
+ ],
+ "point": 134,
+ "expect": {
+  "origin": [
+   0,
+   0
+  ],
+  "rows": [
+   {
+    "text": "[0-9]+ window ψυχή fox ήλιος Χάος",
+    "runs": [
+     {
+      "start": 7,
+      "end": 13,
+      "underline": true
+     },
+     {
+      "start": 14,
+      "end": 18,
+      "fg": "#b8860b"
+     },
+     {
+      "start": 19,
+      "end": 22,
+      "fg": "#ff0000",
+      "bold": true
+     },
+     {
+      "start": 23,
+      "end": 28,
+      "fg": "#a020f0"
+     },
+     {
+      "start": 29,
+      "end": 33,
+      "fg": "#008000",
+      "italic": true,
+      "bg": "#e0e0ff"
+     }
+    ]
+   },
+   {
+    "text": "{ok} Emacs buffer κόσμε ΣΟΦΙΑ βιβλίο",
+    "runs": [
+     {
+      "start": 5,
+      "end": 10,
+      "fg": "#ff0000"
+     },
+     {
+      "start": 11,
+      "end": 17,
+      "fg": "#ff8c00"
+     },
+     {
+      "start": 30,
+      "end": 36,
+      "fg": "#ff0000"
+     }
+    ]
+   },
+   {
+    "text": "λόγος dog @user frame jumps Emacs",
+    "runs": [
+     {
+      "start": 6,
+      "end": 9,
+      "fg": "#696969",
+      "italic": true
+     },
+     {
+      "start": 10,
+      "end": 15,
+      "bold": true
+     },
+     {
+      "start": 22,
+      "end": 27,
+      "fg": "#696969"
+     }
+    ]
+   },
+   {
+    "text": "Ωμέγα ξένος ήλιος @user δέντρο fox",
+    "runs": [
+     {
+      "start": 6,
+      "end": 11,
+      "fg": "#0000ff"
+     },
+     {
+      "start": 12,
+      "end": 17,
+      "fg": "#0000ff",
+      "underline": true
+     },
+     {
+      "start": 18,
+      "end": 23,
+      "fg": "#ff0000",
+      "italic": true
+     },
+     {
+      "start": 31,
+      "end": 34,
+      "italic": true
+     }
+    ]
+   }
+  ],
+  "cursor": {
+   "row": 3,
+   "col": 28
+  }
+ }
+}

@@ -1,0 +1,191 @@
+{
+  "blob": "66b914f62ea1a328f0b25601b573602809295919",
+  "compiled": {
+    "complete": true,
+    "exit": 0,
+    "garbled_lines": 0,
+    "load_error": null,
+    "load_ok": true,
+    "results": {
+      "emacs-tests/bwrap/allows-stdout": {
+        "as_expected": true,
+        "detail": "(ert-test-skipped ((skip-unless (let ((command ...)) (zerop (call-process bash nil nil nil \"-c\" command)))) :form (let ((command (concat ... \" --ro-bind / / --seccomp 20 -- echo Hi 20< \" ...))) (= 0 (call-process bash nil nil nil \"-c\" command))) :value nil))",
+        "expected": ":passed",
+        "outcome": "skipped",
+        "tags": []
+      },
+      "emacs-tests/seccomp/absent-file": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "emacs-tests/seccomp/allows-stdout": {
+        "as_expected": true,
+        "detail": "(ert-test-skipped ((skip-unless (file-readable-p filter)) :form (file-readable-p \"<recording-home>/.hermes/cache/scratch/gts-tree-t8p5ta2b/lib-src/seccomp-filter.bpf\") :value nil))",
+        "expected": ":passed",
+        "outcome": "skipped",
+        "tags": []
+      },
+      "emacs-tests/seccomp/empty-file": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "emacs-tests/seccomp/file-too-large": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "emacs-tests/seccomp/forbids-subprocess": {
+        "as_expected": true,
+        "detail": "(ert-test-skipped ((skip-unless (file-readable-p filter)) :form (file-readable-p \"<recording-home>/.hermes/cache/scratch/gts-tree-t8p5ta2b/lib-src/seccomp-filter.bpf\") :value nil))",
+        "expected": ":passed",
+        "outcome": "skipped",
+        "tags": []
+      },
+      "emacs-tests/seccomp/invalid-file-size": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      }
+    },
+    "timed_out": false
+  },
+  "file": "src/emacs-tests.el",
+  "gnu": {
+    "emacs": "<recording-path-redacted>/emacs-32.0.50",
+    "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+    "sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+    "version": "32.0.50"
+  },
+  "harness_sha256": "78c20850429a08af22faadf73b5d164c560230e83d7eb88ef60cb995670703ef",
+  "mini": {
+    "complete": true,
+    "exit": 0,
+    "garbled_lines": 0,
+    "load_error": null,
+    "load_ok": null,
+    "results": {
+      "emacs-tests/bwrap/allows-stdout": {
+        "as_expected": null,
+        "detail": "((skip-unless (let ((command (concat ... \" --ro-bind / / --seccomp 20 -- echo Hi 20< \" ...))) (zerop (call-process bash nil nil nil \"-c\" command)))))",
+        "expected": ":passed",
+        "outcome": "skipped",
+        "tags": null
+      },
+      "emacs-tests/seccomp/absent-file": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "emacs-tests/seccomp/allows-stdout": {
+        "as_expected": null,
+        "detail": "((skip-unless (file-readable-p filter)))",
+        "expected": ":passed",
+        "outcome": "skipped",
+        "tags": null
+      },
+      "emacs-tests/seccomp/empty-file": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "emacs-tests/seccomp/file-too-large": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "emacs-tests/seccomp/forbids-subprocess": {
+        "as_expected": null,
+        "detail": "((skip-unless (file-readable-p filter)))",
+        "expected": ":passed",
+        "outcome": "skipped",
+        "tags": null
+      },
+      "emacs-tests/seccomp/invalid-file-size": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      }
+    },
+    "timed_out": false
+  },
+  "read_error": null,
+  "real": {
+    "complete": true,
+    "exit": 0,
+    "garbled_lines": 0,
+    "load_error": null,
+    "load_ok": true,
+    "results": {
+      "emacs-tests/bwrap/allows-stdout": {
+        "as_expected": true,
+        "detail": "(ert-test-skipped ((skip-unless (let ((command ...)) (zerop (call-process bash nil nil nil \"-c\" command)))) :form (let ((command (concat ... \" --ro-bind / / --seccomp 20 -- echo Hi 20< \" ...))) (= 0 (call-process bash nil nil nil \"-c\" command))) :value nil))",
+        "expected": ":passed",
+        "outcome": "skipped",
+        "tags": []
+      },
+      "emacs-tests/seccomp/absent-file": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "emacs-tests/seccomp/allows-stdout": {
+        "as_expected": true,
+        "detail": "(ert-test-skipped ((skip-unless (file-readable-p filter)) :form (file-readable-p \"<recording-home>/.hermes/cache/scratch/gts-tree-t8p5ta2b/lib-src/seccomp-filter.bpf\") :value nil))",
+        "expected": ":passed",
+        "outcome": "skipped",
+        "tags": []
+      },
+      "emacs-tests/seccomp/empty-file": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "emacs-tests/seccomp/file-too-large": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "emacs-tests/seccomp/forbids-subprocess": {
+        "as_expected": true,
+        "detail": "(ert-test-skipped ((skip-unless (file-readable-p filter)) :form (file-readable-p \"<recording-home>/.hermes/cache/scratch/gts-tree-t8p5ta2b/lib-src/seccomp-filter.bpf\") :value nil))",
+        "expected": ":passed",
+        "outcome": "skipped",
+        "tags": []
+      },
+      "emacs-tests/seccomp/invalid-file-size": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      }
+    },
+    "timed_out": false
+  },
+  "schema": 1,
+  "toplevel_deftests": 7
+}

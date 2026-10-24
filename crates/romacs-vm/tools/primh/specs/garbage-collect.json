@@ -1,0 +1,16 @@
+{
+  "name": "garbage-collect",
+  "arity": [0, 0],
+  "effect": "global",
+  "gnu_files": ["alloc.c"],
+  "gnu_def": "alloc.c:6030",
+  "rust": "src/prims/garbage_collect.rs:4",
+  "args": [],
+  "probes": [
+    "(mapcar (lambda (row) (list (car row) (length row) (mapcar 'type-of (cdr row)))) (garbage-collect))",
+    "(interactive-form 'garbage-collect)",
+    "(fboundp 'garbage-collect)",
+    "(functionp 'garbage-collect)",
+    "(car (car (funcall 'garbage-collect)))"
+  ]
+}

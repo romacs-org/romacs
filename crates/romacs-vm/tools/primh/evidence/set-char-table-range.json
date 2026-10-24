@@ -1,0 +1,133 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "set-char-table-range",
+ "spec_sha256": "382d6cfeb4b12d35ff1e0ba9205c43294da46acc90a1300c915410a1724b3c82",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "set-char-table-range",
+    "subr",
+    3,
+    3
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "chartab.c": "ee3cc0b6fc04e92281a19ac10493c3db216ab0497c2fe0c12edca33073fe5c51"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "set-char-table-range/0000",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'set-char-table-range '(1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr set-char-table-range> 2))"
+  },
+  {
+   "id": "set-char-table-range/0001",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'set-char-table-range '(1 1 1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr set-char-table-range> 4))"
+  },
+  {
+   "id": "set-char-table-range/0002",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((ct (make-char-table nil 'init))) (set-char-table-range ct nil 'default) (list (aref ct 65) (progn (aset ct 65 nil) (aref ct 65)) (aref ct 66)))) (error (list 'sig e))))",
+   "expected": "(ok (init default init))"
+  },
+  {
+   "id": "set-char-table-range/0003",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((ct (make-char-table nil 'init))) (set-char-table-range ct t 'all) (set-char-table-range ct 65 nil) (list (aref ct 65) (aref ct 66) (aref ct 4194303)))) (error (list 'sig e))))",
+   "expected": "(ok (init all all))"
+  },
+  {
+   "id": "set-char-table-range/0004",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((ct (make-char-table nil))) (set-char-table-range ct '(128 . 4194303) 'wide) (set-char-table-range ct '(1000 . 2000) nil) (set-char-table-range ct '(1500 . 2500) 'overlap) (list (aref ct 127) (aref ct 128) (aref ct 999) (aref ct 1000) (aref ct 1500) (aref ct 2500) (aref ct 2501) (aref ct 128512)))) (error (list 'sig e))))",
+   "expected": "(ok (nil wide wide nil overlap overlap wide wide))"
+  },
+  {
+   "id": "set-char-table-range/0005",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((ct (make-char-table nil))) (set-char-table-range ct '(90 . 65) t) (list (aref ct 64) (aref ct 65) (aref ct 90)))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil nil))"
+  },
+  {
+   "id": "set-char-table-range/0006",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((ct (make-char-table nil))) (eq (set-char-table-range ct 955 'value) 'value))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "set-char-table-range/0007",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-char-table-range (make-char-table nil) -1 'value)) (error (list 'sig e))))",
+   "expected": "(sig (error \"Invalid RANGE argument to ‘set-char-table-range’\"))"
+  },
+  {
+   "id": "set-char-table-range/0008",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-char-table-range (make-char-table nil) 4194304 'value)) (error (list 'sig e))))",
+   "expected": "(sig (error \"Invalid RANGE argument to ‘set-char-table-range’\"))"
+  },
+  {
+   "id": "set-char-table-range/0009",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-char-table-range (make-char-table nil) 1.5 'value)) (error (list 'sig e))))",
+   "expected": "(sig (error \"Invalid RANGE argument to ‘set-char-table-range’\"))"
+  },
+  {
+   "id": "set-char-table-range/0010",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-char-table-range (make-char-table nil) 'bad 'value)) (error (list 'sig e))))",
+   "expected": "(sig (error \"Invalid RANGE argument to ‘set-char-table-range’\"))"
+  },
+  {
+   "id": "set-char-table-range/0011",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-char-table-range (make-char-table nil) '(nil . 1) 'value)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument characterp nil))"
+  },
+  {
+   "id": "set-char-table-range/0012",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-char-table-range (make-char-table nil) '(1 . nil) 'value)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument characterp nil))"
+  },
+  {
+   "id": "set-char-table-range/0013",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-char-table-range (make-char-table nil) '(1 . 4194304) 'value)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument characterp 4194304))"
+  },
+  {
+   "id": "set-char-table-range/0014",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-char-table-range (make-char-table nil) '(1 2) 'value)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument characterp (2)))"
+  },
+  {
+   "id": "set-char-table-range/0015",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-char-table-range 1 nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument char-table-p 1))"
+  },
+  {
+   "id": "set-char-table-range/0016",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (fboundp 'set-char-table-range) (funcall #'set-char-table-range (make-char-table nil) 128512 'astral))) (error (list 'sig e))))",
+   "expected": "(ok (t astral))"
+  }
+ ]
+}

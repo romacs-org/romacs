@@ -1,0 +1,1834 @@
+{
+  "protocol": "reader-integers-and-forms-v1",
+  "gnu_revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "lread_sha256": "f343ea2619bd35d4a0a41c15d3143045acd0cecc06ea0e449c65141b4f146c53",
+  "rows": [
+    {
+      "source": "?\\C-@",
+      "expected": {
+        "type": "integer",
+        "value": 0
+      }
+    },
+    {
+      "source": "?\\C-A",
+      "expected": {
+        "type": "integer",
+        "value": 1
+      }
+    },
+    {
+      "source": "?\\C-Z",
+      "expected": {
+        "type": "integer",
+        "value": 26
+      }
+    },
+    {
+      "source": "?\\C-[",
+      "expected": {
+        "type": "integer",
+        "value": 27
+      }
+    },
+    {
+      "source": "?\\C-\\\\",
+      "expected": {
+        "type": "integer",
+        "value": 28
+      }
+    },
+    {
+      "source": "?\\C-]",
+      "expected": {
+        "type": "integer",
+        "value": 29
+      }
+    },
+    {
+      "source": "?\\C-^",
+      "expected": {
+        "type": "integer",
+        "value": 30
+      }
+    },
+    {
+      "source": "?\\C-_",
+      "expected": {
+        "type": "integer",
+        "value": 31
+      }
+    },
+    {
+      "source": "?\\C-`",
+      "expected": {
+        "type": "integer",
+        "value": 67108960
+      }
+    },
+    {
+      "source": "?\\C-a",
+      "expected": {
+        "type": "integer",
+        "value": 1
+      }
+    },
+    {
+      "source": "?\\C-z",
+      "expected": {
+        "type": "integer",
+        "value": 26
+      }
+    },
+    {
+      "source": "?\\C-?",
+      "expected": {
+        "type": "integer",
+        "value": 127
+      }
+    },
+    {
+      "source": "?\\C-1",
+      "expected": {
+        "type": "integer",
+        "value": 67108913
+      }
+    },
+    {
+      "source": "?\\C- ",
+      "expected": {
+        "type": "integer",
+        "value": 67108896
+      }
+    },
+    {
+      "source": "?\\C-λ",
+      "expected": {
+        "type": "integer",
+        "value": 67109819
+      }
+    },
+    {
+      "source": "?\\^@",
+      "expected": {
+        "type": "integer",
+        "value": 0
+      }
+    },
+    {
+      "source": "?\\^A",
+      "expected": {
+        "type": "integer",
+        "value": 1
+      }
+    },
+    {
+      "source": "?\\^Z",
+      "expected": {
+        "type": "integer",
+        "value": 26
+      }
+    },
+    {
+      "source": "?\\^[",
+      "expected": {
+        "type": "integer",
+        "value": 27
+      }
+    },
+    {
+      "source": "?\\^\\\\",
+      "expected": {
+        "type": "integer",
+        "value": 28
+      }
+    },
+    {
+      "source": "?\\^]",
+      "expected": {
+        "type": "integer",
+        "value": 29
+      }
+    },
+    {
+      "source": "?\\^^",
+      "expected": {
+        "type": "integer",
+        "value": 30
+      }
+    },
+    {
+      "source": "?\\^_",
+      "expected": {
+        "type": "integer",
+        "value": 31
+      }
+    },
+    {
+      "source": "?\\^`",
+      "expected": {
+        "type": "integer",
+        "value": 67108960
+      }
+    },
+    {
+      "source": "?\\^a",
+      "expected": {
+        "type": "integer",
+        "value": 1
+      }
+    },
+    {
+      "source": "?\\^z",
+      "expected": {
+        "type": "integer",
+        "value": 26
+      }
+    },
+    {
+      "source": "?\\^?",
+      "expected": {
+        "type": "integer",
+        "value": 127
+      }
+    },
+    {
+      "source": "?\\^1",
+      "expected": {
+        "type": "integer",
+        "value": 67108913
+      }
+    },
+    {
+      "source": "?\\^ ",
+      "expected": {
+        "type": "integer",
+        "value": 67108896
+      }
+    },
+    {
+      "source": "?\\^λ",
+      "expected": {
+        "type": "integer",
+        "value": 67109819
+      }
+    },
+    {
+      "source": "?\\M-@",
+      "expected": {
+        "type": "integer",
+        "value": 134217792
+      }
+    },
+    {
+      "source": "?\\M-A",
+      "expected": {
+        "type": "integer",
+        "value": 134217793
+      }
+    },
+    {
+      "source": "?\\M-Z",
+      "expected": {
+        "type": "integer",
+        "value": 134217818
+      }
+    },
+    {
+      "source": "?\\M-[",
+      "expected": {
+        "type": "integer",
+        "value": 134217819
+      }
+    },
+    {
+      "source": "?\\M-\\\\",
+      "expected": {
+        "type": "integer",
+        "value": 134217820
+      }
+    },
+    {
+      "source": "?\\M-]",
+      "expected": {
+        "type": "integer",
+        "value": 134217821
+      }
+    },
+    {
+      "source": "?\\M-^",
+      "expected": {
+        "type": "integer",
+        "value": 134217822
+      }
+    },
+    {
+      "source": "?\\M-_",
+      "expected": {
+        "type": "integer",
+        "value": 134217823
+      }
+    },
+    {
+      "source": "?\\M-`",
+      "expected": {
+        "type": "integer",
+        "value": 134217824
+      }
+    },
+    {
+      "source": "?\\M-a",
+      "expected": {
+        "type": "integer",
+        "value": 134217825
+      }
+    },
+    {
+      "source": "?\\M-z",
+      "expected": {
+        "type": "integer",
+        "value": 134217850
+      }
+    },
+    {
+      "source": "?\\M-?",
+      "expected": {
+        "type": "integer",
+        "value": 134217791
+      }
+    },
+    {
+      "source": "?\\M-1",
+      "expected": {
+        "type": "integer",
+        "value": 134217777
+      }
+    },
+    {
+      "source": "?\\M- ",
+      "expected": {
+        "type": "integer",
+        "value": 134217760
+      }
+    },
+    {
+      "source": "?\\M-λ",
+      "expected": {
+        "type": "integer",
+        "value": 134218683
+      }
+    },
+    {
+      "source": "?\\s-@",
+      "expected": {
+        "type": "integer",
+        "value": 8388672
+      }
+    },
+    {
+      "source": "?\\s-A",
+      "expected": {
+        "type": "integer",
+        "value": 8388673
+      }
+    },
+    {
+      "source": "?\\s-Z",
+      "expected": {
+        "type": "integer",
+        "value": 8388698
+      }
+    },
+    {
+      "source": "?\\s-[",
+      "expected": {
+        "type": "integer",
+        "value": 8388699
+      }
+    },
+    {
+      "source": "?\\s-\\\\",
+      "expected": {
+        "type": "integer",
+        "value": 8388700
+      }
+    },
+    {
+      "source": "?\\s-]",
+      "expected": {
+        "type": "integer",
+        "value": 8388701
+      }
+    },
+    {
+      "source": "?\\s-^",
+      "expected": {
+        "type": "integer",
+        "value": 8388702
+      }
+    },
+    {
+      "source": "?\\s-_",
+      "expected": {
+        "type": "integer",
+        "value": 8388703
+      }
+    },
+    {
+      "source": "?\\s-`",
+      "expected": {
+        "type": "integer",
+        "value": 8388704
+      }
+    },
+    {
+      "source": "?\\s-a",
+      "expected": {
+        "type": "integer",
+        "value": 8388705
+      }
+    },
+    {
+      "source": "?\\s-z",
+      "expected": {
+        "type": "integer",
+        "value": 8388730
+      }
+    },
+    {
+      "source": "?\\s-?",
+      "expected": {
+        "type": "integer",
+        "value": 8388671
+      }
+    },
+    {
+      "source": "?\\s-1",
+      "expected": {
+        "type": "integer",
+        "value": 8388657
+      }
+    },
+    {
+      "source": "?\\s- ",
+      "expected": {
+        "type": "integer",
+        "value": 8388640
+      }
+    },
+    {
+      "source": "?\\s-λ",
+      "expected": {
+        "type": "integer",
+        "value": 8389563
+      }
+    },
+    {
+      "source": "?\\H-@",
+      "expected": {
+        "type": "integer",
+        "value": 16777280
+      }
+    },
+    {
+      "source": "?\\H-A",
+      "expected": {
+        "type": "integer",
+        "value": 16777281
+      }
+    },
+    {
+      "source": "?\\H-Z",
+      "expected": {
+        "type": "integer",
+        "value": 16777306
+      }
+    },
+    {
+      "source": "?\\H-[",
+      "expected": {
+        "type": "integer",
+        "value": 16777307
+      }
+    },
+    {
+      "source": "?\\H-\\\\",
+      "expected": {
+        "type": "integer",
+        "value": 16777308
+      }
+    },
+    {
+      "source": "?\\H-]",
+      "expected": {
+        "type": "integer",
+        "value": 16777309
+      }
+    },
+    {
+      "source": "?\\H-^",
+      "expected": {
+        "type": "integer",
+        "value": 16777310
+      }
+    },
+    {
+      "source": "?\\H-_",
+      "expected": {
+        "type": "integer",
+        "value": 16777311
+      }
+    },
+    {
+      "source": "?\\H-`",
+      "expected": {
+        "type": "integer",
+        "value": 16777312
+      }
+    },
+    {
+      "source": "?\\H-a",
+      "expected": {
+        "type": "integer",
+        "value": 16777313
+      }
+    },
+    {
+      "source": "?\\H-z",
+      "expected": {
+        "type": "integer",
+        "value": 16777338
+      }
+    },
+    {
+      "source": "?\\H-?",
+      "expected": {
+        "type": "integer",
+        "value": 16777279
+      }
+    },
+    {
+      "source": "?\\H-1",
+      "expected": {
+        "type": "integer",
+        "value": 16777265
+      }
+    },
+    {
+      "source": "?\\H- ",
+      "expected": {
+        "type": "integer",
+        "value": 16777248
+      }
+    },
+    {
+      "source": "?\\H-λ",
+      "expected": {
+        "type": "integer",
+        "value": 16778171
+      }
+    },
+    {
+      "source": "?\\S-@",
+      "expected": {
+        "type": "integer",
+        "value": 33554496
+      }
+    },
+    {
+      "source": "?\\S-A",
+      "expected": {
+        "type": "integer",
+        "value": 33554497
+      }
+    },
+    {
+      "source": "?\\S-Z",
+      "expected": {
+        "type": "integer",
+        "value": 33554522
+      }
+    },
+    {
+      "source": "?\\S-[",
+      "expected": {
+        "type": "integer",
+        "value": 33554523
+      }
+    },
+    {
+      "source": "?\\S-\\\\",
+      "expected": {
+        "type": "integer",
+        "value": 33554524
+      }
+    },
+    {
+      "source": "?\\S-]",
+      "expected": {
+        "type": "integer",
+        "value": 33554525
+      }
+    },
+    {
+      "source": "?\\S-^",
+      "expected": {
+        "type": "integer",
+        "value": 33554526
+      }
+    },
+    {
+      "source": "?\\S-_",
+      "expected": {
+        "type": "integer",
+        "value": 33554527
+      }
+    },
+    {
+      "source": "?\\S-`",
+      "expected": {
+        "type": "integer",
+        "value": 33554528
+      }
+    },
+    {
+      "source": "?\\S-a",
+      "expected": {
+        "type": "integer",
+        "value": 33554529
+      }
+    },
+    {
+      "source": "?\\S-z",
+      "expected": {
+        "type": "integer",
+        "value": 33554554
+      }
+    },
+    {
+      "source": "?\\S-?",
+      "expected": {
+        "type": "integer",
+        "value": 33554495
+      }
+    },
+    {
+      "source": "?\\S-1",
+      "expected": {
+        "type": "integer",
+        "value": 33554481
+      }
+    },
+    {
+      "source": "?\\S- ",
+      "expected": {
+        "type": "integer",
+        "value": 33554464
+      }
+    },
+    {
+      "source": "?\\S-λ",
+      "expected": {
+        "type": "integer",
+        "value": 33555387
+      }
+    },
+    {
+      "source": "?\\A-@",
+      "expected": {
+        "type": "integer",
+        "value": 4194368
+      }
+    },
+    {
+      "source": "?\\A-A",
+      "expected": {
+        "type": "integer",
+        "value": 4194369
+      }
+    },
+    {
+      "source": "?\\A-Z",
+      "expected": {
+        "type": "integer",
+        "value": 4194394
+      }
+    },
+    {
+      "source": "?\\A-[",
+      "expected": {
+        "type": "integer",
+        "value": 4194395
+      }
+    },
+    {
+      "source": "?\\A-\\\\",
+      "expected": {
+        "type": "integer",
+        "value": 4194396
+      }
+    },
+    {
+      "source": "?\\A-]",
+      "expected": {
+        "type": "integer",
+        "value": 4194397
+      }
+    },
+    {
+      "source": "?\\A-^",
+      "expected": {
+        "type": "integer",
+        "value": 4194398
+      }
+    },
+    {
+      "source": "?\\A-_",
+      "expected": {
+        "type": "integer",
+        "value": 4194399
+      }
+    },
+    {
+      "source": "?\\A-`",
+      "expected": {
+        "type": "integer",
+        "value": 4194400
+      }
+    },
+    {
+      "source": "?\\A-a",
+      "expected": {
+        "type": "integer",
+        "value": 4194401
+      }
+    },
+    {
+      "source": "?\\A-z",
+      "expected": {
+        "type": "integer",
+        "value": 4194426
+      }
+    },
+    {
+      "source": "?\\A-?",
+      "expected": {
+        "type": "integer",
+        "value": 4194367
+      }
+    },
+    {
+      "source": "?\\A-1",
+      "expected": {
+        "type": "integer",
+        "value": 4194353
+      }
+    },
+    {
+      "source": "?\\A- ",
+      "expected": {
+        "type": "integer",
+        "value": 4194336
+      }
+    },
+    {
+      "source": "?\\A-λ",
+      "expected": {
+        "type": "integer",
+        "value": 4195259
+      }
+    },
+    {
+      "source": "?\\C-\\C-@",
+      "expected": {
+        "type": "integer",
+        "value": 67108864
+      }
+    },
+    {
+      "source": "?\\C-\\C-A",
+      "expected": {
+        "type": "integer",
+        "value": 67108865
+      }
+    },
+    {
+      "source": "?\\C-\\C-Z",
+      "expected": {
+        "type": "integer",
+        "value": 67108890
+      }
+    },
+    {
+      "source": "?\\C-\\C-[",
+      "expected": {
+        "type": "integer",
+        "value": 67108891
+      }
+    },
+    {
+      "source": "?\\C-\\C-\\\\",
+      "expected": {
+        "type": "integer",
+        "value": 67108892
+      }
+    },
+    {
+      "source": "?\\C-\\C-]",
+      "expected": {
+        "type": "integer",
+        "value": 67108893
+      }
+    },
+    {
+      "source": "?\\C-\\C-^",
+      "expected": {
+        "type": "integer",
+        "value": 67108894
+      }
+    },
+    {
+      "source": "?\\C-\\C-_",
+      "expected": {
+        "type": "integer",
+        "value": 67108895
+      }
+    },
+    {
+      "source": "?\\C-\\C-`",
+      "expected": {
+        "type": "integer",
+        "value": 67108960
+      }
+    },
+    {
+      "source": "?\\C-\\C-a",
+      "expected": {
+        "type": "integer",
+        "value": 67108865
+      }
+    },
+    {
+      "source": "?\\C-\\C-z",
+      "expected": {
+        "type": "integer",
+        "value": 67108890
+      }
+    },
+    {
+      "source": "?\\C-\\C-?",
+      "expected": {
+        "type": "integer",
+        "value": 67108991
+      }
+    },
+    {
+      "source": "?\\C-\\C-1",
+      "expected": {
+        "type": "integer",
+        "value": 67108913
+      }
+    },
+    {
+      "source": "?\\C-\\C- ",
+      "expected": {
+        "type": "integer",
+        "value": 67108896
+      }
+    },
+    {
+      "source": "?\\C-\\C-λ",
+      "expected": {
+        "type": "integer",
+        "value": 67109819
+      }
+    },
+    {
+      "source": "?\\M-\\C-@",
+      "expected": {
+        "type": "integer",
+        "value": 134217728
+      }
+    },
+    {
+      "source": "?\\M-\\C-A",
+      "expected": {
+        "type": "integer",
+        "value": 134217729
+      }
+    },
+    {
+      "source": "?\\M-\\C-Z",
+      "expected": {
+        "type": "integer",
+        "value": 134217754
+      }
+    },
+    {
+      "source": "?\\M-\\C-[",
+      "expected": {
+        "type": "integer",
+        "value": 134217755
+      }
+    },
+    {
+      "source": "?\\M-\\C-\\\\",
+      "expected": {
+        "type": "integer",
+        "value": 134217756
+      }
+    },
+    {
+      "source": "?\\M-\\C-]",
+      "expected": {
+        "type": "integer",
+        "value": 134217757
+      }
+    },
+    {
+      "source": "?\\M-\\C-^",
+      "expected": {
+        "type": "integer",
+        "value": 134217758
+      }
+    },
+    {
+      "source": "?\\M-\\C-_",
+      "expected": {
+        "type": "integer",
+        "value": 134217759
+      }
+    },
+    {
+      "source": "?\\M-\\C-`",
+      "expected": {
+        "type": "integer",
+        "value": 201326688
+      }
+    },
+    {
+      "source": "?\\M-\\C-a",
+      "expected": {
+        "type": "integer",
+        "value": 134217729
+      }
+    },
+    {
+      "source": "?\\M-\\C-z",
+      "expected": {
+        "type": "integer",
+        "value": 134217754
+      }
+    },
+    {
+      "source": "?\\M-\\C-?",
+      "expected": {
+        "type": "integer",
+        "value": 134217855
+      }
+    },
+    {
+      "source": "?\\M-\\C-1",
+      "expected": {
+        "type": "integer",
+        "value": 201326641
+      }
+    },
+    {
+      "source": "?\\M-\\C- ",
+      "expected": {
+        "type": "integer",
+        "value": 201326624
+      }
+    },
+    {
+      "source": "?\\M-\\C-λ",
+      "expected": {
+        "type": "integer",
+        "value": 201327547
+      }
+    },
+    {
+      "source": "?\\C-\\M-@",
+      "expected": {
+        "type": "integer",
+        "value": 134217728
+      }
+    },
+    {
+      "source": "?\\C-\\M-A",
+      "expected": {
+        "type": "integer",
+        "value": 134217729
+      }
+    },
+    {
+      "source": "?\\C-\\M-Z",
+      "expected": {
+        "type": "integer",
+        "value": 134217754
+      }
+    },
+    {
+      "source": "?\\C-\\M-[",
+      "expected": {
+        "type": "integer",
+        "value": 134217755
+      }
+    },
+    {
+      "source": "?\\C-\\M-\\\\",
+      "expected": {
+        "type": "integer",
+        "value": 134217756
+      }
+    },
+    {
+      "source": "?\\C-\\M-]",
+      "expected": {
+        "type": "integer",
+        "value": 134217757
+      }
+    },
+    {
+      "source": "?\\C-\\M-^",
+      "expected": {
+        "type": "integer",
+        "value": 134217758
+      }
+    },
+    {
+      "source": "?\\C-\\M-_",
+      "expected": {
+        "type": "integer",
+        "value": 134217759
+      }
+    },
+    {
+      "source": "?\\C-\\M-`",
+      "expected": {
+        "type": "integer",
+        "value": 201326688
+      }
+    },
+    {
+      "source": "?\\C-\\M-a",
+      "expected": {
+        "type": "integer",
+        "value": 134217729
+      }
+    },
+    {
+      "source": "?\\C-\\M-z",
+      "expected": {
+        "type": "integer",
+        "value": 134217754
+      }
+    },
+    {
+      "source": "?\\C-\\M-?",
+      "expected": {
+        "type": "integer",
+        "value": 134217855
+      }
+    },
+    {
+      "source": "?\\C-\\M-1",
+      "expected": {
+        "type": "integer",
+        "value": 201326641
+      }
+    },
+    {
+      "source": "?\\C-\\M- ",
+      "expected": {
+        "type": "integer",
+        "value": 201326624
+      }
+    },
+    {
+      "source": "?\\C-\\M-λ",
+      "expected": {
+        "type": "integer",
+        "value": 201327547
+      }
+    },
+    {
+      "source": "?\\M-\\S-\\A-\\H-\\s-\\C-@",
+      "expected": {
+        "type": "integer",
+        "value": 197132288
+      }
+    },
+    {
+      "source": "?\\M-\\S-\\A-\\H-\\s-\\C-A",
+      "expected": {
+        "type": "integer",
+        "value": 197132289
+      }
+    },
+    {
+      "source": "?\\M-\\S-\\A-\\H-\\s-\\C-Z",
+      "expected": {
+        "type": "integer",
+        "value": 197132314
+      }
+    },
+    {
+      "source": "?\\M-\\S-\\A-\\H-\\s-\\C-[",
+      "expected": {
+        "type": "integer",
+        "value": 197132315
+      }
+    },
+    {
+      "source": "?\\M-\\S-\\A-\\H-\\s-\\C-\\\\",
+      "expected": {
+        "type": "integer",
+        "value": 197132316
+      }
+    },
+    {
+      "source": "?\\M-\\S-\\A-\\H-\\s-\\C-]",
+      "expected": {
+        "type": "integer",
+        "value": 197132317
+      }
+    },
+    {
+      "source": "?\\M-\\S-\\A-\\H-\\s-\\C-^",
+      "expected": {
+        "type": "integer",
+        "value": 197132318
+      }
+    },
+    {
+      "source": "?\\M-\\S-\\A-\\H-\\s-\\C-_",
+      "expected": {
+        "type": "integer",
+        "value": 197132319
+      }
+    },
+    {
+      "source": "?\\M-\\S-\\A-\\H-\\s-\\C-`",
+      "expected": {
+        "type": "integer",
+        "value": 264241248
+      }
+    },
+    {
+      "source": "?\\M-\\S-\\A-\\H-\\s-\\C-a",
+      "expected": {
+        "type": "integer",
+        "value": 197132289
+      }
+    },
+    {
+      "source": "?\\M-\\S-\\A-\\H-\\s-\\C-z",
+      "expected": {
+        "type": "integer",
+        "value": 197132314
+      }
+    },
+    {
+      "source": "?\\M-\\S-\\A-\\H-\\s-\\C-?",
+      "expected": {
+        "type": "integer",
+        "value": 197132415
+      }
+    },
+    {
+      "source": "?\\M-\\S-\\A-\\H-\\s-\\C-1",
+      "expected": {
+        "type": "integer",
+        "value": 264241201
+      }
+    },
+    {
+      "source": "?\\M-\\S-\\A-\\H-\\s-\\C- ",
+      "expected": {
+        "type": "integer",
+        "value": 264241184
+      }
+    },
+    {
+      "source": "?\\M-\\S-\\A-\\H-\\s-\\C-λ",
+      "expected": {
+        "type": "integer",
+        "value": 264242107
+      }
+    },
+    {
+      "source": "?\\000",
+      "expected": {
+        "type": "integer",
+        "value": 0
+      }
+    },
+    {
+      "source": "?\\C-\\000",
+      "expected": {
+        "type": "integer",
+        "value": 67108864
+      }
+    },
+    {
+      "source": "?\\M-\\000",
+      "expected": {
+        "type": "integer",
+        "value": 134217728
+      }
+    },
+    {
+      "source": "?\\001",
+      "expected": {
+        "type": "integer",
+        "value": 1
+      }
+    },
+    {
+      "source": "?\\C-\\001",
+      "expected": {
+        "type": "integer",
+        "value": 67108865
+      }
+    },
+    {
+      "source": "?\\M-\\001",
+      "expected": {
+        "type": "integer",
+        "value": 134217729
+      }
+    },
+    {
+      "source": "?\\037",
+      "expected": {
+        "type": "integer",
+        "value": 31
+      }
+    },
+    {
+      "source": "?\\C-\\037",
+      "expected": {
+        "type": "integer",
+        "value": 67108895
+      }
+    },
+    {
+      "source": "?\\M-\\037",
+      "expected": {
+        "type": "integer",
+        "value": 134217759
+      }
+    },
+    {
+      "source": "?\\077",
+      "expected": {
+        "type": "integer",
+        "value": 63
+      }
+    },
+    {
+      "source": "?\\C-\\077",
+      "expected": {
+        "type": "integer",
+        "value": 127
+      }
+    },
+    {
+      "source": "?\\M-\\077",
+      "expected": {
+        "type": "integer",
+        "value": 134217791
+      }
+    },
+    {
+      "source": "?\\100",
+      "expected": {
+        "type": "integer",
+        "value": 64
+      }
+    },
+    {
+      "source": "?\\C-\\100",
+      "expected": {
+        "type": "integer",
+        "value": 0
+      }
+    },
+    {
+      "source": "?\\M-\\100",
+      "expected": {
+        "type": "integer",
+        "value": 134217792
+      }
+    },
+    {
+      "source": "?\\177",
+      "expected": {
+        "type": "integer",
+        "value": 127
+      }
+    },
+    {
+      "source": "?\\C-\\177",
+      "expected": {
+        "type": "integer",
+        "value": 67108991
+      }
+    },
+    {
+      "source": "?\\M-\\177",
+      "expected": {
+        "type": "integer",
+        "value": 134217855
+      }
+    },
+    {
+      "source": "?\\200",
+      "expected": {
+        "type": "integer",
+        "value": 128
+      }
+    },
+    {
+      "source": "?\\C-\\200",
+      "expected": {
+        "type": "integer",
+        "value": 67108992
+      }
+    },
+    {
+      "source": "?\\M-\\200",
+      "expected": {
+        "type": "integer",
+        "value": 134217856
+      }
+    },
+    {
+      "source": "?\\377",
+      "expected": {
+        "type": "integer",
+        "value": 255
+      }
+    },
+    {
+      "source": "?\\C-\\377",
+      "expected": {
+        "type": "integer",
+        "value": 67109119
+      }
+    },
+    {
+      "source": "?\\M-\\377",
+      "expected": {
+        "type": "integer",
+        "value": 134217983
+      }
+    },
+    {
+      "source": "?\\400",
+      "expected": {
+        "type": "integer",
+        "value": 256
+      }
+    },
+    {
+      "source": "?\\C-\\400",
+      "expected": {
+        "type": "integer",
+        "value": 67109120
+      }
+    },
+    {
+      "source": "?\\M-\\400",
+      "expected": {
+        "type": "integer",
+        "value": 134217984
+      }
+    },
+    {
+      "source": "?\\x80",
+      "expected": {
+        "type": "integer",
+        "value": 128
+      }
+    },
+    {
+      "source": "?\\C-\\x80",
+      "expected": {
+        "type": "integer",
+        "value": 67108992
+      }
+    },
+    {
+      "source": "?\\M-\\x80",
+      "expected": {
+        "type": "integer",
+        "value": 134217856
+      }
+    },
+    {
+      "source": "?\\x080",
+      "expected": {
+        "type": "integer",
+        "value": 128
+      }
+    },
+    {
+      "source": "?\\C-\\x080",
+      "expected": {
+        "type": "integer",
+        "value": 67108992
+      }
+    },
+    {
+      "source": "?\\M-\\x080",
+      "expected": {
+        "type": "integer",
+        "value": 134217856
+      }
+    },
+    {
+      "source": "?\\x4000001",
+      "expected": {
+        "type": "integer",
+        "value": 67108865
+      }
+    },
+    {
+      "source": "?\\C-\\x4000001",
+      "expected": {
+        "type": "integer",
+        "value": 67108865
+      }
+    },
+    {
+      "source": "?\\M-\\x4000001",
+      "expected": {
+        "type": "integer",
+        "value": 201326593
+      }
+    },
+    {
+      "source": "?\\x00000000000078",
+      "expected": {
+        "type": "integer",
+        "value": 120
+      }
+    },
+    {
+      "source": "?\\C-\\x00000000000078",
+      "expected": {
+        "type": "integer",
+        "value": 24
+      }
+    },
+    {
+      "source": "?\\M-\\x00000000000078",
+      "expected": {
+        "type": "integer",
+        "value": 134217848
+      }
+    },
+    {
+      "source": "?\\u0080",
+      "expected": {
+        "type": "integer",
+        "value": 128
+      }
+    },
+    {
+      "source": "?\\C-\\u0080",
+      "expected": {
+        "type": "integer",
+        "value": 67108992
+      }
+    },
+    {
+      "source": "?\\M-\\u0080",
+      "expected": {
+        "type": "integer",
+        "value": 134217856
+      }
+    },
+    {
+      "source": "?\\u03bb",
+      "expected": {
+        "type": "integer",
+        "value": 955
+      }
+    },
+    {
+      "source": "?\\C-\\u03bb",
+      "expected": {
+        "type": "integer",
+        "value": 67109819
+      }
+    },
+    {
+      "source": "?\\M-\\u03bb",
+      "expected": {
+        "type": "integer",
+        "value": 134218683
+      }
+    },
+    {
+      "source": "(aref \"\\C-a\" 0)",
+      "expected": {
+        "type": "integer",
+        "value": 1
+      }
+    },
+    {
+      "source": "(aref \"\\C- \" 0)",
+      "expected": {
+        "type": "integer",
+        "value": 0
+      }
+    },
+    {
+      "source": "(aref \"\\^ \" 0)",
+      "expected": {
+        "type": "integer",
+        "value": 0
+      }
+    },
+    {
+      "source": "(aref \"\\S-a\" 0)",
+      "expected": {
+        "type": "integer",
+        "value": 65
+      }
+    },
+    {
+      "source": "(aref \"\\S-Z\" 0)",
+      "expected": {
+        "type": "integer",
+        "value": 90
+      }
+    },
+    {
+      "source": "(aref \"\\M-x\" 0)",
+      "expected": {
+        "type": "integer",
+        "value": 248
+      }
+    },
+    {
+      "source": "(aref \"\\M-\\C-a\" 0)",
+      "expected": {
+        "type": "integer",
+        "value": 129
+      }
+    },
+    {
+      "source": "(aref \"\\200\" 0)",
+      "expected": {
+        "type": "integer",
+        "value": 128
+      }
+    },
+    {
+      "source": "(aref \"\\x80\" 0)",
+      "expected": {
+        "type": "integer",
+        "value": 128
+      }
+    },
+    {
+      "source": "(aref \"\\u0080\" 0)",
+      "expected": {
+        "type": "integer",
+        "value": 128
+      }
+    },
+    {
+      "source": "(aref \"\\s-x\" 0)",
+      "expected": {
+        "type": "integer",
+        "value": 32
+      }
+    },
+    {
+      "source": "`(a ,(+ 1 1) ,@(list 3 4) . z)",
+      "expected": {
+        "type": "cons",
+        "car": {
+          "type": "symbol",
+          "value": "a"
+        },
+        "cdr": {
+          "type": "cons",
+          "car": {
+            "type": "integer",
+            "value": 2
+          },
+          "cdr": {
+            "type": "cons",
+            "car": {
+              "type": "integer",
+              "value": 3
+            },
+            "cdr": {
+              "type": "cons",
+              "car": {
+                "type": "integer",
+                "value": 4
+              },
+              "cdr": {
+                "type": "symbol",
+                "value": "z"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "source": "`(a ,@1)",
+      "expected": {
+        "type": "cons",
+        "car": {
+          "type": "symbol",
+          "value": "a"
+        },
+        "cdr": {
+          "type": "integer",
+          "value": 1
+        }
+      }
+    },
+    {
+      "source": "(let ((x '(2 3))) `(1 . ,x))",
+      "expected": {
+        "type": "cons",
+        "car": {
+          "type": "integer",
+          "value": 1
+        },
+        "cdr": {
+          "type": "cons",
+          "car": {
+            "type": "integer",
+            "value": 2
+          },
+          "cdr": {
+            "type": "cons",
+            "car": {
+              "type": "integer",
+              "value": 3
+            },
+            "cdr": {
+              "type": "nil"
+            }
+          }
+        }
+      }
+    },
+    {
+      "source": "(let ((x 7)) `(a `(b ,x ,,x)))",
+      "expected": {
+        "type": "cons",
+        "car": {
+          "type": "symbol",
+          "value": "a"
+        },
+        "cdr": {
+          "type": "cons",
+          "car": {
+            "type": "cons",
+            "car": {
+              "type": "symbol",
+              "value": "`"
+            },
+            "cdr": {
+              "type": "cons",
+              "car": {
+                "type": "cons",
+                "car": {
+                  "type": "symbol",
+                  "value": "b"
+                },
+                "cdr": {
+                  "type": "cons",
+                  "car": {
+                    "type": "cons",
+                    "car": {
+                      "type": "symbol",
+                      "value": ","
+                    },
+                    "cdr": {
+                      "type": "cons",
+                      "car": {
+                        "type": "symbol",
+                        "value": "x"
+                      },
+                      "cdr": {
+                        "type": "nil"
+                      }
+                    }
+                  },
+                  "cdr": {
+                    "type": "cons",
+                    "car": {
+                      "type": "cons",
+                      "car": {
+                        "type": "symbol",
+                        "value": ","
+                      },
+                      "cdr": {
+                        "type": "cons",
+                        "car": {
+                          "type": "integer",
+                          "value": 7
+                        },
+                        "cdr": {
+                          "type": "nil"
+                        }
+                      }
+                    },
+                    "cdr": {
+                      "type": "nil"
+                    }
+                  }
+                }
+              },
+              "cdr": {
+                "type": "nil"
+              }
+            }
+          },
+          "cdr": {
+            "type": "nil"
+          }
+        }
+      }
+    },
+    {
+      "source": "`[a ,(+ 1 1) ,@(list 3 4)]",
+      "expected": {
+        "type": "vector",
+        "value": [
+          {
+            "type": "symbol",
+            "value": "a"
+          },
+          {
+            "type": "integer",
+            "value": 2
+          },
+          {
+            "type": "integer",
+            "value": 3
+          },
+          {
+            "type": "integer",
+            "value": 4
+          }
+        ]
+      }
+    },
+    {
+      "source": "(let ((x '(2 3))) (list `(1 ,@x 4) x))",
+      "expected": {
+        "type": "cons",
+        "car": {
+          "type": "cons",
+          "car": {
+            "type": "integer",
+            "value": 1
+          },
+          "cdr": {
+            "type": "cons",
+            "car": {
+              "type": "integer",
+              "value": 2
+            },
+            "cdr": {
+              "type": "cons",
+              "car": {
+                "type": "integer",
+                "value": 3
+              },
+              "cdr": {
+                "type": "cons",
+                "car": {
+                  "type": "integer",
+                  "value": 4
+                },
+                "cdr": {
+                  "type": "nil"
+                }
+              }
+            }
+          }
+        },
+        "cdr": {
+          "type": "cons",
+          "car": {
+            "type": "cons",
+            "car": {
+              "type": "integer",
+              "value": 2
+            },
+            "cdr": {
+              "type": "cons",
+              "car": {
+                "type": "integer",
+                "value": 3
+              },
+              "cdr": {
+                "type": "nil"
+              }
+            }
+          },
+          "cdr": {
+            "type": "nil"
+          }
+        }
+      }
+    },
+    {
+      "source": "(let ((x 0)) `(,(setq x (1+ x)) ,@(list (setq x (1+ x))) ,(setq x (1+ x))))",
+      "expected": {
+        "type": "cons",
+        "car": {
+          "type": "integer",
+          "value": 1
+        },
+        "cdr": {
+          "type": "cons",
+          "car": {
+            "type": "integer",
+            "value": 2
+          },
+          "cdr": {
+            "type": "cons",
+            "car": {
+              "type": "integer",
+              "value": 3
+            },
+            "cdr": {
+              "type": "nil"
+            }
+          }
+        }
+      }
+    },
+    {
+      "source": "(progn (defun oracle-f (x) (declare (pure t)) (+ x 1)) (oracle-f 4))",
+      "expected": {
+        "type": "integer",
+        "value": 5
+      }
+    },
+    {
+      "source": "(progn (defmacro lambda (&rest cdr) (list 'function (cons 'lambda cdr))) (funcall (lambda (x) (+ x 1)) 4))",
+      "expected": {
+        "type": "integer",
+        "value": 5
+      }
+    }
+  ]
+}

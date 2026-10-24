@@ -1,0 +1,16 @@
+Upstream: https://git.thanosapollo.org/emacs-jabber/
+Source: https://git.thanosapollo.org/emacs-jabber/ (src/)
+Version: 0.15.0
+Commit: 466d3c5af4b2216c452f85e165605d6c0128824e
+License: GPL-3.0-or-later (wrapper); ISC (picomemo); Apache-2.0 and MIT (HACL*)
+Local changes: Sources moved out of lisp/. Build recipes are owned by xtask.
+
+picomemo upstream: https://github.com/mierenhoop/picomemo
+picomemo version: 1.2.0-5-gb156667
+picomemo commit: b156667e922a8c518746629719e4348b6a46d84d
+See picomemo/README and source headers for individual component attribution.
+
+Build destination: <runtime>/libexec/romacs/jabber-omemo-core.so
+Requires Emacs module headers and libmbedcrypto >= 3; use MBED_STATIC=1.
+The first-build native-helpers lane owns compilation and installation.
+This is the single CHARTER dynamic-module exception, retired by R5 OMEMO.

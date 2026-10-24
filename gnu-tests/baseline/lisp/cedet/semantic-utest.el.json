@@ -1,0 +1,233 @@
+{
+ "blob": "f8509d5b717634b20e7b73eca95913586446b470",
+ "compiled": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": true,
+  "results": {
+   "semantic-utest-C": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "semantic-utest-Csharp": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (featurep 'csharp-mode)) :form (featurep csharp-mode) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "semantic-utest-Html": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "semantic-utest-Java": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "semantic-utest-Javascript": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "semantic-utest-Makefile": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "semantic-utest-PHP": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (featurep 'php-mode)) :form (featurep php-mode) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "semantic-utest-Python": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "semantic-utest-Scheme": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless nil) :form nil :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   }
+  },
+  "timed_out": false
+ },
+ "file": "lisp/cedet/semantic-utest.el",
+ "gnu": {
+  "emacs": "<recording-path-redacted>/emacs-32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+  "version": "32.0.50"
+ },
+ "harness_sha256": "78c20850429a08af22faadf73b5d164c560230e83d7eb88ef60cb995670703ef",
+ "mini": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": null,
+  "results": {
+   "semantic-utest-C": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "semantic-utest-Csharp": {
+    "as_expected": null,
+    "detail": "((skip-unless (featurep 'csharp-mode)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "semantic-utest-Html": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "semantic-utest-Java": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "semantic-utest-Javascript": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "semantic-utest-Makefile": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "semantic-utest-PHP": {
+    "as_expected": null,
+    "detail": "((skip-unless (featurep 'php-mode)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "semantic-utest-Python": {
+    "as_expected": null,
+    "detail": "(error \"Buffer pytest.py was not set up for parsing\")",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "semantic-utest-Scheme": {
+    "as_expected": null,
+    "detail": "((skip-unless nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   }
+  },
+  "timed_out": false
+ },
+ "read_error": null,
+ "real": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": true,
+  "results": {
+   "semantic-utest-C": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "semantic-utest-Csharp": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (featurep 'csharp-mode)) :form (featurep csharp-mode) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "semantic-utest-Html": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "semantic-utest-Java": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "semantic-utest-Javascript": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "semantic-utest-Makefile": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "semantic-utest-PHP": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (featurep 'php-mode)) :form (featurep php-mode) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "semantic-utest-Python": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "semantic-utest-Scheme": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless nil) :form nil :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   }
+  },
+  "timed_out": false
+ },
+ "schema": 1,
+ "toplevel_deftests": 9
+}

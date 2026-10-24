@@ -1,0 +1,278 @@
+{
+ "name": "corpus-04",
+ "frame": {
+  "width": 480,
+  "height": 168,
+  "bg": "#ffffff",
+  "fg": "#000000"
+ },
+ "font": {
+  "family": "Liberation Mono",
+  "pixel_size": 20,
+  "regular": "/usr/share/fonts/liberation/LiberationMono-Regular.ttf",
+  "bold": "/usr/share/fonts/liberation/LiberationMono-Bold.ttf",
+  "italic": "/usr/share/fonts/liberation/LiberationMono-Italic.ttf"
+ },
+ "cursor_color": "#00a000",
+ "buffer": [
+  {
+   "text": "ήλιος",
+   "underline": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "a&b",
+   "fg": "#008000"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "ξένος",
+   "fg": "#ff0000"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "ήλιος",
+   "italic": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "δέντρο"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "ήλιος"
+  },
+  {
+   "text": "\n"
+  },
+  {
+   "text": "βιβλίο",
+   "fg": "#008000",
+   "italic": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "50%"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "brown",
+   "bold": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "R2D2"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "θάλασσα",
+   "bg": "#e0e0ff"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "#if",
+   "underline": true
+  },
+  {
+   "text": "\n"
+  },
+  {
+   "text": "βιβλίο"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "50%",
+   "fg": "#0000ff"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "ξένος"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "ήλιος"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "καλημέρα",
+   "fg": "#008000",
+   "bold": true
+  },
+  {
+   "text": "\n"
+  },
+  {
+   "text": "jumps",
+   "fg": "#b8860b"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "ΔΕΛΤΑ",
+   "fg": "#ff0000"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "καλημέρα",
+   "fg": "#008000"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "ΣΟΦΙΑ"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "Χάος",
+   "bold": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "{ok}"
+  },
+  {
+   "text": "\n"
+  }
+ ],
+ "point": 121,
+ "expect": {
+  "origin": [
+   0,
+   0
+  ],
+  "rows": [
+   {
+    "text": "ήλιος a&b ξένος ήλιος δέντρο ήλιος",
+    "runs": [
+     {
+      "start": 0,
+      "end": 5,
+      "underline": true
+     },
+     {
+      "start": 6,
+      "end": 9,
+      "fg": "#008000"
+     },
+     {
+      "start": 10,
+      "end": 15,
+      "fg": "#ff0000"
+     },
+     {
+      "start": 16,
+      "end": 21,
+      "italic": true
+     }
+    ]
+   },
+   {
+    "text": "βιβλίο 50% brown R2D2 θάλασσα #if",
+    "runs": [
+     {
+      "start": 0,
+      "end": 6,
+      "fg": "#008000",
+      "italic": true
+     },
+     {
+      "start": 11,
+      "end": 16,
+      "bold": true
+     },
+     {
+      "start": 22,
+      "end": 29,
+      "bg": "#e0e0ff"
+     },
+     {
+      "start": 30,
+      "end": 33,
+      "underline": true
+     }
+    ]
+   },
+   {
+    "text": "βιβλίο 50% ξένος ήλιος καλημέρα",
+    "runs": [
+     {
+      "start": 7,
+      "end": 10,
+      "fg": "#0000ff"
+     },
+     {
+      "start": 23,
+      "end": 31,
+      "fg": "#008000",
+      "bold": true
+     }
+    ]
+   },
+   {
+    "text": "jumps ΔΕΛΤΑ καλημέρα ΣΟΦΙΑ Χάος {ok}",
+    "runs": [
+     {
+      "start": 0,
+      "end": 5,
+      "fg": "#b8860b"
+     },
+     {
+      "start": 6,
+      "end": 11,
+      "fg": "#ff0000"
+     },
+     {
+      "start": 12,
+      "end": 20,
+      "fg": "#008000"
+     },
+     {
+      "start": 27,
+      "end": 31,
+      "bold": true
+     }
+    ]
+   }
+  ],
+  "cursor": {
+   "row": 3,
+   "col": 19
+  }
+ }
+}

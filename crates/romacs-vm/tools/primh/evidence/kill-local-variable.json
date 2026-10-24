@@ -1,0 +1,109 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "kill-local-variable",
+ "spec_sha256": "5a43ff77f7c5513d4f37143ce81fcc1428f5e7d8011b54dedd37e2839264a425",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "kill-local-variable",
+    "subr",
+    1,
+    1
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "data.c": "eca7895a8043cd0a960dfe037a46028374d1a40cc6ee4d0cf6de90ac56c242ae"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "kill-local-variable/0000",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'kill-local-variable '())) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr kill-local-variable> 0))"
+  },
+  {
+   "id": "kill-local-variable/0001",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'kill-local-variable '(1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr kill-local-variable> 2))"
+  },
+  {
+   "id": "kill-local-variable/0002",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (setq major-mode 'other mode-name \"Other\") (put 'major-mode 'permanent-local t) (kill-local-variable 'major-mode) (kill-all-local-variables) (list major-mode (equal mode-name \"Fundamental\")))) (error (list 'sig e))))",
+   "expected": "(ok (fundamental-mode t))"
+  },
+  {
+   "id": "kill-local-variable/0003",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (setq fill-column 31 buffer-file-name \"visit\") (kill-local-variable 'fill-column) (list fill-column (local-variable-p 'fill-column) buffer-file-name (local-variable-p 'buffer-file-name)))) (error (list 'sig e))))",
+   "expected": "(ok (70 nil \"visit\" t))"
+  },
+  {
+   "id": "kill-local-variable/0004",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (setq bl-p 7) (set (make-local-variable 'bl-p) 8) (put 'bl-p 'permanent-local t) (kill-local-variable 'bl-p) (list bl-p (local-variable-p 'bl-p)))) (error (list 'sig e))))",
+   "expected": "(ok (7 nil))"
+  },
+  {
+   "id": "kill-local-variable/0005",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (condition-case e (local-variable-p 3) (wrong-type-argument (car e))) (condition-case e (buffer-local-value 'bl-void (current-buffer)) (void-variable e)) (condition-case e (kill-local-variable 3) (wrong-type-argument (car e))))) (error (list 'sig e))))",
+   "expected": "(ok (wrong-type-argument (void-variable bl-void) wrong-type-argument))"
+  },
+  {
+   "id": "kill-local-variable/0006",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (setq bl-x 1) (make-local-variable 'bl-x) (let ((bl-x 2)) (kill-local-variable 'bl-x)) (list bl-x (local-variable-p 'bl-x)))) (error (list 'sig e))))",
+   "expected": "(ok (1 nil))"
+  },
+  {
+   "id": "kill-local-variable/0007",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (setq fill-column 22) (let ((fill-column 33)) (kill-local-variable 'fill-column)) (list fill-column (local-variable-p 'fill-column)))) (error (list 'sig e))))",
+   "expected": "(ok (70 nil))"
+  },
+  {
+   "id": "kill-local-variable/0008",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (kill-local-variable nil) (kill-local-variable t) (local-variable-p nil) (local-variable-p t))) (error (list 'sig e))))",
+   "expected": "(ok (nil t nil nil))"
+  },
+  {
+   "id": "kill-local-variable/0009",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (let ((a (make-symbol \"x\"))) (set a 4) (make-local-variable a) (set a 7) (kill-local-variable a) (symbol-value a)))) (error (list 'sig e))))",
+   "expected": "(ok 4)"
+  },
+  {
+   "id": "kill-local-variable/0010",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (setq bl-x 3) (defvaralias 'bl-alias 'bl-x) (make-local-variable 'bl-x) (setq bl-x 4) (kill-local-variable 'bl-alias) (list bl-x (local-variable-p 'bl-alias)))) (error (list 'sig e))))",
+   "expected": "(ok (3 nil))"
+  },
+  {
+   "id": "kill-local-variable/0011",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (fboundp 'kill-local-variable) (functionp 'kill-local-variable))) (error (list 'sig e))))",
+   "expected": "(ok (t t))"
+  },
+  {
+   "id": "kill-local-variable/0012",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (funcall 'kill-local-variable 'fill-column))) (error (list 'sig e))))",
+   "expected": "(ok fill-column)"
+  }
+ ]
+}

@@ -1,0 +1,19 @@
+{
+ "name": "string-equal",
+ "arity": [
+  2,
+  2
+ ],
+ "effect": "pure",
+ "gnu_files": [
+  "fns.c"
+ ],
+ "gnu_def": "fns.c:339",
+ "rust": "src/prims/str.rs:168",
+ "args": [],
+ "probes": [
+  "(string-equal (unibyte-string 233) \"é\")",
+  "(string-equal (unibyte-string 255) (unibyte-string 255))",
+  "(string-equal nil \"nil\")"
+ ]
+}

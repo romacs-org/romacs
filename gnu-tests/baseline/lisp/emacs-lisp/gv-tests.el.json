@@ -1,0 +1,254 @@
+{
+ "blob": "c2ae871cb350518a70a7c02fb7d46f9453594d96",
+ "compiled": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": true,
+  "results": {
+   "gv-decf": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "gv-define-expander-in-file": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "gv-define-expander-in-file-twice": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "gv-define-expander-in-function": {
+    "as_expected": true,
+    "detail": "(ert-test-failed ((should (equal (buffer-string) \"99\n\")) :form (equal \"\nIn end of data:\ngv-test-deffoo.el: Warning: the function `(setf gv-test-foo)' is not known to be defined.\n\ndebug-early-backtrace...done\nSymbol's function definition is void: \\\\(setf\\\\ gv-test-foo\\\\)\n\nError: void-function (\\\\(setf\\\\ gv-test-foo\\\\))\n  \\\\(setf\\\\ gv-test-foo\\\\)(99 (1 . 2))\n  byte-code(\\\"\\\\10\\\\301\\\\302\\\\2\\\\\\\"\\\\266\\\\2\\\\303\\\\304\\\\10@\\\\\\\"\\\\207\\\" [gv-test-pair \\\\(setf\\\\ gv-test-foo\\\\) 99 message \\\"%d\\\"] 4)\n  command-line-1((\\\"--eval\\\" \\\"(byte-compile-file \\\\\\\"gv-test-deffoo.el\\\\\\\")\\\" \\\"-l\\\" \\\"gv-test-deffoo.elc\\\"))\n  command-line()\n  normal-top-level()\n\" \"99\n\") :value nil :explanation (arrays-of-different-length 526 3 \"\nIn end of data:\ngv-test-deffoo.el: Warning: the function `(setf gv-test-foo)' is not known to be defined.\n\ndebug-early-backtrace...done\nSymbol's function definition is void: \\\\(setf\\\\ gv-test-foo\\\\)\n\nError: void-function (\\\\(setf\\\\ gv-test-foo\\\\))\n  \\\\(setf\\\\ gv-test-foo\\\\)(99 (1 . 2))\n  byte-code(\\\"\\\\10\\\\301\\\\302\\\\2\\\\\\\"\\\\266\\\\2\\\\303\\\\304\\\\10@\\\\\\\"\\\\207\\\" [gv-test-pair \\\\(setf\\\\ gv-test-foo\\\\) 99 message \\\"%d\\\"] 4)\n  command-line-1((\\\"--eval\\\" \\\"(byte-compile-file \\\\\\\"gv-test-deffoo.el\\\\\\\")\\\" \\\"-l\\\" \\\"gv-test-deffoo.elc\\\"))\n  command-line()\n  normal-top-level()\n\" \"99\n\" first-mismatch-at 0)))",
+    "expected": ":failed",
+    "outcome": "failed",
+    "tags": []
+   },
+   "gv-define-expander-out-of-file": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "gv-dont-define-expander-in-file": {
+    "as_expected": true,
+    "detail": "(ert-test-failed ((should (equal (buffer-string) \"Symbol's function definition is void: \\\\(setf\\\\ gv-test-foo\\\\)\n\")) :form (equal \"\nIn end of data:\ngv-test-deffoo.el: Warning: the function `(setf gv-test-foo)' is not known to be defined.\n\ndebug-early-backtrace...done\nSymbol's function definition is void: \\\\(setf\\\\ gv-test-foo\\\\)\n\nError: void-function (\\\\(setf\\\\ gv-test-foo\\\\))\n  \\\\(setf\\\\ gv-test-foo\\\\)(99 (1 . 2))\n  byte-code(\\\"\\\\10\\\\301\\\\302\\\\2\\\\\\\"\\\\266\\\\2\\\\303\\\\304\\\\10@\\\\\\\"\\\\207\\\" [gv-test-pair \\\\(setf\\\\ gv-test-foo\\\\) 99 message \\\"%d\\\"] 4)\n  command-line-1((\\\"--eval\\\" \\\"(let ((backtrace-on-error-noninteractive nil)) (byte-compile-file \\\\\\\"gv-test-deffoo.el\\\\\\\"))\\\" \\\"-l\\\" \\\"gv-test-deffoo.elc\\\"))\n  command-line()\n  normal-top-level()\n\" \"Symbol's function definition is void: \\\\(setf\\\\ gv-test-foo\\\\)\n\") :value nil :explanation (arrays-of-different-length 574 60 \"\nIn end of data:\ngv-test-deffoo.el: Warning: the function `(setf gv-test-foo)' is not known to be defined.\n\ndebug-early-backtrace...done\nSymbol's function definition is void: \\\\(setf\\\\ gv-test-foo\\\\)\n\nError: void-function (\\\\(setf\\\\ gv-test-foo\\\\))\n  \\\\(setf\\\\ gv-test-foo\\\\)(99 (1 . 2))\n  byte-code(\\\"\\\\10\\\\301\\\\302\\\\2\\\\\\\"\\\\266\\\\2\\\\303\\\\304\\\\10@\\\\\\\"\\\\207\\\" [gv-test-pair \\\\(setf\\\\ gv-test-foo\\\\) 99 message \\\"%d\\\"] 4)\n  command-line-1((\\\"--eval\\\" \\\"(let ((backtrace-on-error-noninteractive nil)) (byte-compile-file \\\\\\\"gv-test-deffoo.el\\\\\\\"))\\\" \\\"-l\\\" \\\"gv-test-deffoo.elc\\\"))\n  command-line()\n  normal-top-level()\n\" \"Symbol's function definition is void: \\\\(setf\\\\ gv-test-foo\\\\)\n\" first-mismatch-at 0)))",
+    "expected": ":failed",
+    "outcome": "failed",
+    "tags": []
+   },
+   "gv-dont-define-expander-other-file": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "gv-incf": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "gv-plist-get": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "gv-setter-edebug": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   }
+  },
+  "timed_out": false
+ },
+ "file": "lisp/emacs-lisp/gv-tests.el",
+ "gnu": {
+  "emacs": "<recording-path-redacted>/emacs-32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+  "version": "32.0.50"
+ },
+ "harness_sha256": "78c20850429a08af22faadf73b5d164c560230e83d7eb88ef60cb995670703ef",
+ "mini": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": null,
+  "results": {
+   "gv-decf": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "gv-define-expander-in-file": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "gv-define-expander-in-file-twice": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "gv-define-expander-in-function": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":failed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "gv-define-expander-out-of-file": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "gv-dont-define-expander-in-file": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":failed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "gv-dont-define-expander-other-file": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "gv-incf": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "gv-plist-get": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "gv-setter-edebug": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   }
+  },
+  "timed_out": false
+ },
+ "read_error": null,
+ "real": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": true,
+  "results": {
+   "gv-decf": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "gv-define-expander-in-file": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "gv-define-expander-in-file-twice": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "gv-define-expander-in-function": {
+    "as_expected": true,
+    "detail": "(ert-test-failed ((should (equal (buffer-string) \"99\n\")) :form (equal \"\nIn end of data:\ngv-test-deffoo.el: Warning: the function `(setf gv-test-foo)' is not known to be defined.\n\ndebug-early-backtrace...done\nSymbol's function definition is void: \\\\(setf\\\\ gv-test-foo\\\\)\n\nError: void-function (\\\\(setf\\\\ gv-test-foo\\\\))\n  \\\\(setf\\\\ gv-test-foo\\\\)(99 (1 . 2))\n  byte-code(\\\"\\\\10\\\\301\\\\302\\\\2\\\\\\\"\\\\266\\\\2\\\\303\\\\304\\\\10@\\\\\\\"\\\\207\\\" [gv-test-pair \\\\(setf\\\\ gv-test-foo\\\\) 99 message \\\"%d\\\"] 4)\n  command-line-1((\\\"--eval\\\" \\\"(byte-compile-file \\\\\\\"gv-test-deffoo.el\\\\\\\")\\\" \\\"-l\\\" \\\"gv-test-deffoo.elc\\\"))\n  command-line()\n  normal-top-level()\n\" \"99\n\") :value nil :explanation (arrays-of-different-length 526 3 \"\nIn end of data:\ngv-test-deffoo.el: Warning: the function `(setf gv-test-foo)' is not known to be defined.\n\ndebug-early-backtrace...done\nSymbol's function definition is void: \\\\(setf\\\\ gv-test-foo\\\\)\n\nError: void-function (\\\\(setf\\\\ gv-test-foo\\\\))\n  \\\\(setf\\\\ gv-test-foo\\\\)(99 (1 . 2))\n  byte-code(\\\"\\\\10\\\\301\\\\302\\\\2\\\\\\\"\\\\266\\\\2\\\\303\\\\304\\\\10@\\\\\\\"\\\\207\\\" [gv-test-pair \\\\(setf\\\\ gv-test-foo\\\\) 99 message \\\"%d\\\"] 4)\n  command-line-1((\\\"--eval\\\" \\\"(byte-compile-file \\\\\\\"gv-test-deffoo.el\\\\\\\")\\\" \\\"-l\\\" \\\"gv-test-deffoo.elc\\\"))\n  command-line()\n  normal-top-level()\n\" \"99\n\" first-mismatch-at 0)))",
+    "expected": ":failed",
+    "outcome": "failed",
+    "tags": []
+   },
+   "gv-define-expander-out-of-file": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "gv-dont-define-expander-in-file": {
+    "as_expected": true,
+    "detail": "(ert-test-failed ((should (equal (buffer-string) \"Symbol's function definition is void: \\\\(setf\\\\ gv-test-foo\\\\)\n\")) :form (equal \"\nIn end of data:\ngv-test-deffoo.el: Warning: the function `(setf gv-test-foo)' is not known to be defined.\n\ndebug-early-backtrace...done\nSymbol's function definition is void: \\\\(setf\\\\ gv-test-foo\\\\)\n\nError: void-function (\\\\(setf\\\\ gv-test-foo\\\\))\n  \\\\(setf\\\\ gv-test-foo\\\\)(99 (1 . 2))\n  byte-code(\\\"\\\\10\\\\301\\\\302\\\\2\\\\\\\"\\\\266\\\\2\\\\303\\\\304\\\\10@\\\\\\\"\\\\207\\\" [gv-test-pair \\\\(setf\\\\ gv-test-foo\\\\) 99 message \\\"%d\\\"] 4)\n  command-line-1((\\\"--eval\\\" \\\"(let ((backtrace-on-error-noninteractive nil)) (byte-compile-file \\\\\\\"gv-test-deffoo.el\\\\\\\"))\\\" \\\"-l\\\" \\\"gv-test-deffoo.elc\\\"))\n  command-line()\n  normal-top-level()\n\" \"Symbol's function definition is void: \\\\(setf\\\\ gv-test-foo\\\\)\n\") :value nil :explanation (arrays-of-different-length 574 60 \"\nIn end of data:\ngv-test-deffoo.el: Warning: the function `(setf gv-test-foo)' is not known to be defined.\n\ndebug-early-backtrace...done\nSymbol's function definition is void: \\\\(setf\\\\ gv-test-foo\\\\)\n\nError: void-function (\\\\(setf\\\\ gv-test-foo\\\\))\n  \\\\(setf\\\\ gv-test-foo\\\\)(99 (1 . 2))\n  byte-code(\\\"\\\\10\\\\301\\\\302\\\\2\\\\\\\"\\\\266\\\\2\\\\303\\\\304\\\\10@\\\\\\\"\\\\207\\\" [gv-test-pair \\\\(setf\\\\ gv-test-foo\\\\) 99 message \\\"%d\\\"] 4)\n  command-line-1((\\\"--eval\\\" \\\"(let ((backtrace-on-error-noninteractive nil)) (byte-compile-file \\\\\\\"gv-test-deffoo.el\\\\\\\"))\\\" \\\"-l\\\" \\\"gv-test-deffoo.elc\\\"))\n  command-line()\n  normal-top-level()\n\" \"Symbol's function definition is void: \\\\(setf\\\\ gv-test-foo\\\\)\n\" first-mismatch-at 0)))",
+    "expected": ":failed",
+    "outcome": "failed",
+    "tags": []
+   },
+   "gv-dont-define-expander-other-file": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "gv-incf": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "gv-plist-get": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "gv-setter-edebug": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   }
+  },
+  "timed_out": false
+ },
+ "schema": 1,
+ "toplevel_deftests": 10
+}

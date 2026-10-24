@@ -1,0 +1,1858 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "ntake",
+ "spec_sha256": "830e55a1eb0e5f6497755be42b2826dd08aa5322f9230f14eb4d2444c72714cd",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "ntake",
+    "subr",
+    2,
+    2
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "fns.c": "db81c235d7c63f312128ad84c11d55ae4665a2599099be1229dbaa329afdb3bf"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "ntake/0000",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp nil))"
+  },
+  {
+   "id": "ntake/0001",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake nil t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp nil))"
+  },
+  {
+   "id": "ntake/0002",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake nil 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp nil))"
+  },
+  {
+   "id": "ntake/0003",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake nil 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp nil))"
+  },
+  {
+   "id": "ntake/0004",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake nil 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp nil))"
+  },
+  {
+   "id": "ntake/0005",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake nil -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp nil))"
+  },
+  {
+   "id": "ntake/0006",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake nil most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp nil))"
+  },
+  {
+   "id": "ntake/0007",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake nil 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp nil))"
+  },
+  {
+   "id": "ntake/0008",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake nil 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp nil))"
+  },
+  {
+   "id": "ntake/0009",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake nil :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp nil))"
+  },
+  {
+   "id": "ntake/0010",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake nil (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp nil))"
+  },
+  {
+   "id": "ntake/0011",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake nil (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp nil))"
+  },
+  {
+   "id": "ntake/0012",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake nil (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp nil))"
+  },
+  {
+   "id": "ntake/0013",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake nil (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp nil))"
+  },
+  {
+   "id": "ntake/0014",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake nil (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp nil))"
+  },
+  {
+   "id": "ntake/0015",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake nil (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp nil))"
+  },
+  {
+   "id": "ntake/0016",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake nil (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp nil))"
+  },
+  {
+   "id": "ntake/0017",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake nil (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp nil))"
+  },
+  {
+   "id": "ntake/0018",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake nil (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp nil))"
+  },
+  {
+   "id": "ntake/0019",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake nil (cons 1 (cons 2 (cons 3 9))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp nil))"
+  },
+  {
+   "id": "ntake/0020",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake t nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp t))"
+  },
+  {
+   "id": "ntake/0021",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake t t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp t))"
+  },
+  {
+   "id": "ntake/0022",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake t 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp t))"
+  },
+  {
+   "id": "ntake/0023",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake t 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp t))"
+  },
+  {
+   "id": "ntake/0024",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake t 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp t))"
+  },
+  {
+   "id": "ntake/0025",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake t -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp t))"
+  },
+  {
+   "id": "ntake/0026",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake t most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp t))"
+  },
+  {
+   "id": "ntake/0027",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake t 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp t))"
+  },
+  {
+   "id": "ntake/0028",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake t 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp t))"
+  },
+  {
+   "id": "ntake/0029",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake t :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp t))"
+  },
+  {
+   "id": "ntake/0030",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake t (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp t))"
+  },
+  {
+   "id": "ntake/0031",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake t (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp t))"
+  },
+  {
+   "id": "ntake/0032",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake t (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp t))"
+  },
+  {
+   "id": "ntake/0033",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake t (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp t))"
+  },
+  {
+   "id": "ntake/0034",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake t (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp t))"
+  },
+  {
+   "id": "ntake/0035",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake t (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp t))"
+  },
+  {
+   "id": "ntake/0036",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake t (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp t))"
+  },
+  {
+   "id": "ntake/0037",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake t (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp t))"
+  },
+  {
+   "id": "ntake/0038",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake t (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp t))"
+  },
+  {
+   "id": "ntake/0039",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake t (cons 1 (cons 2 (cons 3 9))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp t))"
+  },
+  {
+   "id": "ntake/0040",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake -1 nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "ntake/0041",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake -1 t)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "ntake/0042",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake -1 0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "ntake/0043",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake -1 1)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "ntake/0044",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake -1 2)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "ntake/0045",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake -1 -1)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "ntake/0046",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake -1 most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "ntake/0047",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake -1 1.5)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "ntake/0048",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake -1 'sym)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "ntake/0049",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake -1 :kw)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "ntake/0050",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake -1 (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "ntake/0051",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake -1 (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "ntake/0052",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake -1 (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "ntake/0053",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake -1 (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "ntake/0054",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake -1 (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "ntake/0055",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake -1 (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "ntake/0056",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake -1 (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "ntake/0057",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake -1 (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "ntake/0058",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake -1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "ntake/0059",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake -1 (cons 1 (cons 2 (cons 3 9))))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "ntake/0060",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 0 nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "ntake/0061",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 0 t)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "ntake/0062",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 0 0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "ntake/0063",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 0 1)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "ntake/0064",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 0 2)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "ntake/0065",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 0 -1)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "ntake/0066",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 0 most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "ntake/0067",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 0 1.5)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "ntake/0068",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 0 'sym)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "ntake/0069",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 0 :kw)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "ntake/0070",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 0 (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "ntake/0071",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 0 (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "ntake/0072",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 0 (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "ntake/0073",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 0 (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "ntake/0074",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 0 (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "ntake/0075",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 0 (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "ntake/0076",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 0 (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "ntake/0077",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 0 (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "ntake/0078",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 0 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "ntake/0079",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 0 (cons 1 (cons 2 (cons 3 9))))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "ntake/0080",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 1 nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "ntake/0081",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 1 t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp t))"
+  },
+  {
+   "id": "ntake/0082",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 1 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 0))"
+  },
+  {
+   "id": "ntake/0083",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 1 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "ntake/0084",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 1 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "ntake/0085",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 1 -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp -1))"
+  },
+  {
+   "id": "ntake/0086",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 1 most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "ntake/0087",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 1 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1.5))"
+  },
+  {
+   "id": "ntake/0088",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 1 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp sym))"
+  },
+  {
+   "id": "ntake/0089",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 1 :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "ntake/0090",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 1 (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"\"))"
+  },
+  {
+   "id": "ntake/0091",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 1 (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"abc\"))"
+  },
+  {
+   "id": "ntake/0092",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 1 (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "ntake/0093",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 1 (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok (1))"
+  },
+  {
+   "id": "ntake/0094",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 1 (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok (a))"
+  },
+  {
+   "id": "ntake/0095",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 1 (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(ok (1))"
+  },
+  {
+   "id": "ntake/0096",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 1 (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(ok (1))"
+  },
+  {
+   "id": "ntake/0097",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 1 (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp [1 2]))"
+  },
+  {
+   "id": "ntake/0098",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(ok (1))"
+  },
+  {
+   "id": "ntake/0099",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 1 (cons 1 (cons 2 (cons 3 9))))) (error (list 'sig e))))",
+   "expected": "(ok (1))"
+  },
+  {
+   "id": "ntake/0100",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 2 nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "ntake/0101",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 2 t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp t))"
+  },
+  {
+   "id": "ntake/0102",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 2 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 0))"
+  },
+  {
+   "id": "ntake/0103",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 2 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "ntake/0104",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 2 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "ntake/0105",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 2 -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp -1))"
+  },
+  {
+   "id": "ntake/0106",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 2 most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "ntake/0107",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 2 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1.5))"
+  },
+  {
+   "id": "ntake/0108",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 2 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp sym))"
+  },
+  {
+   "id": "ntake/0109",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 2 :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "ntake/0110",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 2 (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"\"))"
+  },
+  {
+   "id": "ntake/0111",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 2 (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"abc\"))"
+  },
+  {
+   "id": "ntake/0112",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 2 (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "ntake/0113",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 2 (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok (1 2))"
+  },
+  {
+   "id": "ntake/0114",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 2 (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok (a (b)))"
+  },
+  {
+   "id": "ntake/0115",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 2 (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 . 2)))"
+  },
+  {
+   "id": "ntake/0116",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 2 (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(ok (1 2))"
+  },
+  {
+   "id": "ntake/0117",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 2 (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp [1 2]))"
+  },
+  {
+   "id": "ntake/0118",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 2 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(ok (1 2))"
+  },
+  {
+   "id": "ntake/0119",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 2 (cons 1 (cons 2 (cons 3 9))))) (error (list 'sig e))))",
+   "expected": "(ok (1 2))"
+  },
+  {
+   "id": "ntake/0120",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 3 nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "ntake/0121",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 3 t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp t))"
+  },
+  {
+   "id": "ntake/0122",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 3 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 0))"
+  },
+  {
+   "id": "ntake/0123",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 3 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "ntake/0124",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 3 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "ntake/0125",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 3 -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp -1))"
+  },
+  {
+   "id": "ntake/0126",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 3 most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "ntake/0127",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 3 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1.5))"
+  },
+  {
+   "id": "ntake/0128",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 3 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp sym))"
+  },
+  {
+   "id": "ntake/0129",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 3 :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "ntake/0130",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 3 (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"\"))"
+  },
+  {
+   "id": "ntake/0131",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 3 (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"abc\"))"
+  },
+  {
+   "id": "ntake/0132",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 3 (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "ntake/0133",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 3 (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok (1 2 3))"
+  },
+  {
+   "id": "ntake/0134",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 3 (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok (a (b)))"
+  },
+  {
+   "id": "ntake/0135",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 3 (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 . 2)))"
+  },
+  {
+   "id": "ntake/0136",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 3 (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 2 . 3)))"
+  },
+  {
+   "id": "ntake/0137",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 3 (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp [1 2]))"
+  },
+  {
+   "id": "ntake/0138",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 3 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(ok (1))"
+  },
+  {
+   "id": "ntake/0139",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 3 (cons 1 (cons 2 (cons 3 9))))) (error (list 'sig e))))",
+   "expected": "(ok (1 2 3))"
+  },
+  {
+   "id": "ntake/0140",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 4 nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "ntake/0141",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 4 t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp t))"
+  },
+  {
+   "id": "ntake/0142",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 4 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 0))"
+  },
+  {
+   "id": "ntake/0143",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 4 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "ntake/0144",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 4 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "ntake/0145",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 4 -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp -1))"
+  },
+  {
+   "id": "ntake/0146",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 4 most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "ntake/0147",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 4 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1.5))"
+  },
+  {
+   "id": "ntake/0148",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 4 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp sym))"
+  },
+  {
+   "id": "ntake/0149",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 4 :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "ntake/0150",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 4 (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"\"))"
+  },
+  {
+   "id": "ntake/0151",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 4 (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"abc\"))"
+  },
+  {
+   "id": "ntake/0152",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 4 (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "ntake/0153",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 4 (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok (1 2 3))"
+  },
+  {
+   "id": "ntake/0154",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 4 (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok (a (b)))"
+  },
+  {
+   "id": "ntake/0155",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 4 (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 . 2)))"
+  },
+  {
+   "id": "ntake/0156",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 4 (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 2 . 3)))"
+  },
+  {
+   "id": "ntake/0157",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 4 (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp [1 2]))"
+  },
+  {
+   "id": "ntake/0158",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 4 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(ok (1 2))"
+  },
+  {
+   "id": "ntake/0159",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 4 (cons 1 (cons 2 (cons 3 9))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 2 3 . 9)))"
+  },
+  {
+   "id": "ntake/0160",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 128 nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "ntake/0161",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 128 t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp t))"
+  },
+  {
+   "id": "ntake/0162",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 128 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 0))"
+  },
+  {
+   "id": "ntake/0163",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 128 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "ntake/0164",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 128 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "ntake/0165",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 128 -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp -1))"
+  },
+  {
+   "id": "ntake/0166",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 128 most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "ntake/0167",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 128 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1.5))"
+  },
+  {
+   "id": "ntake/0168",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 128 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp sym))"
+  },
+  {
+   "id": "ntake/0169",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 128 :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "ntake/0170",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 128 (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"\"))"
+  },
+  {
+   "id": "ntake/0171",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 128 (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"abc\"))"
+  },
+  {
+   "id": "ntake/0172",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 128 (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "ntake/0173",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 128 (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok (1 2 3))"
+  },
+  {
+   "id": "ntake/0174",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 128 (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok (a (b)))"
+  },
+  {
+   "id": "ntake/0175",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 128 (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 . 2)))"
+  },
+  {
+   "id": "ntake/0176",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 128 (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 2 . 3)))"
+  },
+  {
+   "id": "ntake/0177",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 128 (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp [1 2]))"
+  },
+  {
+   "id": "ntake/0178",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 128 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(ok (1 2))"
+  },
+  {
+   "id": "ntake/0179",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 128 (cons 1 (cons 2 (cons 3 9))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 2 3 . 9)))"
+  },
+  {
+   "id": "ntake/0180",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 1.5 nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp 1.5))"
+  },
+  {
+   "id": "ntake/0181",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 1.5 t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp 1.5))"
+  },
+  {
+   "id": "ntake/0182",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 1.5 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp 1.5))"
+  },
+  {
+   "id": "ntake/0183",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 1.5 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp 1.5))"
+  },
+  {
+   "id": "ntake/0184",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 1.5 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp 1.5))"
+  },
+  {
+   "id": "ntake/0185",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 1.5 -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp 1.5))"
+  },
+  {
+   "id": "ntake/0186",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 1.5 most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp 1.5))"
+  },
+  {
+   "id": "ntake/0187",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 1.5 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp 1.5))"
+  },
+  {
+   "id": "ntake/0188",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 1.5 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp 1.5))"
+  },
+  {
+   "id": "ntake/0189",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 1.5 :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp 1.5))"
+  },
+  {
+   "id": "ntake/0190",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 1.5 (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp 1.5))"
+  },
+  {
+   "id": "ntake/0191",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 1.5 (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp 1.5))"
+  },
+  {
+   "id": "ntake/0192",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 1.5 (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp 1.5))"
+  },
+  {
+   "id": "ntake/0193",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 1.5 (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp 1.5))"
+  },
+  {
+   "id": "ntake/0194",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 1.5 (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp 1.5))"
+  },
+  {
+   "id": "ntake/0195",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 1.5 (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp 1.5))"
+  },
+  {
+   "id": "ntake/0196",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 1.5 (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp 1.5))"
+  },
+  {
+   "id": "ntake/0197",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 1.5 (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp 1.5))"
+  },
+  {
+   "id": "ntake/0198",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 1.5 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp 1.5))"
+  },
+  {
+   "id": "ntake/0199",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 1.5 (cons 1 (cons 2 (cons 3 9))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp 1.5))"
+  },
+  {
+   "id": "ntake/0200",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'ntake '(1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr ntake> 1))"
+  },
+  {
+   "id": "ntake/0201",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'ntake '(1 1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr ntake> 3))"
+  },
+  {
+   "id": "ntake/0202",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 nil)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (ntake a0 a1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp nil))"
+  },
+  {
+   "id": "ntake/0203",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 (vector 1 2))) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (ntake a0 a1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp t))"
+  },
+  {
+   "id": "ntake/0204",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0) (a1 (list 'a (list 'b)))) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (ntake a0 a1))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "ntake/0205",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 2) (a1 (copy-sequence \"abc\"))) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (ntake a0 a1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"abc\"))"
+  },
+  {
+   "id": "ntake/0206",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 4) (a1 'sym)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (ntake a0 a1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp sym))"
+  },
+  {
+   "id": "ntake/0207",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.5) (a1 -1)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (ntake a0 a1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp 1.5))"
+  },
+  {
+   "id": "ntake/0208",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 nil)) (let ((r (ntake a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp nil))"
+  },
+  {
+   "id": "ntake/0209",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 1)) (let ((r (ntake a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp nil))"
+  },
+  {
+   "id": "ntake/0210",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 most-positive-fixnum)) (let ((r (ntake a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp nil))"
+  },
+  {
+   "id": "ntake/0211",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 :kw)) (let ((r (ntake a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp nil))"
+  },
+  {
+   "id": "ntake/0212",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 (copy-sequence \"λx\"))) (let ((r (ntake a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp nil))"
+  },
+  {
+   "id": "ntake/0213",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 (cons 1 2))) (let ((r (ntake a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp nil))"
+  },
+  {
+   "id": "ntake/0214",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (ntake a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp nil))"
+  },
+  {
+   "id": "ntake/0215",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 t)) (let ((r (ntake a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp t))"
+  },
+  {
+   "id": "ntake/0216",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 2)) (let ((r (ntake a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp t))"
+  },
+  {
+   "id": "ntake/0217",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 1.5)) (let ((r (ntake a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp t))"
+  },
+  {
+   "id": "ntake/0218",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 (copy-sequence \"\"))) (let ((r (ntake a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp t))"
+  },
+  {
+   "id": "ntake/0219",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 (list 1 2 3))) (let ((r (ntake a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp t))"
+  },
+  {
+   "id": "ntake/0220",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 (cons 1 (cons 2 3)))) (let ((r (ntake a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp t))"
+  },
+  {
+   "id": "ntake/0221",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 (cons 1 (cons 2 (cons 3 9))))) (let ((r (ntake a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp t))"
+  },
+  {
+   "id": "ntake/0222",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1) (a1 0)) (let ((r (ntake a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "ntake/0223",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1) (a1 -1)) (let ((r (ntake a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "ntake/0224",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1) (a1 'sym)) (let ((r (ntake a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "ntake/0225",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1) (a1 (copy-sequence \"abc\"))) (let ((r (ntake a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "ntake/0226",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1) (a1 (list 'a (list 'b)))) (let ((r (ntake a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "ntake/0227",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1) (a1 (vector 1 2))) (let ((r (ntake a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "ntake/0228",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0) (a1 nil)) (let ((r (ntake a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "ntake/0229",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0) (a1 1)) (let ((r (ntake a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "ntake/0230",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0) (a1 most-positive-fixnum)) (let ((r (ntake a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "ntake/0231",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0) (a1 :kw)) (let ((r (ntake a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "ntake/0232",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0) (a1 (copy-sequence \"λx\"))) (let ((r (ntake a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "ntake/0233",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0) (a1 (cons 1 2))) (let ((r (ntake a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "ntake/0234",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0) (a1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (ntake a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "ntake/0235",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 t)) (let ((r (ntake a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp t))"
+  },
+  {
+   "id": "ntake/0236",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 2)) (let ((r (ntake a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "ntake/0237",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 1.5)) (let ((r (ntake a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1.5))"
+  },
+  {
+   "id": "ntake/0238",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 (copy-sequence \"\"))) (let ((r (ntake a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"\"))"
+  },
+  {
+   "id": "ntake/0239",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 (list 1 2 3))) (let ((r (ntake a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "ntake/0240",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 (cons 1 (cons 2 3)))) (let ((r (ntake a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "ntake/0241",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 (cons 1 (cons 2 (cons 3 9))))) (let ((r (ntake a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "ntake/0242",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 2) (a1 0)) (let ((r (ntake a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 0))"
+  },
+  {
+   "id": "ntake/0243",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 2) (a1 -1)) (let ((r (ntake a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp -1))"
+  },
+  {
+   "id": "ntake/0244",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 2) (a1 'sym)) (let ((r (ntake a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp sym))"
+  },
+  {
+   "id": "ntake/0245",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 2) (a1 (copy-sequence \"abc\"))) (let ((r (ntake a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"abc\"))"
+  },
+  {
+   "id": "ntake/0246",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 2) (a1 (list 'a (list 'b)))) (let ((r (ntake a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "ntake/0247",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 2) (a1 (vector 1 2))) (let ((r (ntake a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp [1 2]))"
+  },
+  {
+   "id": "ntake/0248",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 3) (a1 nil)) (let ((r (ntake a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "ntake/0249",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 3) (a1 1)) (let ((r (ntake a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "ntake/0250",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 3) (a1 most-positive-fixnum)) (let ((r (ntake a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "ntake/0251",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 3) (a1 :kw)) (let ((r (ntake a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "ntake/0252",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 3) (a1 (copy-sequence \"λx\"))) (let ((r (ntake a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "ntake/0253",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 3) (a1 (cons 1 2))) (let ((r (ntake a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 . 2)))"
+  },
+  {
+   "id": "ntake/0254",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 3) (a1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (ntake a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "ntake/0255",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 4) (a1 t)) (let ((r (ntake a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp t))"
+  },
+  {
+   "id": "ntake/0256",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 4) (a1 2)) (let ((r (ntake a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "ntake/0257",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 4) (a1 1.5)) (let ((r (ntake a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1.5))"
+  },
+  {
+   "id": "ntake/0258",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 4) (a1 (copy-sequence \"\"))) (let ((r (ntake a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"\"))"
+  },
+  {
+   "id": "ntake/0259",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 4) (a1 (list 1 2 3))) (let ((r (ntake a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "ntake/0260",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 4) (a1 (cons 1 (cons 2 3)))) (let ((r (ntake a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 2 . 3)))"
+  },
+  {
+   "id": "ntake/0261",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 4) (a1 (cons 1 (cons 2 (cons 3 9))))) (let ((r (ntake a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 2 3 . 9)))"
+  },
+  {
+   "id": "ntake/0262",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 128) (a1 0)) (let ((r (ntake a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 0))"
+  },
+  {
+   "id": "ntake/0263",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 128) (a1 -1)) (let ((r (ntake a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp -1))"
+  },
+  {
+   "id": "ntake/0264",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 128) (a1 'sym)) (let ((r (ntake a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp sym))"
+  },
+  {
+   "id": "ntake/0265",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 128) (a1 (copy-sequence \"abc\"))) (let ((r (ntake a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"abc\"))"
+  },
+  {
+   "id": "ntake/0266",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 128) (a1 (list 'a (list 'b)))) (let ((r (ntake a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "ntake/0267",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 128) (a1 (vector 1 2))) (let ((r (ntake a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp [1 2]))"
+  },
+  {
+   "id": "ntake/0268",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.5) (a1 nil)) (let ((r (ntake a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp 1.5))"
+  },
+  {
+   "id": "ntake/0269",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.5) (a1 1)) (let ((r (ntake a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp 1.5))"
+  },
+  {
+   "id": "ntake/0270",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.5) (a1 most-positive-fixnum)) (let ((r (ntake a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp 1.5))"
+  },
+  {
+   "id": "ntake/0271",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.5) (a1 :kw)) (let ((r (ntake a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp 1.5))"
+  },
+  {
+   "id": "ntake/0272",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.5) (a1 (copy-sequence \"λx\"))) (let ((r (ntake a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp 1.5))"
+  },
+  {
+   "id": "ntake/0273",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.5) (a1 (cons 1 2))) (let ((r (ntake a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp 1.5))"
+  },
+  {
+   "id": "ntake/0274",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.5) (a1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (ntake a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp 1.5))"
+  },
+  {
+   "id": "ntake/0275",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((x (list 1 2 3))) (let ((tail (cdr x))) (let ((r (ntake 2 x))) (list x tail (eq r x) (eq (cdr r) tail)))))) (error (list 'sig e))))",
+   "expected": "(ok ((1 2) (2) t t))"
+  },
+  {
+   "id": "ntake/0276",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((x (cons 1 9))) (list (eq (ntake 1 x) x) x))) (error (list 'sig e))))",
+   "expected": "(ok (t (1)))"
+  },
+  {
+   "id": "ntake/0277",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((x (list 1 2 3))) (list (eq (ntake most-positive-fixnum x) x) x))) (error (list 'sig e))))",
+   "expected": "(ok (t (1 2 3)))"
+  },
+  {
+   "id": "ntake/0278",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake most-positive-fixnum (cons 1 9))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 . 9)))"
+  },
+  {
+   "id": "ntake/0279",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake -1 t)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "ntake/0280",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (ntake 0 1.5)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "ntake/0281",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 'sym) (error (list 'sig e))))",
+   "expected": "(ok sym)"
+  },
+  {
+   "id": "ntake/0282",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (cons 1 (cons 2 (cons 3 9)))) (error (list 'sig e))))",
+   "expected": "(ok (1 2 3 . 9))"
+  },
+  {
+   "id": "ntake/0283",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (cons 1 (cons 2 3))) (error (list 'sig e))))",
+   "expected": "(ok (1 2 . 3))"
+  },
+  {
+   "id": "ntake/0284",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (cons 1 2)) (error (list 'sig e))))",
+   "expected": "(ok (1 . 2))"
+  },
+  {
+   "id": "ntake/0285",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"\")) (error (list 'sig e))))",
+   "expected": "(ok \"\")"
+  },
+  {
+   "id": "ntake/0286",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"abc\")) (error (list 'sig e))))",
+   "expected": "(ok \"abc\")"
+  },
+  {
+   "id": "ntake/0287",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"λx\")) (error (list 'sig e))))",
+   "expected": "(ok \"λx\")"
+  },
+  {
+   "id": "ntake/0288",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (error (list 'sig e))))",
+   "expected": "(ok (1 2 1 2 . #2))"
+  },
+  {
+   "id": "ntake/0289",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list 'a (list 'b))) (error (list 'sig e))))",
+   "expected": "(ok (a (b)))"
+  },
+  {
+   "id": "ntake/0290",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list 1 2 3)) (error (list 'sig e))))",
+   "expected": "(ok (1 2 3))"
+  },
+  {
+   "id": "ntake/0291",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vector 1 2)) (error (list 'sig e))))",
+   "expected": "(ok [1 2])"
+  },
+  {
+   "id": "ntake/0292",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok -1) (error (list 'sig e))))",
+   "expected": "(ok -1)"
+  },
+  {
+   "id": "ntake/0293",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 0) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "ntake/0294",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1) (error (list 'sig e))))",
+   "expected": "(ok 1)"
+  },
+  {
+   "id": "ntake/0295",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1.5) (error (list 'sig e))))",
+   "expected": "(ok 1.5)"
+  },
+  {
+   "id": "ntake/0296",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 128) (error (list 'sig e))))",
+   "expected": "(ok 128)"
+  },
+  {
+   "id": "ntake/0297",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 2) (error (list 'sig e))))",
+   "expected": "(ok 2)"
+  },
+  {
+   "id": "ntake/0298",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 3) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "ntake/0299",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 4) (error (list 'sig e))))",
+   "expected": "(ok 4)"
+  },
+  {
+   "id": "ntake/0300",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok :kw) (error (list 'sig e))))",
+   "expected": "(ok :kw)"
+  },
+  {
+   "id": "ntake/0301",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok most-positive-fixnum) (error (list 'sig e))))",
+   "expected": "(ok 2305843009213693951)"
+  },
+  {
+   "id": "ntake/0302",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok nil) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "ntake/0303",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok t) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  }
+ ],
+ "pinned": {
+  "ntake/0288": "PRINTER"
+ }
+}

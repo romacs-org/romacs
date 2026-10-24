@@ -1,0 +1,20 @@
+[package]
+name = "romacs-mem"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+romacs-chars = { path = "../romacs-chars" }
+
+[features]
+default = []
+verify = []
+test-drivers = []
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[[example]]
+name = "alloc_bench"
+required-features = ["test-drivers"]

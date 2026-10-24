@@ -1,0 +1,1 @@
+{"name": "make-record", "arity": [3, 3], "effect": "pure", "gnu_files": ["alloc.c"], "gnu_def": "alloc.c:3499", "rust": "src/prims/records.rs:12", "args": []}

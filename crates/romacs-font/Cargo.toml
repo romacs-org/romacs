@@ -1,0 +1,40 @@
+[package]
+name = "romacs-font"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Evaluator-free font resolution for Romacs: plain-data faces and fontsets to exact resolved fonts"
+
+# This crate must never depend on an evaluator. Its whole purpose is that a
+# display built on it cannot reach romacs-core through the font path; the
+# dependency graph, not discipline, enforces it.
+
+[features]
+default = []
+freetype-bundled = ["freetype-rs/bundled"]
+
+[dependencies]
+cosmic-text.workspace = true
+fontdb.workspace = true
+once_cell.workspace = true
+romacs-display-protocol.workspace = true
+romacs-layout-input = { path = "../romacs-layout-input" }
+rustc-hash.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+ttf-parser.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+fontconfig.workspace = true
+yeslogic-fontconfig-sys.workspace = true
+freetype-rs = { version = "0.38.0" }
+
+[dev-dependencies]
+romacs-renderer-wgpu.workspace = true
+romacs-test-fonts.workspace = true
+wgpu.workspace = true
+
+[lints]
+workspace = true

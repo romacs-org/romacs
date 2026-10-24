@@ -1,0 +1,133 @@
+{
+  "core-bench--fib": {
+    "closure": [
+      257,
+      "89c05783070087c1015321c102c05a215c87",
+      [
+        2,
+        {
+          "symbol": "core-bench--fib"
+        }
+      ],
+      5
+    ]
+  },
+  "core-bench--loop": {
+    "closure": [
+      257,
+      "c08901035783140089025cb2010154b20282020087",
+      [
+        0
+      ],
+      5
+    ]
+  },
+  "core-bench--dyn": {
+    "closure": [
+      257,
+      "c1890257830e008918542982010087",
+      [
+        {
+          "symbol": "core-bench--special"
+        },
+        0
+      ],
+      4
+    ]
+  },
+  "core-bench--funcall": {
+    "closure": [
+      257,
+      "c0c1890357831000010121b20182020087",
+      [
+        {
+          "closure": [
+            257,
+            "5487",
+            [],
+            2
+          ]
+        },
+        0
+      ],
+      5
+    ]
+  },
+  "core-bench-row-bc-fib-recursive": {
+    "closure": [
+      0,
+      "c0c12187",
+      [
+        {
+          "symbol": "core-bench--fib"
+        },
+        27
+      ],
+      2
+    ]
+  },
+  "core-bench-row-bc-while-loop": {
+    "closure": [
+      0,
+      "c0c12187",
+      [
+        {
+          "symbol": "core-bench--loop"
+        },
+        20000000
+      ],
+      2
+    ]
+  },
+  "core-bench-row-bc-specbind-loop": {
+    "closure": [
+      0,
+      "c0c12187",
+      [
+        {
+          "symbol": "core-bench--dyn"
+        },
+        5000000
+      ],
+      2
+    ]
+  },
+  "core-bench-row-bc-funcall-closure": {
+    "closure": [
+      0,
+      "c0c12187",
+      [
+        {
+          "symbol": "core-bench--funcall"
+        },
+        10000000
+      ],
+      2
+    ]
+  },
+  "core-bench-row-bc-mapcar-list": {
+    "closure": [
+      0,
+      "c0c1c222c3c489c557831800c3c6c70522b20388548206008887",
+      [
+        {
+          "symbol": "number-sequence"
+        },
+        1,
+        1000,
+        {
+          "symbol": "nil"
+        },
+        0,
+        2000,
+        {
+          "symbol": "mapcar"
+        },
+        {
+          "symbol": "1+"
+        }
+      ],
+      7
+    ]
+  }
+}

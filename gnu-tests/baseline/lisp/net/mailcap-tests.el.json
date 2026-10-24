@@ -1,0 +1,359 @@
+{
+  "blob": "7dea0f06c1620202186f9dae9c80bdbb43dddef8",
+  "compiled": {
+    "complete": true,
+    "exit": 0,
+    "garbled_lines": 0,
+    "load_error": null,
+    "load_ok": true,
+    "results": {
+      "mailcap-add-mailcap-entry-erroneous-merge": {
+        "as_expected": true,
+        "detail": "(ert-test-failed ((should-not (equal mailcap-mime-data '((\"major\" ...)))) :form (equal ((\"major\" (\"minor\" ... ...))) ((\"major\" (\"minor\" ... ...)))) :value t :explanation nil))",
+        "expected": ":failed",
+        "outcome": "failed",
+        "tags": []
+      },
+      "mailcap-add-mailcap-entry-existing-with-test-differing-viewer": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "mailcap-add-mailcap-entry-existing-with-test-same-viewer": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "mailcap-add-mailcap-entry-existing-without-test-differing-viewer": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "mailcap-add-mailcap-entry-new-major": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "mailcap-add-mailcap-entry-new-minor-to-empty-major": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "mailcap-add-mailcap-entry-new-minor-to-non-empty-major": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "mailcap-add-mailcap-entry-new-minor-to-various-major-positions": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "mailcap-add-mailcap-entry-simple-merge": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "mailcap-mimetypes-parsed-p": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "mailcap-parse-empty-path": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "mailcap-parse-path": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "mailcap-parsing-and-mailcap-mime-info": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "mailcap-view-file": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "mailcap-viewer-passes-test-w/o-test-returns-t": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      }
+    },
+    "timed_out": false
+  },
+  "file": "lisp/net/mailcap-tests.el",
+  "gnu": {
+    "emacs": "<recording-path-redacted>/emacs-32.0.50",
+    "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+    "sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+    "version": "32.0.50"
+  },
+  "harness_sha256": "78c20850429a08af22faadf73b5d164c560230e83d7eb88ef60cb995670703ef",
+  "mini": {
+    "complete": true,
+    "exit": 0,
+    "garbled_lines": 0,
+    "load_error": null,
+    "load_ok": null,
+    "results": {
+      "mailcap-add-mailcap-entry-erroneous-merge": {
+        "as_expected": null,
+        "detail": "((should-not (equal mailcap-mime-data '((\"major\" (\"minor\" ... ...)))) :value t))",
+        "expected": ":failed",
+        "outcome": "failed",
+        "tags": null
+      },
+      "mailcap-add-mailcap-entry-existing-with-test-differing-viewer": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "mailcap-add-mailcap-entry-existing-with-test-same-viewer": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "mailcap-add-mailcap-entry-existing-without-test-differing-viewer": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "mailcap-add-mailcap-entry-new-major": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "mailcap-add-mailcap-entry-new-minor-to-empty-major": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "mailcap-add-mailcap-entry-new-minor-to-non-empty-major": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "mailcap-add-mailcap-entry-new-minor-to-various-major-positions": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "mailcap-add-mailcap-entry-simple-merge": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "mailcap-mimetypes-parsed-p": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "mailcap-parse-empty-path": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "mailcap-parse-path": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "mailcap-parsing-and-mailcap-mime-info": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "mailcap-view-file": {
+        "as_expected": null,
+        "detail": "(file-missing \"Opening input file\" \"No such file or directory\" \"<recording-home>/.hermes/cache/scratch/gts-tree-t8p5ta2b/test/lisp/net/test.test\")",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "mailcap-viewer-passes-test-w/o-test-returns-t": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      }
+    },
+    "timed_out": false
+  },
+  "read_error": null,
+  "real": {
+    "complete": true,
+    "exit": 0,
+    "garbled_lines": 0,
+    "load_error": null,
+    "load_ok": true,
+    "results": {
+      "mailcap-add-mailcap-entry-erroneous-merge": {
+        "as_expected": true,
+        "detail": "(ert-test-failed ((should-not (equal mailcap-mime-data '((\"major\" ...)))) :form (equal ((\"major\" (\"minor\" ... ...))) ((\"major\" (\"minor\" ... ...)))) :value t :explanation nil))",
+        "expected": ":failed",
+        "outcome": "failed",
+        "tags": []
+      },
+      "mailcap-add-mailcap-entry-existing-with-test-differing-viewer": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "mailcap-add-mailcap-entry-existing-with-test-same-viewer": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "mailcap-add-mailcap-entry-existing-without-test-differing-viewer": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "mailcap-add-mailcap-entry-new-major": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "mailcap-add-mailcap-entry-new-minor-to-empty-major": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "mailcap-add-mailcap-entry-new-minor-to-non-empty-major": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "mailcap-add-mailcap-entry-new-minor-to-various-major-positions": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "mailcap-add-mailcap-entry-simple-merge": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "mailcap-mimetypes-parsed-p": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "mailcap-parse-empty-path": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "mailcap-parse-path": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "mailcap-parsing-and-mailcap-mime-info": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "mailcap-view-file": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "mailcap-viewer-passes-test-w/o-test-returns-t": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      }
+    },
+    "timed_out": false
+  },
+  "schema": 1,
+  "toplevel_deftests": 15
+}

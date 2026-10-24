@@ -1,0 +1,423 @@
+{
+  "gnu": "/usr/bin/emacs",
+  "version": "32.0.50",
+  "cases": [
+    {
+      "category": "&optional",
+      "source": "(funcall (lambda (a &optional b) (if b (+ a b) a)) 4)",
+      "transport": [
+        "funcall",
+        [
+          "lambda",
+          [
+            "a",
+            "&optional",
+            "b"
+          ],
+          [
+            "if",
+            "b",
+            [
+              "+",
+              "a",
+              "b"
+            ],
+            "a"
+          ]
+        ],
+        4
+      ],
+      "expected": "4",
+      "actual": "4",
+      "error": "",
+      "ir": "entry f1\nsymbol s0 = +\nsymbol s1 = -\nsymbol s2 = *\nsymbol s3 = <\nsymbol s4 = =\nsymbol s5 = 1+\nsymbol s6 = 1-\nsymbol s7 = cons\nsymbol s8 = car\nsymbol s9 = cdr\nsymbol s10 = length\nsymbol s11 = nreverse\nsymbol s12 = apply\nsymbol s13 = throw\nsymbol s14 = signal\nsymbol s15 = vector\nsymbol s16 = aref\nsymbol s17 = aset\nsymbol s18 = copy-sequence\nsymbol s19 = assq\nsymbol s20 = plist-get\nsymbol s21 = setcar\nsymbol s22 = setcdr\nfn f0 args=2 required=1 rest=false captures=0 registers=12\n  0000 r3 = r1\n  0001 unless r3 jump 0006\n  0002 r5 = r0\n  0003 r6 = r1\n  0004 r4 = call s0 cache c0 args r5 count 2\n  0005 jump 0007\n  0006 r4 = r0\n  0007 return r4\nfn f1 args=0 required=0 rest=false captures=0 registers=5\n  0000 r1 = closure f0 captures []\n  0001 r2 = const 4\n  0002 r4 = funcall r1 args r2 count 1\n  0003 return r4\n",
+      "ir_ok": true,
+      "passed": true
+    },
+    {
+      "category": "&rest",
+      "source": "(funcall (lambda (a &rest xs) (+ a (length xs))) 4 5 6)",
+      "transport": [
+        "funcall",
+        [
+          "lambda",
+          [
+            "a",
+            "&rest",
+            "xs"
+          ],
+          [
+            "+",
+            "a",
+            [
+              "length",
+              "xs"
+            ]
+          ]
+        ],
+        4,
+        5,
+        6
+      ],
+      "expected": "6",
+      "actual": "6",
+      "error": "",
+      "ir": "entry f1\nsymbol s0 = +\nsymbol s1 = -\nsymbol s2 = *\nsymbol s3 = <\nsymbol s4 = =\nsymbol s5 = 1+\nsymbol s6 = 1-\nsymbol s7 = cons\nsymbol s8 = car\nsymbol s9 = cdr\nsymbol s10 = length\nsymbol s11 = nreverse\nsymbol s12 = apply\nsymbol s13 = throw\nsymbol s14 = signal\nsymbol s15 = vector\nsymbol s16 = aref\nsymbol s17 = aset\nsymbol s18 = copy-sequence\nsymbol s19 = assq\nsymbol s20 = plist-get\nsymbol s21 = setcar\nsymbol s22 = setcdr\nfn f0 args=1 required=1 rest=true captures=0 registers=10\n  0000 r3 = r0\n  0001 r6 = r1\n  0002 r4 = call s10 cache c0 args r6 count 1\n  0003 r9 = call s0 cache c1 args r3 count 2\n  0004 return r9\nfn f1 args=0 required=0 rest=false captures=0 registers=9\n  0000 r1 = closure f0 captures []\n  0001 r2 = const 4\n  0002 r3 = const 5\n  0003 r4 = const 6\n  0004 r8 = funcall r1 args r2 count 3\n  0005 return r8\n",
+      "ir_ok": true,
+      "passed": true
+    },
+    {
+      "category": "apply",
+      "source": "(apply '+ 1 (cons 2 (cons 3 nil)))",
+      "transport": [
+        "apply",
+        [
+          "quote",
+          "+"
+        ],
+        1,
+        [
+          "cons",
+          2,
+          [
+            "cons",
+            3,
+            "nil"
+          ]
+        ]
+      ],
+      "expected": "6",
+      "actual": "6",
+      "error": "",
+      "ir": "entry f0\nsymbol s0 = +\nsymbol s1 = -\nsymbol s2 = *\nsymbol s3 = <\nsymbol s4 = =\nsymbol s5 = 1+\nsymbol s6 = 1-\nsymbol s7 = cons\nsymbol s8 = car\nsymbol s9 = cdr\nsymbol s10 = length\nsymbol s11 = nreverse\nsymbol s12 = apply\nsymbol s13 = throw\nsymbol s14 = signal\nsymbol s15 = vector\nsymbol s16 = aref\nsymbol s17 = aset\nsymbol s18 = copy-sequence\nsymbol s19 = assq\nsymbol s20 = plist-get\nsymbol s21 = setcar\nsymbol s22 = setcdr\nfn f0 args=0 required=0 rest=false captures=0 registers=16\n  0000 r1 = const +\n  0001 r2 = const 1\n  0002 r6 = const 2\n  0003 r9 = const 3\n  0004 r10 = const nil\n  0005 r7 = call s7 cache c0 args r9 count 2\n  0006 r3 = call s7 cache c1 args r6 count 2\n  0007 r15 = call s12 cache c2 args r1 count 3\n  0008 return r15\n",
+      "ir_ok": true,
+      "passed": true
+    },
+    {
+      "category": "catch/throw",
+      "source": "(catch 'exit (funcall (lambda () (throw 'exit 42))) 0)",
+      "transport": [
+        "catch",
+        [
+          "quote",
+          "exit"
+        ],
+        [
+          "funcall",
+          [
+            "lambda",
+            "nil",
+            [
+              "throw",
+              [
+                "quote",
+                "exit"
+              ],
+              42
+            ]
+          ]
+        ],
+        0
+      ],
+      "expected": "42",
+      "actual": "42",
+      "error": "",
+      "ir": "entry f1\nsymbol s0 = +\nsymbol s1 = -\nsymbol s2 = *\nsymbol s3 = <\nsymbol s4 = =\nsymbol s5 = 1+\nsymbol s6 = 1-\nsymbol s7 = cons\nsymbol s8 = car\nsymbol s9 = cdr\nsymbol s10 = length\nsymbol s11 = nreverse\nsymbol s12 = apply\nsymbol s13 = throw\nsymbol s14 = signal\nsymbol s15 = vector\nsymbol s16 = aref\nsymbol s17 = aset\nsymbol s18 = copy-sequence\nsymbol s19 = assq\nsymbol s20 = plist-get\nsymbol s21 = setcar\nsymbol s22 = setcdr\nsymbol s23 = exit\nfn f0 args=0 required=0 rest=false captures=0 registers=6\n  0000 r1 = const exit\n  0001 r2 = const 42\n  0002 r5 = call s13 cache c0 args r1 count 2\n  0003 return r5\nfn f1 args=0 required=0 rest=false captures=0 registers=7\n  0000 r1 = const exit\n  0001 catch r1 -> r2 resume 0006\n  0002 r4 = closure f0 captures []\n  0003 r5 = funcall r4 args r5 count 0\n  0004 r2 = const 0\n  0005 pop-handlers 1\n  0006 return r2\n",
+      "ir_ok": true,
+      "passed": true
+    },
+    {
+      "category": "condition-case/signal",
+      "source": "(condition-case e (signal 'error (cons 2 nil)) (error (car (cdr e))))",
+      "transport": [
+        "condition-case",
+        "e",
+        [
+          "signal",
+          [
+            "quote",
+            "error"
+          ],
+          [
+            "cons",
+            2,
+            "nil"
+          ]
+        ],
+        [
+          "error",
+          [
+            "car",
+            [
+              "cdr",
+              "e"
+            ]
+          ]
+        ]
+      ],
+      "expected": "2",
+      "actual": "2",
+      "error": "",
+      "ir": "entry f0\nsymbol s0 = +\nsymbol s1 = -\nsymbol s2 = *\nsymbol s3 = <\nsymbol s4 = =\nsymbol s5 = 1+\nsymbol s6 = 1-\nsymbol s7 = cons\nsymbol s8 = car\nsymbol s9 = cdr\nsymbol s10 = length\nsymbol s11 = nreverse\nsymbol s12 = apply\nsymbol s13 = throw\nsymbol s14 = signal\nsymbol s15 = vector\nsymbol s16 = aref\nsymbol s17 = aset\nsymbol s18 = copy-sequence\nsymbol s19 = assq\nsymbol s20 = plist-get\nsymbol s21 = setcar\nsymbol s22 = setcdr\nsymbol s23 = error\nfn f0 args=0 required=0 rest=false captures=0 registers=19\n  0000 condition error -> r2 resume 0008\n  0001 r3 = const error\n  0002 r6 = const 2\n  0003 r7 = const nil\n  0004 r4 = call s7 cache c0 args r6 count 2\n  0005 r1 = call s14 cache c1 args r3 count 2\n  0006 pop-handlers 1\n  0007 jump 0012\n  0008 r15 = r2\n  0009 r14 = call s9 cache c2 args r15 count 1\n  0010 r1 = call s8 cache c3 args r14 count 1\n  0011 jump 0012\n  0012 return r1\n",
+      "ir_ok": true,
+      "passed": true
+    },
+    {
+      "category": "vector/aref",
+      "source": "(aref [3 7] 1)",
+      "transport": [
+        "aref",
+        {
+          "vector": [
+            3,
+            7
+          ]
+        },
+        1
+      ],
+      "expected": "7",
+      "actual": "7",
+      "error": "",
+      "ir": "entry f0\nsymbol s0 = +\nsymbol s1 = -\nsymbol s2 = *\nsymbol s3 = <\nsymbol s4 = =\nsymbol s5 = 1+\nsymbol s6 = 1-\nsymbol s7 = cons\nsymbol s8 = car\nsymbol s9 = cdr\nsymbol s10 = length\nsymbol s11 = nreverse\nsymbol s12 = apply\nsymbol s13 = throw\nsymbol s14 = signal\nsymbol s15 = vector\nsymbol s16 = aref\nsymbol s17 = aset\nsymbol s18 = copy-sequence\nsymbol s19 = assq\nsymbol s20 = plist-get\nsymbol s21 = setcar\nsymbol s22 = setcdr\nfn f0 args=0 required=0 rest=false captures=0 registers=6\n  0000 r1 = const [3 7]\n  0001 r2 = const 1\n  0002 r5 = call s16 cache c0 args r1 count 2\n  0003 return r5\n",
+      "ir_ok": true,
+      "passed": true
+    },
+    {
+      "category": "vector/aset",
+      "source": "(let ((v (vector 1 2))) (aset v 0 9) (aref v 0))",
+      "transport": [
+        "let",
+        [
+          [
+            "v",
+            [
+              "vector",
+              1,
+              2
+            ]
+          ]
+        ],
+        [
+          "aset",
+          "v",
+          0,
+          9
+        ],
+        [
+          "aref",
+          "v",
+          0
+        ]
+      ],
+      "expected": "9",
+      "actual": "9",
+      "error": "",
+      "ir": "entry f0\nsymbol s0 = +\nsymbol s1 = -\nsymbol s2 = *\nsymbol s3 = <\nsymbol s4 = =\nsymbol s5 = 1+\nsymbol s6 = 1-\nsymbol s7 = cons\nsymbol s8 = car\nsymbol s9 = cdr\nsymbol s10 = length\nsymbol s11 = nreverse\nsymbol s12 = apply\nsymbol s13 = throw\nsymbol s14 = signal\nsymbol s15 = vector\nsymbol s16 = aref\nsymbol s17 = aset\nsymbol s18 = copy-sequence\nsymbol s19 = assq\nsymbol s20 = plist-get\nsymbol s21 = setcar\nsymbol s22 = setcdr\nfn f0 args=0 required=0 rest=false captures=0 registers=20\n  0000 r1 = const 1\n  0001 r2 = const 2\n  0002 r6 = call s15 cache c0 args r1 count 2\n  0003 r8 = r6\n  0004 r9 = const 0\n  0005 r10 = const 9\n  0006 r14 = call s17 cache c1 args r8 count 3\n  0007 r15 = r6\n  0008 r16 = const 0\n  0009 r19 = call s16 cache c2 args r15 count 2\n  0010 return r19\n",
+      "ir_ok": true,
+      "passed": true
+    },
+    {
+      "category": "string/aref",
+      "source": "(aref \"abc\" 1)",
+      "transport": [
+        "aref",
+        {
+          "string": "abc"
+        },
+        1
+      ],
+      "expected": "98",
+      "actual": "98",
+      "error": "",
+      "ir": "entry f0\nsymbol s0 = +\nsymbol s1 = -\nsymbol s2 = *\nsymbol s3 = <\nsymbol s4 = =\nsymbol s5 = 1+\nsymbol s6 = 1-\nsymbol s7 = cons\nsymbol s8 = car\nsymbol s9 = cdr\nsymbol s10 = length\nsymbol s11 = nreverse\nsymbol s12 = apply\nsymbol s13 = throw\nsymbol s14 = signal\nsymbol s15 = vector\nsymbol s16 = aref\nsymbol s17 = aset\nsymbol s18 = copy-sequence\nsymbol s19 = assq\nsymbol s20 = plist-get\nsymbol s21 = setcar\nsymbol s22 = setcdr\nfn f0 args=0 required=0 rest=false captures=0 registers=6\n  0000 r1 = const \"abc\"\n  0001 r2 = const 1\n  0002 r5 = call s16 cache c0 args r1 count 2\n  0003 return r5\n",
+      "ir_ok": true,
+      "passed": true
+    },
+    {
+      "category": "string/aset",
+      "source": "(let ((s (copy-sequence \"abc\"))) (aset s 1 90) (aref s 1))",
+      "transport": [
+        "let",
+        [
+          [
+            "s",
+            [
+              "copy-sequence",
+              {
+                "string": "abc"
+              }
+            ]
+          ]
+        ],
+        [
+          "aset",
+          "s",
+          1,
+          90
+        ],
+        [
+          "aref",
+          "s",
+          1
+        ]
+      ],
+      "expected": "90",
+      "actual": "90",
+      "error": "",
+      "ir": "entry f0\nsymbol s0 = +\nsymbol s1 = -\nsymbol s2 = *\nsymbol s3 = <\nsymbol s4 = =\nsymbol s5 = 1+\nsymbol s6 = 1-\nsymbol s7 = cons\nsymbol s8 = car\nsymbol s9 = cdr\nsymbol s10 = length\nsymbol s11 = nreverse\nsymbol s12 = apply\nsymbol s13 = throw\nsymbol s14 = signal\nsymbol s15 = vector\nsymbol s16 = aref\nsymbol s17 = aset\nsymbol s18 = copy-sequence\nsymbol s19 = assq\nsymbol s20 = plist-get\nsymbol s21 = setcar\nsymbol s22 = setcdr\nfn f0 args=0 required=0 rest=false captures=0 registers=18\n  0000 r1 = const \"abc\"\n  0001 r4 = call s18 cache c0 args r1 count 1\n  0002 r6 = r4\n  0003 r7 = const 1\n  0004 r8 = const 90\n  0005 r12 = call s17 cache c1 args r6 count 3\n  0006 r13 = r4\n  0007 r14 = const 1\n  0008 r17 = call s16 cache c2 args r13 count 2\n  0009 return r17\n",
+      "ir_ok": true,
+      "passed": true
+    },
+    {
+      "category": "assq",
+      "source": "(cdr (assq 'a (cons (cons 'a 7) nil)))",
+      "transport": [
+        "cdr",
+        [
+          "assq",
+          [
+            "quote",
+            "a"
+          ],
+          [
+            "cons",
+            [
+              "cons",
+              [
+                "quote",
+                "a"
+              ],
+              7
+            ],
+            "nil"
+          ]
+        ]
+      ],
+      "expected": "7",
+      "actual": "7",
+      "error": "",
+      "ir": "entry f0\nsymbol s0 = +\nsymbol s1 = -\nsymbol s2 = *\nsymbol s3 = <\nsymbol s4 = =\nsymbol s5 = 1+\nsymbol s6 = 1-\nsymbol s7 = cons\nsymbol s8 = car\nsymbol s9 = cdr\nsymbol s10 = length\nsymbol s11 = nreverse\nsymbol s12 = apply\nsymbol s13 = throw\nsymbol s14 = signal\nsymbol s15 = vector\nsymbol s16 = aref\nsymbol s17 = aset\nsymbol s18 = copy-sequence\nsymbol s19 = assq\nsymbol s20 = plist-get\nsymbol s21 = setcar\nsymbol s22 = setcdr\nsymbol s23 = a\nfn f0 args=0 required=0 rest=false captures=0 registers=16\n  0000 r2 = const a\n  0001 r7 = const a\n  0002 r8 = const 7\n  0003 r5 = call s7 cache c0 args r7 count 2\n  0004 r6 = const nil\n  0005 r3 = call s7 cache c1 args r5 count 2\n  0006 r1 = call s19 cache c2 args r2 count 2\n  0007 r15 = call s9 cache c3 args r1 count 1\n  0008 return r15\n",
+      "ir_ok": true,
+      "passed": true
+    },
+    {
+      "category": "plist-get",
+      "source": "(plist-get (cons 'a (cons 9 nil)) 'a)",
+      "transport": [
+        "plist-get",
+        [
+          "cons",
+          [
+            "quote",
+            "a"
+          ],
+          [
+            "cons",
+            9,
+            "nil"
+          ]
+        ],
+        [
+          "quote",
+          "a"
+        ]
+      ],
+      "expected": "9",
+      "actual": "9",
+      "error": "",
+      "ir": "entry f0\nsymbol s0 = +\nsymbol s1 = -\nsymbol s2 = *\nsymbol s3 = <\nsymbol s4 = =\nsymbol s5 = 1+\nsymbol s6 = 1-\nsymbol s7 = cons\nsymbol s8 = car\nsymbol s9 = cdr\nsymbol s10 = length\nsymbol s11 = nreverse\nsymbol s12 = apply\nsymbol s13 = throw\nsymbol s14 = signal\nsymbol s15 = vector\nsymbol s16 = aref\nsymbol s17 = aset\nsymbol s18 = copy-sequence\nsymbol s19 = assq\nsymbol s20 = plist-get\nsymbol s21 = setcar\nsymbol s22 = setcdr\nsymbol s23 = a\nfn f0 args=0 required=0 rest=false captures=0 registers=14\n  0000 r3 = const a\n  0001 r6 = const 9\n  0002 r7 = const nil\n  0003 r4 = call s7 cache c0 args r6 count 2\n  0004 r1 = call s7 cache c1 args r3 count 2\n  0005 r2 = const a\n  0006 r13 = call s20 cache c2 args r1 count 2\n  0007 return r13\n",
+      "ir_ok": true,
+      "passed": true
+    },
+    {
+      "category": "generalized-setf",
+      "source": "(let ((x (cons 1 nil))) (setf (car x) 9) (car x))",
+      "transport": [
+        "let",
+        [
+          [
+            "x",
+            [
+              "cons",
+              1,
+              "nil"
+            ]
+          ]
+        ],
+        [
+          "setf",
+          [
+            "car",
+            "x"
+          ],
+          9
+        ],
+        [
+          "car",
+          "x"
+        ]
+      ],
+      "expected": "9",
+      "actual": "9",
+      "error": "",
+      "ir": "entry f0\nsymbol s0 = +\nsymbol s1 = -\nsymbol s2 = *\nsymbol s3 = <\nsymbol s4 = =\nsymbol s5 = 1+\nsymbol s6 = 1-\nsymbol s7 = cons\nsymbol s8 = car\nsymbol s9 = cdr\nsymbol s10 = length\nsymbol s11 = nreverse\nsymbol s12 = apply\nsymbol s13 = throw\nsymbol s14 = signal\nsymbol s15 = vector\nsymbol s16 = aref\nsymbol s17 = aset\nsymbol s18 = copy-sequence\nsymbol s19 = assq\nsymbol s20 = plist-get\nsymbol s21 = setcar\nsymbol s22 = setcdr\nfn f0 args=0 required=0 rest=false captures=0 registers=22\n  0000 r1 = const 1\n  0001 r2 = const nil\n  0002 r6 = call s7 cache c0 args r1 count 2\n  0003 r10 = r6\n  0004 r12 = const 9\n  0005 r14 = r10\n  0006 r15 = r12\n  0007 r18 = call s21 cache c1 args r14 count 2\n  0008 r19 = r6\n  0009 r21 = call s8 cache c2 args r19 count 1\n  0010 return r21\n",
+      "ir_ok": true,
+      "passed": true
+    },
+    {
+      "category": "generalized-cl-incf",
+      "source": "(let ((x (cons 1 nil))) (cl-incf (car x) 9) (car x))",
+      "transport": [
+        "let",
+        [
+          [
+            "x",
+            [
+              "cons",
+              1,
+              "nil"
+            ]
+          ]
+        ],
+        [
+          "cl-incf",
+          [
+            "car",
+            "x"
+          ],
+          9
+        ],
+        [
+          "car",
+          "x"
+        ]
+      ],
+      "expected": "10",
+      "actual": "10",
+      "error": "",
+      "ir": "entry f0\nsymbol s0 = +\nsymbol s1 = -\nsymbol s2 = *\nsymbol s3 = <\nsymbol s4 = =\nsymbol s5 = 1+\nsymbol s6 = 1-\nsymbol s7 = cons\nsymbol s8 = car\nsymbol s9 = cdr\nsymbol s10 = length\nsymbol s11 = nreverse\nsymbol s12 = apply\nsymbol s13 = throw\nsymbol s14 = signal\nsymbol s15 = vector\nsymbol s16 = aref\nsymbol s17 = aset\nsymbol s18 = copy-sequence\nsymbol s19 = assq\nsymbol s20 = plist-get\nsymbol s21 = setcar\nsymbol s22 = setcdr\nfn f0 args=0 required=0 rest=false captures=0 registers=27\n  0000 r1 = const 1\n  0001 r2 = const nil\n  0002 r6 = call s7 cache c0 args r1 count 2\n  0003 r9 = r6\n  0004 r12 = r9\n  0005 r10 = call s8 cache c1 args r12 count 1\n  0006 r11 = const 9\n  0007 r17 = call s0 cache c2 args r10 count 2\n  0008 r19 = r9\n  0009 r20 = r17\n  0010 r23 = call s21 cache c3 args r19 count 2\n  0011 r24 = r6\n  0012 r26 = call s8 cache c4 args r24 count 1\n  0013 return r26\n",
+      "ir_ok": true,
+      "passed": true
+    },
+    {
+      "category": "quoted-list",
+      "source": "(car '(4 5))",
+      "transport": [
+        "car",
+        [
+          "quote",
+          [
+            4,
+            5
+          ]
+        ]
+      ],
+      "expected": "4",
+      "actual": "4",
+      "error": "",
+      "ir": "entry f0\nsymbol s0 = +\nsymbol s1 = -\nsymbol s2 = *\nsymbol s3 = <\nsymbol s4 = =\nsymbol s5 = 1+\nsymbol s6 = 1-\nsymbol s7 = cons\nsymbol s8 = car\nsymbol s9 = cdr\nsymbol s10 = length\nsymbol s11 = nreverse\nsymbol s12 = apply\nsymbol s13 = throw\nsymbol s14 = signal\nsymbol s15 = vector\nsymbol s16 = aref\nsymbol s17 = aset\nsymbol s18 = copy-sequence\nsymbol s19 = assq\nsymbol s20 = plist-get\nsymbol s21 = setcar\nsymbol s22 = setcdr\nfn f0 args=0 required=0 rest=false captures=0 registers=4\n  0000 r1 = const (4 5)\n  0001 r3 = call s8 cache c0 args r1 count 1\n  0002 return r3\n",
+      "ir_ok": true,
+      "passed": true
+    }
+  ]
+}

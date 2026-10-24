@@ -1,0 +1,8 @@
+{
+  "expression": "(progn (dolist (s '(\"/\" \"/does-not-exist-savejourney\")) (prin1 (file-symlink-p s)) (terpri)) (let ((default-directory \"/tmp/\") (file-name-handler-alist '((\"remote\" . sj-handler)))) (fset 'sj-handler (lambda (op name) (list op name))) (put 'sj-handler 'operations '(file-symlink-p)) (prin1 (file-symlink-p \"remote\"))))",
+  "result": {
+    "output": "nil\nnil\n(file-symlink-p \"/tmp/remote\")",
+    "exit_code": 0,
+    "error": null
+  }
+}

@@ -1,0 +1,8 @@
+Upstream: https://github.com/jrblevin/markdown-mode
+Version: 2.9-alpha
+Commit: 1f72cefa6a4b759f90e335e4908725a721b17ad9
+License: GPL-3.0-or-later
+Local changes: None.
+The original compile-time header-face generator is retained. Romacs's lexical
+lookup now honors positioned symbol keys when symbols-with-pos-enabled is set;
+the six-declaration workaround is no longer necessary.

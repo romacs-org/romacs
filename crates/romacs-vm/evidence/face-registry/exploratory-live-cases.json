@@ -1,0 +1,872 @@
+{
+  "binary": "<recording-path-redacted>/emacs-32.0.50",
+  "source_commit": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "mode": "-Q --batch (TTY selected frame)",
+  "cases": [
+    {
+      "label": "internal-lisp-face-p 'oracle-missing",
+      "expression": "(internal-lisp-face-p 'oracle-missing)",
+      "result": "nil"
+    },
+    {
+      "label": "internal-lisp-face-p 42",
+      "expression": "(internal-lisp-face-p 42)",
+      "result": "nil"
+    },
+    {
+      "label": "internal-lisp-face-p \"oracle-missing\"",
+      "expression": "(internal-lisp-face-p \"oracle-missing\")",
+      "result": "nil"
+    },
+    {
+      "label": "internal-make-lisp-face \"oracle-string\"",
+      "expression": "(internal-make-lisp-face \"oracle-string\")",
+      "result": "ERROR (wrong-type-argument symbolp \"oracle-string\")"
+    },
+    {
+      "label": "internal-make-lisp-face 'oracle-new t",
+      "expression": "(internal-make-lisp-face 'oracle-new t)",
+      "result": "ERROR (wrong-type-argument frame-live-p t)"
+    },
+    {
+      "label": "internal-make-lisp-face 'oracle-new 0",
+      "expression": "(internal-make-lisp-face 'oracle-new 0)",
+      "result": "ERROR (wrong-type-argument frame-live-p 0)"
+    },
+    {
+      "label": "internal-get-lisp-face-attribute 'oracle-missing :bogus",
+      "expression": "(internal-get-lisp-face-attribute 'oracle-missing :bogus)",
+      "result": "ERROR (error \"Invalid face\" oracle-missing)"
+    },
+    {
+      "label": "internal-get-lisp-face-attribute 42 :bogus",
+      "expression": "(internal-get-lisp-face-attribute 42 :bogus)",
+      "result": "ERROR (error \"Invalid face\" 42)"
+    },
+    {
+      "label": "internal-get-lisp-face-attribute \"default\" :weight",
+      "expression": "(internal-get-lisp-face-attribute \"default\" :weight)",
+      "result": "ERROR (wrong-type-argument symbolp \"default\")"
+    },
+    {
+      "label": "internal-get-lisp-face-attribute 'default 42",
+      "expression": "(internal-get-lisp-face-attribute 'default 42)",
+      "result": "ERROR (wrong-type-argument symbolp 42)"
+    },
+    {
+      "label": "internal-get-lisp-face-attribute 'default :bogus 0",
+      "expression": "(internal-get-lisp-face-attribute 'default :bogus 0)",
+      "result": "ERROR (wrong-type-argument frame-live-p 0)"
+    },
+    {
+      "label": "internal-set-lisp-face-attribute 'oracle-missing :weight 'bold t",
+      "expression": "(internal-set-lisp-face-attribute 'oracle-missing :weight 'bold t)",
+      "result": "ERROR (error \"Invalid face\" oracle-missing)"
+    },
+    {
+      "label": "internal-set-lisp-face-attribute 42 42 nil 99",
+      "expression": "(internal-set-lisp-face-attribute 42 42 nil 99)",
+      "result": "ERROR (wrong-type-argument symbolp 42)"
+    },
+    {
+      "label": "make-global-vector",
+      "expression": "(internal-make-lisp-face 'oracle-new)",
+      "result": "[face unspecified unspecified unspecified unspecified unspecified unspecified unspecified unspecified unspecified unspecified unspecified unspecified unspecified unspecified unspecified unspecified unspecified unspecified unspecified]"
+    },
+    {
+      "label": "make-reset-identity",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (let ((v (internal-lisp-face-p f))) (aset v 5 'bold) (list (eq v (internal-make-lisp-face f)) v)))",
+      "result": "(t [face unspecified unspecified unspecified unspecified unspecified unspecified unspecified unspecified unspecified unspecified unspecified unspecified unspecified unspecified unspecified unspecified unspecified unspecified unspecified])"
+    },
+    {
+      "label": "global-only-no-local",
+      "expression": "(let ((f (make-symbol \"global-only\"))) (internal-make-lisp-face f) (list (internal-lisp-face-p f (selected-frame)) (condition-case e (internal-get-lisp-face-attribute f :weight) (error e))))",
+      "result": "(nil (error \"Invalid face\" global-only))"
+    },
+    {
+      "label": "predicate frame nil",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-lisp-face-p f nil))",
+      "result": "[face unspecified unspecified unspecified unspecified unspecified unspecified unspecified unspecified unspecified unspecified unspecified unspecified unspecified unspecified unspecified unspecified unspecified unspecified unspecified]"
+    },
+    {
+      "label": "setter frame nil",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :weight 'bold nil) (list (aref (internal-lisp-face-p f) 5) (aref (internal-lisp-face-p f (selected-frame)) 5)))",
+      "result": "(unspecified bold)"
+    },
+    {
+      "label": "predicate frame t",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-lisp-face-p f t))",
+      "result": "ERROR (wrong-type-argument frame-live-p t)"
+    },
+    {
+      "label": "setter frame t",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :weight 'bold t) (list (aref (internal-lisp-face-p f) 5) (aref (internal-lisp-face-p f (selected-frame)) 5)))",
+      "result": "(bold unspecified)"
+    },
+    {
+      "label": "predicate frame 0",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-lisp-face-p f 0))",
+      "result": "ERROR (wrong-type-argument frame-live-p 0)"
+    },
+    {
+      "label": "setter frame 0",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :weight 'bold 0) (list (aref (internal-lisp-face-p f) 5) (aref (internal-lisp-face-p f (selected-frame)) 5)))",
+      "result": "(bold bold)"
+    },
+    {
+      "label": "predicate frame 42",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-lisp-face-p f 42))",
+      "result": "ERROR (wrong-type-argument frame-live-p 42)"
+    },
+    {
+      "label": "setter frame 42",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :weight 'bold 42) (list (aref (internal-lisp-face-p f) 5) (aref (internal-lisp-face-p f (selected-frame)) 5)))",
+      "result": "ERROR (wrong-type-argument frame-live-p 42)"
+    },
+    {
+      "label": "set :family nil",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :family nil) (internal-get-lisp-face-attribute f :family))",
+      "result": "ERROR (wrong-type-argument stringp nil)"
+    },
+    {
+      "label": "set :family \"\"",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :family \"\") (internal-get-lisp-face-attribute f :family))",
+      "result": "ERROR (error \"Invalid face family\" \"\")"
+    },
+    {
+      "label": "set :family \"unknown-family\"",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :family \"unknown-family\") (internal-get-lisp-face-attribute f :family))",
+      "result": "\"unknown-family\""
+    },
+    {
+      "label": "set :foundry nil",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :foundry nil) (internal-get-lisp-face-attribute f :foundry))",
+      "result": "ERROR (wrong-type-argument stringp nil)"
+    },
+    {
+      "label": "set :foundry \"\"",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :foundry \"\") (internal-get-lisp-face-attribute f :foundry))",
+      "result": "ERROR (error \"Invalid face foundry\" \"\")"
+    },
+    {
+      "label": "set :height nil",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :height nil) (internal-get-lisp-face-attribute f :height))",
+      "result": "ERROR (error \"Face height does not produce a positive integer\")"
+    },
+    {
+      "label": "set :height 0",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :height 0) (internal-get-lisp-face-attribute f :height))",
+      "result": "ERROR (error \"Face height does not produce a positive integer\" 0)"
+    },
+    {
+      "label": "set :height -1",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :height -1) (internal-get-lisp-face-attribute f :height))",
+      "result": "ERROR (error \"Face height does not produce a positive integer\" -1)"
+    },
+    {
+      "label": "set :height 1",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :height 1) (internal-get-lisp-face-attribute f :height))",
+      "result": "1"
+    },
+    {
+      "label": "set :height 1.25",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :height 1.25) (internal-get-lisp-face-attribute f :height))",
+      "result": "1.25"
+    },
+    {
+      "label": "set :height 0.01",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :height 0.01) (internal-get-lisp-face-attribute f :height))",
+      "result": "ERROR (error \"Face height does not produce a positive integer\" 0.01)"
+    },
+    {
+      "label": "set :height 'foo",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :height 'foo) (internal-get-lisp-face-attribute f :height))",
+      "result": "ERROR (error \"Face height does not produce a positive integer\" foo)"
+    },
+    {
+      "label": "set :height (lambda (h) (+ h 1))",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :height (lambda (h) (+ h 1))) (internal-get-lisp-face-attribute f :height))",
+      "result": "#[(h) ((+ h 1)) nil]"
+    },
+    {
+      "label": "set :height (lambda (h) 0)",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :height (lambda (h) 0)) (internal-get-lisp-face-attribute f :height))",
+      "result": "ERROR (error \"Face height does not produce a positive integer\" #[(h) (0) nil])"
+    },
+    {
+      "label": "set :height (lambda (h) (error \"height-boom\"))",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :height (lambda (h) (error \"height-boom\"))) (internal-get-lisp-face-attribute f :height))",
+      "result": "ERROR (error \"Face height does not produce a positive integer\" #[(h) ((error \"height-boom\")) nil])"
+    },
+    {
+      "label": "set :weight nil",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :weight nil) (internal-get-lisp-face-attribute f :weight))",
+      "result": "ERROR (error \"Invalid face weight\")"
+    },
+    {
+      "label": "set :weight 'bold",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :weight 'bold) (internal-get-lisp-face-attribute f :weight))",
+      "result": "bold"
+    },
+    {
+      "label": "set :weight 400",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :weight 400) (internal-get-lisp-face-attribute f :weight))",
+      "result": "ERROR (wrong-type-argument symbolp 400)"
+    },
+    {
+      "label": "set :weight 'bogus",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :weight 'bogus) (internal-get-lisp-face-attribute f :weight))",
+      "result": "ERROR (error \"Invalid face weight\" bogus)"
+    },
+    {
+      "label": "set :width 'condensed",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :width 'condensed) (internal-get-lisp-face-attribute f :width))",
+      "result": "condensed"
+    },
+    {
+      "label": "set :width 'bogus",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :width 'bogus) (internal-get-lisp-face-attribute f :width))",
+      "result": "ERROR (error \"Invalid face width\" bogus)"
+    },
+    {
+      "label": "set :slant 'italic",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :slant 'italic) (internal-get-lisp-face-attribute f :slant))",
+      "result": "italic"
+    },
+    {
+      "label": "set :slant 'bogus",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :slant 'bogus) (internal-get-lisp-face-attribute f :slant))",
+      "result": "ERROR (error \"Invalid face slant\" bogus)"
+    },
+    {
+      "label": "set :foreground nil",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :foreground nil) (internal-get-lisp-face-attribute f :foreground))",
+      "result": "unspecified"
+    },
+    {
+      "label": "set :foreground \"\"",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :foreground \"\") (internal-get-lisp-face-attribute f :foreground))",
+      "result": "ERROR (error \"Empty foreground color value\" \"\")"
+    },
+    {
+      "label": "set :foreground \"nonsense-color\"",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :foreground \"nonsense-color\") (internal-get-lisp-face-attribute f :foreground))",
+      "result": "\"nonsense-color\""
+    },
+    {
+      "label": "set :background nil",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :background nil) (internal-get-lisp-face-attribute f :background))",
+      "result": "unspecified"
+    },
+    {
+      "label": "set :distant-foreground nil",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :distant-foreground nil) (internal-get-lisp-face-attribute f :distant-foreground))",
+      "result": "unspecified"
+    },
+    {
+      "label": "set :underline nil",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :underline nil) (internal-get-lisp-face-attribute f :underline))",
+      "result": "nil"
+    },
+    {
+      "label": "set :underline t",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :underline t) (internal-get-lisp-face-attribute f :underline))",
+      "result": "t"
+    },
+    {
+      "label": "set :underline \"\"",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :underline \"\") (internal-get-lisp-face-attribute f :underline))",
+      "result": "ERROR (error \"Invalid face underline\" \"\")"
+    },
+    {
+      "label": "set :underline 42",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :underline 42) (internal-get-lisp-face-attribute f :underline))",
+      "result": "ERROR (error \"Invalid face underline\" 42)"
+    },
+    {
+      "label": "set :underline 'foo",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :underline 'foo) (internal-get-lisp-face-attribute f :underline))",
+      "result": "ERROR (error \"Invalid face underline\" foo)"
+    },
+    {
+      "label": "set :underline '(:style wave)",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :underline '(:style wave)) (internal-get-lisp-face-attribute f :underline))",
+      "result": "(:style wave)"
+    },
+    {
+      "label": "set :underline '(:foo bar)",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :underline '(:foo bar)) (internal-get-lisp-face-attribute f :underline))",
+      "result": "(:foo bar)"
+    },
+    {
+      "label": "set :underline '(:position nil)",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :underline '(:position nil)) (internal-get-lisp-face-attribute f :underline))",
+      "result": "(:position nil)"
+    },
+    {
+      "label": "set :underline '(:style bad)",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :underline '(:style bad)) (internal-get-lisp-face-attribute f :underline))",
+      "result": "ERROR (error \"Invalid face underline\" :style bad)"
+    },
+    {
+      "label": "set :underline '(nil)",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :underline '(nil)) (internal-get-lisp-face-attribute f :underline))",
+      "result": "(nil)"
+    },
+    {
+      "label": "set :underline '(:color foreground-color)",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :underline '(:color foreground-color)) (internal-get-lisp-face-attribute f :underline))",
+      "result": "(:color foreground-color)"
+    },
+    {
+      "label": "set :overline 42",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :overline 42) (internal-get-lisp-face-attribute f :overline))",
+      "result": "42"
+    },
+    {
+      "label": "set :overline 'foo",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :overline 'foo) (internal-get-lisp-face-attribute f :overline))",
+      "result": "ERROR (error \"Invalid face overline\" foo)"
+    },
+    {
+      "label": "set :overline \"\"",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :overline \"\") (internal-get-lisp-face-attribute f :overline))",
+      "result": "ERROR (error \"Invalid face overline\" \"\")"
+    },
+    {
+      "label": "set :strike-through 42",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :strike-through 42) (internal-get-lisp-face-attribute f :strike-through))",
+      "result": "42"
+    },
+    {
+      "label": "set :box t",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :box t) (internal-get-lisp-face-attribute f :box))",
+      "result": "1"
+    },
+    {
+      "label": "set :box 0",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :box 0) (internal-get-lisp-face-attribute f :box))",
+      "result": "ERROR (error \"Invalid face box\" 0)"
+    },
+    {
+      "label": "set :box '(0 . 0)",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :box '(0 . 0)) (internal-get-lisp-face-attribute f :box))",
+      "result": "(0 . 0)"
+    },
+    {
+      "label": "set :box '(:line-width 0)",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :box '(:line-width 0)) (internal-get-lisp-face-attribute f :box))",
+      "result": "ERROR (error \"Invalid face box\" :line-width 0)"
+    },
+    {
+      "label": "set :box '(:color nil)",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :box '(:color nil)) (internal-get-lisp-face-attribute f :box))",
+      "result": "(:color nil)"
+    },
+    {
+      "label": "set :box '(:unknown t)",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :box '(:unknown t)) (internal-get-lisp-face-attribute f :box))",
+      "result": "ERROR (error \"Invalid face box\" :unknown t)"
+    },
+    {
+      "label": "set :inverse-video 42",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :inverse-video 42) (internal-get-lisp-face-attribute f :inverse-video))",
+      "result": "ERROR (wrong-type-argument symbolp 42)"
+    },
+    {
+      "label": "set :inverse-video 'foo",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :inverse-video 'foo) (internal-get-lisp-face-attribute f :inverse-video))",
+      "result": "ERROR (error \"Invalid inverse-video face attribute value\" foo)"
+    },
+    {
+      "label": "set :extend 42",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :extend 42) (internal-get-lisp-face-attribute f :extend))",
+      "result": "ERROR (wrong-type-argument symbolp 42)"
+    },
+    {
+      "label": "set :extend 'foo",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :extend 'foo) (internal-get-lisp-face-attribute f :extend))",
+      "result": "ERROR (error \"Invalid extend face attribute value\" foo)"
+    },
+    {
+      "label": "set :inherit nil",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :inherit nil) (internal-get-lisp-face-attribute f :inherit))",
+      "result": "nil"
+    },
+    {
+      "label": "set :inherit 'unknown-parent",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :inherit 'unknown-parent) (internal-get-lisp-face-attribute f :inherit))",
+      "result": "unknown-parent"
+    },
+    {
+      "label": "set :inherit '(parent-a parent-b)",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :inherit '(parent-a parent-b)) (internal-get-lisp-face-attribute f :inherit))",
+      "result": "(parent-a parent-b)"
+    },
+    {
+      "label": "set :inherit '(parent-a . parent-b)",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :inherit '(parent-a . parent-b)) (internal-get-lisp-face-attribute f :inherit))",
+      "result": "ERROR (error \"Invalid face inheritance\" (parent-a . parent-b))"
+    },
+    {
+      "label": "set :inherit '(parent-a 42)",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :inherit '(parent-a 42)) (internal-get-lisp-face-attribute f :inherit))",
+      "result": "ERROR (error \"Invalid face inheritance\" parent-a 42)"
+    },
+    {
+      "label": "set :inherit f",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :inherit f) (internal-get-lisp-face-attribute f :inherit))",
+      "result": "ERROR (error \"Face inheritance results in inheritance cycle\" oracle-face)"
+    },
+    {
+      "label": "set :bold nil",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :bold nil) (internal-get-lisp-face-attribute f :bold))",
+      "result": "ERROR (error \"Invalid face attribute name\" :bold)"
+    },
+    {
+      "label": "set :bold 'unspecified",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :bold 'unspecified) (internal-get-lisp-face-attribute f :bold))",
+      "result": "ERROR (error \"Invalid face attribute name\" :bold)"
+    },
+    {
+      "label": "set :italic 42",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :italic 42) (internal-get-lisp-face-attribute f :italic))",
+      "result": "ERROR (error \"Invalid face attribute name\" :italic)"
+    },
+    {
+      "label": "set :font 42",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :font 42) (internal-get-lisp-face-attribute f :font))",
+      "result": "unspecified"
+    },
+    {
+      "label": "set :font \"monospace\"",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :font \"monospace\") (internal-get-lisp-face-attribute f :font))",
+      "result": "unspecified"
+    },
+    {
+      "label": "set :font 'unspecified",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :font 'unspecified) (internal-get-lisp-face-attribute f :font))",
+      "result": "unspecified"
+    },
+    {
+      "label": "set :fontset 42",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :fontset 42) (internal-get-lisp-face-attribute f :fontset))",
+      "result": "unspecified"
+    },
+    {
+      "label": "set :fontset \"bogus\"",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :fontset \"bogus\") (internal-get-lisp-face-attribute f :fontset))",
+      "result": "unspecified"
+    },
+    {
+      "label": "set :fontset 'unspecified",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :fontset 'unspecified) (internal-get-lisp-face-attribute f :fontset))",
+      "result": "unspecified"
+    },
+    {
+      "label": "set :stipple 42",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :stipple 42) (internal-get-lisp-face-attribute f :stipple))",
+      "result": "ERROR (error \"Invalid stipple attribute\" 42)"
+    },
+    {
+      "label": "set :bogus nil",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :bogus nil) (internal-get-lisp-face-attribute f :bogus))",
+      "result": "ERROR (error \"Invalid face attribute name\" :bogus)"
+    },
+    {
+      "label": "special nil 'unspecified",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :weight 'unspecified nil) (list (internal-get-lisp-face-attribute f :weight nil) (aref (internal-lisp-face-p f (selected-frame)) 5)))",
+      "result": "(unspecified unspecified)"
+    },
+    {
+      "label": "special nil :ignore-defface",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :weight :ignore-defface nil) (list (internal-get-lisp-face-attribute f :weight nil) (aref (internal-lisp-face-p f (selected-frame)) 5)))",
+      "result": "(unspecified :ignore-defface)"
+    },
+    {
+      "label": "special nil 'reset",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :weight 'reset nil) (list (internal-get-lisp-face-attribute f :weight nil) (aref (internal-lisp-face-p f (selected-frame)) 5)))",
+      "result": "(reset reset)"
+    },
+    {
+      "label": "special t 'unspecified",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :weight 'unspecified t) (list (internal-get-lisp-face-attribute f :weight t) (aref (internal-lisp-face-p f nil) 5)))",
+      "result": "(unspecified :ignore-defface)"
+    },
+    {
+      "label": "special t :ignore-defface",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :weight :ignore-defface t) (list (internal-get-lisp-face-attribute f :weight t) (aref (internal-lisp-face-p f nil) 5)))",
+      "result": "(unspecified :ignore-defface)"
+    },
+    {
+      "label": "special t 'reset",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-set-lisp-face-attribute f :weight 'reset t) (list (internal-get-lisp-face-attribute f :weight t) (aref (internal-lisp-face-p f nil) 5)))",
+      "result": "(reset reset)"
+    },
+    {
+      "label": "relative :height 42",
+      "expression": "(face-attribute-relative-p :height 42)",
+      "result": "nil"
+    },
+    {
+      "label": "relative :height 1.5",
+      "expression": "(face-attribute-relative-p :height 1.5)",
+      "result": "t"
+    },
+    {
+      "label": "relative :height nil",
+      "expression": "(face-attribute-relative-p :height nil)",
+      "result": "t"
+    },
+    {
+      "label": "relative :height 'unspecified",
+      "expression": "(face-attribute-relative-p :height 'unspecified)",
+      "result": "t"
+    },
+    {
+      "label": "relative :height :ignore-defface",
+      "expression": "(face-attribute-relative-p :height :ignore-defface)",
+      "result": "t"
+    },
+    {
+      "label": "relative :height 'foo",
+      "expression": "(face-attribute-relative-p :height 'foo)",
+      "result": "t"
+    },
+    {
+      "label": "relative :weight 42",
+      "expression": "(face-attribute-relative-p :weight 42)",
+      "result": "nil"
+    },
+    {
+      "label": "relative :weight 1.5",
+      "expression": "(face-attribute-relative-p :weight 1.5)",
+      "result": "nil"
+    },
+    {
+      "label": "relative :weight nil",
+      "expression": "(face-attribute-relative-p :weight nil)",
+      "result": "nil"
+    },
+    {
+      "label": "relative :weight 'unspecified",
+      "expression": "(face-attribute-relative-p :weight 'unspecified)",
+      "result": "t"
+    },
+    {
+      "label": "relative :weight :ignore-defface",
+      "expression": "(face-attribute-relative-p :weight :ignore-defface)",
+      "result": "t"
+    },
+    {
+      "label": "relative :weight 'foo",
+      "expression": "(face-attribute-relative-p :weight 'foo)",
+      "result": "nil"
+    },
+    {
+      "label": "relative :bogus 42",
+      "expression": "(face-attribute-relative-p :bogus 42)",
+      "result": "nil"
+    },
+    {
+      "label": "relative :bogus 1.5",
+      "expression": "(face-attribute-relative-p :bogus 1.5)",
+      "result": "nil"
+    },
+    {
+      "label": "relative :bogus nil",
+      "expression": "(face-attribute-relative-p :bogus nil)",
+      "result": "nil"
+    },
+    {
+      "label": "relative :bogus 'unspecified",
+      "expression": "(face-attribute-relative-p :bogus 'unspecified)",
+      "result": "t"
+    },
+    {
+      "label": "relative :bogus :ignore-defface",
+      "expression": "(face-attribute-relative-p :bogus :ignore-defface)",
+      "result": "t"
+    },
+    {
+      "label": "relative :bogus 'foo",
+      "expression": "(face-attribute-relative-p :bogus 'foo)",
+      "result": "nil"
+    },
+    {
+      "label": "relative 42 42",
+      "expression": "(face-attribute-relative-p 42 42)",
+      "result": "nil"
+    },
+    {
+      "label": "relative 42 1.5",
+      "expression": "(face-attribute-relative-p 42 1.5)",
+      "result": "nil"
+    },
+    {
+      "label": "relative 42 nil",
+      "expression": "(face-attribute-relative-p 42 nil)",
+      "result": "nil"
+    },
+    {
+      "label": "relative 42 'unspecified",
+      "expression": "(face-attribute-relative-p 42 'unspecified)",
+      "result": "t"
+    },
+    {
+      "label": "relative 42 :ignore-defface",
+      "expression": "(face-attribute-relative-p 42 :ignore-defface)",
+      "result": "t"
+    },
+    {
+      "label": "relative 42 'foo",
+      "expression": "(face-attribute-relative-p 42 'foo)",
+      "result": "nil"
+    },
+    {
+      "label": "values :weight",
+      "expression": "(internal-lisp-face-attribute-values :weight)",
+      "result": "nil"
+    },
+    {
+      "label": "values :slant",
+      "expression": "(internal-lisp-face-attribute-values :slant)",
+      "result": "nil"
+    },
+    {
+      "label": "values :width",
+      "expression": "(internal-lisp-face-attribute-values :width)",
+      "result": "nil"
+    },
+    {
+      "label": "values :underline",
+      "expression": "(internal-lisp-face-attribute-values :underline)",
+      "result": "(t nil)"
+    },
+    {
+      "label": "values :overline",
+      "expression": "(internal-lisp-face-attribute-values :overline)",
+      "result": "(t nil)"
+    },
+    {
+      "label": "values :strike-through",
+      "expression": "(internal-lisp-face-attribute-values :strike-through)",
+      "result": "(t nil)"
+    },
+    {
+      "label": "values :inverse-video",
+      "expression": "(internal-lisp-face-attribute-values :inverse-video)",
+      "result": "(t nil)"
+    },
+    {
+      "label": "values :extend",
+      "expression": "(internal-lisp-face-attribute-values :extend)",
+      "result": "(t nil)"
+    },
+    {
+      "label": "values :height",
+      "expression": "(internal-lisp-face-attribute-values :height)",
+      "result": "nil"
+    },
+    {
+      "label": "values :bold",
+      "expression": "(internal-lisp-face-attribute-values :bold)",
+      "result": "nil"
+    },
+    {
+      "label": "values :bogus",
+      "expression": "(internal-lisp-face-attribute-values :bogus)",
+      "result": "nil"
+    },
+    {
+      "label": "values 42",
+      "expression": "(internal-lisp-face-attribute-values 42)",
+      "result": "ERROR (wrong-type-argument symbolp 42)"
+    },
+    {
+      "label": "inheritance-not-merged",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (let ((p (make-symbol \"parent\"))) (internal-make-lisp-face p (selected-frame)) (internal-set-lisp-face-attribute p :weight 'bold) (internal-set-lisp-face-attribute f :inherit p) (list (internal-get-lisp-face-attribute f :weight) (eq p (internal-get-lisp-face-attribute f :inherit)))))",
+      "result": "(unspecified t)"
+    },
+    {
+      "label": "inherit-cycle",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (let ((p (make-symbol \"parent\"))) (internal-make-lisp-face p (selected-frame)) (internal-set-lisp-face-attribute p :inherit f) (internal-set-lisp-face-attribute f :inherit p)))",
+      "result": "ERROR (error \"Face inheritance results in inheritance cycle\" parent)"
+    },
+    {
+      "label": "default-relative-height",
+      "expression": "(internal-set-lisp-face-attribute 'default :height 1.2 t)",
+      "result": "ERROR (error \"Default face height not absolute and positive\" 1.2)"
+    },
+    {
+      "label": "alias",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (let ((a (make-symbol \"alias\"))) (put a 'face-alias f) (list (eq (internal-lisp-face-p a) (internal-lisp-face-p f)) (eq (internal-set-lisp-face-attribute a :weight 'bold) f))))",
+      "result": "(t t)"
+    },
+    {
+      "label": "failed-set-creates-face",
+      "expression": "(let ((f (make-symbol \"failed-create\"))) (list (condition-case e (internal-set-lisp-face-attribute f :bogus nil) (error e)) (vectorp (internal-lisp-face-p f)) (vectorp (internal-lisp-face-p f (selected-frame)))))",
+      "result": "((error \"Invalid face attribute name\" :bogus) t t)"
+    },
+    {
+      "label": "setter-return :bold nil nil",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (list (internal-set-lisp-face-attribute f :bold nil nil) (internal-get-lisp-face-attribute f :weight nil)))",
+      "result": "(oracle-face normal)"
+    },
+    {
+      "label": "setter-return :bold nil t",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (list (internal-set-lisp-face-attribute f :bold nil t) (internal-get-lisp-face-attribute f :weight t)))",
+      "result": "(oracle-face normal)"
+    },
+    {
+      "label": "setter-return :bold 'unspecified nil",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (list (internal-set-lisp-face-attribute f :bold 'unspecified nil) (internal-get-lisp-face-attribute f :weight nil)))",
+      "result": "(oracle-face bold)"
+    },
+    {
+      "label": "setter-return :bold 'unspecified t",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (list (internal-set-lisp-face-attribute f :bold 'unspecified t) (internal-get-lisp-face-attribute f :weight t)))",
+      "result": "(oracle-face bold)"
+    },
+    {
+      "label": "setter-return :bold 'reset nil",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (list (internal-set-lisp-face-attribute f :bold 'reset nil) (internal-get-lisp-face-attribute f :weight nil)))",
+      "result": "(oracle-face reset)"
+    },
+    {
+      "label": "setter-return :bold 'reset t",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (list (internal-set-lisp-face-attribute f :bold 'reset t) (internal-get-lisp-face-attribute f :weight t)))",
+      "result": "(oracle-face reset)"
+    },
+    {
+      "label": "setter-return :bold 42 nil",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (list (internal-set-lisp-face-attribute f :bold 42 nil) (internal-get-lisp-face-attribute f :weight nil)))",
+      "result": "(oracle-face bold)"
+    },
+    {
+      "label": "setter-return :bold 42 t",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (list (internal-set-lisp-face-attribute f :bold 42 t) (internal-get-lisp-face-attribute f :weight t)))",
+      "result": "(oracle-face bold)"
+    },
+    {
+      "label": "setter-return :italic nil nil",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (list (internal-set-lisp-face-attribute f :italic nil nil) (internal-get-lisp-face-attribute f :slant nil)))",
+      "result": "(oracle-face normal)"
+    },
+    {
+      "label": "setter-return :italic nil t",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (list (internal-set-lisp-face-attribute f :italic nil t) (internal-get-lisp-face-attribute f :slant t)))",
+      "result": "(oracle-face normal)"
+    },
+    {
+      "label": "setter-return :italic 'unspecified nil",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (list (internal-set-lisp-face-attribute f :italic 'unspecified nil) (internal-get-lisp-face-attribute f :slant nil)))",
+      "result": "(oracle-face italic)"
+    },
+    {
+      "label": "setter-return :italic 'unspecified t",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (list (internal-set-lisp-face-attribute f :italic 'unspecified t) (internal-get-lisp-face-attribute f :slant t)))",
+      "result": "(oracle-face italic)"
+    },
+    {
+      "label": "setter-return :italic 'reset nil",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (list (internal-set-lisp-face-attribute f :italic 'reset nil) (internal-get-lisp-face-attribute f :slant nil)))",
+      "result": "(oracle-face reset)"
+    },
+    {
+      "label": "setter-return :italic 'reset t",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (list (internal-set-lisp-face-attribute f :italic 'reset t) (internal-get-lisp-face-attribute f :slant t)))",
+      "result": "(oracle-face reset)"
+    },
+    {
+      "label": "setter-return :italic 42 nil",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (list (internal-set-lisp-face-attribute f :italic 42 nil) (internal-get-lisp-face-attribute f :slant nil)))",
+      "result": "(oracle-face italic)"
+    },
+    {
+      "label": "setter-return :italic 42 t",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (list (internal-set-lisp-face-attribute f :italic 42 t) (internal-get-lisp-face-attribute f :slant t)))",
+      "result": "(oracle-face italic)"
+    },
+    {
+      "label": "setter-return :font 42 nil",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (list (internal-set-lisp-face-attribute f :font 42 nil) (internal-get-lisp-face-attribute f :font nil)))",
+      "result": "(oracle-face unspecified)"
+    },
+    {
+      "label": "setter-return :font 42 t",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (list (internal-set-lisp-face-attribute f :font 42 t) (internal-get-lisp-face-attribute f :font t)))",
+      "result": "ERROR (error \"Invalid font or font-spec\" 42)"
+    },
+    {
+      "label": "setter-return :font \"monospace\" nil",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (list (internal-set-lisp-face-attribute f :font \"monospace\" nil) (internal-get-lisp-face-attribute f :font nil)))",
+      "result": "(oracle-face unspecified)"
+    },
+    {
+      "label": "setter-return :font \"monospace\" t",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (list (internal-set-lisp-face-attribute f :font \"monospace\" t) (internal-get-lisp-face-attribute f :font t)))",
+      "result": "(oracle-face unspecified)"
+    },
+    {
+      "label": "setter-return :font 'unspecified nil",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (list (internal-set-lisp-face-attribute f :font 'unspecified nil) (internal-get-lisp-face-attribute f :font nil)))",
+      "result": "(oracle-face unspecified)"
+    },
+    {
+      "label": "setter-return :font 'unspecified t",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (list (internal-set-lisp-face-attribute f :font 'unspecified t) (internal-get-lisp-face-attribute f :font t)))",
+      "result": "(oracle-face unspecified)"
+    },
+    {
+      "label": "setter-return :fontset 42 nil",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (list (internal-set-lisp-face-attribute f :fontset 42 nil) (internal-get-lisp-face-attribute f :fontset nil)))",
+      "result": "(oracle-face unspecified)"
+    },
+    {
+      "label": "setter-return :fontset 42 t",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (list (internal-set-lisp-face-attribute f :fontset 42 t) (internal-get-lisp-face-attribute f :fontset t)))",
+      "result": "ERROR (error \"Window system is not in use or not initialized\")"
+    },
+    {
+      "label": "setter-return :fontset \"bogus\" nil",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (list (internal-set-lisp-face-attribute f :fontset \"bogus\" nil) (internal-get-lisp-face-attribute f :fontset nil)))",
+      "result": "(oracle-face unspecified)"
+    },
+    {
+      "label": "setter-return :fontset \"bogus\" t",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (list (internal-set-lisp-face-attribute f :fontset \"bogus\" t) (internal-get-lisp-face-attribute f :fontset t)))",
+      "result": "ERROR (error \"Window system is not in use or not initialized\")"
+    },
+    {
+      "label": "setter-return :fontset 'unspecified nil",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (list (internal-set-lisp-face-attribute f :fontset 'unspecified nil) (internal-get-lisp-face-attribute f :fontset nil)))",
+      "result": "(oracle-face unspecified)"
+    },
+    {
+      "label": "setter-return :fontset 'unspecified t",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (list (internal-set-lisp-face-attribute f :fontset 'unspecified t) (internal-get-lisp-face-attribute f :fontset t)))",
+      "result": "ERROR (error \"Window system is not in use or not initialized\")"
+    },
+    {
+      "label": "string-predicate",
+      "expression": "(vectorp (internal-lisp-face-p \"default\"))",
+      "result": "t"
+    },
+    {
+      "label": "alias-cycle",
+      "expression": "(let ((a (make-symbol \"alias-a\")) (b (make-symbol \"alias-b\"))) (put a 'face-alias b) (put b 'face-alias a) (internal-lisp-face-p a))",
+      "result": "ERROR (circular-list alias-a)"
+    },
+    {
+      "label": "getter-bad-attribute",
+      "expression": "(let ((f (make-symbol \"oracle-face\"))) (internal-make-lisp-face f) (internal-make-lisp-face f (selected-frame)) (internal-get-lisp-face-attribute f :bogus))",
+      "result": "ERROR (error \"Invalid face attribute name\" :bogus)"
+    },
+    {
+      "label": "getter-alias-string",
+      "expression": "(internal-get-lisp-face-attribute \"missing-string\" :weight)",
+      "result": "ERROR (error \"Invalid face\" missing-string)"
+    }
+  ]
+}

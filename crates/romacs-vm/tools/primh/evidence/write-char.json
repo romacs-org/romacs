@@ -1,0 +1,140 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "write-char",
+ "spec_sha256": "b8b7124ba37372992a6e1668fd28fa1dfa17a2fd34cc2dd97a6b39e26629ab67",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "write-char",
+    "subr",
+    1,
+    2
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "print.c": "a4d3613dd97297cb4a9b682f0fbe5a86d3ae1ac9a1a07bddaf6da970b28f0a85"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "write-char/0000",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'write-char '())) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr write-char> 0))"
+  },
+  {
+   "id": "write-char/0001",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'write-char '(1 1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr write-char> 3))"
+  },
+  {
+   "id": "write-char/0002",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((out nil)) (list (write-char 0 (lambda (c) (setq out (cons c out)))) (nreverse out)))) (error (list 'sig e))))",
+   "expected": "(ok (0 (0)))"
+  },
+  {
+   "id": "write-char/0003",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((out nil)) (list (write-char 7 (lambda (c) (setq out (cons c out)))) (nreverse out)))) (error (list 'sig e))))",
+   "expected": "(ok (7 (7)))"
+  },
+  {
+   "id": "write-char/0004",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((out nil)) (list (write-char 10 (lambda (c) (setq out (cons c out)))) (nreverse out)))) (error (list 'sig e))))",
+   "expected": "(ok (10 (10)))"
+  },
+  {
+   "id": "write-char/0005",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((out nil)) (list (write-char 32 (lambda (c) (setq out (cons c out)))) (nreverse out)))) (error (list 'sig e))))",
+   "expected": "(ok (32 (32)))"
+  },
+  {
+   "id": "write-char/0006",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((out nil)) (list (write-char 127 (lambda (c) (setq out (cons c out)))) (nreverse out)))) (error (list 'sig e))))",
+   "expected": "(ok (127 (127)))"
+  },
+  {
+   "id": "write-char/0007",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((out nil)) (list (write-char 128 (lambda (c) (setq out (cons c out)))) (nreverse out)))) (error (list 'sig e))))",
+   "expected": "(ok (128 (128)))"
+  },
+  {
+   "id": "write-char/0008",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((out nil)) (list (write-char 255 (lambda (c) (setq out (cons c out)))) (nreverse out)))) (error (list 'sig e))))",
+   "expected": "(ok (255 (255)))"
+  },
+  {
+   "id": "write-char/0009",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((out nil)) (list (write-char 955 (lambda (c) (setq out (cons c out)))) (nreverse out)))) (error (list 'sig e))))",
+   "expected": "(ok (955 (955)))"
+  },
+  {
+   "id": "write-char/0010",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((out nil)) (list (write-char 128512 (lambda (c) (setq out (cons c out)))) (nreverse out)))) (error (list 'sig e))))",
+   "expected": "(ok (128512 (128512)))"
+  },
+  {
+   "id": "write-char/0011",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((out nil)) (list (write-char 4194303 (lambda (c) (setq out (cons c out)))) (nreverse out)))) (error (list 'sig e))))",
+   "expected": "(ok (4194303 (4194303)))"
+  },
+  {
+   "id": "write-char/0012",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((out nil)) (list (write-char 4194304 (lambda (c) (setq out (cons c out)))) (nreverse out)))) (error (list 'sig e))))",
+   "expected": "(ok (4194304 (4194304)))"
+  },
+  {
+   "id": "write-char/0013",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((out nil)) (list (write-char -1 (lambda (c) (setq out (cons c out)))) (nreverse out)))) (error (list 'sig e))))",
+   "expected": "(ok (-1 (4294967295)))"
+  },
+  {
+   "id": "write-char/0014",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((out nil)) (list (write-char most-positive-fixnum (lambda (c) (setq out (cons c out)))) (nreverse out)))) (error (list 'sig e))))",
+   "expected": "(ok (2305843009213693951 (4294967295)))"
+  },
+  {
+   "id": "write-char/0015",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((out nil)) (list (write-char 'bad (lambda (c) (setq out (cons c out)))) (nreverse out)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument fixnump bad))"
+  },
+  {
+   "id": "write-char/0016",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((out nil)) (list (write-char 1.0 (lambda (c) (setq out (cons c out)))) (nreverse out)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument fixnump 1.0))"
+  },
+  {
+   "id": "write-char/0017",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((out nil)) (list (write-char nil (lambda (c) (setq out (cons c out)))) (nreverse out)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument fixnump nil))"
+  }
+ ],
+ "pinned": {}
+}

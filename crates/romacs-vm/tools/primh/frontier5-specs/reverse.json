@@ -1,0 +1,42 @@
+{
+ "name": "reverse",
+ "arity": [
+  1,
+  1
+ ],
+ "effect": "pure",
+ "gnu_files": [
+  "fns.c"
+ ],
+ "gnu_def": "fns.c:2322",
+ "rust": "src/prims/reverse.rs:4",
+ "args": [],
+ "probes": [
+  "(reverse \"a\u03bb\u96ea\")",
+  "(multibyte-string-p (reverse (string-to-multibyte \"abc\")))",
+  "(multibyte-string-p (reverse \"\u03bb\"))",
+  "(let ((r (reverse (unibyte-string 255 1)))) (list (multibyte-string-p r) (aref r 0) (aref r 1)))",
+  "(let ((r (reverse (string-to-multibyte (unibyte-string 255 97))))) (list (multibyte-string-p r) (aref r 0) (aref r 1)))",
+  "(reverse \"\ud83d\ude00a\")",
+  "(reverse '(1 2 . 3))",
+  "(let ((l (list 1 2))) (setcdr (cdr l) l) (condition-case e (reverse l) (circular-list (eq (car (cdr e)) l))))",
+  "(let ((l (list 1 2))) (reverse l) l)",
+  "(let ((v (vector 1 2))) (reverse v) v)",
+  "(let ((s (copy-sequence \"ab\"))) (reverse s) s)",
+  "(let ((s (copy-sequence \"ab\"))) (put-text-property 0 2 'face 'bold s) (list (text-properties-at 0 (reverse s)) (text-properties-at 0 s)))",
+  "(let ((l (list (list 1) 2))) (eq (car (cdr (reverse l))) (car l)))",
+  "(let ((v (vector 1))) (eq v (reverse v)))",
+  "(eq (reverse []) (reverse []))",
+  "(length (reverse (let ((l nil) (i 0)) (while (< i 5000) (setq l (cons i l)) (setq i (1+ i))) l)))",
+  "(car (reverse (let ((l nil) (i 0)) (while (< i 5000) (setq l (cons i l)) (setq i (1+ i))) l)))",
+  "(reverse (make-bool-vector 3 nil))",
+  "(let ((b (make-bool-vector 3 nil))) (aset b 0 t) (reverse b))",
+  "(reverse (bool-vector t nil nil t t))",
+  "(reverse (lambda (x) x))",
+  "(reverse (make-char-table 'test))",
+  "(reverse (make-hash-table))",
+  "(reverse (record 'foo 1 2))",
+  "(reverse 1.5)",
+  "(funcall #'reverse '(1 2))"
+ ]
+}

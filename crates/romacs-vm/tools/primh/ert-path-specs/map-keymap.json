@@ -1,0 +1,23 @@
+{
+  "name": "map-keymap",
+  "arity": [
+    2,
+    3
+  ],
+  "args": [
+    "boundary-no-domain",
+    "boundary-no-domain",
+    "boundary-no-domain"
+  ],
+  "effect": "global",
+  "gnu_files": [
+    "keymap.c",
+    "chartab.c"
+  ],
+  "probes": [
+    "(let ((ct (make-char-table nil)) (seen nil)) (set-char-table-range ct '(0 . 65535) 'x) (set-char-table-range ct '(65536 . 131071) 'y) (map-keymap (lambda (k v) (setq seen (cons (cons k v) seen)) (if (eq v 'x) (aset ct 65537 'z))) (list 'keymap ct)) (list (nreverse seen) (aref ct 65537)))",
+    "(let ((ct (make-char-table nil)) (seen nil)) (set-char-table-range ct '(0 . 65535) 'x) (set-char-table-range ct '(65536 . 131071) 'y) (aset ct 65537 'temporary) (aset ct 65537 'y) (map-keymap (lambda (k v) (setq seen (cons (cons k v) seen)) (if (eq v 'x) (aset ct 65537 'z))) (list 'keymap ct)) (list (nreverse seen) (aref ct 65537)))"
+  ],
+  "gnu_def": "keymap.c:625",
+  "rust": "src/prims/map_keymap.rs:33"
+}

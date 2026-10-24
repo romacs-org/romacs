@@ -1,0 +1,1120 @@
+{
+  "protocol": "radix-reader-v1",
+  "oracle": {
+    "path": "<recording-path-redacted>/emacs",
+    "resolved": "<recording-path-redacted>/emacs-32.0.50",
+    "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+    "version": "32.0.50",
+    "sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8"
+  },
+  "cases_sha256": "5768e3e2eff20b43fd4064cc9b59c82740e2143b8b05711046d5fb37c3ca0f76",
+  "recorder_sha256": "02f4d7ea1db915c59a6c5b78be68756249553927e204ae61697d557ae85d17ec",
+  "cases": [
+    {
+      "id": "radix-000",
+      "input": "#o040",
+      "form": "(condition-case e (read-from-string \"#o040\") (error e))",
+      "gnu": "(32 . 5)"
+    },
+    {
+      "id": "radix-001",
+      "input": "#o0177",
+      "form": "(condition-case e (read-from-string \"#o0177\") (error e))",
+      "gnu": "(127 . 6)"
+    },
+    {
+      "id": "radix-002",
+      "input": "#o0200",
+      "form": "(condition-case e (read-from-string \"#o0200\") (error e))",
+      "gnu": "(128 . 6)"
+    },
+    {
+      "id": "radix-003",
+      "input": "#o0240",
+      "form": "(condition-case e (read-from-string \"#o0240\") (error e))",
+      "gnu": "(160 . 6)"
+    },
+    {
+      "id": "radix-004",
+      "input": "#o0400",
+      "form": "(condition-case e (read-from-string \"#o0400\") (error e))",
+      "gnu": "(256 . 6)"
+    },
+    {
+      "id": "radix-005",
+      "input": "#b101",
+      "form": "(condition-case e (read-from-string \"#b101\") (error e))",
+      "gnu": "(5 . 5)"
+    },
+    {
+      "id": "radix-006",
+      "input": "#B101",
+      "form": "(condition-case e (read-from-string \"#B101\") (error e))",
+      "gnu": "(5 . 5)"
+    },
+    {
+      "id": "radix-007",
+      "input": "#O77",
+      "form": "(condition-case e (read-from-string \"#O77\") (error e))",
+      "gnu": "(63 . 4)"
+    },
+    {
+      "id": "radix-008",
+      "input": "#xdeadBEEF",
+      "form": "(condition-case e (read-from-string \"#xdeadBEEF\") (error e))",
+      "gnu": "(3735928559 . 10)"
+    },
+    {
+      "id": "radix-009",
+      "input": "#XDeAdbEeF",
+      "form": "(condition-case e (read-from-string \"#XDeAdbEeF\") (error e))",
+      "gnu": "(3735928559 . 10)"
+    },
+    {
+      "id": "radix-010",
+      "input": "#2r101",
+      "form": "(condition-case e (read-from-string \"#2r101\") (error e))",
+      "gnu": "(5 . 6)"
+    },
+    {
+      "id": "radix-011",
+      "input": "#2R101",
+      "form": "(condition-case e (read-from-string \"#2R101\") (error e))",
+      "gnu": "(5 . 6)"
+    },
+    {
+      "id": "radix-012",
+      "input": "#36rzZ",
+      "form": "(condition-case e (read-from-string \"#36rzZ\") (error e))",
+      "gnu": "(1295 . 6)"
+    },
+    {
+      "id": "radix-013",
+      "input": "#00016rFF",
+      "form": "(condition-case e (read-from-string \"#00016rFF\") (error e))",
+      "gnu": "(255 . 9)"
+    },
+    {
+      "id": "radix-014",
+      "input": "#b+101",
+      "form": "(condition-case e (read-from-string \"#b+101\") (error e))",
+      "gnu": "(5 . 6)"
+    },
+    {
+      "id": "radix-015",
+      "input": "#o-77",
+      "form": "(condition-case e (read-from-string \"#o-77\") (error e))",
+      "gnu": "(-63 . 5)"
+    },
+    {
+      "id": "radix-016",
+      "input": "#x-FF",
+      "form": "(condition-case e (read-from-string \"#x-FF\") (error e))",
+      "gnu": "(-255 . 5)"
+    },
+    {
+      "id": "radix-017",
+      "input": "#16r+fF",
+      "form": "(condition-case e (read-from-string \"#16r+fF\") (error e))",
+      "gnu": "(255 . 7)"
+    },
+    {
+      "id": "radix-018",
+      "input": "#16R-Ff",
+      "form": "(condition-case e (read-from-string \"#16R-Ff\") (error e))",
+      "gnu": "(-255 . 7)"
+    },
+    {
+      "id": "radix-019",
+      "input": "#x-0",
+      "form": "(condition-case e (read-from-string \"#x-0\") (error e))",
+      "gnu": "(0 . 4)"
+    },
+    {
+      "id": "radix-020",
+      "input": "#b",
+      "form": "(condition-case e (read-from-string \"#b\") (error e))",
+      "gnu": "(invalid-read-syntax \"integer, radix 2\")"
+    },
+    {
+      "id": "radix-021",
+      "input": "#o",
+      "form": "(condition-case e (read-from-string \"#o\") (error e))",
+      "gnu": "(invalid-read-syntax \"integer, radix 8\")"
+    },
+    {
+      "id": "radix-022",
+      "input": "#x",
+      "form": "(condition-case e (read-from-string \"#x\") (error e))",
+      "gnu": "(invalid-read-syntax \"integer, radix 16\")"
+    },
+    {
+      "id": "radix-023",
+      "input": "#2r",
+      "form": "(condition-case e (read-from-string \"#2r\") (error e))",
+      "gnu": "(invalid-read-syntax \"integer, radix 2\")"
+    },
+    {
+      "id": "radix-024",
+      "input": "#x+",
+      "form": "(condition-case e (read-from-string \"#x+\") (error e))",
+      "gnu": "(invalid-read-syntax \"integer, radix 16\")"
+    },
+    {
+      "id": "radix-025",
+      "input": "#b-",
+      "form": "(condition-case e (read-from-string \"#b-\") (error e))",
+      "gnu": "(invalid-read-syntax \"integer, radix 2\")"
+    },
+    {
+      "id": "radix-026",
+      "input": "#o 7",
+      "form": "(condition-case e (read-from-string \"#o 7\") (error e))",
+      "gnu": "(invalid-read-syntax \"integer, radix 8\")"
+    },
+    {
+      "id": "radix-027",
+      "input": "#x+ 1",
+      "form": "(condition-case e (read-from-string \"#x+ 1\") (error e))",
+      "gnu": "(invalid-read-syntax \"integer, radix 16\")"
+    },
+    {
+      "id": "radix-028",
+      "input": "#b2",
+      "form": "(condition-case e (read-from-string \"#b2\") (error e))",
+      "gnu": "(invalid-read-syntax \"integer, radix 2\")"
+    },
+    {
+      "id": "radix-029",
+      "input": "#b102",
+      "form": "(condition-case e (read-from-string \"#b102\") (error e))",
+      "gnu": "(invalid-read-syntax \"integer, radix 2\")"
+    },
+    {
+      "id": "radix-030",
+      "input": "#o8",
+      "form": "(condition-case e (read-from-string \"#o8\") (error e))",
+      "gnu": "(invalid-read-syntax \"integer, radix 8\")"
+    },
+    {
+      "id": "radix-031",
+      "input": "#o078",
+      "form": "(condition-case e (read-from-string \"#o078\") (error e))",
+      "gnu": "(invalid-read-syntax \"integer, radix 8\")"
+    },
+    {
+      "id": "radix-032",
+      "input": "#x1g",
+      "form": "(condition-case e (read-from-string \"#x1g\") (error e))",
+      "gnu": "(invalid-read-syntax \"integer, radix 16\")"
+    },
+    {
+      "id": "radix-033",
+      "input": "#10r1e2",
+      "form": "(condition-case e (read-from-string \"#10r1e2\") (error e))",
+      "gnu": "(invalid-read-syntax \"integer, radix 10\")"
+    },
+    {
+      "id": "radix-034",
+      "input": "#36rZ0z",
+      "form": "(condition-case e (read-from-string \"#36rZ0z\") (error e))",
+      "gnu": "(45395 . 7)"
+    },
+    {
+      "id": "radix-035",
+      "input": "#1r0",
+      "form": "(condition-case e (read-from-string \"#1r0\") (error e))",
+      "gnu": "(invalid-read-syntax \"integer, radix 1\")"
+    },
+    {
+      "id": "radix-036",
+      "input": "#0r0",
+      "form": "(condition-case e (read-from-string \"#0r0\") (error e))",
+      "gnu": "(invalid-read-syntax \"integer, radix 0\")"
+    },
+    {
+      "id": "radix-037",
+      "input": "#37r0",
+      "form": "(condition-case e (read-from-string \"#37r0\") (error e))",
+      "gnu": "(invalid-read-syntax \"integer, radix 37\")"
+    },
+    {
+      "id": "radix-038",
+      "input": "#99r1",
+      "form": "(condition-case e (read-from-string \"#99r1\") (error e))",
+      "gnu": "(invalid-read-syntax \"integer, radix 99\")"
+    },
+    {
+      "id": "radix-039",
+      "input": "#9223372036854775807r1",
+      "form": "(condition-case e (read-from-string \"#9223372036854775807r1\") (error e))",
+      "gnu": "(invalid-read-syntax \"integer, radix 9223372036854775807\")"
+    },
+    {
+      "id": "radix-040",
+      "input": "#9223372036854775808r1",
+      "form": "(condition-case e (read-from-string \"#9223372036854775808r1\") (error e))",
+      "gnu": "(invalid-read-syntax \"#9223372036854775808\")"
+    },
+    {
+      "id": "radix-041",
+      "input": "#00000000000000000000000000000000000002r1",
+      "form": "(condition-case e (read-from-string \"#00000000000000000000000000000000000002r1\") (error e))",
+      "gnu": "(1 . 41)"
+    },
+    {
+      "id": "radix-042",
+      "input": "#x1.2",
+      "form": "(condition-case e (read-from-string \"#x1.2\") (error e))",
+      "gnu": "(1 . 3)"
+    },
+    {
+      "id": "radix-043",
+      "input": "#x1+2",
+      "form": "(condition-case e (read-from-string \"#x1+2\") (error e))",
+      "gnu": "(1 . 3)"
+    },
+    {
+      "id": "radix-044",
+      "input": "#b0_1",
+      "form": "(condition-case e (read-from-string \"#b0_1\") (error e))",
+      "gnu": "(0 . 3)"
+    },
+    {
+      "id": "radix-045",
+      "input": "#x1é",
+      "form": "(condition-case e (read-from-string \"#x1é\") (error e))",
+      "gnu": "(1 . 3)"
+    },
+    {
+      "id": "radix-046",
+      "input": "#x+ff)",
+      "form": "(condition-case e (read-from-string \"#x+ff)\") (error e))",
+      "gnu": "(255 . 5)"
+    },
+    {
+      "id": "radix-047",
+      "input": "#b--1",
+      "form": "(condition-case e (read-from-string \"#b--1\") (error e))",
+      "gnu": "(invalid-read-syntax \"integer, radix 2\")"
+    },
+    {
+      "id": "radix-048",
+      "input": "#x+-1",
+      "form": "(condition-case e (read-from-string \"#x+-1\") (error e))",
+      "gnu": "(invalid-read-syntax \"integer, radix 16\")"
+    },
+    {
+      "id": "radix-049",
+      "input": "#x0000",
+      "form": "(condition-case e (read-from-string \"#x0000\") (error e))",
+      "gnu": "(0 . 6)"
+    },
+    {
+      "id": "radix-050",
+      "input": "#x1fffffffffffffff",
+      "form": "(condition-case e (read-from-string \"#x1fffffffffffffff\") (error e))",
+      "gnu": "(2305843009213693951 . 18)"
+    },
+    {
+      "id": "radix-051",
+      "input": "#x2000000000000000",
+      "form": "(condition-case e (read-from-string \"#x2000000000000000\") (error e))",
+      "gnu": "(2305843009213693952 . 18)"
+    },
+    {
+      "id": "radix-052",
+      "input": "#x-2000000000000000",
+      "form": "(condition-case e (read-from-string \"#x-2000000000000000\") (error e))",
+      "gnu": "(-2305843009213693952 . 19)"
+    },
+    {
+      "id": "radix-053",
+      "input": "#x-2000000000000001",
+      "form": "(condition-case e (read-from-string \"#x-2000000000000001\") (error e))",
+      "gnu": "(-2305843009213693953 . 19)"
+    },
+    {
+      "id": "radix-054",
+      "input": "#x7fffffffffffffff",
+      "form": "(condition-case e (read-from-string \"#x7fffffffffffffff\") (error e))",
+      "gnu": "(9223372036854775807 . 18)"
+    },
+    {
+      "id": "radix-055",
+      "input": "#x8000000000000000",
+      "form": "(condition-case e (read-from-string \"#x8000000000000000\") (error e))",
+      "gnu": "(9223372036854775808 . 18)"
+    },
+    {
+      "id": "radix-056",
+      "input": "#xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF",
+      "form": "(condition-case e (read-from-string \"#xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF\") (error e))",
+      "gnu": "(340282366920938463463374607431768211455 . 34)"
+    },
+    {
+      "id": "radix-057",
+      "input": "#x-FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF",
+      "form": "(condition-case e (read-from-string \"#x-FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF\") (error e))",
+      "gnu": "(-340282366920938463463374607431768211455 . 35)"
+    },
+    {
+      "id": "radix-058",
+      "input": "#2r11111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111",
+      "form": "(condition-case e (read-from-string \"#2r11111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111\") (error e))",
+      "gnu": "(231584178474632390847141970017375815706539969331281128078915168015826259279871 . 260)"
+    },
+    {
+      "id": "radix-059",
+      "input": "#36rZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ",
+      "form": "(condition-case e (read-from-string \"#36rZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ\") (error e))",
+      "gnu": "(426825223812027400796974891518773732342988745354489429495479078935112929549619739019072139340757097296812815466676129830954465240517595242384015591919845375 . 104)"
+    },
+    {
+      "id": "form-0",
+      "input": "#xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF",
+      "expression": "#xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF",
+      "form": "(condition-case e #xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF (error e))",
+      "gnu": "340282366920938463463374607431768211455"
+    },
+    {
+      "id": "form-1",
+      "input": "'#xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF",
+      "expression": "'#xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF",
+      "form": "(condition-case e '#xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF (error e))",
+      "gnu": "340282366920938463463374607431768211455"
+    },
+    {
+      "id": "form-2",
+      "input": "(list #xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF #x-FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF)",
+      "expression": "(list #xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF #x-FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF)",
+      "form": "(condition-case e (list #xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF #x-FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF) (error e))",
+      "gnu": "(340282366920938463463374607431768211455 -340282366920938463463374607431768211455)"
+    },
+    {
+      "id": "form-3",
+      "input": "(let ((x #xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF)) (list (integerp x) (bignump x) (fixnump x) (numberp x) (type-of x)))",
+      "expression": "(let ((x #xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF)) (list (integerp x) (bignump x) (fixnump x) (numberp x) (type-of x)))",
+      "form": "(condition-case e (let ((x #xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF)) (list (integerp x) (bignump x) (fixnump x) (numberp x) (type-of x))) (error e))",
+      "gnu": "(t t nil t integer)"
+    },
+    {
+      "id": "form-4",
+      "input": "(let ((h (make-hash-table :test 'eql))) (puthash #xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF 'found h) (list (equal #xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF #16rffffffffffffffffffffffffffffffff) (gethash #16rffffffffffffffffffffffffffffffff h)))",
+      "expression": "(let ((h (make-hash-table :test 'eql))) (puthash #xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF 'found h) (list (equal #xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF #16rffffffffffffffffffffffffffffffff) (gethash #16rffffffffffffffffffffffffffffffff h)))",
+      "form": "(condition-case e (let ((h (make-hash-table :test 'eql))) (puthash #xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF 'found h) (list (equal #xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF #16rffffffffffffffffffffffffffffffff) (gethash #16rffffffffffffffffffffffffffffffff h))) (error e))",
+      "gnu": "(t found)"
+    },
+    {
+      "id": "disk-0",
+      "input": "(progn #x10000000000000000 1)",
+      "expression": "(progn #x10000000000000000 1)",
+      "form": "(condition-case e (progn #x10000000000000000 1) (error e))",
+      "gnu": "1"
+    },
+    {
+      "id": "disk-1",
+      "input": "(let ((x #x10000000000000000)) 1)",
+      "expression": "(let ((x #x10000000000000000)) 1)",
+      "form": "(condition-case e (let ((x #x10000000000000000)) 1) (error e))",
+      "gnu": "1"
+    },
+    {
+      "id": "base-2-unsigned",
+      "input": "#2r11",
+      "form": "(condition-case e (read-from-string \"#2r11\") (error e))",
+      "gnu": "(3 . 5)"
+    },
+    {
+      "id": "base-2-+",
+      "input": "#2r+11",
+      "form": "(condition-case e (read-from-string \"#2r+11\") (error e))",
+      "gnu": "(3 . 6)"
+    },
+    {
+      "id": "base-2--",
+      "input": "#2r-11",
+      "form": "(condition-case e (read-from-string \"#2r-11\") (error e))",
+      "gnu": "(-3 . 6)"
+    },
+    {
+      "id": "base-3-unsigned",
+      "input": "#3r12",
+      "form": "(condition-case e (read-from-string \"#3r12\") (error e))",
+      "gnu": "(5 . 5)"
+    },
+    {
+      "id": "base-3-+",
+      "input": "#3r+12",
+      "form": "(condition-case e (read-from-string \"#3r+12\") (error e))",
+      "gnu": "(5 . 6)"
+    },
+    {
+      "id": "base-3--",
+      "input": "#3r-12",
+      "form": "(condition-case e (read-from-string \"#3r-12\") (error e))",
+      "gnu": "(-5 . 6)"
+    },
+    {
+      "id": "base-4-unsigned",
+      "input": "#4r13",
+      "form": "(condition-case e (read-from-string \"#4r13\") (error e))",
+      "gnu": "(7 . 5)"
+    },
+    {
+      "id": "base-4-+",
+      "input": "#4r+13",
+      "form": "(condition-case e (read-from-string \"#4r+13\") (error e))",
+      "gnu": "(7 . 6)"
+    },
+    {
+      "id": "base-4--",
+      "input": "#4r-13",
+      "form": "(condition-case e (read-from-string \"#4r-13\") (error e))",
+      "gnu": "(-7 . 6)"
+    },
+    {
+      "id": "base-5-unsigned",
+      "input": "#5r14",
+      "form": "(condition-case e (read-from-string \"#5r14\") (error e))",
+      "gnu": "(9 . 5)"
+    },
+    {
+      "id": "base-5-+",
+      "input": "#5r+14",
+      "form": "(condition-case e (read-from-string \"#5r+14\") (error e))",
+      "gnu": "(9 . 6)"
+    },
+    {
+      "id": "base-5--",
+      "input": "#5r-14",
+      "form": "(condition-case e (read-from-string \"#5r-14\") (error e))",
+      "gnu": "(-9 . 6)"
+    },
+    {
+      "id": "base-6-unsigned",
+      "input": "#6r15",
+      "form": "(condition-case e (read-from-string \"#6r15\") (error e))",
+      "gnu": "(11 . 5)"
+    },
+    {
+      "id": "base-6-+",
+      "input": "#6r+15",
+      "form": "(condition-case e (read-from-string \"#6r+15\") (error e))",
+      "gnu": "(11 . 6)"
+    },
+    {
+      "id": "base-6--",
+      "input": "#6r-15",
+      "form": "(condition-case e (read-from-string \"#6r-15\") (error e))",
+      "gnu": "(-11 . 6)"
+    },
+    {
+      "id": "base-7-unsigned",
+      "input": "#7r16",
+      "form": "(condition-case e (read-from-string \"#7r16\") (error e))",
+      "gnu": "(13 . 5)"
+    },
+    {
+      "id": "base-7-+",
+      "input": "#7r+16",
+      "form": "(condition-case e (read-from-string \"#7r+16\") (error e))",
+      "gnu": "(13 . 6)"
+    },
+    {
+      "id": "base-7--",
+      "input": "#7r-16",
+      "form": "(condition-case e (read-from-string \"#7r-16\") (error e))",
+      "gnu": "(-13 . 6)"
+    },
+    {
+      "id": "base-8-unsigned",
+      "input": "#8r17",
+      "form": "(condition-case e (read-from-string \"#8r17\") (error e))",
+      "gnu": "(15 . 5)"
+    },
+    {
+      "id": "base-8-+",
+      "input": "#8r+17",
+      "form": "(condition-case e (read-from-string \"#8r+17\") (error e))",
+      "gnu": "(15 . 6)"
+    },
+    {
+      "id": "base-8--",
+      "input": "#8r-17",
+      "form": "(condition-case e (read-from-string \"#8r-17\") (error e))",
+      "gnu": "(-15 . 6)"
+    },
+    {
+      "id": "base-9-unsigned",
+      "input": "#9r18",
+      "form": "(condition-case e (read-from-string \"#9r18\") (error e))",
+      "gnu": "(17 . 5)"
+    },
+    {
+      "id": "base-9-+",
+      "input": "#9r+18",
+      "form": "(condition-case e (read-from-string \"#9r+18\") (error e))",
+      "gnu": "(17 . 6)"
+    },
+    {
+      "id": "base-9--",
+      "input": "#9r-18",
+      "form": "(condition-case e (read-from-string \"#9r-18\") (error e))",
+      "gnu": "(-17 . 6)"
+    },
+    {
+      "id": "base-10-unsigned",
+      "input": "#10r19",
+      "form": "(condition-case e (read-from-string \"#10r19\") (error e))",
+      "gnu": "(19 . 6)"
+    },
+    {
+      "id": "base-10-+",
+      "input": "#10r+19",
+      "form": "(condition-case e (read-from-string \"#10r+19\") (error e))",
+      "gnu": "(19 . 7)"
+    },
+    {
+      "id": "base-10--",
+      "input": "#10r-19",
+      "form": "(condition-case e (read-from-string \"#10r-19\") (error e))",
+      "gnu": "(-19 . 7)"
+    },
+    {
+      "id": "base-11-unsigned",
+      "input": "#11r1a",
+      "form": "(condition-case e (read-from-string \"#11r1a\") (error e))",
+      "gnu": "(21 . 6)"
+    },
+    {
+      "id": "base-11-+",
+      "input": "#11r+1a",
+      "form": "(condition-case e (read-from-string \"#11r+1a\") (error e))",
+      "gnu": "(21 . 7)"
+    },
+    {
+      "id": "base-11--",
+      "input": "#11r-1a",
+      "form": "(condition-case e (read-from-string \"#11r-1a\") (error e))",
+      "gnu": "(-21 . 7)"
+    },
+    {
+      "id": "base-12-unsigned",
+      "input": "#12r1b",
+      "form": "(condition-case e (read-from-string \"#12r1b\") (error e))",
+      "gnu": "(23 . 6)"
+    },
+    {
+      "id": "base-12-+",
+      "input": "#12r+1b",
+      "form": "(condition-case e (read-from-string \"#12r+1b\") (error e))",
+      "gnu": "(23 . 7)"
+    },
+    {
+      "id": "base-12--",
+      "input": "#12r-1b",
+      "form": "(condition-case e (read-from-string \"#12r-1b\") (error e))",
+      "gnu": "(-23 . 7)"
+    },
+    {
+      "id": "base-13-unsigned",
+      "input": "#13r1c",
+      "form": "(condition-case e (read-from-string \"#13r1c\") (error e))",
+      "gnu": "(25 . 6)"
+    },
+    {
+      "id": "base-13-+",
+      "input": "#13r+1c",
+      "form": "(condition-case e (read-from-string \"#13r+1c\") (error e))",
+      "gnu": "(25 . 7)"
+    },
+    {
+      "id": "base-13--",
+      "input": "#13r-1c",
+      "form": "(condition-case e (read-from-string \"#13r-1c\") (error e))",
+      "gnu": "(-25 . 7)"
+    },
+    {
+      "id": "base-14-unsigned",
+      "input": "#14r1d",
+      "form": "(condition-case e (read-from-string \"#14r1d\") (error e))",
+      "gnu": "(27 . 6)"
+    },
+    {
+      "id": "base-14-+",
+      "input": "#14r+1d",
+      "form": "(condition-case e (read-from-string \"#14r+1d\") (error e))",
+      "gnu": "(27 . 7)"
+    },
+    {
+      "id": "base-14--",
+      "input": "#14r-1d",
+      "form": "(condition-case e (read-from-string \"#14r-1d\") (error e))",
+      "gnu": "(-27 . 7)"
+    },
+    {
+      "id": "base-15-unsigned",
+      "input": "#15r1e",
+      "form": "(condition-case e (read-from-string \"#15r1e\") (error e))",
+      "gnu": "(29 . 6)"
+    },
+    {
+      "id": "base-15-+",
+      "input": "#15r+1e",
+      "form": "(condition-case e (read-from-string \"#15r+1e\") (error e))",
+      "gnu": "(29 . 7)"
+    },
+    {
+      "id": "base-15--",
+      "input": "#15r-1e",
+      "form": "(condition-case e (read-from-string \"#15r-1e\") (error e))",
+      "gnu": "(-29 . 7)"
+    },
+    {
+      "id": "base-16-unsigned",
+      "input": "#16r1f",
+      "form": "(condition-case e (read-from-string \"#16r1f\") (error e))",
+      "gnu": "(31 . 6)"
+    },
+    {
+      "id": "base-16-+",
+      "input": "#16r+1f",
+      "form": "(condition-case e (read-from-string \"#16r+1f\") (error e))",
+      "gnu": "(31 . 7)"
+    },
+    {
+      "id": "base-16--",
+      "input": "#16r-1f",
+      "form": "(condition-case e (read-from-string \"#16r-1f\") (error e))",
+      "gnu": "(-31 . 7)"
+    },
+    {
+      "id": "base-17-unsigned",
+      "input": "#17r1g",
+      "form": "(condition-case e (read-from-string \"#17r1g\") (error e))",
+      "gnu": "(33 . 6)"
+    },
+    {
+      "id": "base-17-+",
+      "input": "#17r+1g",
+      "form": "(condition-case e (read-from-string \"#17r+1g\") (error e))",
+      "gnu": "(33 . 7)"
+    },
+    {
+      "id": "base-17--",
+      "input": "#17r-1g",
+      "form": "(condition-case e (read-from-string \"#17r-1g\") (error e))",
+      "gnu": "(-33 . 7)"
+    },
+    {
+      "id": "base-18-unsigned",
+      "input": "#18r1h",
+      "form": "(condition-case e (read-from-string \"#18r1h\") (error e))",
+      "gnu": "(35 . 6)"
+    },
+    {
+      "id": "base-18-+",
+      "input": "#18r+1h",
+      "form": "(condition-case e (read-from-string \"#18r+1h\") (error e))",
+      "gnu": "(35 . 7)"
+    },
+    {
+      "id": "base-18--",
+      "input": "#18r-1h",
+      "form": "(condition-case e (read-from-string \"#18r-1h\") (error e))",
+      "gnu": "(-35 . 7)"
+    },
+    {
+      "id": "base-19-unsigned",
+      "input": "#19r1i",
+      "form": "(condition-case e (read-from-string \"#19r1i\") (error e))",
+      "gnu": "(37 . 6)"
+    },
+    {
+      "id": "base-19-+",
+      "input": "#19r+1i",
+      "form": "(condition-case e (read-from-string \"#19r+1i\") (error e))",
+      "gnu": "(37 . 7)"
+    },
+    {
+      "id": "base-19--",
+      "input": "#19r-1i",
+      "form": "(condition-case e (read-from-string \"#19r-1i\") (error e))",
+      "gnu": "(-37 . 7)"
+    },
+    {
+      "id": "base-20-unsigned",
+      "input": "#20r1j",
+      "form": "(condition-case e (read-from-string \"#20r1j\") (error e))",
+      "gnu": "(39 . 6)"
+    },
+    {
+      "id": "base-20-+",
+      "input": "#20r+1j",
+      "form": "(condition-case e (read-from-string \"#20r+1j\") (error e))",
+      "gnu": "(39 . 7)"
+    },
+    {
+      "id": "base-20--",
+      "input": "#20r-1j",
+      "form": "(condition-case e (read-from-string \"#20r-1j\") (error e))",
+      "gnu": "(-39 . 7)"
+    },
+    {
+      "id": "base-21-unsigned",
+      "input": "#21r1k",
+      "form": "(condition-case e (read-from-string \"#21r1k\") (error e))",
+      "gnu": "(41 . 6)"
+    },
+    {
+      "id": "base-21-+",
+      "input": "#21r+1k",
+      "form": "(condition-case e (read-from-string \"#21r+1k\") (error e))",
+      "gnu": "(41 . 7)"
+    },
+    {
+      "id": "base-21--",
+      "input": "#21r-1k",
+      "form": "(condition-case e (read-from-string \"#21r-1k\") (error e))",
+      "gnu": "(-41 . 7)"
+    },
+    {
+      "id": "base-22-unsigned",
+      "input": "#22r1l",
+      "form": "(condition-case e (read-from-string \"#22r1l\") (error e))",
+      "gnu": "(43 . 6)"
+    },
+    {
+      "id": "base-22-+",
+      "input": "#22r+1l",
+      "form": "(condition-case e (read-from-string \"#22r+1l\") (error e))",
+      "gnu": "(43 . 7)"
+    },
+    {
+      "id": "base-22--",
+      "input": "#22r-1l",
+      "form": "(condition-case e (read-from-string \"#22r-1l\") (error e))",
+      "gnu": "(-43 . 7)"
+    },
+    {
+      "id": "base-23-unsigned",
+      "input": "#23r1m",
+      "form": "(condition-case e (read-from-string \"#23r1m\") (error e))",
+      "gnu": "(45 . 6)"
+    },
+    {
+      "id": "base-23-+",
+      "input": "#23r+1m",
+      "form": "(condition-case e (read-from-string \"#23r+1m\") (error e))",
+      "gnu": "(45 . 7)"
+    },
+    {
+      "id": "base-23--",
+      "input": "#23r-1m",
+      "form": "(condition-case e (read-from-string \"#23r-1m\") (error e))",
+      "gnu": "(-45 . 7)"
+    },
+    {
+      "id": "base-24-unsigned",
+      "input": "#24r1n",
+      "form": "(condition-case e (read-from-string \"#24r1n\") (error e))",
+      "gnu": "(47 . 6)"
+    },
+    {
+      "id": "base-24-+",
+      "input": "#24r+1n",
+      "form": "(condition-case e (read-from-string \"#24r+1n\") (error e))",
+      "gnu": "(47 . 7)"
+    },
+    {
+      "id": "base-24--",
+      "input": "#24r-1n",
+      "form": "(condition-case e (read-from-string \"#24r-1n\") (error e))",
+      "gnu": "(-47 . 7)"
+    },
+    {
+      "id": "base-25-unsigned",
+      "input": "#25r1o",
+      "form": "(condition-case e (read-from-string \"#25r1o\") (error e))",
+      "gnu": "(49 . 6)"
+    },
+    {
+      "id": "base-25-+",
+      "input": "#25r+1o",
+      "form": "(condition-case e (read-from-string \"#25r+1o\") (error e))",
+      "gnu": "(49 . 7)"
+    },
+    {
+      "id": "base-25--",
+      "input": "#25r-1o",
+      "form": "(condition-case e (read-from-string \"#25r-1o\") (error e))",
+      "gnu": "(-49 . 7)"
+    },
+    {
+      "id": "base-26-unsigned",
+      "input": "#26r1p",
+      "form": "(condition-case e (read-from-string \"#26r1p\") (error e))",
+      "gnu": "(51 . 6)"
+    },
+    {
+      "id": "base-26-+",
+      "input": "#26r+1p",
+      "form": "(condition-case e (read-from-string \"#26r+1p\") (error e))",
+      "gnu": "(51 . 7)"
+    },
+    {
+      "id": "base-26--",
+      "input": "#26r-1p",
+      "form": "(condition-case e (read-from-string \"#26r-1p\") (error e))",
+      "gnu": "(-51 . 7)"
+    },
+    {
+      "id": "base-27-unsigned",
+      "input": "#27r1q",
+      "form": "(condition-case e (read-from-string \"#27r1q\") (error e))",
+      "gnu": "(53 . 6)"
+    },
+    {
+      "id": "base-27-+",
+      "input": "#27r+1q",
+      "form": "(condition-case e (read-from-string \"#27r+1q\") (error e))",
+      "gnu": "(53 . 7)"
+    },
+    {
+      "id": "base-27--",
+      "input": "#27r-1q",
+      "form": "(condition-case e (read-from-string \"#27r-1q\") (error e))",
+      "gnu": "(-53 . 7)"
+    },
+    {
+      "id": "base-28-unsigned",
+      "input": "#28r1r",
+      "form": "(condition-case e (read-from-string \"#28r1r\") (error e))",
+      "gnu": "(55 . 6)"
+    },
+    {
+      "id": "base-28-+",
+      "input": "#28r+1r",
+      "form": "(condition-case e (read-from-string \"#28r+1r\") (error e))",
+      "gnu": "(55 . 7)"
+    },
+    {
+      "id": "base-28--",
+      "input": "#28r-1r",
+      "form": "(condition-case e (read-from-string \"#28r-1r\") (error e))",
+      "gnu": "(-55 . 7)"
+    },
+    {
+      "id": "base-29-unsigned",
+      "input": "#29r1s",
+      "form": "(condition-case e (read-from-string \"#29r1s\") (error e))",
+      "gnu": "(57 . 6)"
+    },
+    {
+      "id": "base-29-+",
+      "input": "#29r+1s",
+      "form": "(condition-case e (read-from-string \"#29r+1s\") (error e))",
+      "gnu": "(57 . 7)"
+    },
+    {
+      "id": "base-29--",
+      "input": "#29r-1s",
+      "form": "(condition-case e (read-from-string \"#29r-1s\") (error e))",
+      "gnu": "(-57 . 7)"
+    },
+    {
+      "id": "base-30-unsigned",
+      "input": "#30r1t",
+      "form": "(condition-case e (read-from-string \"#30r1t\") (error e))",
+      "gnu": "(59 . 6)"
+    },
+    {
+      "id": "base-30-+",
+      "input": "#30r+1t",
+      "form": "(condition-case e (read-from-string \"#30r+1t\") (error e))",
+      "gnu": "(59 . 7)"
+    },
+    {
+      "id": "base-30--",
+      "input": "#30r-1t",
+      "form": "(condition-case e (read-from-string \"#30r-1t\") (error e))",
+      "gnu": "(-59 . 7)"
+    },
+    {
+      "id": "base-31-unsigned",
+      "input": "#31r1u",
+      "form": "(condition-case e (read-from-string \"#31r1u\") (error e))",
+      "gnu": "(61 . 6)"
+    },
+    {
+      "id": "base-31-+",
+      "input": "#31r+1u",
+      "form": "(condition-case e (read-from-string \"#31r+1u\") (error e))",
+      "gnu": "(61 . 7)"
+    },
+    {
+      "id": "base-31--",
+      "input": "#31r-1u",
+      "form": "(condition-case e (read-from-string \"#31r-1u\") (error e))",
+      "gnu": "(-61 . 7)"
+    },
+    {
+      "id": "base-32-unsigned",
+      "input": "#32r1v",
+      "form": "(condition-case e (read-from-string \"#32r1v\") (error e))",
+      "gnu": "(63 . 6)"
+    },
+    {
+      "id": "base-32-+",
+      "input": "#32r+1v",
+      "form": "(condition-case e (read-from-string \"#32r+1v\") (error e))",
+      "gnu": "(63 . 7)"
+    },
+    {
+      "id": "base-32--",
+      "input": "#32r-1v",
+      "form": "(condition-case e (read-from-string \"#32r-1v\") (error e))",
+      "gnu": "(-63 . 7)"
+    },
+    {
+      "id": "base-33-unsigned",
+      "input": "#33r1w",
+      "form": "(condition-case e (read-from-string \"#33r1w\") (error e))",
+      "gnu": "(65 . 6)"
+    },
+    {
+      "id": "base-33-+",
+      "input": "#33r+1w",
+      "form": "(condition-case e (read-from-string \"#33r+1w\") (error e))",
+      "gnu": "(65 . 7)"
+    },
+    {
+      "id": "base-33--",
+      "input": "#33r-1w",
+      "form": "(condition-case e (read-from-string \"#33r-1w\") (error e))",
+      "gnu": "(-65 . 7)"
+    },
+    {
+      "id": "base-34-unsigned",
+      "input": "#34r1x",
+      "form": "(condition-case e (read-from-string \"#34r1x\") (error e))",
+      "gnu": "(67 . 6)"
+    },
+    {
+      "id": "base-34-+",
+      "input": "#34r+1x",
+      "form": "(condition-case e (read-from-string \"#34r+1x\") (error e))",
+      "gnu": "(67 . 7)"
+    },
+    {
+      "id": "base-34--",
+      "input": "#34r-1x",
+      "form": "(condition-case e (read-from-string \"#34r-1x\") (error e))",
+      "gnu": "(-67 . 7)"
+    },
+    {
+      "id": "base-35-unsigned",
+      "input": "#35r1y",
+      "form": "(condition-case e (read-from-string \"#35r1y\") (error e))",
+      "gnu": "(69 . 6)"
+    },
+    {
+      "id": "base-35-+",
+      "input": "#35r+1y",
+      "form": "(condition-case e (read-from-string \"#35r+1y\") (error e))",
+      "gnu": "(69 . 7)"
+    },
+    {
+      "id": "base-35--",
+      "input": "#35r-1y",
+      "form": "(condition-case e (read-from-string \"#35r-1y\") (error e))",
+      "gnu": "(-69 . 7)"
+    },
+    {
+      "id": "base-36-unsigned",
+      "input": "#36r1z",
+      "form": "(condition-case e (read-from-string \"#36r1z\") (error e))",
+      "gnu": "(71 . 6)"
+    },
+    {
+      "id": "base-36-+",
+      "input": "#36r+1z",
+      "form": "(condition-case e (read-from-string \"#36r+1z\") (error e))",
+      "gnu": "(71 . 7)"
+    },
+    {
+      "id": "base-36--",
+      "input": "#36r-1z",
+      "form": "(condition-case e (read-from-string \"#36r-1z\") (error e))",
+      "gnu": "(-71 . 7)"
+    },
+    {
+      "id": "context-0",
+      "input": "'#o77",
+      "expression": "(let ((v (read-from-string \"'#o77\"))) (list (equal (car v) (quote (quote 63))) (cdr v)))",
+      "form": "(condition-case e (let ((v (read-from-string \"'#o77\"))) (list (equal (car v) (quote (quote 63))) (cdr v))) (error e))",
+      "gnu": "(t 5)"
+    },
+    {
+      "id": "context-1",
+      "input": "[#o77 #Xff #B11 #24r1k]",
+      "form": "(condition-case e (read-from-string \"[#o77 #Xff #B11 #24r1k]\") (error e))",
+      "gnu": "([63 255 3 44] . 23)"
+    },
+    {
+      "id": "context-2",
+      "input": "?\\o",
+      "form": "(condition-case e (read-from-string \"?\\\\o\") (error e))",
+      "gnu": "(111 . 3)"
+    },
+    {
+      "id": "context-3",
+      "input": "?\\O",
+      "form": "(condition-case e (read-from-string \"?\\\\O\") (error e))",
+      "gnu": "(79 . 3)"
+    },
+    {
+      "id": "context-4",
+      "input": "?\\077",
+      "form": "(condition-case e (read-from-string \"?\\\\077\") (error e))",
+      "gnu": "(63 . 5)"
+    },
+    {
+      "id": "context-5",
+      "input": "#o77symbol",
+      "form": "(condition-case e (read-from-string \"#o77symbol\") (error e))",
+      "gnu": "(invalid-read-syntax \"integer, radix 8\")"
+    },
+    {
+      "id": "context-6",
+      "input": "#x1z",
+      "form": "(condition-case e (read-from-string \"#x1z\") (error e))",
+      "gnu": "(invalid-read-syntax \"integer, radix 16\")"
+    },
+    {
+      "id": "context-7",
+      "input": "#24r1k",
+      "form": "(condition-case e (read-from-string \"#24r1k\") (error e))",
+      "gnu": "(44 . 6)"
+    },
+    {
+      "id": "context-8",
+      "input": "#o77;comment",
+      "form": "(condition-case e (read-from-string \"#o77;comment\") (error e))",
+      "gnu": "(63 . 4)"
+    },
+    {
+      "id": "context-9",
+      "input": "#o77(foo)",
+      "form": "(condition-case e (read-from-string \"#o77(foo)\") (error e))",
+      "gnu": "(63 . 4)"
+    },
+    {
+      "id": "context-10",
+      "input": "#x1_foo",
+      "form": "(condition-case e (read-from-string \"#x1_foo\") (error e))",
+      "gnu": "(1 . 3)"
+    }
+  ]
+}

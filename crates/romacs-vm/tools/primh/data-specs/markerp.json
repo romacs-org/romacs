@@ -1,0 +1,68 @@
+{
+ "name": "markerp",
+ "arity": [
+  1,
+  1
+ ],
+ "effect": "pure",
+ "gnu_files": [
+  "data.c"
+ ],
+ "gnu_def": "data.c:490",
+ "rust": "src/prims/markerp.rs:5",
+ "args": [
+  "data-predicate-curated"
+ ],
+ "extra": {
+  "0": [
+   "nil",
+   "t",
+   "'x",
+   ":key",
+   "0",
+   "1",
+   "-1",
+   "4194303",
+   "4194304",
+   "1152921504606846975",
+   "1152921504606846976",
+   "2305843009213693951",
+   "-2305843009213693952",
+   "#x2000000000000000",
+   "#x-2000000000000001",
+   "#xffffffffffffffffffffffffffffffff",
+   "#x-ffffffffffffffffffffffffffffffff",
+   "0.0",
+   "-0.0",
+   "1.5",
+   "-1.5",
+   "1.0e+INF",
+   "-1.0e+INF",
+   "0.0e+NaN",
+   "\"\"",
+   "\"x\"",
+   "\"\u03bb\"",
+   "'(1 . 2)",
+   "[1]"
+  ]
+ },
+ "probes": [
+  "(markerp (make-marker))",
+  "(markerp (set-marker (make-marker) 1))",
+  "(markerp (current-buffer))",
+  "(markerp (symbol-function 'car))",
+  "(markerp (lambda (x) x))",
+  "(markerp (make-symbol \"x\"))",
+  "(markerp (make-hash-table))",
+  "(markerp (make-char-table 'data-predicate))",
+  "(markerp (standard-syntax-table))",
+  "(markerp (obarray-make 3))",
+  "(markerp (make-overlay 1 1))",
+  "(markerp (selected-window))",
+  "(markerp (selected-frame))",
+  "(markerp (frame-terminal))",
+  "(markerp (unibyte-string 255))",
+  "(funcall #'markerp 0)",
+  "(funcall #'markerp (symbol-function 'car))"
+ ]
+}

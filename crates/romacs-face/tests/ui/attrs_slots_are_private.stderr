@@ -1,0 +1,5 @@
+error[E0616]: field `slots` of struct `Attrs` is private
+ --> tests/ui/attrs_slots_are_private.rs:3:11
+  |
+3 |     attrs.slots[0] = romacs_face::Slot::Reset;
+  |           ^^^^^ private field

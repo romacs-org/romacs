@@ -1,0 +1,34 @@
+{
+ "name": "window-frame",
+ "arity": [
+  0,
+  1
+ ],
+ "effect": "reads",
+ "gnu_files": [
+  "window.c"
+ ],
+ "gnu_def": "window.c:342",
+ "rust": "src/prims/window.rs:19",
+ "args": [
+  "none"
+ ],
+ "extra": {
+  "0": [
+   "1",
+   "'sym",
+   "(copy-sequence \"s\")",
+   "t"
+  ]
+ },
+ "probes": [
+  "(eq (window-frame) (selected-frame))",
+  "(eq (window-frame (selected-window)) (selected-frame))",
+  "(eq (window-frame (minibuffer-window)) (selected-frame))",
+  "(let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (list (eq (window-frame p) (selected-frame)) (eq (window-frame b) (window-frame a))))",
+  "(let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (progn (set-window-new-pixel p h) (set-window-new-pixel a h) (delete-window-internal b) (condition-case e (window-frame b) (error (list (car e) (car (cdr e)) (eq (car (cdr (cdr e))) b))))))",
+  "(let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (progn (set-window-new-pixel p h) (set-window-new-pixel a h) (delete-window-internal b) (condition-case e (window-frame p) (error (list (car e) (car (cdr e)) (eq (car (cdr (cdr e))) p))))))",
+  "(condition-case e (window-frame (selected-frame)) (error (list (car e) (car (cdr e)) (eq (car (cdr (cdr e))) (selected-frame)))))",
+  "(eq (funcall #'window-frame) (selected-frame))"
+ ]
+}

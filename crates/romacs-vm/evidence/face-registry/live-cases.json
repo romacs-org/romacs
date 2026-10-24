@@ -1,0 +1,40 @@
+{
+  "gnu_commit": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "binary": "<recording-path-redacted>/emacs-32.0.50",
+  "binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+  "argv": [
+    "-Q",
+    "--batch",
+    "--eval"
+  ],
+  "cases": [
+    {
+      "expression": "(progn (internal-make-lisp-face 'registry-test) (let ((v (internal-lisp-face-p 'registry-test))) (list (vectorp v) (= (length v) 20) (eq (aref v 0) 'face) (eq v (internal-lisp-face-p \"registry-test\")) (internal-lisp-face-p 'missing-registry-face))))",
+      "result": "(t t t t nil)"
+    },
+    {
+      "expression": "(let ((v (internal-make-lisp-face 'registry-test))) (aset v 5 'bold) (list (eq v (internal-make-lisp-face 'registry-test)) (aref v 5)))",
+      "result": "(t unspecified)"
+    },
+    {
+      "expression": "(let ((v (internal-make-lisp-face 'registry-test))) (aset v 5 'bold) (aset v 4 ':ignore-defface) (aset v 16 'unknown-parent) (list (internal-get-lisp-face-attribute 'registry-test :weight t) (internal-get-lisp-face-attribute 'registry-test :height t) (internal-get-lisp-face-attribute 'registry-test :inherit t)))",
+      "result": "(bold unspecified unknown-parent)"
+    },
+    {
+      "expression": "(list (face-attribute-relative-p :height nil) (face-attribute-relative-p :height 10) (face-attribute-relative-p 42 'unspecified) (face-attribute-relative-p :weight ':ignore-defface) (face-attribute-relative-p :weight 'bold))",
+      "result": "(t nil t t nil)"
+    },
+    {
+      "expression": "(let ((v (internal-lisp-face-attribute-values :underline))) (list v (eq v (internal-lisp-face-attribute-values :underline)) (internal-lisp-face-attribute-values :weight) (condition-case e (internal-lisp-face-attribute-values 42) (error e))))",
+      "result": "((t nil) nil nil (wrong-type-argument symbolp 42))"
+    },
+    {
+      "expression": "(progn (internal-make-lisp-face 'registry-test) (list (internal-lisp-face-p 'registry-test (selected-frame)) (condition-case e (internal-get-lisp-face-attribute 'registry-test :weight) (error e)) (let ((local (internal-make-lisp-face 'registry-test (selected-frame)))) (aset local 5 'bold) (list (internal-get-lisp-face-attribute 'registry-test :weight) (internal-get-lisp-face-attribute 'registry-test :weight t)))))",
+      "result": "(nil (error \"Invalid face\" registry-test) (bold unspecified))"
+    },
+    {
+      "expression": "(progn (internal-make-lisp-face 'registry-test) (put 'registry-alias 'face-alias 'registry-test) (list (eq (internal-lisp-face-p 'registry-alias) (internal-lisp-face-p 'registry-test)) (condition-case e (internal-get-lisp-face-attribute 'no-face 42 t) (error e)) (condition-case e (internal-get-lisp-face-attribute 'registry-test :bogus t) (error e)) (condition-case e (internal-get-lisp-face-attribute \"registry-test\" :weight t) (error e)) (condition-case e (internal-lisp-face-p 'registry-test t) (error e))))",
+      "result": "(t (error \"Invalid face\" no-face) (error \"Invalid face attribute name\" :bogus) (wrong-type-argument symbolp \"registry-test\") (wrong-type-argument frame-live-p t))"
+    }
+  ]
+}

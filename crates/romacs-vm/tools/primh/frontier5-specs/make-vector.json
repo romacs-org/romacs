@@ -1,0 +1,28 @@
+{
+ "name": "make-vector",
+ "arity": [
+  2,
+  2
+ ],
+ "effect": "pure",
+ "gnu_files": [
+  "alloc.c"
+ ],
+ "gnu_def": "alloc.c:3530",
+ "rust": "src/prims/frontier.rs:45",
+ "args": [],
+ "probes": [
+  "(let ((v (make-vector 2 (list 1)))) (eq (aref v 0) (aref v 1)))",
+  "(let* ((a (make-vector 2 0)) (b (make-vector 2 0))) (aset a 0 9) (list a b (eq a b)))",
+  "(length (make-vector 5000 'x))",
+  "(aref (make-vector 5000 'x) 4999)",
+  "(vectorp (make-vector 0 nil))",
+  "(eq (make-vector 0 nil) (make-vector 0 t))",
+  "(car (condition-case e (make-vector most-positive-fixnum nil) (error e)))",
+  "(substring-no-properties (car (cdr (condition-case e (make-vector most-positive-fixnum nil) (error e)))))",
+  "(make-vector (1+ most-positive-fixnum) nil)",
+  "(make-vector (- most-negative-fixnum 1) nil)",
+  "(make-vector 2 (make-bool-vector 1 t))",
+  "(funcall #'make-vector 2 'x)"
+ ]
+}

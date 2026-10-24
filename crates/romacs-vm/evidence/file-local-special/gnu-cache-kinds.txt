@@ -1,0 +1,10 @@
+;; GNU Emacs 32.0.50, /usr/bin/emacs sha256 20a94ee7abc04960e3296deead030a37866d1d1e1522f3efd818838af7fffbe4
+;; (load "flp") then (load "flq"): ((flp-1 flp-2) after flp) ((flp-1 flp-2) after flq)
+((unbound 43) (0 43))
+;; flr.el interpreted, then byte-compiled: (flp-1 flp-2)
+(0 43)
+(0 43)
+;; fld.el (Sol review fixture): review-checks
+(t t 9 7)
+;; (list (defvar nil) (defvar t))
+(nil t)

@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+# lane-run: run ONE command inside a lane environment, in a fresh process, and log it.
+#
+#     lane-run LANE [-C WORKTREE] -- CMD [ARG...]
+#
+# Why a wrapper instead of `. scripts/lane-env.sh LANE` in your shell:
+#   * sourcing in a pipeline or $(...) silently loses every export (banner printed,
+#     then "cargo: command not found");
+#   * sourcing "on its own line" in a SHARED agent terminal persists HOME,
+#     CARGO_TARGET_DIR and cwd into every sibling lane using that terminal;
+#   * inherited GIT_DIR / GIT_WORK_TREE / LANE_TARGET_OVERRIDE redirect git and cargo.
+# A fresh `bash -c` has BASHPID == $$, so lane-env's subshell guard holds, and nothing
+# it exports can outlive the command. The command's own exit status is returned and
+# pipefail is exported, so `lane-run s1 -- bash -c 'cargo clippy | tail'` cannot
+# report 0 for a failed clippy.
+#
+# Every invocation appends one row to <registry>/runs.jsonl (lane, cwd, argv, start,
+# end, rc, max child RSS, loadavg before/after): the farm log of work that never goes
+# through a slot. SIGTERM/SIGINT/SIGHUP are forwarded to the command, and a death by
+# signal is logged as rc 128+N, so "killed at 75 s" is visible as a kill.
+set -u
+REAL_HOME=$(getent passwd "$(id -u)" | cut -d: -f6)
+CANON=${LANE_CANONICAL:-$REAL_HOME/Projects/rust/romacs}
+ENVSH=${LANE_ENV:-$CANON/scripts/lane-env.sh}   # canonical copy: old worktrees predate its guards
+REG=${LANES_REGISTRY:-$REAL_HOME/.cache/romacs-lanes}
+
+lane=${1:?usage: lane-run LANE [-C WORKTREE] -- CMD...}; shift
+wt=$PWD
+if [ "${1:-}" = -C ]; then wt=${2:?-C needs a directory}; shift 2; fi
+[ "${1:-}" = -- ] && shift
+[ $# -gt 0 ] || { echo "lane-run: no command" >&2; exit 2; }
+[ -r "$ENVSH" ] || { echo "lane-run: cannot read $ENVSH" >&2; exit 2; }
+mkdir -p "$REG"
+
+read -r -d '' SUPERVISE <<'PY'
+import json, os, resource, signal, subprocess, sys, time
+def load():
+    try: return [float(x) for x in open('/proc/loadavg').read().split()[:3]]
+    except OSError: return None
+row = dict(kind='run', lane=os.environ['LANE_RUN_LANE'], cwd=os.getcwd(), argv=sys.argv[1:8],
+           start=time.time(), load_start=load(), target=os.environ.get('CARGO_TARGET_DIR'))
+p = subprocess.Popen(sys.argv[1:])
+for s in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+    signal.signal(s, lambda n, f: p.send_signal(n))
+rc = p.wait()
+rc = 128 - rc if rc < 0 else rc
+row.update(end=time.time(), rc=rc, max_rss_kb=resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss,
+           load_end=load())
+row['wall_s'] = round(row['end'] - row['start'], 2)
+try:
+    with open(os.path.join(os.environ['LANE_RUN_REG'], 'runs.jsonl'), 'a') as f:
+        f.write(json.dumps(row) + '\n')
+except OSError as e:
+    print(f'lane-run: could not log run: {e}', file=sys.stderr)
+sys.exit(rc)
+PY
+
+exec env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u LANE_TARGET_OVERRIDE \
+  -u HOME_OVERRIDE BASH_ENV= ENV= \
+  LANE_RUN_LANE="$lane" LANE_RUN_ENVSH="$ENVSH" LANE_RUN_REAL_HOME="$REAL_HOME" \
+  LANE_RUN_REG="$REG" LANE_RUN_SUPERVISE="$SUPERVISE" \
+  bash --noprofile --norc -c '
+    set -o pipefail; export SHELLOPTS   # a child bash -c inherits pipefail
+    cd "$0" || exit 2
+    . "$LANE_RUN_ENVSH" "$LANE_RUN_LANE" >/dev/null || { echo "lane-run: lane-env failed" >&2; exit 97; }
+    command -v cargo >/dev/null || { echo "lane-run: lane-env ran but cargo is not on PATH" >&2; exit 98; }
+    # git in a lane HOME has no identity; point git at the real config, never at HOME.
+    export GIT_CONFIG_GLOBAL="$LANE_RUN_REAL_HOME/.gitconfig"
+    exec python3 -c "$LANE_RUN_SUPERVISE" "$@"' "$wt" "$@"

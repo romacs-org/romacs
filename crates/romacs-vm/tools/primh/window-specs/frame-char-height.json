@@ -1,0 +1,30 @@
+{
+ "name": "frame-char-height",
+ "arity": [
+  0,
+  1
+ ],
+ "effect": "reads",
+ "gnu_files": [
+  "frame.c"
+ ],
+ "gnu_def": "frame.c:4345",
+ "rust": "src/prims/window.rs:187",
+ "args": [
+  "none"
+ ],
+ "extra": {
+  "0": [
+   "1",
+   "'sym",
+   "(copy-sequence \"s\")"
+  ]
+ },
+ "probes": [
+  "(integerp (frame-char-height))",
+  "(= (frame-char-height) (frame-char-height (selected-frame)))",
+  "(= (* (frame-char-height) (window-total-height (minibuffer-window))) (window-pixel-height (minibuffer-window)))",
+  "(> (frame-char-height) 0)",
+  "(condition-case e (frame-char-height (selected-window)) (error (list (car e) (car (cdr e)) (eq (car (cdr (cdr e))) (selected-window)))))"
+ ]
+}

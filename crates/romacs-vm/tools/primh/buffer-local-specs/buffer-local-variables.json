@@ -1,0 +1,24 @@
+{
+  "name": "buffer-local-variables",
+  "arity": [
+    0,
+    1
+  ],
+  "effect": "reads",
+  "gnu_files": [
+    "buffer.c"
+  ],
+  "gnu_def": "buffer.c:1485",
+  "rust": "src/prims/buffer_locals.rs:14",
+  "args": [
+    "projected-buffer-locals"
+  ],
+  "probes": [
+    "(let ((b (get-buffer-create \"local-other\"))) (setq bl-x 7) (with-current-buffer b (set (make-local-variable 'bl-x) 12)) (list (buffer-local-value 'bl-x b) bl-x (local-variable-p 'bl-x b) (cdr (assq 'bl-x (buffer-local-variables b)))))",
+    "(with-temp-buffer (setq bl-void 2) (make-local-variable 'bl-void) (makunbound 'bl-void) (list (not (null (memq 'bl-void (buffer-local-variables)))) (local-variable-p 'bl-void)))",
+    "(condition-case e (buffer-local-variables 3) (error e))",
+    "(with-temp-buffer (list (cdr (assq 'major-mode (buffer-local-variables))) (equal (cdr (assq 'mode-name (buffer-local-variables))) \"Fundamental\") (assq 'fill-column (buffer-local-variables))))",
+    "(list (fboundp 'buffer-local-variables) (functionp 'buffer-local-variables))",
+    "(with-temp-buffer (consp (funcall 'buffer-local-variables)))"
+  ]
+}

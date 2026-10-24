@@ -1,0 +1,32 @@
+{
+ "name": "frame-terminal",
+ "arity": [
+  0,
+  1
+ ],
+ "effect": "reads",
+ "gnu_files": [
+  "terminal.c"
+ ],
+ "gnu_def": "terminal.c:424",
+ "args": [
+  "none"
+ ],
+ "extra": {
+  "0": [
+   "nil",
+   "t",
+   "1",
+   "'symbol",
+   "\"string\""
+  ]
+ },
+ "probes": [
+  "(fboundp 'frame-terminal)",
+  "(eq (frame-terminal) (frame-terminal nil))",
+  "(eq (frame-terminal) (frame-terminal (selected-frame)))",
+  "(eq (funcall #'frame-terminal) (frame-terminal))",
+  "(terminal-live-p (frame-terminal))"
+ ],
+ "rust": "src/prims/frame.rs:8"
+}

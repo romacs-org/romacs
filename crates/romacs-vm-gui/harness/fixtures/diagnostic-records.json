@@ -1,0 +1,50 @@
+{
+  "normal": [
+    {
+      "diagnostic": "paint",
+      "unresolved_face_text_total": 0,
+      "buffer_version": 5
+    },
+    {
+      "diagnostic": "paint",
+      "unresolved_face_text_total": 0,
+      "buffer_version": 7
+    }
+  ],
+  "low-gc": [
+    {
+      "diagnostic": "paint",
+      "unresolved_face_text_total": 0,
+      "buffer_version": 5
+    },
+    {
+      "diagnostic": "paint",
+      "unresolved_face_text_total": 0,
+      "buffer_version": 7
+    }
+  ],
+  "forced-gc": [
+    {
+      "diagnostic": "gc-between-snapshot-and-paint",
+      "witness_moved": true,
+      "collections_before": 1,
+      "collections_after": 2
+    },
+    {
+      "diagnostic": "paint",
+      "unresolved_face_text_total": 0,
+      "buffer_version": 5
+    },
+    {
+      "diagnostic": "gc-between-snapshot-and-paint",
+      "witness_moved": true,
+      "collections_before": 3,
+      "collections_after": 4
+    },
+    {
+      "diagnostic": "paint",
+      "unresolved_face_text_total": 0,
+      "buffer_version": 7
+    }
+  ]
+}

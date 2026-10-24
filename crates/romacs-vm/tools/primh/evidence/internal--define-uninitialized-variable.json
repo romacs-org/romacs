@@ -1,0 +1,415 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "internal--define-uninitialized-variable",
+ "spec_sha256": "96829f7d136183c1665baacb301ff334fc1e6e7d1bcd54c38d280147fd5aee69",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "internal--define-uninitialized-variable",
+    "subr",
+    1,
+    2
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "eval.c": "db894444b2edc1e7e675d5d8f97cba7e6f77f2beb0e5c3a130afc505c6f387b4"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "internal--define-uninitialized-variable/0000",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal--define-uninitialized-variable 'uv-domain nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "internal--define-uninitialized-variable/0001",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal--define-uninitialized-variable 'uv-domain \"doc\")) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "internal--define-uninitialized-variable/0002",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal--define-uninitialized-variable 'uv-domain 7)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "internal--define-uninitialized-variable/0003",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal--define-uninitialized-variable 'uv-domain '(a b))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "internal--define-uninitialized-variable/0004",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal--define-uninitialized-variable 'uv-domain [1 2])) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "internal--define-uninitialized-variable/0005",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal--define-uninitialized-variable (make-symbol \"uv-domain\") nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "internal--define-uninitialized-variable/0006",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal--define-uninitialized-variable (make-symbol \"uv-domain\") \"doc\")) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "internal--define-uninitialized-variable/0007",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal--define-uninitialized-variable (make-symbol \"uv-domain\") 7)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "internal--define-uninitialized-variable/0008",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal--define-uninitialized-variable (make-symbol \"uv-domain\") '(a b))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "internal--define-uninitialized-variable/0009",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal--define-uninitialized-variable (make-symbol \"uv-domain\") [1 2])) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "internal--define-uninitialized-variable/0010",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal--define-uninitialized-variable nil nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "internal--define-uninitialized-variable/0011",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal--define-uninitialized-variable nil \"doc\")) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "internal--define-uninitialized-variable/0012",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal--define-uninitialized-variable nil 7)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "internal--define-uninitialized-variable/0013",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal--define-uninitialized-variable nil '(a b))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "internal--define-uninitialized-variable/0014",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal--define-uninitialized-variable nil [1 2])) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "internal--define-uninitialized-variable/0015",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal--define-uninitialized-variable t nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "internal--define-uninitialized-variable/0016",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal--define-uninitialized-variable t \"doc\")) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "internal--define-uninitialized-variable/0017",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal--define-uninitialized-variable t 7)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "internal--define-uninitialized-variable/0018",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal--define-uninitialized-variable t '(a b))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "internal--define-uninitialized-variable/0019",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal--define-uninitialized-variable t [1 2])) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "internal--define-uninitialized-variable/0020",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal--define-uninitialized-variable :uv-domain nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "internal--define-uninitialized-variable/0021",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal--define-uninitialized-variable :uv-domain \"doc\")) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "internal--define-uninitialized-variable/0022",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal--define-uninitialized-variable :uv-domain 7)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "internal--define-uninitialized-variable/0023",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal--define-uninitialized-variable :uv-domain '(a b))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "internal--define-uninitialized-variable/0024",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal--define-uninitialized-variable :uv-domain [1 2])) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "internal--define-uninitialized-variable/0025",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'internal--define-uninitialized-variable '())) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr internal--define-uninitialized-variable> 0))"
+  },
+  {
+   "id": "internal--define-uninitialized-variable/0026",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'internal--define-uninitialized-variable '(1 1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr internal--define-uninitialized-variable> 3))"
+  },
+  {
+   "id": "internal--define-uninitialized-variable/0027",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'uv-domain) (a1 nil)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (internal--define-uninitialized-variable a0 a1))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "internal--define-uninitialized-variable/0028",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'uv-domain) (a1 nil)) (let ((r (internal--define-uninitialized-variable a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "internal--define-uninitialized-variable/0029",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'uv-domain) (a1 '(a b))) (let ((r (internal--define-uninitialized-variable a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "internal--define-uninitialized-variable/0030",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (make-symbol \"uv-domain\")) (a1 \"doc\")) (let ((r (internal--define-uninitialized-variable a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "internal--define-uninitialized-variable/0031",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (make-symbol \"uv-domain\")) (a1 [1 2])) (let ((r (internal--define-uninitialized-variable a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "internal--define-uninitialized-variable/0032",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 7)) (let ((r (internal--define-uninitialized-variable a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (t nil))"
+  },
+  {
+   "id": "internal--define-uninitialized-variable/0033",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 nil)) (let ((r (internal--define-uninitialized-variable a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "internal--define-uninitialized-variable/0034",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 '(a b))) (let ((r (internal--define-uninitialized-variable a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "internal--define-uninitialized-variable/0035",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :uv-domain) (a1 \"doc\")) (let ((r (internal--define-uninitialized-variable a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "internal--define-uninitialized-variable/0036",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :uv-domain) (a1 [1 2])) (let ((r (internal--define-uninitialized-variable a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "internal--define-uninitialized-variable/0037",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (fboundp 'internal--define-uninitialized-variable) (functionp #'internal--define-uninitialized-variable) (funcall #'internal--define-uninitialized-variable 'uv-call) (special-variable-p 'uv-call) (boundp 'uv-call))) (error (list 'sig e))))",
+   "expected": "(ok (t t nil t nil))"
+  },
+  {
+   "id": "internal--define-uninitialized-variable/0038",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (internal--define-uninitialized-variable 'uv-fresh) (list (special-variable-p 'uv-fresh) (boundp 'uv-fresh)))) (error (list 'sig e))))",
+   "expected": "(ok (t nil))"
+  },
+  {
+   "id": "internal--define-uninitialized-variable/0039",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq uv-value '(7 8)) (list (internal--define-uninitialized-variable 'uv-value) uv-value (special-variable-p 'uv-value)))) (error (list 'sig e))))",
+   "expected": "(ok (nil (7 8) t))"
+  },
+  {
+   "id": "internal--define-uninitialized-variable/0040",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (put 'uv-doc 'variable-documentation \"old\") (internal--define-uninitialized-variable 'uv-doc) (get 'uv-doc 'variable-documentation))) (error (list 'sig e))))",
+   "expected": "(ok \"old\")"
+  },
+  {
+   "id": "internal--define-uninitialized-variable/0041",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (put 'uv-doc 'variable-documentation \"old\") (internal--define-uninitialized-variable 'uv-doc nil) (get 'uv-doc 'variable-documentation))) (error (list 'sig e))))",
+   "expected": "(ok \"old\")"
+  },
+  {
+   "id": "internal--define-uninitialized-variable/0042",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((s (make-symbol \"uv-twin\")) (doc (list 1 2))) (list (internal--define-uninitialized-variable s doc) (special-variable-p s) (boundp s) (eq (get s 'variable-documentation) doc) (special-variable-p 'uv-twin)))) (error (list 'sig e))))",
+   "expected": "(ok (nil t nil t nil))"
+  },
+  {
+   "id": "internal--define-uninitialized-variable/0043",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defvaralias 'uv-alias 'uv-base) (setq uv-base 19) (internal--define-uninitialized-variable 'uv-alias \"alias-doc\") (list uv-alias uv-base (get 'uv-alias 'variable-documentation) (get 'uv-base 'variable-documentation)))) (error (list 'sig e))))",
+   "expected": "(ok (19 19 \"alias-doc\" nil))"
+  },
+  {
+   "id": "internal--define-uninitialized-variable/0044",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((current-load-list nil)) (internal--define-uninitialized-variable 'uv-history) current-load-list)) (error (list 'sig e))))",
+   "expected": "(ok (uv-history))"
+  },
+  {
+   "id": "internal--define-uninitialized-variable/0045",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((current-load-list '(existing))) (internal--define-uninitialized-variable 'uv-history) (internal--define-uninitialized-variable 'uv-history) current-load-list)) (error (list 'sig e))))",
+   "expected": "(ok (uv-history uv-history existing))"
+  },
+  {
+   "id": "internal--define-uninitialized-variable/0046",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defvar uv-dynamic 4) (let ((uv-dynamic 9)) (internal--define-uninitialized-variable 'uv-dynamic) uv-dynamic))) (error (list 'sig e))))",
+   "expected": "(ok 9)"
+  },
+  {
+   "id": "internal--define-uninitialized-variable/0047",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((uv-lexical 8)) (list (internal--define-uninitialized-variable 'uv-lexical) uv-lexical))) (error (list 'sig e))))",
+   "expected": "(ok (nil 8))"
+  },
+  {
+   "id": "internal--define-uninitialized-variable/0048",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (internal--define-uninitialized-variable nil '(a b)) (special-variable-p nil) (get nil 'variable-documentation))) (error (list 'sig e))))",
+   "expected": "(ok (nil t (a b)))"
+  },
+  {
+   "id": "internal--define-uninitialized-variable/0049",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (internal--define-uninitialized-variable t '(a b)) (special-variable-p t) (get t 'variable-documentation))) (error (list 'sig e))))",
+   "expected": "(ok (nil t (a b)))"
+  },
+  {
+   "id": "internal--define-uninitialized-variable/0050",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (internal--define-uninitialized-variable :uv-constant '(a b)) (special-variable-p :uv-constant) (get :uv-constant 'variable-documentation))) (error (list 'sig e))))",
+   "expected": "(ok (nil t (a b)))"
+  },
+  {
+   "id": "internal--define-uninitialized-variable/0051",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (internal--define-uninitialized-variable 'most-positive-fixnum '(a b)) (special-variable-p 'most-positive-fixnum) (get 'most-positive-fixnum 'variable-documentation))) (error (list 'sig e))))",
+   "expected": "(ok (nil t (a b)))"
+  },
+  {
+   "id": "internal--define-uninitialized-variable/0052",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (special-variable-p nil) (special-variable-p t))) (error (list 'sig e))))",
+   "expected": "(ok (t t))"
+  },
+  {
+   "id": "internal--define-uninitialized-variable/0053",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((current-load-list nil)) (setplist 'uv-bad 'junk) (list (condition-case e (internal--define-uninitialized-variable 'uv-bad 7) (error e)) (special-variable-p 'uv-bad) current-load-list))) (error (list 'sig e))))",
+   "expected": "(ok ((wrong-type-argument plistp junk) t nil))"
+  },
+  {
+   "id": "internal--define-uninitialized-variable/0054",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((current-load-list nil)) (setplist 'uv-bad '(x . junk)) (list (condition-case e (internal--define-uninitialized-variable 'uv-bad 7) (error e)) (special-variable-p 'uv-bad) current-load-list))) (error (list 'sig e))))",
+   "expected": "(ok ((wrong-type-argument plistp (x . junk)) t nil))"
+  },
+  {
+   "id": "internal--define-uninitialized-variable/0055",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"doc\") (error (list 'sig e))))",
+   "expected": "(ok \"doc\")"
+  },
+  {
+   "id": "internal--define-uninitialized-variable/0056",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok '(a b)) (error (list 'sig e))))",
+   "expected": "(ok (a b))"
+  },
+  {
+   "id": "internal--define-uninitialized-variable/0057",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 'uv-domain) (error (list 'sig e))))",
+   "expected": "(ok uv-domain)"
+  },
+  {
+   "id": "internal--define-uninitialized-variable/0058",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (make-symbol \"uv-domain\")) (error (list 'sig e))))",
+   "expected": "(ok uv-domain)"
+  },
+  {
+   "id": "internal--define-uninitialized-variable/0059",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 7) (error (list 'sig e))))",
+   "expected": "(ok 7)"
+  },
+  {
+   "id": "internal--define-uninitialized-variable/0060",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok :uv-domain) (error (list 'sig e))))",
+   "expected": "(ok :uv-domain)"
+  },
+  {
+   "id": "internal--define-uninitialized-variable/0061",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok [1 2]) (error (list 'sig e))))",
+   "expected": "(ok [1 2])"
+  },
+  {
+   "id": "internal--define-uninitialized-variable/0062",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok nil) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "internal--define-uninitialized-variable/0063",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok t) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  }
+ ]
+}

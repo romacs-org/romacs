@@ -1,0 +1,128 @@
+{
+ "blob": "0ba9140137c93d7370f2b1c0be7df5553c2ab7df",
+ "compiled": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": true,
+  "results": {
+   "ispell/hunspell/ispell-word/language-switch/check-only": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (equal 0 (with-temp-buffer (insert ispell-tests--constants/russian/correct \"\n\") (call-process-region nil nil \"hunspell\" nil ... nil \"-d\" \"ru_RU\")))) :form (equal 0 1) :value nil :explanation (different-atoms (0 \"#x0\" \"?\u0000\") (1 \"#x1\" \"?\u0001\"))))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "ispell/hunspell/ispell-word/multilang": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (equal 0 (with-temp-buffer (insert ispell-tests--constants/russian/correct) (call-process-region nil nil \"hunspell\" nil ... nil \"-d\" \"ru_RU\")))) :form (equal 0 1) :value nil :explanation (different-atoms (0 \"#x0\" \"?\u0000\") (1 \"#x1\" \"?\u0001\"))))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "ispell/hunspell/ispell-word/russian/check-only": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (equal 0 (let (...) retval))) :form (equal 0 1) :value nil :explanation (different-atoms (0 \"#x0\" \"?\u0000\") (1 \"#x1\" \"?\u0001\"))))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "ispell/hunspell/ispell-word/russian/check-only/wrong-language": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (equal 0 (with-temp-buffer (insert ispell-tests--constants/russian/correct) (call-process-region nil nil \"hunspell\" nil ... nil \"-d\" \"ru_RU\")))) :form (equal 0 1) :value nil :explanation (different-atoms (0 \"#x0\" \"?\u0000\") (1 \"#x1\" \"?\u0001\"))))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   }
+  },
+  "timed_out": false
+ },
+ "file": "lisp/textmodes/ispell-tests/ispell-hunspell-tests.el",
+ "gnu": {
+  "emacs": "<recording-path-redacted>/emacs-32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+  "version": "32.0.50"
+ },
+ "harness_sha256": "78c20850429a08af22faadf73b5d164c560230e83d7eb88ef60cb995670703ef",
+ "mini": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": null,
+  "results": {
+   "ispell/hunspell/ispell-word/language-switch/check-only": {
+    "as_expected": null,
+    "detail": "((skip-unless (equal 0 (with-temp-buffer (insert ispell-tests--constants/russian/correct \"\n\") (call-process-region nil nil \"hunspell\" nil '(\"*scratch*\" t) nil \"-d\" \"ru_RU\")))))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "ispell/hunspell/ispell-word/multilang": {
+    "as_expected": null,
+    "detail": "((skip-unless (equal 0 (with-temp-buffer (insert ispell-tests--constants/russian/correct) (call-process-region nil nil \"hunspell\" nil '(\"*scratch*\" t) nil \"-d\" \"ru_RU\")))))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "ispell/hunspell/ispell-word/russian/check-only": {
+    "as_expected": null,
+    "detail": "((skip-unless (equal 0 (let ((retval ...)) retval))))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "ispell/hunspell/ispell-word/russian/check-only/wrong-language": {
+    "as_expected": null,
+    "detail": "((skip-unless (equal 0 (with-temp-buffer (insert ispell-tests--constants/russian/correct) (call-process-region nil nil \"hunspell\" nil '(\"*scratch*\" t) nil \"-d\" \"ru_RU\")))))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   }
+  },
+  "timed_out": false
+ },
+ "read_error": null,
+ "real": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": true,
+  "results": {
+   "ispell/hunspell/ispell-word/language-switch/check-only": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (equal 0 (with-temp-buffer (insert ispell-tests--constants/russian/correct \"\n\") (call-process-region nil nil \"hunspell\" nil ... nil \"-d\" \"ru_RU\")))) :form (equal 0 1) :value nil :explanation (different-atoms (0 \"#x0\" \"?\u0000\") (1 \"#x1\" \"?\u0001\"))))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "ispell/hunspell/ispell-word/multilang": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (equal 0 (with-temp-buffer (insert ispell-tests--constants/russian/correct) (call-process-region nil nil \"hunspell\" nil ... nil \"-d\" \"ru_RU\")))) :form (equal 0 1) :value nil :explanation (different-atoms (0 \"#x0\" \"?\u0000\") (1 \"#x1\" \"?\u0001\"))))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "ispell/hunspell/ispell-word/russian/check-only": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (equal 0 (let (...) retval))) :form (equal 0 1) :value nil :explanation (different-atoms (0 \"#x0\" \"?\u0000\") (1 \"#x1\" \"?\u0001\"))))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "ispell/hunspell/ispell-word/russian/check-only/wrong-language": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (equal 0 (with-temp-buffer (insert ispell-tests--constants/russian/correct) (call-process-region nil nil \"hunspell\" nil ... nil \"-d\" \"ru_RU\")))) :form (equal 0 1) :value nil :explanation (different-atoms (0 \"#x0\" \"?\u0000\") (1 \"#x1\" \"?\u0001\"))))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   }
+  },
+  "timed_out": false
+ },
+ "schema": 1,
+ "toplevel_deftests": 5
+}

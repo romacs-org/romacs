@@ -1,0 +1,1952 @@
+//! Pointer, wheel, and hover handling for winit window events.
+
+use super::RenderApp;
+use super::frame_windows::{ChromePress, GuiFrameWindowState};
+use super::input::{MenuBarHit, frame_chrome_hit, frame_chrome_owns_pointer};
+use super::state::PointerCursorIntent;
+use super::state::PresentedInteractionKey;
+#[cfg(feature = "webview")]
+use super::state::WebViewPointerCapture;
+use crate::backend::wgpu::ROMACS_SUPER_MASK;
+#[cfg(feature = "webview")]
+use crate::backend::wgpu::{ROMACS_CTRL_MASK, ROMACS_META_MASK, ROMACS_SHIFT_MASK};
+use crate::core::frame_glyphs::FrameGlyph;
+use crate::thread_comm::{
+    InputEvent, PointerAction, PointerPosition, PointerTarget, PositionedPointerInput, ScrollDelta,
+};
+use romacs_display_protocol::PresentationFramePoint;
+use romacs_display_protocol::frame_chrome::{ChromeAction, FrameChromeKind};
+#[cfg(any(test, feature = "webview"))]
+use romacs_webview::WebViewScrollDelta;
+#[cfg(feature = "webview")]
+use romacs_webview::{
+    ButtonState, PointerButton, WebContentPoint, WebViewInput, WebViewInputTarget, WebViewModifiers,
+};
+
+use winit::dpi::PhysicalPosition;
+use winit::event::{DeviceId, ElementState, MouseButton, MouseScrollDelta, TouchPhase};
+use winit::window::WindowId;
+
+/// Zoom notches, possibly fractional, in one wheel event over a model:
+/// line deltas count as notches; pixel deltas (touchpads) count one notch
+/// per 50 px.
+fn model_wheel_notches(delta: MouseScrollDelta) -> Option<f64> {
+    let notches = match delta {
+        MouseScrollDelta::LineDelta(_, y) | MouseScrollDelta::ContinuousLineDelta(_, y) => {
+            f64::from(y)
+        }
+        MouseScrollDelta::PixelDelta(p) => p.y / 50.0,
+        _ => return None,
+    };
+    notches.is_finite().then_some(notches)
+}
+
+/// The most notches one wheel event may zoom.
+const MODEL_WHEEL_MAX_NOTCHES: f64 = 10.0;
+
+/// Wheel input over models, turned into whole zoom notches. Fractions
+/// (touchpads, high-resolution wheels) carry over to the next event of the
+/// same gesture, so a stream of small deltas zooms as much as one big one.
+#[derive(Debug, Default)]
+pub(super) struct ModelWheel {
+    remainder: Option<WheelRemainder>,
+}
+
+/// The part of a notch one device has scrolled over one model and not yet
+/// zoomed, and when.
+#[derive(Debug)]
+struct WheelRemainder {
+    device: Option<DeviceId>,
+    id: u32,
+    notches: f64,
+    at: std::time::Instant,
+}
+
+impl ModelWheel {
+    /// The whole notches `delta` from `device` over model `id` amounts to,
+    /// with what this device last left over this model. That remainder is
+    /// dropped when the gesture changes hands (another device or model,
+    /// or the wheel leaving the model: [`Self::reset`]), when a new
+    /// gesture starts or the old one ends, and after a quiet period as
+    /// long as the one that settles a wheel burst.
+    pub(super) fn notches(
+        &mut self,
+        device: Option<DeviceId>,
+        id: u32,
+        delta: MouseScrollDelta,
+        phase: TouchPhase,
+        now: std::time::Instant,
+    ) -> i32 {
+        let previous = self.remainder.take();
+        let Some(step) = model_wheel_notches(delta) else {
+            return 0;
+        };
+        let carried = previous
+            .filter(|r| {
+                r.device == device
+                    && r.id == id
+                    && phase != TouchPhase::Started
+                    && now.saturating_duration_since(r.at)
+                        < romacs_renderer_wgpu::model::store::WHEEL_QUIET
+            })
+            .map_or(0.0, |r| r.notches);
+        let total = (carried + step).clamp(-MODEL_WHEEL_MAX_NOTCHES, MODEL_WHEEL_MAX_NOTCHES);
+        // Whole notches toward zero; the fraction waits for the next event.
+        let whole = total.trunc();
+        let left = total - whole;
+        if left != 0.0 && !matches!(phase, TouchPhase::Ended | TouchPhase::Cancelled) {
+            self.remainder = Some(WheelRemainder {
+                device,
+                id,
+                notches: left,
+                at: now,
+            });
+        }
+        whole as i32
+    }
+
+    /// The wheel left the models: nothing carries into a later gesture.
+    pub(super) fn reset(&mut self) {
+        self.remainder = None;
+    }
+
+    /// The model a remainder is waiting over, if any.
+    pub(super) fn pending_model(&self) -> Option<u32> {
+        self.remainder.as_ref().map(|r| r.id)
+    }
+
+    /// The pointer moved and is now over model `over` (or none): a
+    /// remainder left over another model belongs to a gesture that has
+    /// moved on, even if the pointer comes back within the quiet period.
+    pub(super) fn pointer_over(&mut self, over: Option<u32>) {
+        if self.pending_model().is_some_and(|id| Some(id) != over) {
+            self.reset();
+        }
+    }
+}
+
+impl RenderApp {
+    /// Wheel input from `device` over interactive model `id` zooms it
+    /// (design §5.1) and never scrolls the buffer.
+    pub(super) fn wheel_over_model(
+        &mut self,
+        device: Option<DeviceId>,
+        id: u32,
+        delta: MouseScrollDelta,
+        phase: TouchPhase,
+        now: std::time::Instant,
+    ) {
+        let notches = self.model_wheel.notches(device, id, delta, phase, now);
+        // Even input completing no notch reaches the store: it keeps an
+        // active burst from settling while the gesture goes on.
+        self.models.wheel(id, notches, now);
+        self.flush_model_events();
+    }
+}
+
+// Embedded browsers own their distance policy and fractional viewport. Do not
+// impose the editor's integral Lisp boundary on their input.
+#[cfg(any(test, feature = "webview"))]
+fn webview_scroll_delta(delta: MouseScrollDelta, scale: f64) -> Option<WebViewScrollDelta> {
+    if !scale.is_finite() || scale <= 0.0 {
+        return None;
+    }
+    match delta {
+        MouseScrollDelta::LineDelta(x, y) | MouseScrollDelta::ContinuousLineDelta(x, y)
+            if x.is_finite() && y.is_finite() =>
+        {
+            Some(WebViewScrollDelta::Lines { x, y })
+        }
+        MouseScrollDelta::PixelDelta(p) if p.x.is_finite() && p.y.is_finite() => {
+            Some(WebViewScrollDelta::Pixels {
+                x: (p.x / scale) as f32,
+                y: (p.y / scale) as f32,
+            })
+        }
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+#[path = "pointer_events/tests/webview_scroll_test.rs"]
+mod webview_scroll_test;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) enum PointerOwner {
+    Child {
+        frame_id: u64,
+        x: f32,
+        y: f32,
+    },
+    Root {
+        frame_id: u64,
+        x: f32,
+        y: f32,
+    },
+    /// Live surface area not covered by the immutable root presentation.
+    Expose {
+        frame_id: u64,
+        x: f32,
+        y: f32,
+    },
+}
+
+#[cfg(all(test, feature = "webview"))]
+#[path = "tests/pointer_events_webview_test.rs"]
+mod webview_tests;
+
+#[cfg(test)]
+#[path = "pointer_events/tests/shader_surface_test.rs"]
+mod shader_surface_tests;
+
+#[cfg(test)]
+#[path = "tests/pointer_events_test.rs"]
+mod native_chrome_tests;
+
+impl PointerOwner {
+    pub(super) fn target(self) -> Option<(f32, f32, u64)> {
+        match self {
+            Self::Expose { .. } => None,
+            Self::Child { frame_id, x, y } | Self::Root { frame_id, x, y } => {
+                Some((x, y, frame_id))
+            }
+        }
+    }
+
+    /// Raw evaluator input still names the live frame in expose area, while
+    /// presentation-qualified hit testing must not.
+    pub(super) fn raw_target(self) -> Option<(f32, f32, u64)> {
+        match self {
+            Self::Child { frame_id, x, y }
+            | Self::Root { frame_id, x, y }
+            | Self::Expose { frame_id, x, y } => Some((x, y, frame_id)),
+        }
+    }
+
+    /// Popup handling deliberately delegates menu/chrome clicks back to the
+    /// existing popup branch, but never exposes an underlying presented target.
+    pub(super) fn permits_root_chrome(self) -> bool {
+        !matches!(self, Self::Child { .. })
+    }
+
+    pub(super) fn owns_root_hover(self) -> bool {
+        matches!(self, Self::Root { .. })
+    }
+
+    pub(super) fn permits_native_chrome(self) -> bool {
+        matches!(self, Self::Root { .. } | Self::Expose { .. })
+    }
+}
+
+#[cfg(feature = "webview")]
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct WebViewPointerHit {
+    view: romacs_display_protocol::WebViewId,
+    position: WebContentPoint,
+}
+
+#[cfg(feature = "webview")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WebViewDeliveryTarget {
+    Current(romacs_display_protocol::WebViewId),
+    Captured(WebViewInputTarget),
+}
+
+#[cfg(feature = "webview")]
+impl WebViewDeliveryTarget {
+    fn resolve(self, system: &romacs_webview::WebViewSystem) -> Option<WebViewInputTarget> {
+        match self {
+            Self::Current(view) => system.presented_target(view),
+            Self::Captured(target) => Some(target),
+        }
+    }
+
+    const fn view(self) -> romacs_display_protocol::WebViewId {
+        match self {
+            Self::Current(view) => view,
+            Self::Captured(target) => target.view(),
+        }
+    }
+}
+
+/// Search a glyph buffer for an inline WebView under `point`.
+///
+/// Takes the witnessed point rather than coordinates for the reason
+/// [`PresentedHitQuery`](romacs_display_protocol::PresentedHitQuery) does:
+/// the widget rects belong to the destination presentation, so a pointer
+/// position that has not been through the projection names a different pixel
+/// for as long as the widget's pane is moving.
+#[cfg(feature = "webview")]
+fn webview_glyph_hit_test(
+    glyphs: &[FrameGlyph],
+    point: PresentationFramePoint,
+) -> Option<WebViewPointerHit> {
+    let point = point.in_frame_space();
+    for glyph in glyphs.iter().rev() {
+        // The pointer target is the widget itself, GNU `xww->width` by
+        // `xww->height` at the glyph origin, minus what the text-area clip
+        // hides: the same content-and-clip pair `collect_frame_webviews`
+        // places the native view with, so hits and placement cannot differ.
+        if let FrameGlyph::Xwidget {
+            webview_id,
+            presentation,
+            ..
+        } = glyph
+        {
+            let Ok(Some(visible)) = presentation.resolve_visible(None) else {
+                continue;
+            };
+            if let Some(content_point) = visible.content_point_at(point) {
+                return Some(WebViewPointerHit {
+                    view: *webview_id,
+                    position: WebContentPoint::new(content_point.x(), content_point.y()),
+                });
+            }
+        }
+    }
+    None
+}
+
+/// Search a glyph buffer for an inline shader surface under `point` (the
+/// `webview_glyph_hit_test` mirror, for `iMouse`). Returns `(surface_id, u, v)`
+/// — the pointer's normalized position inside the glyph rect (top-left origin)
+/// — if found.
+///
+/// Takes the witnessed point for the same reason: a shader is handed `u`/`v` as
+/// the place a user is pointing at, and a raw surface position stops naming
+/// that place the moment the surface's pane starts moving.
+pub(in crate::render_thread) fn surface_glyph_hit_test(
+    glyphs: &[FrameGlyph],
+    point: PresentationFramePoint,
+) -> Option<(u32, f32, f32)> {
+    let point = point.in_frame_space();
+    let (x, y) = (point.x(), point.y());
+    for glyph in glyphs.iter().rev() {
+        if let FrameGlyph::Surface {
+            surface_id,
+            x: sx,
+            y: sy,
+            width,
+            height,
+            ..
+        } = glyph
+            && x >= *sx
+            && x < *sx + *width
+            && y >= *sy
+            && y < *sy + *height
+        {
+            return Some((surface_id.get(), (x - *sx) / *width, (y - *sy) / *height));
+        }
+    }
+    None
+}
+
+impl RenderApp {
+    fn positioned_pointer_input_event(
+        render: &super::frame_windows::GuiFrameRenderState,
+        owner: PointerOwner,
+        position: PointerPosition,
+        action: PointerAction,
+    ) -> Result<InputEvent, romacs_display_protocol::PresentedHitError> {
+        let target = Self::positioned_pointer_target(render, owner, position)?;
+        Ok(InputEvent::PositionedPointer(PositionedPointerInput {
+            position,
+            target,
+            action,
+        }))
+    }
+
+    fn positioned_pointer_target(
+        render: &super::frame_windows::GuiFrameRenderState,
+        owner: PointerOwner,
+        position: PointerPosition,
+    ) -> Result<PointerTarget, romacs_display_protocol::PresentedHitError> {
+        let target = if owner.target().is_some() {
+            match render.presented_region_observation(
+                position.target_frame_id,
+                position.x,
+                position.y,
+            )? {
+                Some((presentation, hit)) => PointerTarget::Presented {
+                    presentation: presentation.get(),
+                    hit,
+                },
+                None => PointerTarget::Unpresented,
+            }
+        } else {
+            PointerTarget::Unpresented
+        };
+        Ok(target)
+    }
+
+    #[cfg(feature = "webview")]
+    pub(super) fn webview_modifiers(modifiers: u32) -> WebViewModifiers {
+        let mut result = WebViewModifiers::empty();
+        if modifiers & ROMACS_SHIFT_MASK != 0 {
+            result |= WebViewModifiers::SHIFT;
+        }
+        if modifiers & ROMACS_CTRL_MASK != 0 {
+            result |= WebViewModifiers::CONTROL;
+        }
+        if modifiers & ROMACS_META_MASK != 0 {
+            result |= WebViewModifiers::META;
+        }
+        if modifiers & ROMACS_SUPER_MASK != 0 {
+            result |= WebViewModifiers::SUPER;
+        }
+        result
+    }
+
+    #[cfg(feature = "webview")]
+    fn webview_button(button: MouseButton) -> PointerButton {
+        match button {
+            MouseButton::Left => PointerButton::Primary,
+            MouseButton::Middle => PointerButton::Middle,
+            MouseButton::Right => PointerButton::Secondary,
+            MouseButton::Back => PointerButton::Back,
+            MouseButton::Forward => PointerButton::Forward,
+            other => PointerButton::Other(other as u16 + 1),
+        }
+    }
+
+    pub(super) fn suppress_root_chrome_hover(
+        render: &mut super::frame_windows::GuiFrameRenderState,
+    ) -> bool {
+        let interaction = &mut render.chrome.interaction;
+        let changed = interaction.menu_bar_hovered.is_some()
+            || interaction.compact_bar_menu_hovered.is_some()
+            || interaction.compact_bar_tool_hovered.is_some()
+            || interaction.toolbar_hovered.is_some();
+        interaction.menu_bar_hovered = None;
+        interaction.compact_bar_menu_hovered = None;
+        interaction.compact_bar_tool_hovered = None;
+        interaction.toolbar_hovered = None;
+        changed
+    }
+
+    pub(super) fn pointer_owner(
+        window_state: &GuiFrameWindowState,
+        x: f32,
+        y: f32,
+    ) -> PointerOwner {
+        let Some((frame_x, frame_y)) = window_state.render.root_frame_point_from_surface(x, y)
+        else {
+            return PointerOwner::Expose {
+                frame_id: window_state.render.emacs_frame_id,
+                x,
+                y,
+            };
+        };
+        if let Some((frame_id, local_x, local_y)) = window_state
+            .render
+            .compositor
+            .child_frames
+            .hit_test(frame_x, frame_y)
+        {
+            PointerOwner::Child {
+                frame_id,
+                x: local_x,
+                y: local_y,
+            }
+        } else {
+            PointerOwner::Root {
+                frame_id: window_state.render.emacs_frame_id,
+                x: frame_x,
+                y: frame_y,
+            }
+        }
+    }
+    fn pointer_target_for_frame_window(
+        window_state: &GuiFrameWindowState,
+        x: f32,
+        y: f32,
+    ) -> (f32, f32, u64) {
+        if let Some((fid, local_x, local_y)) =
+            window_state.render.compositor.child_frames.hit_test(x, y)
+        {
+            (local_x, local_y, fid)
+        } else {
+            (x, y, window_state.render.emacs_frame_id)
+        }
+    }
+
+    #[cfg(feature = "webview")]
+    fn webview_target_for_frame_window(
+        render: &super::frame_windows::GuiFrameRenderState,
+        target_fid: u64,
+        ev_x: f32,
+        ev_y: f32,
+    ) -> Option<WebViewPointerHit> {
+        let (glyphs, point) = render.glyph_hit_target(target_fid, ev_x, ev_y)?;
+        webview_glyph_hit_test(glyphs, point)
+    }
+
+    /// The shader surface under a pointer at frame-local `(x, y)`, and where
+    /// inside it the pointer is.
+    ///
+    /// The one route from a pointer position to a surface's `iMouse`: press and
+    /// hover both come through here, so the two cannot answer differently about
+    /// the same pixel.
+    fn surface_target_for_frame_window(
+        render: &super::frame_windows::GuiFrameRenderState,
+        target_fid: u64,
+        x: f32,
+        y: f32,
+    ) -> Option<(u32, f32, f32)> {
+        let (glyphs, point) = render.glyph_hit_target(target_fid, x, y)?;
+        surface_glyph_hit_test(glyphs, point)
+    }
+
+    fn frame_window_menu_bar_hit_test(
+        window_state: &GuiFrameWindowState,
+        x: f32,
+        y: f32,
+    ) -> Option<MenuBarHit> {
+        Self::frame_window_menu_hit_test(window_state, x, y)
+    }
+
+    fn frame_window_compact_bar_menu_hit_test(
+        window_state: &GuiFrameWindowState,
+        x: f32,
+        y: f32,
+    ) -> Option<MenuBarHit> {
+        Self::frame_window_menu_hit_test(window_state, x, y)
+    }
+
+    fn menu_bar_click_event(hit: MenuBarHit, emacs_frame_id: u64) -> InputEvent {
+        InputEvent::MenuBarClick {
+            request_id: None,
+            index: hit.index as i32,
+            key: hit.key,
+            menu_x: hit.menu_x,
+            anchor: hit.anchor,
+            emacs_frame_id,
+        }
+    }
+
+    /// Frame chrome may switch a native menu; all other menu input belongs
+    /// to the menu module, not to the editor's presented-content hit tester.
+    pub(super) fn handle_native_menu_bar_event(
+        &mut self,
+        id: winit::window::WindowId,
+        event: &winit::event::WindowEvent,
+    ) -> bool {
+        use winit::event::WindowEvent;
+        let (position, pressed) = match event {
+            WindowEvent::PointerMoved { position, .. }
+            | WindowEvent::PointerEntered { position, .. } => (position, false),
+            WindowEvent::PointerButton {
+                position,
+                state: ElementState::Pressed,
+                button,
+                primary: true,
+                ..
+            } if button.clone().mouse_button() == Some(MouseButton::Left) => (position, true),
+            _ => return false,
+        };
+        if !pressed && !self.menus.owns_parent(id) {
+            return false;
+        }
+        let Some(window) = self.frame_windows.get_by_winit_mut(id) else {
+            return false;
+        };
+        let scale = window.scale_factor() as f32;
+        let Some(hit) = Self::frame_window_menu_hit_test(
+            window,
+            position.x as f32 / scale,
+            position.y as f32 / scale,
+        ) else {
+            return false;
+        };
+        let frame = window.render.emacs_frame_id;
+        let compact = Self::frame_window_point_in_band(
+            window,
+            FrameChromeKind::CompactBar,
+            position.x as f32 / scale,
+            position.y as f32 / scale,
+        );
+        self.activate_native_heading(hit, frame, id, compact, pressed);
+        true
+    }
+
+    fn activate_native_heading(
+        &mut self,
+        hit: MenuBarHit,
+        frame: u64,
+        id: WindowId,
+        compact: bool,
+        pressed: bool,
+    ) {
+        let action = self.menus.select_heading(
+            crate::menus::MenuHeading {
+                frame,
+                parent: id,
+                key: hit.key.clone(),
+                index: hit.index,
+                compact,
+            },
+            pressed,
+        );
+        while let Some(result) = self.menus.take_result() {
+            self.comms.send_input(InputEvent::MenuSelection {
+                index: result.index(),
+                token: Some(result.token),
+            });
+        }
+        if let crate::menus::HeadingAction::Request(request_id) = action {
+            let mut event = Self::menu_bar_click_event(hit, frame);
+            if let InputEvent::MenuBarClick {
+                request_id: origin, ..
+            } = &mut event
+            {
+                *origin = Some(request_id);
+            }
+            self.comms.send_input(event);
+        }
+        self.sync_menu_heading();
+    }
+
+    pub(super) fn handle_native_menu_bar_key(
+        &mut self,
+        id: WindowId,
+        event: &winit::event::WindowEvent,
+    ) -> bool {
+        let winit::event::WindowEvent::KeyboardInput { event, .. } = event else {
+            return false;
+        };
+        if event.state != ElementState::Pressed {
+            return false;
+        }
+        let Some(step) = self.menus.heading_step(id, &event.logical_key) else {
+            return false;
+        };
+        self.switch_native_menu_heading(step)
+    }
+
+    pub(super) fn switch_native_menu_heading(&mut self, step: i32) -> bool {
+        if self.menus.heading().is_none() {
+            return false;
+        }
+        let heading = self.menus.heading().unwrap().clone();
+        let Some(frame) = self
+            .frame_windows
+            .get(heading.frame)
+            .and_then(|w| w.render.compositor.current_frame.as_ref())
+        else {
+            return false;
+        };
+        let kind = if heading.compact {
+            FrameChromeKind::CompactBar
+        } else {
+            FrameChromeKind::MenuBar
+        };
+        let Some(band) = frame.frame_chrome.band(kind) else {
+            return false;
+        };
+        let Ok(regions) = band.materialized_hit_regions() else {
+            return false;
+        };
+        let hits: Vec<_> = regions
+            .iter()
+            .filter_map(|region| {
+                let ChromeAction::OpenMenu { index, key } = region.action() else {
+                    return None;
+                };
+                let bounds = region.bounds();
+                Some(MenuBarHit {
+                    index: *index,
+                    key: key.clone(),
+                    menu_x: bounds.x(),
+                    anchor: crate::thread_comm::PopupAnchorRect::new(
+                        bounds.x(),
+                        bounds.y(),
+                        bounds.width(),
+                        bounds.height(),
+                    ),
+                })
+            })
+            .collect();
+        let Some(current) = hits.iter().position(|hit| hit.key == heading.key) else {
+            return false;
+        };
+        let next = (current as i32 + step).rem_euclid(hits.len() as i32) as usize;
+        self.activate_native_heading(
+            hits[next].clone(),
+            heading.frame,
+            heading.parent,
+            heading.compact,
+            false,
+        );
+        true
+    }
+
+    /// Chrome is a projection of controller state, never the switch authority.
+    fn dispatch_pointer_input(&mut self, event: InputEvent, parent: WindowId) {
+        if let InputEvent::MenuBarClick {
+            index,
+            key,
+            menu_x,
+            anchor,
+            emacs_frame_id,
+            ..
+        } = event
+        {
+            let compact = self
+                .frame_windows
+                .get_by_winit(parent)
+                .is_some_and(|window| {
+                    let Some((x, y)) = window.render.surface_point_from_frame(anchor.x, anchor.y)
+                    else {
+                        return false;
+                    };
+                    Self::frame_window_point_in_band(window, FrameChromeKind::CompactBar, x, y)
+                });
+            self.activate_native_heading(
+                MenuBarHit {
+                    index: index as u32,
+                    key,
+                    menu_x,
+                    anchor,
+                },
+                emacs_frame_id,
+                parent,
+                compact,
+                true,
+            );
+        } else {
+            self.comms.send_input(event);
+        }
+    }
+
+    /// Chrome is a projection of controller state, never the switch authority.
+    pub(super) fn sync_menu_heading(&mut self) {
+        let heading = self.menus.heading();
+        self.frame_windows.for_each_top_level_window_mut(|window| {
+            let selected = heading.filter(|h| h.frame == window.render.emacs_frame_id);
+            let normal = selected.filter(|h| !h.compact).map(|h| h.index);
+            let compact = selected.filter(|h| h.compact).map(|h| h.index);
+            let chrome = &mut window.render.chrome.interaction;
+            if chrome.menu_bar_active != normal || chrome.compact_bar_menu_active != compact {
+                chrome.menu_bar_active = normal;
+                chrome.compact_bar_menu_active = compact;
+                window.render.mark_dirty();
+            }
+        });
+    }
+
+    fn frame_window_compact_bar_tool_hit_test(
+        window_state: &GuiFrameWindowState,
+        x: f32,
+        y: f32,
+    ) -> Option<u32> {
+        Self::frame_window_tool_hit_test(window_state, x, y)
+    }
+
+    fn frame_window_band_bounds(
+        window_state: &GuiFrameWindowState,
+        kind: FrameChromeKind,
+    ) -> Option<
+        romacs_display_protocol::GeometryRect<
+            romacs_display_protocol::RootSurfaceSpace,
+            romacs_display_protocol::LogicalPixels,
+        >,
+    > {
+        let bounds = window_state
+            .render
+            .compositor
+            .current_frame
+            .as_ref()?
+            .frame_chrome
+            .band(kind)
+            .map(|band| band.bounds())?;
+        let (x, y) = window_state
+            .render
+            .surface_point_from_frame(bounds.x(), bounds.y())?;
+        romacs_display_protocol::GeometryRect::new(x, y, bounds.width(), bounds.height()).ok()
+    }
+
+    fn frame_window_point_in_band(
+        window_state: &GuiFrameWindowState,
+        kind: FrameChromeKind,
+        x: f32,
+        y: f32,
+    ) -> bool {
+        Self::frame_window_band_bounds(window_state, kind).is_some_and(|bounds| {
+            x >= bounds.x()
+                && x < bounds.x() + bounds.width()
+                && y >= bounds.y()
+                && y < bounds.y() + bounds.height()
+        })
+    }
+
+    fn frame_window_toolbar_hit_test(
+        window_state: &GuiFrameWindowState,
+        x: f32,
+        y: f32,
+    ) -> Option<u32> {
+        Self::frame_window_tool_hit_test(window_state, x, y)
+    }
+
+    pub(super) fn frame_window_tab_bar_hit_test(
+        window_state: &GuiFrameWindowState,
+        x: f32,
+        y: f32,
+    ) -> Option<PresentedInteractionKey> {
+        if let Ok(Some(hit)) =
+            window_state
+                .render
+                .presented_pointer_hit(window_state.render.emacs_frame_id, x, y)
+            && let Some(interaction) = hit.interaction()
+        {
+            return Some(PresentedInteractionKey::new(
+                hit.presentation(),
+                interaction,
+            ));
+        }
+        None
+    }
+
+    fn presented_pointer_input_event(
+        render: &super::frame_windows::GuiFrameRenderState,
+        target: PresentedInteractionKey,
+        pressed: bool,
+        x: f32,
+        y: f32,
+    ) -> InputEvent {
+        InputEvent::PresentedPointer {
+            presentation: target.presentation().get(),
+            interaction: target.interaction().get(),
+            pressed,
+            button: 1,
+            x,
+            y,
+            emacs_frame_id: if target.frame_id() == 0 {
+                render.emacs_frame_id
+            } else {
+                target.frame_id()
+            },
+        }
+    }
+
+    fn presented_interaction_for_owner(
+        window_state: &GuiFrameWindowState,
+        owner: PointerOwner,
+    ) -> Result<Option<PresentedInteractionKey>, romacs_display_protocol::PresentedHitError> {
+        let Some((x, y, frame_id)) = owner.target() else {
+            return Ok(None);
+        };
+        let Some((presentation, semantic)) = window_state
+            .render
+            .presented_region_observation(frame_id, x, y)?
+        else {
+            return Ok(None);
+        };
+        if semantic.is_none() {
+            return Ok(None);
+        }
+        let Some(hit) = window_state.render.presented_pointer_hit(frame_id, x, y)? else {
+            return Ok(None);
+        };
+        if hit.presentation() != presentation {
+            return Err(
+                romacs_display_protocol::PresentedHitError::StalePresentation {
+                    expected: presentation,
+                    requested: hit.presentation(),
+                },
+            );
+        }
+        let Some(interaction) = hit.interaction() else {
+            return Ok(None);
+        };
+        Ok(Some(PresentedInteractionKey::for_frame(
+            frame_id,
+            hit.presentation(),
+            interaction,
+        )))
+    }
+
+    pub(super) fn capture_presented_pointer_press(
+        window_state: &mut GuiFrameWindowState,
+        owner: PointerOwner,
+        x: f32,
+        y: f32,
+    ) -> Result<Option<InputEvent>, romacs_display_protocol::PresentedHitError> {
+        let Some((local_x, local_y, _)) = owner.target() else {
+            return Ok(None);
+        };
+        let Some(target) = Self::presented_interaction_for_owner(window_state, owner)? else {
+            return Ok(None);
+        };
+        window_state
+            .render
+            .capture_presented_at(target, (x - local_x, y - local_y));
+        Ok(Some(Self::presented_pointer_input_event(
+            &window_state.render,
+            target,
+            true,
+            local_x,
+            local_y,
+        )))
+    }
+
+    pub(super) fn capture_tab_band_press(
+        window_state: &mut GuiFrameWindowState,
+        x: f32,
+        y: f32,
+    ) -> Option<InputEvent> {
+        let (frame_x, frame_y) = window_state.render.root_frame_point_from_surface(x, y)?;
+        let target = Self::frame_window_tab_bar_hit_test(window_state, frame_x, frame_y);
+        if let Some(target) = target {
+            window_state
+                .render
+                .capture_presented_at(target, (x - frame_x, y - frame_y));
+        }
+        target.map(|target| {
+            Self::presented_pointer_input_event(
+                &window_state.render,
+                target,
+                true,
+                frame_x,
+                frame_y,
+            )
+        })
+    }
+
+    pub(super) fn take_presented_release_events(
+        render: &mut super::frame_windows::GuiFrameRenderState,
+        x: f32,
+        y: f32,
+    ) -> Vec<InputEvent> {
+        let release = render.take_presented_capture().and_then(|capture| {
+            let target = capture.target()?;
+            let (local_x, local_y) = capture.local_coordinates(x, y);
+            Some(Self::presented_pointer_input_event(
+                render, target, false, local_x, local_y,
+            ))
+        });
+        release
+            .into_iter()
+            .chain(
+                render
+                    .take_deferred_pointer_retirements()
+                    .into_iter()
+                    .map(|presentation| InputEvent::PresentationRetired { presentation }),
+            )
+            .collect()
+    }
+
+    fn frame_window_tool_hit_test(
+        window_state: &GuiFrameWindowState,
+        x: f32,
+        y: f32,
+    ) -> Option<u32> {
+        let (x, y) = window_state.render.root_frame_point_from_surface(x, y)?;
+        let frame = window_state.render.compositor.current_frame.as_ref()?;
+        match frame_chrome_hit(frame, x, y)?.0 {
+            ChromeAction::InvokeToolBarItem { index } => Some(*index),
+            _ => None,
+        }
+    }
+
+    fn frame_window_menu_hit_test(
+        window_state: &GuiFrameWindowState,
+        x: f32,
+        y: f32,
+    ) -> Option<MenuBarHit> {
+        let (x, y) = window_state.render.root_frame_point_from_surface(x, y)?;
+        let frame = window_state.render.compositor.current_frame.as_ref()?;
+        let (ChromeAction::OpenMenu { index, key }, bounds) = frame_chrome_hit(frame, x, y)? else {
+            return None;
+        };
+        Some(MenuBarHit {
+            index: *index,
+            key: key.clone(),
+            menu_x: bounds.x(),
+            anchor: crate::thread_comm::PopupAnchorRect::new(
+                bounds.x(),
+                bounds.y(),
+                bounds.width(),
+                bounds.height(),
+            ),
+        })
+    }
+
+    #[cfg(test)]
+    pub(super) fn pointer_target_at(&self, x: f32, y: f32) -> (f32, f32, u64) {
+        if let Some(primary_state) = self.frame_windows.primary_window() {
+            return Self::pointer_target_for_frame_window(primary_state, x, y);
+        }
+        let primary_frame_id = self.frame_windows.primary_event_frame_id();
+        if let Some((fid, local_x, local_y)) = self
+            .frame_windows
+            .primary_window()
+            .expect("primary child frames")
+            .render
+            .compositor
+            .child_frames
+            .hit_test(x, y)
+        {
+            (local_x, local_y, fid)
+        } else {
+            (x, y, primary_frame_id)
+        }
+    }
+
+    /// Left button over a model glyph (design §5.1): an unmodified press
+    /// on a ready, unfrozen model starts a capture; the release ends it,
+    /// picking when there was no orbit. Both still reach Lisp afterwards.
+    fn route_model_button(&mut self, window_id: WindowId, state: ElementState) {
+        if self.models.is_empty() {
+            return;
+        }
+        let Some(window_state) = self.frame_windows.get_by_winit(window_id) else {
+            return;
+        };
+        let key = window_state.render.emacs_frame_id;
+        let (x, y) = window_state.render.mouse_pos;
+        let (ev_x, ev_y, target_fid) = Self::pointer_target_for_frame_window(window_state, x, y);
+        let hit =
+            Self::surface_target_for_frame_window(&window_state.render, target_fid, ev_x, ev_y)
+                .filter(|(id, _, _)| self.models.contains(*id))
+                .map(|(id, u, v)| romacs_renderer_wgpu::model::GlyphHit { id, u, v });
+        match state {
+            ElementState::Pressed => {
+                if self.modifiers == 0
+                    && let Some(hit) = hit
+                {
+                    self.models.press(key, hit, (f64::from(x), f64::from(y)));
+                }
+            }
+            ElementState::Released => match self.renderer.as_mut() {
+                Some(renderer) => self.models.release(
+                    key,
+                    hit,
+                    romacs_display_protocol::frame_time::observe_platform_now().into_instant(),
+                    renderer,
+                ),
+                None => self.models.cancel_capture(),
+            },
+        }
+        self.flush_model_events();
+    }
+
+    pub(super) fn handle_mouse_input(
+        &mut self,
+        window_id: WindowId,
+        state: ElementState,
+        button: MouseButton,
+    ) {
+        self.record_idle_dim_activity(window_id);
+        if button == MouseButton::Left {
+            self.route_model_button(window_id, state);
+        }
+        #[cfg(feature = "webview")]
+        let captured_release = if state == ElementState::Released {
+            self.webview_pointer_capture.take()
+        } else {
+            None
+        };
+        if state == ElementState::Released
+            && let Some(renderer) = self.renderer.as_mut()
+        {
+            // iMouse click state: any button release ends the pressed-surface
+            // click (negates its iMouse.zw). Render-thread internal, like
+            // hover — no-op when no surface is pressed, so it runs before any
+            // chrome capture can swallow the release.
+            renderer.surface_mouse_release();
+        }
+        if self.frame_windows.get_by_winit(window_id).is_some() {
+            let mut event = None;
+            let mut captured_events = Vec::new();
+            let mut handled_chrome = false;
+            let mut delivered_mouse_button = false;
+            #[cfg(feature = "webview")]
+            let mut webview_delivery = None;
+            #[cfg(feature = "webview")]
+            let mut captured_press = None;
+            #[cfg(feature = "webview")]
+            let mut focus_webview = None;
+            if let Some(window_state) = self.frame_windows.get_by_winit_mut(window_id) {
+                let x = window_state.render.mouse_pos.0;
+                let y = window_state.render.mouse_pos.1;
+                let pointer_owner = Self::pointer_owner(window_state, x, y);
+                #[cfg(feature = "webview")]
+                if let Some(capture) = captured_release {
+                    webview_delivery = Some((
+                        WebViewDeliveryTarget::Captured(capture.target),
+                        WebViewInput::PointerButton {
+                            position: WebContentPoint::new(
+                                x - capture.surface_origin_x,
+                                y - capture.surface_origin_y,
+                            ),
+                            button: Self::webview_button(button),
+                            state: ButtonState::Released,
+                            modifiers: Self::webview_modifiers(self.modifiers),
+                        },
+                    ));
+                }
+                if button == MouseButton::Left {
+                    let target = if window_state.render.pointer_inside {
+                        pointer_owner
+                            .target()
+                            .map(|(x, y, frame_id)| (frame_id, x, y))
+                    } else {
+                        None
+                    };
+                    window_state
+                        .render
+                        .update_presented_pointer_button(target, state == ElementState::Pressed);
+                }
+                if state == ElementState::Pressed && button == MouseButton::Left {
+                    if window_state.drag_resize_for_current_edge() {
+                        handled_chrome = true;
+                    }
+
+                    if !handled_chrome
+                        && Self::frame_window_titlebar_hit_test(window_state, x, y) > 0
+                    {
+                        match Self::frame_window_titlebar_hit_test(window_state, x, y) {
+                            2 => {
+                                event = Some(InputEvent::WindowClose {
+                                    emacs_frame_id: window_state.render.emacs_frame_id,
+                                });
+                            }
+                            action => {
+                                window_state.handle_titlebar_action(action);
+                            }
+                        }
+                        handled_chrome = true;
+                    }
+
+                    if !handled_chrome
+                        && !window_state.chrome().decorations_enabled
+                        && (self.modifiers & ROMACS_SUPER_MASK) != 0
+                    {
+                        window_state.drag_window();
+                        handled_chrome = true;
+                    }
+                }
+
+                if state == ElementState::Pressed && button == MouseButton::Left {
+                    let x = window_state.render.mouse_pos.0;
+                    let y = window_state.render.mouse_pos.1;
+                    if !handled_chrome {
+                        match Self::capture_presented_pointer_press(
+                            window_state,
+                            pointer_owner,
+                            x,
+                            y,
+                        ) {
+                            Ok(Some(presented)) => {
+                                event = Some(presented);
+                                handled_chrome = true;
+                            }
+                            Ok(None) => {}
+                            Err(error) => {
+                                tracing::error!(?error, "rejecting incoherent pointer press");
+                                handled_chrome = true;
+                            }
+                        }
+                    }
+                    if !handled_chrome
+                        && pointer_owner.permits_root_chrome()
+                        && Self::frame_window_point_in_band(
+                            window_state,
+                            FrameChromeKind::CompactBar,
+                            x,
+                            y,
+                        )
+                    {
+                        if let Some(hit) =
+                            Self::frame_window_compact_bar_menu_hit_test(window_state, x, y)
+                        {
+                            event = Some(Self::menu_bar_click_event(
+                                hit,
+                                window_state.render.emacs_frame_id,
+                            ));
+                            window_state.render.mark_dirty();
+                            handled_chrome = true;
+                        }
+                        if !handled_chrome
+                            && let Some(idx) =
+                                Self::frame_window_compact_bar_tool_hit_test(window_state, x, y)
+                        {
+                            window_state
+                                .render
+                                .chrome
+                                .interaction
+                                .compact_bar_tool_pressed = Some(idx);
+                            event = Some(InputEvent::ToolBarClick {
+                                index: idx as i32,
+                                emacs_frame_id: window_state.render.emacs_frame_id,
+                            });
+                            window_state.render.mark_dirty();
+                            handled_chrome = true;
+                        }
+                    } else if !handled_chrome
+                        && pointer_owner.permits_root_chrome()
+                        && Self::frame_window_point_in_band(
+                            window_state,
+                            FrameChromeKind::MenuBar,
+                            x,
+                            y,
+                        )
+                    {
+                        if let Some(hit) = Self::frame_window_menu_bar_hit_test(window_state, x, y)
+                        {
+                            event = Some(Self::menu_bar_click_event(
+                                hit,
+                                window_state.render.emacs_frame_id,
+                            ));
+                            window_state.render.mark_dirty();
+                            handled_chrome = true;
+                        }
+                    } else if !handled_chrome
+                        && pointer_owner.permits_root_chrome()
+                        && Self::frame_window_point_in_band(
+                            window_state,
+                            FrameChromeKind::TabBar,
+                            x,
+                            y,
+                        )
+                    {
+                        event = Self::capture_tab_band_press(window_state, x, y);
+                        if event.is_some() {
+                            window_state.render.mark_dirty();
+                        }
+                        handled_chrome = true;
+                    } else if !handled_chrome
+                        && pointer_owner.permits_root_chrome()
+                        && Self::frame_window_point_in_band(
+                            window_state,
+                            FrameChromeKind::ToolBar,
+                            x,
+                            y,
+                        )
+                    {
+                        window_state
+                            .render
+                            .chrome
+                            .interaction
+                            .toolbar_press_captured = true;
+                        if let Some(idx) = Self::frame_window_toolbar_hit_test(window_state, x, y) {
+                            window_state
+                                .render
+                                .chrome
+                                .press_with_popup(&ChromePress::ToolBar(idx));
+                            event = Some(InputEvent::ToolBarClick {
+                                index: idx as i32,
+                                emacs_frame_id: window_state.render.emacs_frame_id,
+                            });
+                            window_state.render.mark_dirty();
+                        }
+                        handled_chrome = true;
+                    }
+                } else if state == ElementState::Released
+                    && button == MouseButton::Left
+                    && (window_state.render.presented_capture().is_some()
+                        || window_state
+                            .render
+                            .chrome
+                            .interaction
+                            .toolbar_press_captured
+                        || window_state
+                            .render
+                            .chrome
+                            .interaction
+                            .compact_bar_tool_pressed
+                            .is_some()
+                        || window_state
+                            .render
+                            .chrome
+                            .interaction
+                            .toolbar_pressed
+                            .is_some())
+                {
+                    if window_state.render.presented_capture().is_some() {
+                        captured_events =
+                            Self::take_presented_release_events(&mut window_state.render, x, y);
+                    }
+                    window_state.render.clear_all_chrome_pressed();
+                    handled_chrome = true;
+                }
+
+                if !handled_chrome
+                    && pointer_owner.permits_root_chrome()
+                    && window_state
+                        .render
+                        .compositor
+                        .current_frame
+                        .as_ref()
+                        .is_some_and(|frame| frame_chrome_owns_pointer(frame, x, y))
+                {
+                    handled_chrome = true;
+                }
+
+                if handled_chrome {
+                    // Chrome consumed the click/release; do not also deliver it
+                    // as a buffer mouse event.
+                } else {
+                    let btn = match button {
+                        MouseButton::Left => 1,
+                        MouseButton::Middle => 2,
+                        MouseButton::Right => 3,
+                        MouseButton::Back => 4,
+                        MouseButton::Forward => 5,
+                        other => other as u32 + 1,
+                    };
+                    let (ev_x, ev_y, target_fid) =
+                        pointer_owner.raw_target().unwrap_or_else(|| {
+                            Self::pointer_target_for_frame_window(
+                                window_state,
+                                window_state.render.mouse_pos.0,
+                                window_state.render.mouse_pos.1,
+                            )
+                        });
+                    #[cfg(feature = "webview")]
+                    if state == ElementState::Pressed {
+                        let hit = Self::webview_target_for_frame_window(
+                            &window_state.render,
+                            target_fid,
+                            ev_x,
+                            ev_y,
+                        );
+                        if let Some(hit) = hit {
+                            webview_delivery = Some((
+                                WebViewDeliveryTarget::Current(hit.view),
+                                WebViewInput::PointerButton {
+                                    position: hit.position,
+                                    button: Self::webview_button(button),
+                                    state: ButtonState::Pressed,
+                                    modifiers: Self::webview_modifiers(self.modifiers),
+                                },
+                            ));
+                            captured_press =
+                                Some((hit.view, x - hit.position.x(), y - hit.position.y()));
+                            focus_webview = Some(hit.view);
+                        }
+                    }
+                    // iMouse click state (docs/display-engine/SHADER_SURFACES.md):
+                    // a press over a shader-surface glyph routes the press
+                    // position into that surface's iMouse.zw — the Surface
+                    // mirror of the Xwidget search above. Render-thread
+                    // internal, like hover; the Lisp event below is unchanged.
+                    if state == ElementState::Pressed
+                        && let Some((surface_id, u, v)) = Self::surface_target_for_frame_window(
+                            &window_state.render,
+                            target_fid,
+                            ev_x,
+                            ev_y,
+                        )
+                        && let Some(renderer) = self.renderer.as_mut()
+                    {
+                        renderer.surface_mouse_press(surface_id, u, v);
+                    }
+                    let position = PointerPosition {
+                        x: ev_x,
+                        y: ev_y,
+                        target_frame_id: target_fid,
+                    };
+                    let action = PointerAction::Button {
+                        button: btn,
+                        pressed: state == ElementState::Pressed,
+                        modifiers: self.modifiers,
+                    };
+                    match Self::positioned_pointer_input_event(
+                        &window_state.render,
+                        pointer_owner,
+                        position,
+                        action,
+                    ) {
+                        Ok(input) => {
+                            event = Some(input);
+                            if state == ElementState::Pressed {
+                                window_state.render.clear_presented_capture();
+                                window_state
+                                    .render
+                                    .chrome
+                                    .interaction
+                                    .toolbar_press_captured = false;
+                            }
+                            delivered_mouse_button = true;
+                        }
+                        Err(error) => {
+                            tracing::error!(
+                                ?error,
+                                target_fid,
+                                ev_x,
+                                ev_y,
+                                "dropping incoherent mouse-button input"
+                            );
+                        }
+                    }
+                }
+            }
+            #[cfg(feature = "webview")]
+            {
+                if state == ElementState::Pressed {
+                    let focused_target = focus_webview.and_then(|view| {
+                        self.webview_system
+                            .as_ref()
+                            .and_then(|system| system.presented_target(view))
+                    });
+                    if self.focused_webview != focused_target {
+                        if let (Some(previous), Some(system)) =
+                            (self.focused_webview, self.webview_system.as_mut())
+                        {
+                            let _ = system.command(romacs_webview::WebViewCommand::Focus {
+                                id: previous.view(),
+                                intent: romacs_webview::FocusIntent::Blur,
+                            });
+                        }
+                        if let (Some(target), Some(system)) =
+                            (focused_target, self.webview_system.as_mut())
+                        {
+                            let _ = system.command(romacs_webview::WebViewCommand::Focus {
+                                id: target.view(),
+                                intent: romacs_webview::FocusIntent::Focus,
+                            });
+                        }
+                    }
+                    self.focused_webview = focused_target;
+                    self.webview_pointer_capture =
+                        captured_press.and_then(|(view, surface_origin_x, surface_origin_y)| {
+                            self.webview_system
+                                .as_ref()
+                                .and_then(|system| system.presented_target(view))
+                                .map(|target| WebViewPointerCapture {
+                                    target,
+                                    surface_origin_x,
+                                    surface_origin_y,
+                                })
+                        });
+                }
+                if let Some((delivery, input)) = webview_delivery
+                    && let Some(system) = self.webview_system.as_mut()
+                {
+                    let view = delivery.view();
+                    if let Some(target) = delivery.resolve(system)
+                        && let Err(error) = system.input(target, input)
+                    {
+                        tracing::warn!(%view, %error, "dropping WebView pointer input");
+                    }
+                }
+            }
+            for event in captured_events {
+                self.comms.send_input(event);
+            }
+            if let Some(event) = event {
+                self.dispatch_pointer_input(event, window_id);
+            }
+            if state == ElementState::Pressed
+                && self.effects.click_halo.enabled
+                && delivered_mouse_button
+                && let Some(window_state) = self.frame_windows.get_by_winit_mut(window_id)
+                && let Some((x, y)) = window_state.render.root_frame_point_from_surface(
+                    window_state.render.mouse_pos.0,
+                    window_state.render.mouse_pos.1,
+                )
+            {
+                window_state.render.trigger_click_halo(
+                    x,
+                    y,
+                    romacs_display_protocol::frame_time::observe_platform_now(),
+                    self.effects.click_halo.duration_ms,
+                );
+            }
+        }
+    }
+
+    pub(super) fn handle_cursor_moved(
+        &mut self,
+        window_id: WindowId,
+        position: PhysicalPosition<f64>,
+    ) {
+        self.record_idle_dim_activity(window_id);
+        let modifiers = self.modifiers;
+        #[cfg(feature = "webview")]
+        let pointer_capture = self.webview_pointer_capture;
+        #[cfg(feature = "webview")]
+        let mut webview_delivery = None;
+        if let Some(window_state) = self.frame_windows.get_by_winit_mut(window_id) {
+            let mut event = None;
+            let scale = window_state.scale_factor();
+            let (native_w, native_h) = window_state.native_size();
+            let lx = (position.x / scale) as f32;
+            let ly = (position.y / scale) as f32;
+            window_state.render.set_mouse_pos((lx, ly));
+            let mut dirty = false;
+            let pointer_owner = Self::pointer_owner(window_state, lx, ly);
+            if !pointer_owner.owns_root_hover() {
+                dirty |= Self::suppress_root_chrome_hover(&mut window_state.render);
+            }
+
+            let edge = Self::detect_resize_edge_for_chrome(
+                window_state.chrome(),
+                native_w as f32 / scale as f32,
+                native_h as f32 / scale as f32,
+                lx,
+                ly,
+            );
+            if edge != window_state.chrome().resize_edge {
+                window_state.chrome_mut().resize_edge = edge;
+            }
+
+            if !window_state.chrome().decorations_enabled {
+                let new_hover = if pointer_owner.permits_native_chrome() {
+                    Self::frame_window_titlebar_hit_test(window_state, lx, ly)
+                } else {
+                    0
+                };
+                if new_hover != window_state.chrome().titlebar_hover {
+                    window_state.chrome_mut().titlebar_hover = new_hover;
+                    dirty = true;
+                }
+            }
+
+            let presented_resize = pointer_owner.target().and_then(|(x, y, frame_id)| {
+                match window_state
+                    .render
+                    .presented_region_observation(frame_id, x, y)
+                {
+                    Ok(Some((_, Some(hit)))) => hit.region().kind().resize_axis(),
+                    Ok(Some((_, None)) | None) => None,
+                    Err(error) => {
+                        tracing::error!(
+                            ?error,
+                            frame_id,
+                            x,
+                            y,
+                            "rejecting incoherent presented resize-cursor hit"
+                        );
+                        None
+                    }
+                }
+            });
+            let cursor_intent = PointerCursorIntent::resolve(
+                edge,
+                presented_resize,
+                !window_state.chrome().decorations_enabled
+                    && matches!(window_state.chrome().titlebar_hover, 2..=4),
+            );
+            if cursor_intent != window_state.chrome().cursor_intent {
+                window_state.chrome_mut().cursor_intent = cursor_intent;
+                if let Some(window) = window_state.window() {
+                    window.set_cursor(cursor_intent.icon().into());
+                }
+            }
+
+            if let Some(menu_bounds) =
+                Self::frame_window_band_bounds(window_state, FrameChromeKind::MenuBar)
+            {
+                let old_hover = window_state.render.chrome.interaction.menu_bar_hovered;
+                if pointer_owner.owns_root_hover()
+                    && ly >= menu_bounds.y()
+                    && ly < menu_bounds.y() + menu_bounds.height()
+                {
+                    let new_hover = Self::frame_window_menu_bar_hit_test(window_state, lx, ly);
+                    window_state.render.chrome.interaction.menu_bar_hovered =
+                        new_hover.as_ref().map(|hit| hit.index);
+                } else {
+                    window_state.render.chrome.interaction.menu_bar_hovered = None;
+                }
+                dirty |= window_state.render.chrome.interaction.menu_bar_hovered != old_hover;
+            }
+
+            if let Some(compact_bounds) =
+                Self::frame_window_band_bounds(window_state, FrameChromeKind::CompactBar)
+            {
+                let old_menu_hover = window_state
+                    .render
+                    .chrome
+                    .interaction
+                    .compact_bar_menu_hovered;
+                let old_tool_hover = window_state
+                    .render
+                    .chrome
+                    .interaction
+                    .compact_bar_tool_hovered;
+                if pointer_owner.owns_root_hover()
+                    && ly >= compact_bounds.y()
+                    && ly < compact_bounds.y() + compact_bounds.height()
+                {
+                    let new_menu_hover =
+                        Self::frame_window_compact_bar_menu_hit_test(window_state, lx, ly);
+                    window_state
+                        .render
+                        .chrome
+                        .interaction
+                        .compact_bar_menu_hovered = new_menu_hover.as_ref().map(|hit| hit.index);
+                    window_state
+                        .render
+                        .chrome
+                        .interaction
+                        .compact_bar_tool_hovered = if new_menu_hover.is_none() {
+                        Self::frame_window_compact_bar_tool_hit_test(window_state, lx, ly)
+                    } else {
+                        None
+                    };
+                } else {
+                    window_state
+                        .render
+                        .chrome
+                        .interaction
+                        .compact_bar_menu_hovered = None;
+                    window_state
+                        .render
+                        .chrome
+                        .interaction
+                        .compact_bar_tool_hovered = None;
+                }
+                dirty |= window_state
+                    .render
+                    .chrome
+                    .interaction
+                    .compact_bar_menu_hovered
+                    != old_menu_hover
+                    || window_state
+                        .render
+                        .chrome
+                        .interaction
+                        .compact_bar_tool_hovered
+                        != old_tool_hover;
+            }
+
+            let old_toolbar_hover = window_state.render.chrome.interaction.toolbar_hovered;
+            window_state.render.chrome.interaction.toolbar_hovered =
+                if pointer_owner.owns_root_hover() {
+                    Self::frame_window_toolbar_hit_test(window_state, lx, ly)
+                } else {
+                    None
+                };
+            dirty |= window_state.render.chrome.interaction.toolbar_hovered != old_toolbar_hover;
+
+            window_state.set_mouse_hidden_for_typing(false);
+
+            let (ev_x, ev_y, target_fid) = pointer_owner
+                .raw_target()
+                .unwrap_or_else(|| Self::pointer_target_for_frame_window(window_state, lx, ly));
+            // A model orbit owns the motion of its capture: it is not
+            // forwarded to Lisp, so no drag tracking can start (design §5.1).
+            let model_owned = self.models.motion(
+                window_state.render.emacs_frame_id,
+                (f64::from(lx), f64::from(ly)),
+            );
+            // A wheel fraction left over a model ends when the pointer
+            // leaves that model's glyph. Asked only while one is pending,
+            // since the surface search reads every glyph in the frame.
+            if self.model_wheel.pending_model().is_some() {
+                let over = Self::surface_target_for_frame_window(
+                    &window_state.render,
+                    target_fid,
+                    ev_x,
+                    ev_y,
+                )
+                .map(|(id, _, _)| id);
+                self.model_wheel.pointer_over(over);
+            }
+            // iMouse hover state (docs/display-engine/SHADER_SURFACES.md):
+            // resolved here rather than while drawing, because which surface
+            // the pointer is over is a question about the composition, and the
+            // renderer is handed the answer. Deciding it at draw time from the
+            // raw pointer position compared it against glyph rects belonging to
+            // the destination presentation, which is a different pixel for as
+            // long as the surface's pane is moving. Outside every surface
+            // nothing is written, so iMouse persists at the last hover position.
+            //
+            // The surface search reads every glyph in the frame, and unlike the
+            // press it now runs on each pointer motion, so it is asked only
+            // when a shader surface exists to route to.
+            if let Some(renderer) = self.renderer.as_mut()
+                && renderer.has_shader_surfaces()
+                && let Some((surface_id, u, v)) = Self::surface_target_for_frame_window(
+                    &window_state.render,
+                    target_fid,
+                    ev_x,
+                    ev_y,
+                )
+            {
+                renderer.surface_mouse_hover(surface_id, u, v);
+            }
+            #[cfg(feature = "webview")]
+            {
+                let hit = pointer_capture.map_or_else(
+                    || {
+                        Self::webview_target_for_frame_window(
+                            &window_state.render,
+                            target_fid,
+                            ev_x,
+                            ev_y,
+                        )
+                    },
+                    |capture| {
+                        Some(WebViewPointerHit {
+                            view: capture.target.view(),
+                            position: WebContentPoint::new(
+                                lx - capture.surface_origin_x,
+                                ly - capture.surface_origin_y,
+                            ),
+                        })
+                    },
+                );
+                if let Some(hit) = hit {
+                    let delivery = pointer_capture
+                        .map_or(WebViewDeliveryTarget::Current(hit.view), |capture| {
+                            WebViewDeliveryTarget::Captured(capture.target)
+                        });
+                    webview_delivery = Some((
+                        delivery,
+                        WebViewInput::PointerMove {
+                            position: hit.position,
+                            modifiers: Self::webview_modifiers(modifiers),
+                        },
+                    ));
+                }
+            }
+            let appearance_target = pointer_owner
+                .target()
+                .map(|(x, y, frame_id)| (frame_id, x, y));
+            dirty |= window_state
+                .render
+                .update_presented_pointer_motion(appearance_target);
+            if dirty {
+                window_state.render.mark_dirty();
+            }
+            if event.is_none() && !model_owned {
+                let position = PointerPosition {
+                    x: ev_x,
+                    y: ev_y,
+                    target_frame_id: target_fid,
+                };
+                match Self::positioned_pointer_input_event(
+                    &window_state.render,
+                    pointer_owner,
+                    position,
+                    PointerAction::Move { modifiers },
+                ) {
+                    Ok(input) => {
+                        event = Some(input);
+                    }
+                    Err(error) => {
+                        tracing::error!(
+                            ?error,
+                            target_fid,
+                            ev_x,
+                            ev_y,
+                            "dropping incoherent mouse-move input"
+                        );
+                    }
+                }
+            }
+            if let Some(event) = event {
+                self.comms.send_input(event);
+            }
+        }
+        self.flush_model_events();
+        #[cfg(feature = "webview")]
+        if let Some((delivery, input)) = webview_delivery
+            && let Some(system) = self.webview_system.as_mut()
+        {
+            let view = delivery.view();
+            if let Some(target) = delivery.resolve(system)
+                && let Err(error) = system.input(target, input)
+            {
+                tracing::warn!(%view, %error, "dropping WebView pointer-move input");
+            }
+        }
+    }
+
+    pub(super) fn handle_cursor_left(&mut self, window_id: WindowId) {
+        // The pointer left the window: a wheel fraction left over a model
+        // does not wait for its return.
+        self.model_wheel.reset();
+        if let Some(window_state) = self.frame_windows.get_by_winit_mut(window_id) {
+            window_state.render.clear_pointer_hover();
+            window_state.render.scroll_input.reset();
+        }
+    }
+
+    pub(super) fn handle_mouse_wheel(
+        &mut self,
+        window_id: WindowId,
+        device: Option<DeviceId>,
+        delta: MouseScrollDelta,
+        phase: TouchPhase,
+    ) {
+        if let Some(window_state) = self.frame_windows.get_by_winit_mut(window_id) {
+            let scale = window_state.scale_factor();
+            let pointer_owner = Self::pointer_owner(
+                window_state,
+                window_state.render.mouse_pos.0,
+                window_state.render.mouse_pos.1,
+            );
+            let (ev_x, ev_y, target_fid) = pointer_owner.raw_target().unwrap_or_else(|| {
+                Self::pointer_target_for_frame_window(
+                    window_state,
+                    window_state.render.mouse_pos.0,
+                    window_state.render.mouse_pos.1,
+                )
+            });
+            // Wheel over a model zooms it instead of scrolling (design §5.1;
+            // the default awaits Thanos's decision).
+            if self.modifiers == 0
+                && !self.models.is_empty()
+                && let Some((surface_id, _, _)) = Self::surface_target_for_frame_window(
+                    &window_state.render,
+                    target_fid,
+                    ev_x,
+                    ev_y,
+                )
+                && self.models.is_interactive(surface_id)
+            {
+                self.wheel_over_model(
+                    device,
+                    surface_id,
+                    delta,
+                    phase,
+                    romacs_display_protocol::frame_time::observe_platform_now().into_instant(),
+                );
+                return;
+            }
+            // Not over an interactive model (or modified): any fraction
+            // left over a model belongs to a gesture that has moved on.
+            self.model_wheel.reset();
+            let position = PointerPosition {
+                x: ev_x,
+                y: ev_y,
+                target_frame_id: target_fid,
+            };
+            let target = match Self::positioned_pointer_target(
+                &window_state.render,
+                pointer_owner,
+                position,
+            ) {
+                Ok(target) => target,
+                Err(error) => {
+                    window_state.render.scroll_input.reset();
+                    tracing::error!(
+                        ?error,
+                        target_fid,
+                        ev_x,
+                        ev_y,
+                        "dropping incoherent mouse-wheel input"
+                    );
+                    return;
+                }
+            };
+            let target_window = match target {
+                PointerTarget::Presented { hit: Some(hit), .. } => hit.region().window(),
+                _ => None,
+            };
+            let frame = window_state.render.frame_for_target(target_fid);
+            let info = frame.and_then(|frame| {
+                frame
+                    .window_infos
+                    .iter()
+                    .find(|info| Some(info.window_id) == target_window)
+            });
+            let scroll_target = super::scroll_input::ScrollTarget {
+                frame: target_fid,
+                window: target_window,
+                buffer: info.map(|info| info.buffer_id),
+                height: info
+                    .map(|info| info.bounds.height)
+                    .or_else(|| frame.map(|frame| frame.height))
+                    .unwrap_or(1.0),
+                scale,
+                x11_factor: frame
+                    .map(|frame| frame.scroll_input_policy.x11_delta_factor)
+                    .unwrap_or(1.0),
+                modifiers: self.modifiers,
+                device,
+            };
+            let converted = window_state
+                .render
+                .scroll_input
+                .convert(delta, scroll_target, phase);
+            #[cfg(feature = "webview")]
+            let webview_delivery = webview_scroll_delta(delta, scale).and_then(|delta| {
+                Self::webview_target_for_frame_window(&window_state.render, target_fid, ev_x, ev_y)
+                    .map(|hit| {
+                        (
+                            WebViewDeliveryTarget::Current(hit.view),
+                            WebViewInput::Scroll {
+                                position: hit.position,
+                                delta,
+                                modifiers: Self::webview_modifiers(self.modifiers),
+                            },
+                        )
+                    })
+            });
+            if let Some(delta) = converted {
+                let action = PointerAction::Scroll {
+                    delta,
+                    modifiers: self.modifiers,
+                };
+                let input = InputEvent::PositionedPointer(PositionedPointerInput {
+                    position,
+                    target,
+                    action,
+                });
+                let (receipt, token) = self.comms.send_input_with_receipt(input);
+                if let Some(receipt) = &receipt
+                    && let Some(state) = self.frame_windows.get_by_winit_mut(window_id)
+                {
+                    state
+                        .render
+                        .compositor
+                        .input_scroll
+                        .observe_input(receipt.clone(), token);
+                }
+                if let (
+                    ScrollDelta::Pixels {
+                        x: horizontal,
+                        y: vertical,
+                    },
+                    Some(receipt),
+                ) = (delta, receipt)
+                    && self.modifiers == 0
+                    && horizontal.abs() <= vertical.abs()
+                    && let Some(state) = self.frame_windows.get_by_winit_mut(window_id)
+                    && state.render.emacs_frame_id == target_fid
+                    && matches!(
+                        state.render.compositor.layout,
+                        super::frame_compositor::layout_driver::LayoutDriver::Settled
+                    )
+                    && !state.render.compositor.transitions.has_active()
+                    && !state
+                        .render
+                        .compositor
+                        .renderer_effects
+                        .scroll_effects_active()
+                    && let Some(frame) = state.render.compositor.current_frame.as_ref()
+                    && state.render.compositor.input_scroll.push(
+                        frame,
+                        ev_x,
+                        ev_y,
+                        -vertical.round(),
+                        receipt,
+                        token,
+                    )
+                {
+                    state.render.compositor.current_scene_generation =
+                        super::frame_state::next_scene_generation();
+                    state.render.compositor.current_row_damage = None;
+                    state.render.mark_dirty();
+                }
+            }
+            #[cfg(feature = "webview")]
+            if let Some((delivery, input)) = webview_delivery
+                && let Some(system) = self.webview_system.as_mut()
+            {
+                let view = delivery.view();
+                if let Some(target) = delivery.resolve(system)
+                    && let Err(error) = system.input(target, input)
+                {
+                    tracing::warn!(%view, %error, "dropping WebView scroll input");
+                }
+            }
+            self.record_idle_dim_activity(window_id);
+        }
+    }
+}

@@ -1,0 +1,5 @@
+memory-full=nil
+("%e" "%b") => "probe"
+("%e" romacs-void-front-space romacs-void-mule-info "%b" "   " (romacs-void-project romacs-void-project-format) "  " "|") => "probe     |"
+"%3e|" => "   |"
+memory-full=t: "%e|" => "|"

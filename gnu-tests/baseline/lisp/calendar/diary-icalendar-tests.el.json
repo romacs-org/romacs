@@ -1,0 +1,1619 @@
+{
+ "blob": "96c39114ef323def9b7fc53765dcaa26e6eb3625",
+ "compiled": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": true,
+  "results": {
+   "diary-icalendar-test-import-bug-11473": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-import-bug-22092": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-import-bug-24199": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-import-bug-33277": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-import-bug-6766": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-import-duration": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-import-multiple-vcalendars": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-import-non-recurring": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-import-real-world": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-import-rrule": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-import-w/legacy-function": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-import-w/legacy-vars": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-import-w/time-format": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-import-with-attachment": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-import-with-timezone": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-import-with-uid": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-attendees-and-organizer": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-class/private": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-class/public": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-date-form/american-date": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-date-form/emacs-manual-sec33.10.1/1": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-date-form/emacs-manual-sec33.10.1/2": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-date-form/emacs-manual-sec33.10.1/3": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-date-form/emacs-manual-sec33.10.1/5": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-date-form/emacs-manual-sec33.10.1/7": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-date-form/emacs-manual-sec33.10.1/8": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-date-form/emacs-manual-sec33.10.1/9": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-date-form/emacs-manual-sec33.10.3/1": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-date-form/emacs-manual-sec33.10.3/2": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-date-form/emacs-manual-sec33.10.3/3": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-date-form/emacs-manual-sec33.10.3/4": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-date-form/european-date": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-date-form/generic-day": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-date-form/generic-month": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-date-form/generic-year-american": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-date-form/generic-year-european": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-date-form/iso-date": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-date-form/iso-date-dashes": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-entry-type/vevent": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-entry-type/vjournal": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-entry-type/vtodo": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-location": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-sexp": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-sexp/multiline-sexp": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-status": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-summary-and-description": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-summary-and-description/with-summary-regexp": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-uid": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-uid/with-org-id-uuid": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-url": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-weekday-name": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-weekday-name/emacs-manual-sec33.10.1/4": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-weekday-name/emacs-manual-sec33.10.1/6": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-weekday-name/emacs-manual-sec33.10.3/5": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-rrule-bug-80460": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-test-entry-parser/alarms-export": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-test-entry-parser/diary-anniversary-recurrence": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-test-entry-parser/diary-block-recurrence": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-test-entry-parser/diary-cyclic-recurrence": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-test-entry-parser/diary-date-recurrence": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-test-entry-parser/diary-float-recurrence": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-test-entry-parser/diary-offset-recurrence": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-test-entry-parser/diary-rrule-recurrence": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-test-entry-parser/emacs-manual-sec33.10.1/10": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-test-entry-parser/emacs-manual-sec33.10.1/10-first-line": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-test-entry-parser/emacs-manual-sec33.10.1/6": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-test-entry-parser/emacs-manual-sec33.13.10.7": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-test-entry-parser/multiline-linewise": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-test-entry-parser/multiline-single": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-test-entry-parser/other-properties-parser": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-test-entry-parser/tz-strategy-floating": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-test-entry-parser/tz-strategy-local": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-test-entry-parser/tz-strategy-sexp": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-test-entry-parser/tz-strategy-to-utc": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-test-parse-vevent-transparency/nonmarking": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   }
+  },
+  "timed_out": false
+ },
+ "file": "lisp/calendar/diary-icalendar-tests.el",
+ "gnu": {
+  "emacs": "<recording-path-redacted>/emacs-32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+  "version": "32.0.50"
+ },
+ "harness_sha256": "78c20850429a08af22faadf73b5d164c560230e83d7eb88ef60cb995670703ef",
+ "mini": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": null,
+  "results": {
+   "diary-icalendar-test-di:parse-attendees-and-organizer": {
+    "as_expected": null,
+    "detail": "(void-function di:parse-attendees-and-organizer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "diary-icalendar-test-di:parse-class/private": {
+    "as_expected": null,
+    "detail": "(void-function di:parse-class)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "diary-icalendar-test-di:parse-class/public": {
+    "as_expected": null,
+    "detail": "(void-function di:parse-class)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "diary-icalendar-test-di:parse-date-form/american-date": {
+    "as_expected": null,
+    "detail": "(void-function di:parse-date-form)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "diary-icalendar-test-di:parse-date-form/emacs-manual-sec33.10.1/1": {
+    "as_expected": null,
+    "detail": "(void-function di:parse-date-form)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "diary-icalendar-test-di:parse-date-form/emacs-manual-sec33.10.1/2": {
+    "as_expected": null,
+    "detail": "(void-function di:parse-date-form)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "diary-icalendar-test-di:parse-date-form/emacs-manual-sec33.10.1/3": {
+    "as_expected": null,
+    "detail": "(void-function di:parse-date-form)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "diary-icalendar-test-di:parse-date-form/emacs-manual-sec33.10.1/5": {
+    "as_expected": null,
+    "detail": "(void-function di:parse-date-form)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "diary-icalendar-test-di:parse-date-form/emacs-manual-sec33.10.1/7": {
+    "as_expected": null,
+    "detail": "(void-function di:parse-date-form)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "diary-icalendar-test-di:parse-date-form/emacs-manual-sec33.10.1/8": {
+    "as_expected": null,
+    "detail": "(void-function di:parse-date-form)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "diary-icalendar-test-di:parse-date-form/emacs-manual-sec33.10.1/9": {
+    "as_expected": null,
+    "detail": "(void-function di:parse-date-form)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "diary-icalendar-test-di:parse-date-form/emacs-manual-sec33.10.3/1": {
+    "as_expected": null,
+    "detail": "(void-function di:parse-date-form)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "diary-icalendar-test-di:parse-date-form/emacs-manual-sec33.10.3/2": {
+    "as_expected": null,
+    "detail": "(void-function di:parse-date-form)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "diary-icalendar-test-di:parse-date-form/emacs-manual-sec33.10.3/3": {
+    "as_expected": null,
+    "detail": "(void-function di:parse-date-form)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "diary-icalendar-test-di:parse-date-form/emacs-manual-sec33.10.3/4": {
+    "as_expected": null,
+    "detail": "(void-function di:parse-date-form)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "diary-icalendar-test-di:parse-date-form/european-date": {
+    "as_expected": null,
+    "detail": "(void-function di:parse-date-form)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "diary-icalendar-test-di:parse-date-form/generic-day": {
+    "as_expected": null,
+    "detail": "(void-function di:parse-date-form)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "diary-icalendar-test-di:parse-date-form/generic-month": {
+    "as_expected": null,
+    "detail": "(void-function di:parse-date-form)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "diary-icalendar-test-di:parse-date-form/generic-year-american": {
+    "as_expected": null,
+    "detail": "(void-function di:parse-date-form)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "diary-icalendar-test-di:parse-date-form/generic-year-european": {
+    "as_expected": null,
+    "detail": "(void-function di:parse-date-form)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "diary-icalendar-test-di:parse-date-form/iso-date": {
+    "as_expected": null,
+    "detail": "(void-function di:parse-date-form)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "diary-icalendar-test-di:parse-date-form/iso-date-dashes": {
+    "as_expected": null,
+    "detail": "(void-function di:parse-date-form)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "diary-icalendar-test-di:parse-entry-type/vevent": {
+    "as_expected": null,
+    "detail": "(void-function di:parse-entry-type)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "diary-icalendar-test-di:parse-entry-type/vjournal": {
+    "as_expected": null,
+    "detail": "(void-function di:parse-entry-type)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "diary-icalendar-test-di:parse-entry-type/vtodo": {
+    "as_expected": null,
+    "detail": "(void-function di:parse-entry-type)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "diary-icalendar-test-di:parse-location": {
+    "as_expected": null,
+    "detail": "(void-function di:parse-location)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "diary-icalendar-test-di:parse-sexp": {
+    "as_expected": null,
+    "detail": "(void-function di:parse-sexp)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "diary-icalendar-test-di:parse-sexp/multiline-sexp": {
+    "as_expected": null,
+    "detail": "(void-function di:parse-sexp)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "diary-icalendar-test-di:parse-status": {
+    "as_expected": null,
+    "detail": "(void-function di:parse-status)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "diary-icalendar-test-di:parse-summary-and-description": {
+    "as_expected": null,
+    "detail": "(void-function di:parse-summary-and-description)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "diary-icalendar-test-di:parse-summary-and-description/with-summary-regexp": {
+    "as_expected": null,
+    "detail": "(void-function di:parse-summary-and-description)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "diary-icalendar-test-di:parse-uid": {
+    "as_expected": null,
+    "detail": "(void-function di:parse-uid)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "diary-icalendar-test-di:parse-uid/with-org-id-uuid": {
+    "as_expected": null,
+    "detail": "(void-function di:parse-uid)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "diary-icalendar-test-di:parse-url": {
+    "as_expected": null,
+    "detail": "(void-function di:parse-url)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "diary-icalendar-test-di:parse-weekday-name": {
+    "as_expected": null,
+    "detail": "(void-function di:parse-weekday-name)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "diary-icalendar-test-di:parse-weekday-name/emacs-manual-sec33.10.1/4": {
+    "as_expected": null,
+    "detail": "(void-function di:parse-weekday-name)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "diary-icalendar-test-di:parse-weekday-name/emacs-manual-sec33.10.1/6": {
+    "as_expected": null,
+    "detail": "(void-function di:parse-weekday-name)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "diary-icalendar-test-di:parse-weekday-name/emacs-manual-sec33.10.3/5": {
+    "as_expected": null,
+    "detail": "(void-function di:parse-weekday-name)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "diary-icalendar-test-dit:entry-parser/alarms-export": {
+    "as_expected": null,
+    "detail": "(void-variable di:time-zone-export-strategy)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "diary-icalendar-test-dit:entry-parser/diary-anniversary-recurrence": {
+    "as_expected": null,
+    "detail": "(void-variable di:time-zone-export-strategy)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "diary-icalendar-test-dit:entry-parser/diary-block-recurrence": {
+    "as_expected": null,
+    "detail": "(void-variable di:time-zone-export-strategy)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "diary-icalendar-test-dit:entry-parser/diary-cyclic-recurrence": {
+    "as_expected": null,
+    "detail": "(void-variable di:time-zone-export-strategy)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "diary-icalendar-test-dit:entry-parser/diary-date-recurrence": {
+    "as_expected": null,
+    "detail": "(void-variable di:time-zone-export-strategy)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "diary-icalendar-test-dit:entry-parser/diary-float-recurrence": {
+    "as_expected": null,
+    "detail": "(void-variable di:time-zone-export-strategy)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "diary-icalendar-test-dit:entry-parser/diary-offset-recurrence": {
+    "as_expected": null,
+    "detail": "(void-variable di:time-zone-export-strategy)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "diary-icalendar-test-dit:entry-parser/diary-rrule-recurrence": {
+    "as_expected": null,
+    "detail": "(void-variable di:time-zone-export-strategy)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "diary-icalendar-test-dit:entry-parser/emacs-manual-sec33.10.1/10": {
+    "as_expected": null,
+    "detail": "(void-variable di:time-zone-export-strategy)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "diary-icalendar-test-dit:entry-parser/emacs-manual-sec33.10.1/10-first-line": {
+    "as_expected": null,
+    "detail": "(void-variable di:time-zone-export-strategy)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "diary-icalendar-test-dit:entry-parser/emacs-manual-sec33.10.1/6": {
+    "as_expected": null,
+    "detail": "(void-variable di:time-zone-export-strategy)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "diary-icalendar-test-dit:entry-parser/emacs-manual-sec33.13.10.7": {
+    "as_expected": null,
+    "detail": "(void-variable di:time-zone-export-strategy)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "diary-icalendar-test-dit:entry-parser/multiline-linewise": {
+    "as_expected": null,
+    "detail": "(void-variable di:time-zone-export-strategy)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "diary-icalendar-test-dit:entry-parser/multiline-single": {
+    "as_expected": null,
+    "detail": "(void-variable di:time-zone-export-strategy)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "diary-icalendar-test-dit:entry-parser/other-properties-parser": {
+    "as_expected": null,
+    "detail": "(void-variable di:time-zone-export-strategy)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "diary-icalendar-test-dit:entry-parser/tz-strategy-floating": {
+    "as_expected": null,
+    "detail": "(void-variable di:time-zone-export-strategy)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "diary-icalendar-test-dit:entry-parser/tz-strategy-local": {
+    "as_expected": null,
+    "detail": "(void-variable di:time-zone-export-strategy)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "diary-icalendar-test-dit:entry-parser/tz-strategy-sexp": {
+    "as_expected": null,
+    "detail": "(void-variable di:time-zone-export-strategy)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "diary-icalendar-test-dit:entry-parser/tz-strategy-to-utc": {
+    "as_expected": null,
+    "detail": "(void-variable di:time-zone-export-strategy)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "diary-icalendar-test-dit:parse-vevent-transparency/nonmarking": {
+    "as_expected": null,
+    "detail": "(void-function di:parse-transparency)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "dit:import-bug-11473": {
+    "as_expected": null,
+    "detail": "(void-function di:import-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "dit:import-bug-22092": {
+    "as_expected": null,
+    "detail": "(void-function di:import-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "dit:import-bug-24199": {
+    "as_expected": null,
+    "detail": "(void-function di:import-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "dit:import-bug-33277": {
+    "as_expected": null,
+    "detail": "(void-function di:import-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "dit:import-bug-6766": {
+    "as_expected": null,
+    "detail": "(void-function di:import-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "dit:import-duration": {
+    "as_expected": null,
+    "detail": "(void-function di:import-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "dit:import-multiple-vcalendars": {
+    "as_expected": null,
+    "detail": "(void-function di:import-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "dit:import-non-recurring": {
+    "as_expected": null,
+    "detail": "(void-function di:import-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "dit:import-real-world": {
+    "as_expected": null,
+    "detail": "(void-function di:import-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "dit:import-rrule": {
+    "as_expected": null,
+    "detail": "(void-function di:import-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "dit:import-w/legacy-function": {
+    "as_expected": null,
+    "detail": "(void-function di:import-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "dit:import-w/legacy-vars": {
+    "as_expected": null,
+    "detail": "(void-function di:import-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "dit:import-w/time-format": {
+    "as_expected": null,
+    "detail": "(void-function di:import-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "dit:import-with-attachment": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "dit:import-with-timezone": {
+    "as_expected": null,
+    "detail": "(void-function di:import-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "dit:import-with-uid": {
+    "as_expected": null,
+    "detail": "(void-function di:import-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "dit:rrule-bug-80460": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   }
+  },
+  "timed_out": false
+ },
+ "read_error": null,
+ "real": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": true,
+  "results": {
+   "diary-icalendar-test-import-bug-11473": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-import-bug-22092": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-import-bug-24199": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-import-bug-33277": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-import-bug-6766": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-import-duration": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-import-multiple-vcalendars": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-import-non-recurring": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-import-real-world": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-import-rrule": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-import-w/legacy-function": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-import-w/legacy-vars": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-import-w/time-format": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-import-with-attachment": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-import-with-timezone": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-import-with-uid": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-attendees-and-organizer": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-class/private": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-class/public": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-date-form/american-date": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-date-form/emacs-manual-sec33.10.1/1": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-date-form/emacs-manual-sec33.10.1/2": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-date-form/emacs-manual-sec33.10.1/3": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-date-form/emacs-manual-sec33.10.1/5": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-date-form/emacs-manual-sec33.10.1/7": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-date-form/emacs-manual-sec33.10.1/8": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-date-form/emacs-manual-sec33.10.1/9": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-date-form/emacs-manual-sec33.10.3/1": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-date-form/emacs-manual-sec33.10.3/2": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-date-form/emacs-manual-sec33.10.3/3": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-date-form/emacs-manual-sec33.10.3/4": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-date-form/european-date": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-date-form/generic-day": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-date-form/generic-month": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-date-form/generic-year-american": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-date-form/generic-year-european": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-date-form/iso-date": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-date-form/iso-date-dashes": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-entry-type/vevent": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-entry-type/vjournal": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-entry-type/vtodo": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-location": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-sexp": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-sexp/multiline-sexp": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-status": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-summary-and-description": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-summary-and-description/with-summary-regexp": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-uid": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-uid/with-org-id-uuid": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-url": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-weekday-name": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-weekday-name/emacs-manual-sec33.10.1/4": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-weekday-name/emacs-manual-sec33.10.1/6": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-parse-weekday-name/emacs-manual-sec33.10.3/5": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-rrule-bug-80460": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-test-entry-parser/alarms-export": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-test-entry-parser/diary-anniversary-recurrence": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-test-entry-parser/diary-block-recurrence": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-test-entry-parser/diary-cyclic-recurrence": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-test-entry-parser/diary-date-recurrence": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-test-entry-parser/diary-float-recurrence": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-test-entry-parser/diary-offset-recurrence": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-test-entry-parser/diary-rrule-recurrence": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-test-entry-parser/emacs-manual-sec33.10.1/10": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-test-entry-parser/emacs-manual-sec33.10.1/10-first-line": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-test-entry-parser/emacs-manual-sec33.10.1/6": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-test-entry-parser/emacs-manual-sec33.13.10.7": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-test-entry-parser/multiline-linewise": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-test-entry-parser/multiline-single": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-test-entry-parser/other-properties-parser": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-test-entry-parser/tz-strategy-floating": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-test-entry-parser/tz-strategy-local": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-test-entry-parser/tz-strategy-sexp": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-test-entry-parser/tz-strategy-to-utc": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "diary-icalendar-test-test-parse-vevent-transparency/nonmarking": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   }
+  },
+  "timed_out": false
+ },
+ "schema": 1,
+ "toplevel_deftests": 17
+}

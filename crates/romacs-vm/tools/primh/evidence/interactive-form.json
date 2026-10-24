@@ -1,0 +1,1051 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "interactive-form",
+ "spec_sha256": "75a75b2527937cdfe27c39155c7c19d9407f255544b0056298a93bbd56ce2585",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "interactive-form",
+    "subr",
+    1,
+    1
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "data.c": "eca7895a8043cd0a960dfe037a46028374d1a40cc6ee4d0cf6de90ac56c242ae"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "interactive-form/0000",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "interactive-form/0001",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form t)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "interactive-form/0002",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form 0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "interactive-form/0003",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form 1)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "interactive-form/0004",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form 2)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "interactive-form/0005",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form -1)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "interactive-form/0006",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "interactive-form/0007",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form 1.5)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "interactive-form/0008",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form 'sym)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "interactive-form/0009",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form :kw)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "interactive-form/0010",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "interactive-form/0011",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "interactive-form/0012",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "interactive-form/0013",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "interactive-form/0014",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "interactive-form/0015",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "interactive-form/0016",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "interactive-form/0017",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "interactive-form/0018",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "interactive-form/0019",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'interactive-form '())) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr interactive-form> 0))"
+  },
+  {
+   "id": "interactive-form/0020",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'interactive-form '(1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr interactive-form> 2))"
+  },
+  {
+   "id": "interactive-form/0021",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (interactive-form a0))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "interactive-form/0022",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil)) (let ((r (interactive-form a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (t))"
+  },
+  {
+   "id": "interactive-form/0023",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1)) (let ((r (interactive-form a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "interactive-form/0024",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-positive-fixnum)) (let ((r (interactive-form a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "interactive-form/0025",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :kw)) (let ((r (interactive-form a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "interactive-form/0026",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\"))) (let ((r (interactive-form a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "interactive-form/0027",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 2))) (let ((r (interactive-form a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "interactive-form/0028",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (interactive-form a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "interactive-form/0029",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form (lambda (x) (interactive \"p\") x))) (error (list 'sig e))))",
+   "expected": "(ok (interactive \"p\"))"
+  },
+  {
+   "id": "interactive-form/0030",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form (lambda (x) \"doc\" (interactive \"p\") x))) (error (list 'sig e))))",
+   "expected": "(ok (interactive \"p\"))"
+  },
+  {
+   "id": "interactive-form/0031",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form (lambda (x) (interactive) x))) (error (list 'sig e))))",
+   "expected": "(ok (interactive nil))"
+  },
+  {
+   "id": "interactive-form/0032",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form (lambda () (interactive)))) (error (list 'sig e))))",
+   "expected": "(ok (interactive nil))"
+  },
+  {
+   "id": "interactive-form/0033",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form (lambda (x) (interactive (list 1)) x))) (error (list 'sig e))))",
+   "expected": "(ok (interactive (list 1)))"
+  },
+  {
+   "id": "interactive-form/0034",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form (lambda (x) \"doc\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "interactive-form/0035",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form (lambda (x) \"doc\" x))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "interactive-form/0036",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form (lambda (x) (interactive \"p\" cl-mode) x))) (error (list 'sig e))))",
+   "expected": "(ok (interactive \"p\"))"
+  },
+  {
+   "id": "interactive-form/0037",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form (lambda (x) (interactive \"p\" cl-mode cl-mode2) x))) (error (list 'sig e))))",
+   "expected": "(ok (interactive \"p\"))"
+  },
+  {
+   "id": "interactive-form/0038",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form (lambda (x) x (interactive \"p\")))) (error (list 'sig e))))",
+   "expected": "(ok (interactive \"p\"))",
+   "gnu_regime_variant": "(ok nil)"
+  },
+  {
+   "id": "interactive-form/0039",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form (lambda (x) \"doc\" x (interactive \"p\")))) (error (list 'sig e))))",
+   "expected": "(ok (interactive \"p\"))",
+   "gnu_regime_variant": "(ok nil)"
+  },
+  {
+   "id": "interactive-form/0040",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form (lambda (x) \"doc\" \"more\" (interactive \"p\") x))) (error (list 'sig e))))",
+   "expected": "(ok (interactive \"p\"))",
+   "gnu_regime_variant": "(ok nil)"
+  },
+  {
+   "id": "interactive-form/0041",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form (lambda (x) (interactive \"P\") (interactive \"p\") x))) (error (list 'sig e))))",
+   "expected": "(ok (interactive \"P\"))"
+  },
+  {
+   "id": "interactive-form/0042",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form (lambda (x) (interactive \"\") x))) (error (list 'sig e))))",
+   "expected": "(ok (interactive \"\"))"
+  },
+  {
+   "id": "interactive-form/0043",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form (lambda (x) (interactive 'cl-sym) x))) (error (list 'sig e))))",
+   "expected": "(ok (interactive 'cl-sym))"
+  },
+  {
+   "id": "interactive-form/0044",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((x 5)) (interactive-form (lambda (a) (interactive (list x)) a)))) (error (list 'sig e))))",
+   "expected": "(ok (interactive (funcall '#[128 \"\\300C\\207\" [5] 2 \"\n\n(fn &rest CCONV--DUMMY)\"])))",
+   "gnu_regime_variant": "(ok (interactive (list x)))"
+  },
+  {
+   "id": "interactive-form/0045",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((f (lambda () (interactive \"p\") 1))) (eq (interactive-form f) (interactive-form f)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "interactive-form/0046",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((f (lambda () (interactive \"p\") 1))) (eq (car (cdr (interactive-form f))) (car (cdr (interactive-form f)))))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "interactive-form/0047",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (funcall (lambda () (interactive \"p\") 42))) (error (list 'sig e))))",
+   "expected": "(ok 42)"
+  },
+  {
+   "id": "interactive-form/0048",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (funcall (lambda () \"doc\" (interactive \"p\")))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "interactive-form/0049",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (funcall (lambda () (interactive \"p\")))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "interactive-form/0050",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (funcall (lambda (x) (interactive \"p\") (list 'body x)) 3)) (error (list 'sig e))))",
+   "expected": "(ok (body 3))"
+  },
+  {
+   "id": "interactive-form/0051",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form '(lambda (x) (interactive \"p\") x))) (error (list 'sig e))))",
+   "expected": "(ok (interactive \"p\"))"
+  },
+  {
+   "id": "interactive-form/0052",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form '(lambda (x) \"d\" (interactive \"p\") x))) (error (list 'sig e))))",
+   "expected": "(ok (interactive \"p\"))"
+  },
+  {
+   "id": "interactive-form/0053",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form '(lambda (x) x (interactive \"p\")))) (error (list 'sig e))))",
+   "expected": "(ok (interactive \"p\"))"
+  },
+  {
+   "id": "interactive-form/0054",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form '(lambda (x) (interactive \"p\" m1 m2) x))) (error (list 'sig e))))",
+   "expected": "(ok (interactive \"p\"))"
+  },
+  {
+   "id": "interactive-form/0055",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form '(lambda (x) (interactive) x))) (error (list 'sig e))))",
+   "expected": "(ok (interactive))"
+  },
+  {
+   "id": "interactive-form/0056",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form '(lambda (x) x))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "interactive-form/0057",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form '(lambda))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "interactive-form/0058",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form '(lambda . 5))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 5))"
+  },
+  {
+   "id": "interactive-form/0059",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form '(lambda x . 5))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 5))"
+  },
+  {
+   "id": "interactive-form/0060",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form '(lambda (x) 5 (interactive \"p\") . 6))) (error (list 'sig e))))",
+   "expected": "(ok (interactive \"p\"))"
+  },
+  {
+   "id": "interactive-form/0061",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form '(lambda (x) (interactive . 5)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 5))"
+  },
+  {
+   "id": "interactive-form/0062",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form '(lambda (x) (interactive \"p\" . 5)))) (error (list 'sig e))))",
+   "expected": "(ok (interactive \"p\"))"
+  },
+  {
+   "id": "interactive-form/0063",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form '(closure (t) (x) (interactive \"p\") x))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "interactive-form/0064",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form '(foo (x) (interactive \"p\") x))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "interactive-form/0065",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form 'forward-char)) (error (list 'sig e))))",
+   "expected": "(ok (interactive \"^p\"))"
+  },
+  {
+   "id": "interactive-form/0066",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form 'backward-char)) (error (list 'sig e))))",
+   "expected": "(ok (interactive \"^p\"))"
+  },
+  {
+   "id": "interactive-form/0067",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form 'beginning-of-line)) (error (list 'sig e))))",
+   "expected": "(ok (interactive \"^p\"))"
+  },
+  {
+   "id": "interactive-form/0068",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form 'end-of-line)) (error (list 'sig e))))",
+   "expected": "(ok (interactive \"^p\"))"
+  },
+  {
+   "id": "interactive-form/0069",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form 'forward-line)) (error (list 'sig e))))",
+   "expected": "(ok (interactive \"^p\"))"
+  },
+  {
+   "id": "interactive-form/0070",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form 'delete-char)) (error (list 'sig e))))",
+   "expected": "(ok (interactive \"p\nP\"))"
+  },
+  {
+   "id": "interactive-form/0071",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form 'self-insert-command)) (error (list 'sig e))))",
+   "expected": "(ok (interactive (list (prefix-numeric-value current-prefix-arg) last-command-event)))"
+  },
+  {
+   "id": "interactive-form/0072",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form 'goto-char)) (error (list 'sig e))))",
+   "expected": "(ok (interactive (goto-char--read-natnum-interactive \"Go to char: \")))"
+  },
+  {
+   "id": "interactive-form/0073",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form 'delete-region)) (error (list 'sig e))))",
+   "expected": "(ok (interactive \"r\"))"
+  },
+  {
+   "id": "interactive-form/0074",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form 'narrow-to-region)) (error (list 'sig e))))",
+   "expected": "(ok (interactive \"r\"))"
+  },
+  {
+   "id": "interactive-form/0075",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form 'widen)) (error (list 'sig e))))",
+   "expected": "(ok (interactive \"\"))"
+  },
+  {
+   "id": "interactive-form/0076",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form 'erase-buffer)) (error (list 'sig e))))",
+   "expected": "(ok (interactive \"*\"))"
+  },
+  {
+   "id": "interactive-form/0077",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form 'search-forward)) (error (list 'sig e))))",
+   "expected": "(ok (interactive \"MSearch: \"))"
+  },
+  {
+   "id": "interactive-form/0078",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form 're-search-forward)) (error (list 'sig e))))",
+   "expected": "(ok (interactive \"sRE search: \"))"
+  },
+  {
+   "id": "interactive-form/0079",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form 're-search-backward)) (error (list 'sig e))))",
+   "expected": "(ok (interactive \"sRE search backward: \"))"
+  },
+  {
+   "id": "interactive-form/0080",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form 'modify-syntax-entry)) (error (list 'sig e))))",
+   "expected": "(ok (interactive \"cSet syntax for character: \nsSet syntax for %s to: \"))"
+  },
+  {
+   "id": "interactive-form/0081",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form 'make-variable-buffer-local)) (error (list 'sig e))))",
+   "expected": "(ok (interactive \"vMake Variable Buffer Local: \"))"
+  },
+  {
+   "id": "interactive-form/0082",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form 'make-local-variable)) (error (list 'sig e))))",
+   "expected": "(ok (interactive \"vMake Local Variable: \"))"
+  },
+  {
+   "id": "interactive-form/0083",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form 'car)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "interactive-form/0084",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form 'insert)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "interactive-form/0085",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form 'point)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "interactive-form/0086",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form 'set-buffer)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "interactive-form/0087",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form 'current-buffer)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "interactive-form/0088",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form 'interactive-form)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "interactive-form/0089",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form 'call-interactively)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "interactive-form/0090",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form 'funcall-interactively)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "interactive-form/0091",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form 'run-hooks)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "interactive-form/0092",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form 'self-insert-command)) (error (list 'sig e))))",
+   "expected": "(ok (interactive (list (prefix-numeric-value current-prefix-arg) last-command-event)))"
+  },
+  {
+   "id": "interactive-form/0093",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a (interactive-form 'self-insert-command)) (b (interactive-form 'self-insert-command))) (list (equal a b) (eq a b) (eq (car (cdr a)) (car (cdr b)))))) (error (list 'sig e))))",
+   "expected": "(ok (t nil nil))"
+  },
+  {
+   "id": "interactive-form/0094",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form (symbol-function 'forward-char))) (error (list 'sig e))))",
+   "expected": "(ok (interactive \"^p\"))"
+  },
+  {
+   "id": "interactive-form/0095",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "interactive-form/0096",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form t)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "interactive-form/0097",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form 5)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "interactive-form/0098",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form \"forward-char\")) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "interactive-form/0099",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form 'cl-no-such-fn)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "interactive-form/0100",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form [interactive \"p\"])) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "interactive-form/0101",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form '(interactive \"p\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "interactive-form/0102",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defalias 'cl-a (lambda () (interactive \"P\") 1)) (put 'cl-a 'interactive-form '(interactive \"p\")) (interactive-form 'cl-a))) (error (list 'sig e))))",
+   "expected": "(ok (interactive \"p\"))"
+  },
+  {
+   "id": "interactive-form/0103",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defalias 'cl-a (lambda () (interactive \"P\") 1)) (put 'cl-a 'interactive-form '(interactive \"p\")) (defalias 'cl-b 'cl-a) (interactive-form 'cl-b))) (error (list 'sig e))))",
+   "expected": "(ok (interactive \"p\"))"
+  },
+  {
+   "id": "interactive-form/0104",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defalias 'cl-c (lambda () (interactive \"P\") 1)) (defalias 'cl-d 'cl-c) (put 'cl-d 'interactive-form '(interactive \"x\")) (list (interactive-form 'cl-d) (interactive-form 'cl-c)))) (error (list 'sig e))))",
+   "expected": "(ok ((interactive \"x\") (interactive \"P\")))"
+  },
+  {
+   "id": "interactive-form/0105",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (put 'cl-e 'interactive-form '(interactive \"s\")) (interactive-form 'cl-e))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "interactive-form/0106",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defalias 'cl-f2 'car) (put 'cl-f2 'interactive-form 'not-a-list) (interactive-form 'cl-f2))) (error (list 'sig e))))",
+   "expected": "(ok not-a-list)"
+  },
+  {
+   "id": "interactive-form/0107",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defalias 'cl-g (lambda () 1)) (put 'cl-g 'interactive-form '(interactive \"p\")) (interactive-form 'cl-g))) (error (list 'sig e))))",
+   "expected": "(ok (interactive \"p\"))"
+  },
+  {
+   "id": "interactive-form/0108",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defalias 'cl-h1 'forward-char) (defalias 'cl-h2 'cl-h1) (interactive-form 'cl-h2))) (error (list 'sig e))))",
+   "expected": "(ok (interactive \"^p\"))"
+  },
+  {
+   "id": "interactive-form/0109",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defalias 'cl-i (lambda (x) (interactive \"p\") x)) (interactive-form 'cl-i))) (error (list 'sig e))))",
+   "expected": "(ok (interactive \"p\"))"
+  },
+  {
+   "id": "interactive-form/0110",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defalias 'cl-j '(lambda (x) (interactive \"P\") x)) (interactive-form 'cl-j))) (error (list 'sig e))))",
+   "expected": "(ok (interactive \"P\"))"
+  },
+  {
+   "id": "interactive-form/0111",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (fset 'cl-k (lambda (x) (interactive \"p\") x)) (fset 'cl-k (lambda (x) x)) (interactive-form 'cl-k))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "interactive-form/0112",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defun cl-d1 (x) \"Doc.\" (interactive \"p\") x) (interactive-form 'cl-d1))) (error (list 'sig e))))",
+   "expected": "(ok (interactive \"p\"))"
+  },
+  {
+   "id": "interactive-form/0113",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defun cl-d2 (x) \"Doc.\" (declare (interactive-only t)) (interactive \"p\") x) (interactive-form 'cl-d2))) (error (list 'sig e))))",
+   "expected": "(ok (interactive \"p\"))"
+  },
+  {
+   "id": "interactive-form/0114",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defun cl-d3 (x) (declare (indent 1)) (interactive \"P\") x) (interactive-form 'cl-d3))) (error (list 'sig e))))",
+   "expected": "(ok (interactive \"P\"))"
+  },
+  {
+   "id": "interactive-form/0115",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defun cl-d4 () \"Doc.\") (interactive-form 'cl-d4))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "interactive-form/0116",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defun cl-d5 () (interactive)) (list (interactive-form 'cl-d5) (cl-d5)))) (error (list 'sig e))))",
+   "expected": "(ok ((interactive nil) nil))"
+  },
+  {
+   "id": "interactive-form/0117",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defun cl-d6 () \"Doc.\" (interactive) 9) (list (interactive-form 'cl-d6) (cl-d6)))) (error (list 'sig e))))",
+   "expected": "(ok ((interactive nil) 9))"
+  },
+  {
+   "id": "interactive-form/0118",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defun cl-d7 (n) (interactive (list (* 2 (prefix-numeric-value current-prefix-arg)))) n) (interactive-form 'cl-d7))) (error (list 'sig e))))",
+   "expected": "(ok (interactive (byte-code \"\\301\b!\\302_C\\207\" [current-prefix-arg prefix-numeric-value 2] 2)))",
+   "gnu_regime_variant": "(ok (interactive (list (* 2 (prefix-numeric-value current-prefix-arg)))))"
+  },
+  {
+   "id": "interactive-form/0119",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defun cl-d8 () (interactive \"p\" cl-mode)) (interactive-form 'cl-d8))) (error (list 'sig e))))",
+   "expected": "(ok (interactive \"p\"))"
+  },
+  {
+   "id": "interactive-form/0120",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defmacro cl-mac (x) (interactive \"p\") x) (interactive-form 'cl-mac))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "interactive-form/0121",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (autoload 'cl-al \"cl-no-such-file-anywhere\" nil t) (interactive-form 'cl-al))) (error (list 'sig e))))",
+   "expected": "(sig (file-missing \"Cannot open load file\" \"No such file or directory\" \"cl-no-such-file-anywhere\"))"
+  },
+  {
+   "id": "interactive-form/0122",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (autoload 'cl-al2 \"cl-no-such-file-anywhere\" nil nil) (interactive-form 'cl-al2))) (error (list 'sig e))))",
+   "expected": "(sig (file-missing \"Cannot open load file\" \"No such file or directory\" \"cl-no-such-file-anywhere\"))"
+  },
+  {
+   "id": "interactive-form/0123",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defalias 'cl-adv (lambda (x) (interactive \"p\") x)) (advice-add 'cl-adv :around (lambda (f &rest a) (apply f a))) (interactive-form 'cl-adv))) (error (list 'sig e))))",
+   "expected": "(ok (interactive \"p\"))"
+  },
+  {
+   "id": "interactive-form/0124",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((f (lambda () (interactive (list 'kept)) 1))) (let ((i 0)) (while (< i 3000) (list i (make-string 3 ?x) (vector i)) (setq i (1+ i)))) (list (interactive-form f) (call-interactively f)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments (0 . 0) 1))",
+   "gnu_regime_variant": "(sig (wrong-number-of-arguments #[nil (1) (t) nil nil (list 'kept)] 1))"
+  },
+  {
+   "id": "interactive-form/0125",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (funcall (lambda () (:documentation \"d\")))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "interactive-form/0126",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form (lambda () (:documentation \"d\") \"s\" (interactive \"p\") 1))) (error (list 'sig e))))",
+   "expected": "(ok (interactive \"p\"))",
+   "gnu_regime_variant": "(ok nil)"
+  },
+  {
+   "id": "interactive-form/0127",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (interactive-form (lambda () (:documentation \"d\") (interactive \"p\") 1))) (error (list 'sig e))))",
+   "expected": "(ok (interactive \"p\"))"
+  },
+  {
+   "id": "interactive-form/0128",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eval '(condition-case e (lambda () (:documentation . 5) 1) (error e)) t)) (error (list 'sig e))))",
+   "expected": "(ok (wrong-type-argument listp 5))"
+  },
+  {
+   "id": "interactive-form/0129",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eval '(interactive-form (function (lambda () (interactive \"p\" . 3) 9))) t)) (error (list 'sig e))))",
+   "expected": "(ok (interactive \"p\"))"
+  },
+  {
+   "id": "interactive-form/0130",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eval '(condition-case e (interactive-form (function (lambda () (interactive . 3) 9))) (error e)) t)) (error (list 'sig e))))",
+   "expected": "(ok (wrong-type-argument listp 3))"
+  },
+  {
+   "id": "interactive-form/0131",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defun cl-q () (:documentation \"x\") (interactive \"p\") 1) (interactive-form 'cl-q))) (error (list 'sig e))))",
+   "expected": "(ok (interactive \"p\"))"
+  },
+  {
+   "id": "interactive-form/0132",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eval '(let ((x 0)) (let ((f (function (lambda () (:documentation (setq x 5)) 9)))) (list x (funcall f) x))) t)) (error (list 'sig e))))",
+   "expected": "(ok (5 9 5))"
+  },
+  {
+   "id": "interactive-form/0133",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eval '(let ((x 0)) (let ((f (function (lambda () (:documentation (setq x 5) . 3) 9)))) (list x (funcall f) x))) t)) (error (list 'sig e))))",
+   "expected": "(ok (5 9 5))"
+  },
+  {
+   "id": "interactive-form/0134",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eval '(funcall (function (lambda () (:documentation) 9))) t)) (error (list 'sig e))))",
+   "expected": "(ok 9)"
+  },
+  {
+   "id": "interactive-form/0135",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defun cl-m1 () (declare (indent 1)) (:documentation \"x\") (interactive) 1) (list (interactive-form 'cl-m1) (cl-m1)))) (error (list 'sig e))))",
+   "expected": "(ok ((interactive nil) 1))"
+  },
+  {
+   "id": "interactive-form/0136",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defun cl-m2 () \"doc\" (:documentation \"x\") (interactive) 1) (list (interactive-form 'cl-m2) (cl-m2)))) (error (list 'sig e))))",
+   "expected": "(ok ((interactive nil) 1))"
+  },
+  {
+   "id": "interactive-form/0137",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defun cl-m3 () (interactive \"p\") \"Doc.\" 1) (list (interactive-form 'cl-m3) (cl-m3)))) (error (list 'sig e))))",
+   "expected": "(ok ((interactive \"p\") 1))"
+  },
+  {
+   "id": "interactive-form/0138",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defun cl-m4 () (interactive \"P\") (declare (indent 1)) 2) (list (interactive-form 'cl-m4) (cl-m4)))) (error (list 'sig e))))",
+   "expected": "(ok ((interactive \"P\") 2))"
+  },
+  {
+   "id": "interactive-form/0139",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defun cl-m5 () (interactive \"p\") (interactive \"P\") 3) (list (interactive-form 'cl-m5) (cl-m5)))) (error (list 'sig e))))",
+   "expected": "(ok ((interactive \"p\") 3))"
+  },
+  {
+   "id": "interactive-form/0140",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defun cl-m7 () (declare (indent 1)) \"doc\" (interactive) 4) (list (interactive-form 'cl-m7) (cl-m7)))) (error (list 'sig e))))",
+   "expected": "(ok ((interactive nil) 4))"
+  },
+  {
+   "id": "interactive-form/0141",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defun cl-m8 () \"Doc.\" (declare (indent 1))) (list (interactive-form 'cl-m8) (cl-m8)))) (error (list 'sig e))))",
+   "expected": "(ok (nil \"Doc.\"))"
+  },
+  {
+   "id": "interactive-form/0142",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defun cl-m9 () (declare (indent 1)) (declare (doc-string 1)) (interactive \"p\") 5) (list (interactive-form 'cl-m9) (cl-m9)))) (error (list 'sig e))))",
+   "expected": "(ok ((interactive \"p\") 5))"
+  },
+  {
+   "id": "interactive-form/0143",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defun cl-m10 () (interactive \"p\") (:documentation \"x\") 6) (list (interactive-form 'cl-m10) (cl-m10)))) (error (list 'sig e))))",
+   "expected": "(ok ((interactive \"p\") 6))"
+  },
+  {
+   "id": "interactive-form/0144",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defun cl-m11 () (:documentation \"x\") (declare (indent 1)) (interactive \"P\") 7) (list (interactive-form 'cl-m11) (cl-m11)))) (error (list 'sig e))))",
+   "expected": "(ok ((interactive \"P\") 7))"
+  },
+  {
+   "id": "interactive-form/0145",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eval '(let ((x 0)) (defun cl-m12 () (declare (indent 1)) (:documentation (setq x 5)) (interactive) 8) (list x (cl-m12) x)) t)) (error (list 'sig e))))",
+   "expected": "(ok (0 8 0))"
+  },
+  {
+   "id": "interactive-form/0146",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defun cl-m13 () (:documentation \"x\") (interactive \"p\") (:documentation \"y\") 3) (list (interactive-form 'cl-m13) (cl-m13)))) (error (list 'sig e))))",
+   "expected": "(ok ((interactive \"p\") 3))"
+  },
+  {
+   "id": "interactive-form/0147",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defun cl-m14 () (declare (indent 1)) (interactive \"P\") (declare (doc-string 1)) 9) (list (interactive-form 'cl-m14) (cl-m14)))) (error (list 'sig e))))",
+   "expected": "(ok ((interactive \"P\") 9))"
+  },
+  {
+   "id": "interactive-form/0148",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eval '(let ((x 0)) (defun cl-m15 () (:documentation \"x\") (interactive \"p\") (:documentation (setq x 5)) 3) (list x (cl-m15) x (interactive-form 'cl-m15))) t)) (error (list 'sig e))))",
+   "expected": "(ok (0 3 0 (interactive \"p\")))"
+  },
+  {
+   "id": "interactive-form/0149",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 'sym) (error (list 'sig e))))",
+   "expected": "(ok sym)"
+  },
+  {
+   "id": "interactive-form/0150",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (cons 1 (cons 2 3))) (error (list 'sig e))))",
+   "expected": "(ok (1 2 . 3))"
+  },
+  {
+   "id": "interactive-form/0151",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (cons 1 2)) (error (list 'sig e))))",
+   "expected": "(ok (1 . 2))"
+  },
+  {
+   "id": "interactive-form/0152",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"\")) (error (list 'sig e))))",
+   "expected": "(ok \"\")"
+  },
+  {
+   "id": "interactive-form/0153",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"abc\")) (error (list 'sig e))))",
+   "expected": "(ok \"abc\")"
+  },
+  {
+   "id": "interactive-form/0154",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"λx\")) (error (list 'sig e))))",
+   "expected": "(ok \"λx\")"
+  },
+  {
+   "id": "interactive-form/0155",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (error (list 'sig e))))",
+   "expected": "(ok (1 2 1 2 . #2))"
+  },
+  {
+   "id": "interactive-form/0156",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list 'a (list 'b))) (error (list 'sig e))))",
+   "expected": "(ok (a (b)))"
+  },
+  {
+   "id": "interactive-form/0157",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list 1 2 3)) (error (list 'sig e))))",
+   "expected": "(ok (1 2 3))"
+  },
+  {
+   "id": "interactive-form/0158",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vector 1 2)) (error (list 'sig e))))",
+   "expected": "(ok [1 2])"
+  },
+  {
+   "id": "interactive-form/0159",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok -1) (error (list 'sig e))))",
+   "expected": "(ok -1)"
+  },
+  {
+   "id": "interactive-form/0160",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 0) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "interactive-form/0161",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1) (error (list 'sig e))))",
+   "expected": "(ok 1)"
+  },
+  {
+   "id": "interactive-form/0162",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1.5) (error (list 'sig e))))",
+   "expected": "(ok 1.5)"
+  },
+  {
+   "id": "interactive-form/0163",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 2) (error (list 'sig e))))",
+   "expected": "(ok 2)"
+  },
+  {
+   "id": "interactive-form/0164",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok :kw) (error (list 'sig e))))",
+   "expected": "(ok :kw)"
+  },
+  {
+   "id": "interactive-form/0165",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok most-positive-fixnum) (error (list 'sig e))))",
+   "expected": "(ok 2305843009213693951)"
+  },
+  {
+   "id": "interactive-form/0166",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok nil) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "interactive-form/0167",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok t) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  }
+ ],
+ "pinned": {
+  "interactive-form/0110": "SIGNAL-VS-VALUE",
+  "interactive-form/0123": "MISSING",
+  "interactive-form/0155": "PRINTER"
+ }
+}

@@ -1,0 +1,62 @@
+{
+  "name": "set-default-toplevel-value",
+  "arity": [
+    2,
+    2
+  ],
+  "effect": "global",
+  "gnu_files": [
+    "eval.c",
+    "data.c"
+  ],
+  "gnu_def": "eval.c:827",
+  "rust": "src/prims/vars.rs:211",
+  "args": [
+    "tv-symbol",
+    "tv-value"
+  ],
+  "extra": {
+    "0": [
+      "'tv",
+      "nil",
+      "t",
+      ":tv",
+      "1",
+      "\"text\"",
+      "'(a)",
+      "[1]"
+    ],
+    "1": [
+      "7"
+    ]
+  },
+  "probes": [
+    "(list (fboundp 'set-default-toplevel-value) (functionp #'set-default-toplevel-value) (funcall #'set-default-toplevel-value 'tv 7) (default-value 'tv))",
+    "(list (set-default-toplevel-value 'tv '(3 4)) (default-toplevel-value 'tv))",
+    "(progn (defvar tv 1) (list (let ((tv 2)) (let ((tv 3)) (list (set-default-toplevel-value 'tv 4) tv (default-value 'tv) (default-toplevel-value 'tv)))) tv))",
+    "(progn (defvar tv) (makunbound 'tv) (list (let ((tv 2)) (list (set-default-toplevel-value 'tv 4) tv (default-toplevel-value 'tv))) tv))",
+    "(progn (defvar tv 1) (defvaralias 'ta 'tv) (list (let ((tv 2)) (list (set-default-toplevel-value 'ta 4) ta tv (default-toplevel-value 'ta) (default-toplevel-value 'tv))) tv))",
+    "(progn (defvar tv 1) (defvaralias 'ta 'tv) (list (let ((ta 2)) (list (set-default-toplevel-value 'tv 4) ta tv)) tv))",
+    "(progn (defvar tv 1) (make-local-variable 'tv) (setq tv 5) (list (let ((tv 9)) (list (set-default-toplevel-value 'tv 4) tv (default-value 'tv) (default-toplevel-value 'tv))) tv (default-value 'tv)))",
+    "(progn (defvar tv 1) (make-variable-buffer-local 'tv) (list (let ((tv 9)) (list (set-default-toplevel-value 'tv 4) tv (default-value 'tv) (default-toplevel-value 'tv))) tv (default-value 'tv)))",
+    "(progn (defvar tv 1) (make-variable-buffer-local 'tv) (list (let ((tv 9)) (set-buffer (get-buffer-create \"tv-other\")) (list (set-default-toplevel-value 'tv 4) tv (default-value 'tv) (default-toplevel-value 'tv))) tv))",
+    "(progn (defvar tv 1) (make-variable-buffer-local 'tv) (setq tv 5) (list (set-default-toplevel-value 'tv 4) tv (default-value 'tv)))",
+    "(let* ((s (make-symbol \":tv\")) (v (list 3 4))) (list (set-default-toplevel-value s v) (eq (default-toplevel-value s) v)))",
+    "(progn (defvar tv 1) (defvaralias 'ta 'tv) (list (set-default-toplevel-value 'ta 6) tv ta))",
+    "(set-default-toplevel-value :tv :tv)",
+    "(set-default-toplevel-value 'most-positive-fixnum 0)",
+    "(progn (setq undo-limit 11) (list (let ((undo-limit 22)) (list (set-default-toplevel-value 'undo-limit 33) undo-limit (default-toplevel-value 'undo-limit))) undo-limit))",
+    "(progn (set-buffer (get-buffer-create \"tv-fresh\")) (set-default 'fill-column 71) (list (let ((fill-column 82)) (list (set-default-toplevel-value 'fill-column 93) fill-column (default-value 'fill-column) (default-toplevel-value 'fill-column))) fill-column))",
+    "(progn (set-buffer (get-buffer-create \"tv-fresh\")) (set-default 'fill-column 71) (make-local-variable 'fill-column) (setq fill-column 75) (list (let ((fill-column 82)) (list (set-default-toplevel-value 'fill-column 93) fill-column (default-value 'fill-column) (default-toplevel-value 'fill-column))) fill-column (default-value 'fill-column)))",
+    "(progn (defvar tv 1) (list (catch 'stop (let ((tv 2)) (set-default-toplevel-value 'tv 4) (throw 'stop tv))) tv))",
+    "(progn (setq undo-limit 11) (condition-case e (let ((undo-limit 22)) (set-default-toplevel-value 'undo-limit \"bad\")) (error e)))",
+    "(progn (setq undo-limit 11) (condition-case e (catch 'stop (let ((undo-limit 22)) (set-default-toplevel-value 'undo-limit \"bad\") (throw 'stop 9))) (error e)))",
+    "(progn (setq undo-limit 11) (condition-case e (funcall (lambda () (let ((undo-limit 22)) (set-default-toplevel-value 'undo-limit \"bad\")))) (error e)))",
+    "(progn (setq undo-limit 11) (let ((tv-clean nil)) (list (condition-case e (unwind-protect (let ((undo-limit 22)) (set-default-toplevel-value 'undo-limit \"bad\")) (setq tv-clean t)) (error e)) tv-clean)))",
+    "(progn (defvar tv 1) (let ((tv 2)) (set-default-toplevel-value 'tv (list 4 5)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i))))) tv)",
+    "(progn (setq undo-limit 11) (condition-case e (funcall (lambda (undo-limit) (set-default-toplevel-value 'undo-limit \"bad\")) 22) (error e)))",
+    "(progn (defvar tv 1) (list (funcall (lambda (tv) (list (default-toplevel-value 'tv) (set-default-toplevel-value 'tv 4) tv)) 2) tv))",
+    "(condition-case e (catch 'stop (condition-case nil (let ((undo-limit 22)) (set-default-toplevel-value 'undo-limit \"bad\") (throw 'stop 9)) (wrong-type-argument 'inner))) (error (list 'outer e)))",
+    "(condition-case e (let ((undo-limit 22)) (set-default-toplevel-value 'undo-limit \"bad\") (signal 'arith-error nil)) (wrong-type-argument 'type) (arith-error 'arithmetic) (error (list 'outer e)))"
+  ]
+}

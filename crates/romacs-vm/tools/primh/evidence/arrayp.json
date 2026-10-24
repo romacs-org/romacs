@@ -1,0 +1,704 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "arrayp",
+ "spec_sha256": "1d5de73402b21b2cc4640263693332b0eda9830c6f48a327756a77f5c7612fe7",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "arrayp",
+    "subr",
+    1,
+    1
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "data.c": "eca7895a8043cd0a960dfe037a46028374d1a40cc6ee4d0cf6de90ac56c242ae"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "arrayp/0000",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (arrayp nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "arrayp/0001",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (arrayp t)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "arrayp/0002",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (arrayp 'x)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "arrayp/0003",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (arrayp :key)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "arrayp/0004",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (arrayp 0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "arrayp/0005",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (arrayp 1)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "arrayp/0006",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (arrayp -1)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "arrayp/0007",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (arrayp 4194303)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "arrayp/0008",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (arrayp 4194304)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "arrayp/0009",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (arrayp 1152921504606846975)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "arrayp/0010",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (arrayp 1152921504606846976)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "arrayp/0011",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (arrayp 2305843009213693951)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "arrayp/0012",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (arrayp -2305843009213693952)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "arrayp/0013",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (arrayp #x2000000000000000)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "arrayp/0014",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (arrayp #x-2000000000000001)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "arrayp/0015",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (arrayp #xffffffffffffffffffffffffffffffff)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "arrayp/0016",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (arrayp #x-ffffffffffffffffffffffffffffffff)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "arrayp/0017",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (arrayp 0.0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "arrayp/0018",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (arrayp -0.0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "arrayp/0019",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (arrayp 1.5)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "arrayp/0020",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (arrayp -1.5)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "arrayp/0021",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (arrayp 1.0e+INF)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "arrayp/0022",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (arrayp -1.0e+INF)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "arrayp/0023",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (arrayp 0.0e+NaN)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "arrayp/0024",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (arrayp \"\")) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "arrayp/0025",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (arrayp \"x\")) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "arrayp/0026",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (arrayp \"λ\")) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "arrayp/0027",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (arrayp '(1 . 2))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "arrayp/0028",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (arrayp [1])) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "arrayp/0029",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (arrayp 'tag)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "arrayp/0030",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (arrayp \"text\")) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "arrayp/0031",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (arrayp (unibyte-string 255))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "arrayp/0032",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (arrayp (list 1))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "arrayp/0033",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (arrayp (record 'tag 1))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "arrayp/0034",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (arrayp (make-hash-table))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "arrayp/0035",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (arrayp (obarray-make))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "arrayp/0036",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (arrayp #'car)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "arrayp/0037",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'arrayp '())) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr arrayp> 0))"
+  },
+  {
+   "id": "arrayp/0038",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'arrayp '(1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr arrayp> 2))"
+  },
+  {
+   "id": "arrayp/0039",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (arrayp a0))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "arrayp/0040",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil)) (let ((r (arrayp a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (t))"
+  },
+  {
+   "id": "arrayp/0041",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :key)) (let ((r (arrayp a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "arrayp/0042",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1)) (let ((r (arrayp a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "arrayp/0043",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1152921504606846975)) (let ((r (arrayp a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "arrayp/0044",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -2305843009213693952)) (let ((r (arrayp a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "arrayp/0045",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 #xffffffffffffffffffffffffffffffff)) (let ((r (arrayp a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "arrayp/0046",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -0.0)) (let ((r (arrayp a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "arrayp/0047",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.0e+INF)) (let ((r (arrayp a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "arrayp/0048",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 \"\")) (let ((r (arrayp a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "arrayp/0049",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 '(1 . 2))) (let ((r (arrayp a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "arrayp/0050",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 \"text\")) (let ((r (arrayp a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "arrayp/0051",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (record 'tag 1))) (let ((r (arrayp a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "arrayp/0052",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 #'car)) (let ((r (arrayp a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "arrayp/0053",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.5)) (let ((r (arrayp a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "arrayp/0054",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (unibyte-string 255))) (let ((r (arrayp a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "arrayp/0055",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (arrayp (make-marker))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "arrayp/0056",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (arrayp (set-marker (make-marker) 1))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "arrayp/0057",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (arrayp (current-buffer))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "arrayp/0058",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (arrayp (symbol-function 'car))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "arrayp/0059",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (arrayp (lambda (x) x))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "arrayp/0060",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (arrayp (make-symbol \"x\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "arrayp/0061",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (arrayp (make-hash-table))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "arrayp/0062",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (arrayp (make-char-table 'data-predicate))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "arrayp/0063",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (arrayp (standard-syntax-table))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "arrayp/0064",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (arrayp (obarray-make 3))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "arrayp/0065",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (arrayp (make-overlay 1 1))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "arrayp/0066",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (arrayp (selected-window))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "arrayp/0067",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (arrayp (selected-frame))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "arrayp/0068",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (arrayp (frame-terminal))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "arrayp/0069",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (arrayp (unibyte-string 255))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "arrayp/0070",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (funcall #'arrayp 0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "arrayp/0071",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (funcall #'arrayp (symbol-function 'car))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "arrayp/0072",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (arrayp (make-bool-vector 2 t))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "arrayp/0073",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (arrayp nil) (arrayp '(1)) (arrayp 1) (arrayp [1]) (arrayp \"x\") (arrayp (unibyte-string 255)) (arrayp (make-char-table 'test)) (arrayp (record 'tag 1)) (arrayp (make-hash-table)) (arrayp (obarray-make)) (arrayp #'car) (arrayp (lambda () nil)))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil nil t t t t nil nil nil nil nil))"
+  },
+  {
+   "id": "arrayp/0074",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (fboundp 'arrayp) (functionp #'arrayp) (funcall #'arrayp [1]) (condition-case e (apply #'arrayp nil) (error (list (car e) (nth 2 e)))) (condition-case e (apply #'arrayp '(nil nil)) (error (list (car e) (nth 2 e)))))) (error (list 'sig e))))",
+   "expected": "(ok (t t t (wrong-number-of-arguments 0) (wrong-number-of-arguments 2)))"
+  },
+  {
+   "id": "arrayp/0075",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"\") (error (list 'sig e))))",
+   "expected": "(ok \"\")"
+  },
+  {
+   "id": "arrayp/0076",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"text\") (error (list 'sig e))))",
+   "expected": "(ok \"text\")"
+  },
+  {
+   "id": "arrayp/0077",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"x\") (error (list 'sig e))))",
+   "expected": "(ok \"x\")"
+  },
+  {
+   "id": "arrayp/0078",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"λ\") (error (list 'sig e))))",
+   "expected": "(ok \"λ\")"
+  },
+  {
+   "id": "arrayp/0079",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok #'car) (error (list 'sig e))))",
+   "expected": "(ok car)"
+  },
+  {
+   "id": "arrayp/0080",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok #x-2000000000000001) (error (list 'sig e))))",
+   "expected": "(ok -2305843009213693953)"
+  },
+  {
+   "id": "arrayp/0081",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok #x-ffffffffffffffffffffffffffffffff) (error (list 'sig e))))",
+   "expected": "(ok -340282366920938463463374607431768211455)"
+  },
+  {
+   "id": "arrayp/0082",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok #x2000000000000000) (error (list 'sig e))))",
+   "expected": "(ok 2305843009213693952)"
+  },
+  {
+   "id": "arrayp/0083",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok #xffffffffffffffffffffffffffffffff) (error (list 'sig e))))",
+   "expected": "(ok 340282366920938463463374607431768211455)"
+  },
+  {
+   "id": "arrayp/0084",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok '(1 . 2)) (error (list 'sig e))))",
+   "expected": "(ok (1 . 2))"
+  },
+  {
+   "id": "arrayp/0085",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 'tag) (error (list 'sig e))))",
+   "expected": "(ok tag)"
+  },
+  {
+   "id": "arrayp/0086",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 'x) (error (list 'sig e))))",
+   "expected": "(ok x)"
+  },
+  {
+   "id": "arrayp/0087",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list 1)) (error (list 'sig e))))",
+   "expected": "(ok (1))"
+  },
+  {
+   "id": "arrayp/0088",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (make-hash-table)) (error (list 'sig e))))",
+   "expected": "(ok #s(hash-table))"
+  },
+  {
+   "id": "arrayp/0089",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (obarray-make)) (error (list 'sig e))))",
+   "expected": "(ok #<obarray n=0>)"
+  },
+  {
+   "id": "arrayp/0090",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (record 'tag 1)) (error (list 'sig e))))",
+   "expected": "(ok #s(tag 1))"
+  },
+  {
+   "id": "arrayp/0091",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (unibyte-string 255)) (error (list 'sig e))))",
+   "expected": "(ok \"\\377\")"
+  },
+  {
+   "id": "arrayp/0092",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok -0.0) (error (list 'sig e))))",
+   "expected": "(ok -0.0)"
+  },
+  {
+   "id": "arrayp/0093",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok -1) (error (list 'sig e))))",
+   "expected": "(ok -1)"
+  },
+  {
+   "id": "arrayp/0094",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok -1.0e+INF) (error (list 'sig e))))",
+   "expected": "(ok -1.0e+INF)"
+  },
+  {
+   "id": "arrayp/0095",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok -1.5) (error (list 'sig e))))",
+   "expected": "(ok -1.5)"
+  },
+  {
+   "id": "arrayp/0096",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok -2305843009213693952) (error (list 'sig e))))",
+   "expected": "(ok -2305843009213693952)"
+  },
+  {
+   "id": "arrayp/0097",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 0) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "arrayp/0098",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 0.0) (error (list 'sig e))))",
+   "expected": "(ok 0.0)"
+  },
+  {
+   "id": "arrayp/0099",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 0.0e+NaN) (error (list 'sig e))))",
+   "expected": "(ok 0.0e+NaN)"
+  },
+  {
+   "id": "arrayp/0100",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1) (error (list 'sig e))))",
+   "expected": "(ok 1)"
+  },
+  {
+   "id": "arrayp/0101",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1.0e+INF) (error (list 'sig e))))",
+   "expected": "(ok 1.0e+INF)"
+  },
+  {
+   "id": "arrayp/0102",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1.5) (error (list 'sig e))))",
+   "expected": "(ok 1.5)"
+  },
+  {
+   "id": "arrayp/0103",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1152921504606846975) (error (list 'sig e))))",
+   "expected": "(ok 1152921504606846975)"
+  },
+  {
+   "id": "arrayp/0104",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1152921504606846976) (error (list 'sig e))))",
+   "expected": "(ok 1152921504606846976)"
+  },
+  {
+   "id": "arrayp/0105",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 2305843009213693951) (error (list 'sig e))))",
+   "expected": "(ok 2305843009213693951)"
+  },
+  {
+   "id": "arrayp/0106",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 4194303) (error (list 'sig e))))",
+   "expected": "(ok 4194303)"
+  },
+  {
+   "id": "arrayp/0107",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 4194304) (error (list 'sig e))))",
+   "expected": "(ok 4194304)"
+  },
+  {
+   "id": "arrayp/0108",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok :key) (error (list 'sig e))))",
+   "expected": "(ok :key)"
+  },
+  {
+   "id": "arrayp/0109",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok [1]) (error (list 'sig e))))",
+   "expected": "(ok [1])"
+  },
+  {
+   "id": "arrayp/0110",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok nil) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "arrayp/0111",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok t) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  }
+ ],
+ "pinned": {}
+}

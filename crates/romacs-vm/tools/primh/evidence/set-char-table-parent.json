@@ -1,0 +1,79 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "set-char-table-parent",
+ "spec_sha256": "40e507e21ac138e0a4bee84578e6e01bf65022799623a96915f0cff9c68fad4f",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "set-char-table-parent",
+    "subr",
+    2,
+    2
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "chartab.c": "ee3cc0b6fc04e92281a19ac10493c3db216ab0497c2fe0c12edca33073fe5c51"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "set-char-table-parent/0000",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'set-char-table-parent '(1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr set-char-table-parent> 1))"
+  },
+  {
+   "id": "set-char-table-parent/0001",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'set-char-table-parent '(1 1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr set-char-table-parent> 3))"
+  },
+  {
+   "id": "set-char-table-parent/0002",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a (make-char-table nil 'grand)) (b (make-char-table nil)) (c (make-char-table nil))) (set-char-table-parent b a) (set-char-table-parent c b) (list (eq (char-table-parent c) b) (aref c 65) (progn (set-char-table-range b '(65 . 90) 'parent) (aref c 65)) (progn (set-char-table-range c nil 'default) (aref c 65)) (progn (set-char-table-parent c nil) (char-table-parent c))))) (error (list 'sig e))))",
+   "expected": "(ok (t grand parent default nil))"
+  },
+  {
+   "id": "set-char-table-parent/0003",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((c (make-char-table nil))) (set-char-table-parent c c))) (error (list 'sig e))))",
+   "expected": "(sig (error \"Attempt to make a chartable be its own parent\"))"
+  },
+  {
+   "id": "set-char-table-parent/0004",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a (make-char-table nil)) (b (make-char-table nil))) (set-char-table-parent a b) (set-char-table-parent b a))) (error (list 'sig e))))",
+   "expected": "(sig (error \"Attempt to make a chartable be its own parent\"))"
+  },
+  {
+   "id": "set-char-table-parent/0005",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-char-table-parent 1 nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument char-table-p 1))"
+  },
+  {
+   "id": "set-char-table-parent/0006",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-char-table-parent (make-char-table nil) 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument char-table-p 1))"
+  },
+  {
+   "id": "set-char-table-parent/0007",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((c (make-char-table nil))) (let ((p (make-char-table 'different))) (eq (funcall #'set-char-table-parent c p) p)))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  }
+ ]
+}

@@ -1,0 +1,560 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "number-or-marker-p",
+ "spec_sha256": "667b293f56149c0818762eb22483d47bf2ebab95afbb0b6428d1ffea2701bf85",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "number-or-marker-p",
+    "subr",
+    1,
+    1
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "data.c": "eca7895a8043cd0a960dfe037a46028374d1a40cc6ee4d0cf6de90ac56c242ae"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "number-or-marker-p/0000",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (number-or-marker-p nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "number-or-marker-p/0001",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (number-or-marker-p t)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "number-or-marker-p/0002",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (number-or-marker-p 'x)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "number-or-marker-p/0003",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (number-or-marker-p :key)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "number-or-marker-p/0004",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (number-or-marker-p 0)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "number-or-marker-p/0005",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (number-or-marker-p 1)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "number-or-marker-p/0006",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (number-or-marker-p -1)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "number-or-marker-p/0007",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (number-or-marker-p 4194303)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "number-or-marker-p/0008",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (number-or-marker-p 4194304)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "number-or-marker-p/0009",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (number-or-marker-p 1152921504606846975)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "number-or-marker-p/0010",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (number-or-marker-p 1152921504606846976)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "number-or-marker-p/0011",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (number-or-marker-p 2305843009213693951)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "number-or-marker-p/0012",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (number-or-marker-p -2305843009213693952)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "number-or-marker-p/0013",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (number-or-marker-p #x2000000000000000)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "number-or-marker-p/0014",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (number-or-marker-p #x-2000000000000001)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "number-or-marker-p/0015",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (number-or-marker-p #xffffffffffffffffffffffffffffffff)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "number-or-marker-p/0016",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (number-or-marker-p #x-ffffffffffffffffffffffffffffffff)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "number-or-marker-p/0017",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (number-or-marker-p 0.0)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "number-or-marker-p/0018",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (number-or-marker-p -0.0)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "number-or-marker-p/0019",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (number-or-marker-p 1.5)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "number-or-marker-p/0020",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (number-or-marker-p -1.5)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "number-or-marker-p/0021",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (number-or-marker-p 1.0e+INF)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "number-or-marker-p/0022",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (number-or-marker-p -1.0e+INF)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "number-or-marker-p/0023",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (number-or-marker-p 0.0e+NaN)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "number-or-marker-p/0024",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (number-or-marker-p \"\")) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "number-or-marker-p/0025",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (number-or-marker-p \"x\")) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "number-or-marker-p/0026",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (number-or-marker-p \"λ\")) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "number-or-marker-p/0027",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (number-or-marker-p '(1 . 2))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "number-or-marker-p/0028",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (number-or-marker-p [1])) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "number-or-marker-p/0029",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'number-or-marker-p '())) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr number-or-marker-p> 0))"
+  },
+  {
+   "id": "number-or-marker-p/0030",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'number-or-marker-p '(1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr number-or-marker-p> 2))"
+  },
+  {
+   "id": "number-or-marker-p/0031",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (number-or-marker-p a0))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "number-or-marker-p/0032",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil)) (let ((r (number-or-marker-p a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (t))"
+  },
+  {
+   "id": "number-or-marker-p/0033",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :key)) (let ((r (number-or-marker-p a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "number-or-marker-p/0034",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1)) (let ((r (number-or-marker-p a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "number-or-marker-p/0035",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1152921504606846975)) (let ((r (number-or-marker-p a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "number-or-marker-p/0036",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -2305843009213693952)) (let ((r (number-or-marker-p a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "number-or-marker-p/0037",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 #xffffffffffffffffffffffffffffffff)) (let ((r (number-or-marker-p a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "number-or-marker-p/0038",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -0.0)) (let ((r (number-or-marker-p a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "number-or-marker-p/0039",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.0e+INF)) (let ((r (number-or-marker-p a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "number-or-marker-p/0040",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 \"\")) (let ((r (number-or-marker-p a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "number-or-marker-p/0041",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 '(1 . 2))) (let ((r (number-or-marker-p a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "number-or-marker-p/0042",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (number-or-marker-p (make-marker))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "number-or-marker-p/0043",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (number-or-marker-p (set-marker (make-marker) 1))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "number-or-marker-p/0044",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (number-or-marker-p (current-buffer))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "number-or-marker-p/0045",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (number-or-marker-p (symbol-function 'car))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "number-or-marker-p/0046",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (number-or-marker-p (lambda (x) x))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "number-or-marker-p/0047",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (number-or-marker-p (make-symbol \"x\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "number-or-marker-p/0048",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (number-or-marker-p (make-hash-table))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "number-or-marker-p/0049",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (number-or-marker-p (make-char-table 'data-predicate))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "number-or-marker-p/0050",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (number-or-marker-p (standard-syntax-table))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "number-or-marker-p/0051",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (number-or-marker-p (obarray-make 3))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "number-or-marker-p/0052",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (number-or-marker-p (make-overlay 1 1))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "number-or-marker-p/0053",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (number-or-marker-p (selected-window))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "number-or-marker-p/0054",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (number-or-marker-p (selected-frame))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "number-or-marker-p/0055",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (number-or-marker-p (frame-terminal))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "number-or-marker-p/0056",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (number-or-marker-p (unibyte-string 255))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "number-or-marker-p/0057",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (funcall #'number-or-marker-p 0)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "number-or-marker-p/0058",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (funcall #'number-or-marker-p (symbol-function 'car))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "number-or-marker-p/0059",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"\") (error (list 'sig e))))",
+   "expected": "(ok \"\")"
+  },
+  {
+   "id": "number-or-marker-p/0060",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"x\") (error (list 'sig e))))",
+   "expected": "(ok \"x\")"
+  },
+  {
+   "id": "number-or-marker-p/0061",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"λ\") (error (list 'sig e))))",
+   "expected": "(ok \"λ\")"
+  },
+  {
+   "id": "number-or-marker-p/0062",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok #x-2000000000000001) (error (list 'sig e))))",
+   "expected": "(ok -2305843009213693953)"
+  },
+  {
+   "id": "number-or-marker-p/0063",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok #x-ffffffffffffffffffffffffffffffff) (error (list 'sig e))))",
+   "expected": "(ok -340282366920938463463374607431768211455)"
+  },
+  {
+   "id": "number-or-marker-p/0064",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok #x2000000000000000) (error (list 'sig e))))",
+   "expected": "(ok 2305843009213693952)"
+  },
+  {
+   "id": "number-or-marker-p/0065",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok #xffffffffffffffffffffffffffffffff) (error (list 'sig e))))",
+   "expected": "(ok 340282366920938463463374607431768211455)"
+  },
+  {
+   "id": "number-or-marker-p/0066",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok '(1 . 2)) (error (list 'sig e))))",
+   "expected": "(ok (1 . 2))"
+  },
+  {
+   "id": "number-or-marker-p/0067",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 'x) (error (list 'sig e))))",
+   "expected": "(ok x)"
+  },
+  {
+   "id": "number-or-marker-p/0068",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok -0.0) (error (list 'sig e))))",
+   "expected": "(ok -0.0)"
+  },
+  {
+   "id": "number-or-marker-p/0069",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok -1) (error (list 'sig e))))",
+   "expected": "(ok -1)"
+  },
+  {
+   "id": "number-or-marker-p/0070",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok -1.0e+INF) (error (list 'sig e))))",
+   "expected": "(ok -1.0e+INF)"
+  },
+  {
+   "id": "number-or-marker-p/0071",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok -1.5) (error (list 'sig e))))",
+   "expected": "(ok -1.5)"
+  },
+  {
+   "id": "number-or-marker-p/0072",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok -2305843009213693952) (error (list 'sig e))))",
+   "expected": "(ok -2305843009213693952)"
+  },
+  {
+   "id": "number-or-marker-p/0073",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 0) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "number-or-marker-p/0074",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 0.0) (error (list 'sig e))))",
+   "expected": "(ok 0.0)"
+  },
+  {
+   "id": "number-or-marker-p/0075",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 0.0e+NaN) (error (list 'sig e))))",
+   "expected": "(ok 0.0e+NaN)"
+  },
+  {
+   "id": "number-or-marker-p/0076",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1) (error (list 'sig e))))",
+   "expected": "(ok 1)"
+  },
+  {
+   "id": "number-or-marker-p/0077",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1.0e+INF) (error (list 'sig e))))",
+   "expected": "(ok 1.0e+INF)"
+  },
+  {
+   "id": "number-or-marker-p/0078",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1.5) (error (list 'sig e))))",
+   "expected": "(ok 1.5)"
+  },
+  {
+   "id": "number-or-marker-p/0079",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1152921504606846975) (error (list 'sig e))))",
+   "expected": "(ok 1152921504606846975)"
+  },
+  {
+   "id": "number-or-marker-p/0080",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1152921504606846976) (error (list 'sig e))))",
+   "expected": "(ok 1152921504606846976)"
+  },
+  {
+   "id": "number-or-marker-p/0081",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 2305843009213693951) (error (list 'sig e))))",
+   "expected": "(ok 2305843009213693951)"
+  },
+  {
+   "id": "number-or-marker-p/0082",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 4194303) (error (list 'sig e))))",
+   "expected": "(ok 4194303)"
+  },
+  {
+   "id": "number-or-marker-p/0083",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 4194304) (error (list 'sig e))))",
+   "expected": "(ok 4194304)"
+  },
+  {
+   "id": "number-or-marker-p/0084",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok :key) (error (list 'sig e))))",
+   "expected": "(ok :key)"
+  },
+  {
+   "id": "number-or-marker-p/0085",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok [1]) (error (list 'sig e))))",
+   "expected": "(ok [1])"
+  },
+  {
+   "id": "number-or-marker-p/0086",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok nil) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "number-or-marker-p/0087",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok t) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  }
+ ],
+ "pinned": {}
+}

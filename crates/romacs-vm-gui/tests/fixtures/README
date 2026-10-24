@@ -1,0 +1,14 @@
+GNU oracle fixtures, byte-exact, never edited.
+
+gnu-45b0f7699df-cus-start-86.el      lisp/cus-start.el line 86 at GNU 45b0f7699df,
+                                     the backquoted list read from that line
+                                     (208 elements by GNU 32.0.50 `read`).
+                                     sha256 30fa26c03194eec39a724bfd46b36dea234912e86e4a0e74a2096b2b40ca2c17
+gnu-45b0f7699df-comp-common-71.el    lisp/emacs-lisp/comp-common.el line 71 at GNU
+                                     45b0f7699df, the whole defconst
+                                     (270-element backquoted list).
+                                     sha256 c36328aa36f0abcca3648c587dec5878ad8c06703b37e955b65d5a513224dbf7
+
+Extracted with GNU 32.0.50 -Q --batch: (forward-line N-1), (read), and
+write-region over exactly the read span, from `git show 45b0f7699df:lisp/...`
+in a pristine GNU Emacs checkout at that revision.

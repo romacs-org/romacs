@@ -1,0 +1,512 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "define-charset-internal",
+ "spec_sha256": "a5b774658fd766b7c8ae034185a81a86b9a8aaa249264b3f39c5cd68d3db9ac8",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "define-charset-internal",
+    "subr",
+    17,
+    "many"
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "charset.c": "8cda94ae199a7bbab47fd2f662282e7ddf23bc799fec084dbe30d50362111103",
+  "charset.h": "6a7e1d2974e0a045373583daa660137d535439f48a4c87e70cf9fa960ac25877"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "define-charset-internal/0000",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'define-charset-internal '(1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr define-charset-internal> 16))"
+  },
+  {
+   "id": "define-charset-internal/0001",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-charset-internal 'primh-cdef nil [0 3 0 0 0 0 0 0] nil nil nil nil nil nil nil nil 1024 nil nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "define-charset-internal/0002",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (define-charset-internal 'primh-cdef nil [0 3 0 0 0 0 0 0] nil nil nil nil nil nil nil nil 1024 nil nil nil nil nil) (list (charset-plist 'primh-cdef) (not (null (memq 'primh-cdef charset-list))) (functionp #'define-charset-internal) (fboundp 'define-charset-internal)))) (error (list 'sig e))))",
+   "expected": "(ok (nil t t t))"
+  },
+  {
+   "id": "define-charset-internal/0003",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-charset-internal 'primh-cdef nil [1 2 1 2 0 0 0 0] nil nil nil nil nil nil nil nil 1024 nil nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "define-charset-internal/0004",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-charset-internal 'primh-cdef 4 [0 3 0 0 0 0 0 0] nil nil nil nil nil nil nil nil 1024 nil nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "define-charset-internal/0005",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (define-charset-internal 'primh-cdef nil [0 3 0 0 0 0 0 0] 1 2 nil nil nil nil nil nil 1024 nil nil nil nil nil) (list (charset-plist 'primh-cdef) (not (null (memq 'primh-cdef charset-list)))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "define-charset-internal/0006",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-charset-internal 42 nil [0 3 0 0 0 0 0 0] nil nil nil nil nil nil nil nil 1024 nil nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 42))"
+  },
+  {
+   "id": "define-charset-internal/0007",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-charset-internal 'primh-cdef 0 [0 3 0 0 0 0 0 0] nil nil nil nil nil nil nil nil 1024 nil nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range 0 1 4))"
+  },
+  {
+   "id": "define-charset-internal/0008",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-charset-internal 'primh-cdef 5 [0 3 0 0 0 0 0 0] nil nil nil nil nil nil nil nil 1024 nil nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range 5 1 4))"
+  },
+  {
+   "id": "define-charset-internal/0009",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-charset-internal 'primh-cdef 'bad [0 3 0 0 0 0 0 0] nil nil nil nil nil nil nil nil 1024 nil nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp bad))"
+  },
+  {
+   "id": "define-charset-internal/0010",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-charset-internal 'primh-cdef 1.0 [0 3 0 0 0 0 0 0] nil nil nil nil nil nil nil nil 1024 nil nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp 1.0))"
+  },
+  {
+   "id": "define-charset-internal/0011",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-charset-internal 'primh-cdef nil '(0 3 0 0 0 0 0 0) nil nil nil nil nil nil nil nil 1024 nil nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument arrayp (0 3 0 0 0 0 0 0)))"
+  },
+  {
+   "id": "define-charset-internal/0012",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-charset-internal 'primh-cdef nil [0 3] nil nil nil nil nil nil nil nil 1024 nil nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range [0 3] 2))"
+  },
+  {
+   "id": "define-charset-internal/0013",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-charset-internal 'primh-cdef nil 'bad nil nil nil nil nil nil nil nil 1024 nil nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument arrayp bad))"
+  },
+  {
+   "id": "define-charset-internal/0014",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-charset-internal 'primh-cdef nil [-1 3 0 0 0 0 0 0] nil nil nil nil nil nil nil nil 1024 nil nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range -1 0 255))"
+  },
+  {
+   "id": "define-charset-internal/0015",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-charset-internal 'primh-cdef nil [0 256 0 0 0 0 0 0] nil nil nil nil nil nil nil nil 1024 nil nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range 256 0 255))"
+  },
+  {
+   "id": "define-charset-internal/0016",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-charset-internal 'primh-cdef nil [3 2 0 0 0 0 0 0] nil nil nil nil nil nil nil nil 1024 nil nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range 2 3 255))"
+  },
+  {
+   "id": "define-charset-internal/0017",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-charset-internal 'primh-cdef nil [0 bad 0 0 0 0 0 0] nil nil nil nil nil nil nil nil 1024 nil nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp bad))"
+  },
+  {
+   "id": "define-charset-internal/0018",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-charset-internal 'primh-cdef nil [0 3 0 0 0 0 0 0] -1 nil nil nil nil nil nil nil 1024 nil nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (error \"Not an in-range integer, integral float, or cons of integers\"))"
+  },
+  {
+   "id": "define-charset-internal/0019",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-charset-internal 'primh-cdef nil [0 3 0 0 0 0 0 0] 4 nil nil nil nil nil nil nil 1024 nil nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range 0 3 4))"
+  },
+  {
+   "id": "define-charset-internal/0020",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-charset-internal 'primh-cdef nil [0 3 0 0 0 0 0 0] 'bad nil nil nil nil nil nil nil 1024 nil nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (error \"Not an in-range integer, integral float, or cons of integers\"))"
+  },
+  {
+   "id": "define-charset-internal/0021",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-charset-internal 'primh-cdef nil [0 3 0 0 0 0 0 0] nil 4 nil nil nil nil nil nil 1024 nil nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range 0 3 4))"
+  },
+  {
+   "id": "define-charset-internal/0022",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-charset-internal 'primh-cdef nil [0 3 0 0 0 0 0 0] nil -1 nil nil nil nil nil nil 1024 nil nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (error \"Not an in-range integer, integral float, or cons of integers\"))"
+  },
+  {
+   "id": "define-charset-internal/0023",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-charset-internal 'primh-cdef nil [0 3 0 0 0 0 0 0] nil 'bad nil nil nil nil nil nil 1024 nil nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (error \"Not an in-range integer, integral float, or cons of integers\"))"
+  },
+  {
+   "id": "define-charset-internal/0024",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-charset-internal 'primh-cdef nil [0 3 0 0 0 0 0 0] nil nil nil nil nil nil nil -1 1024 nil nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (error \"Not an in-range integer, integral float, or cons of integers\"))"
+  },
+  {
+   "id": "define-charset-internal/0025",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-charset-internal 'primh-cdef nil [0 3 0 0 0 0 0 0] nil nil nil nil nil nil nil 4294967296 1024 nil nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (error \"Not an in-range integer, integral float, or cons of integers\"))"
+  },
+  {
+   "id": "define-charset-internal/0026",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-charset-internal 'primh-cdef nil [0 3 0 0 0 0 0 0] nil nil nil nil nil nil nil 'bad 1024 nil nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (error \"Not an in-range integer, integral float, or cons of integers\"))"
+  },
+  {
+   "id": "define-charset-internal/0027",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-charset-internal 'primh-cdef nil [0 3 0 0 0 0 0 0] nil nil nil nil nil nil nil 1 1024 nil nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "define-charset-internal/0028",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-charset-internal 'primh-cdef nil [0 3 0 0 0 0 0 0] nil nil nil nil nil nil nil '(0 . 9) 1024 nil nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "define-charset-internal/0029",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-charset-internal 'primh-cdef nil [0 3 0 0 0 0 0 0] nil nil 47 nil nil nil nil nil 1024 nil nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (error \"Invalid iso-final-char: 47\"))"
+  },
+  {
+   "id": "define-charset-internal/0030",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-charset-internal 'primh-cdef nil [0 3 0 0 0 0 0 0] nil nil 128 nil nil nil nil nil 1024 nil nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (error \"Invalid iso-final-char: 128\"))"
+  },
+  {
+   "id": "define-charset-internal/0031",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-charset-internal 'primh-cdef nil [0 3 0 0 0 0 0 0] nil nil 'bad nil nil nil nil nil 1024 nil nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument fixnump bad))"
+  },
+  {
+   "id": "define-charset-internal/0032",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-charset-internal 'primh-cdef nil [0 3 0 0 0 0 0 0] nil nil 48 nil nil nil nil nil 1024 nil nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "define-charset-internal/0033",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-charset-internal 'primh-cdef nil [0 3 0 0 0 0 0 0] nil nil 127 nil nil nil nil nil 1024 nil nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "define-charset-internal/0034",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-charset-internal 'primh-cdef nil [0 3 0 0 0 0 0 0] nil nil nil -2 nil nil nil nil 1024 nil nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range -2 -1 63))"
+  },
+  {
+   "id": "define-charset-internal/0035",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-charset-internal 'primh-cdef nil [0 3 0 0 0 0 0 0] nil nil nil 64 nil nil nil nil 1024 nil nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range 64 -1 63))"
+  },
+  {
+   "id": "define-charset-internal/0036",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-charset-internal 'primh-cdef nil [0 3 0 0 0 0 0 0] nil nil nil 'bad nil nil nil nil 1024 nil nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp bad))"
+  },
+  {
+   "id": "define-charset-internal/0037",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-charset-internal 'primh-cdef nil [0 3 0 0 0 0 0 0] nil nil nil -1 nil nil nil nil 1024 nil nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "define-charset-internal/0038",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-charset-internal 'primh-cdef nil [0 3 0 0 0 0 0 0] nil nil nil 63 nil nil nil nil 1024 nil nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "define-charset-internal/0039",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-charset-internal 'primh-cdef nil [0 3 0 0 0 0 0 0] nil nil nil nil -1 nil nil nil 1024 nil nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument wholenump -1))"
+  },
+  {
+   "id": "define-charset-internal/0040",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-charset-internal 'primh-cdef nil [0 3 0 0 0 0 0 0] nil nil nil nil 1 nil nil nil 1024 nil nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (error \"Invalid emacs-mule-id: 1\"))"
+  },
+  {
+   "id": "define-charset-internal/0041",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-charset-internal 'primh-cdef nil [0 3 0 0 0 0 0 0] nil nil nil nil 128 nil nil nil 1024 nil nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (error \"Invalid emacs-mule-id: 128\"))"
+  },
+  {
+   "id": "define-charset-internal/0042",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-charset-internal 'primh-cdef nil [0 3 0 0 0 0 0 0] nil nil nil nil 256 nil nil nil 1024 nil nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (error \"Invalid emacs-mule-id: 256\"))"
+  },
+  {
+   "id": "define-charset-internal/0043",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-charset-internal 'primh-cdef nil [0 3 0 0 0 0 0 0] nil nil nil nil 'bad nil nil nil 1024 nil nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument wholenump bad))"
+  },
+  {
+   "id": "define-charset-internal/0044",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-charset-internal 'primh-cdef nil [0 3 0 0 0 0 0 0] nil nil nil nil 0 nil nil nil 1024 nil nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "define-charset-internal/0045",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-charset-internal 'primh-cdef nil [0 3 0 0 0 0 0 0] nil nil nil nil 129 nil nil nil 1024 nil nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "define-charset-internal/0046",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-charset-internal 'primh-cdef nil [0 3 0 0 0 0 0 0] nil nil nil nil 255 nil nil nil 1024 nil nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "define-charset-internal/0047",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-charset-internal 'primh-cdef nil [0 3 0 0 0 0 0 0] nil nil nil nil nil nil nil nil -1 nil nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument characterp -1))"
+  },
+  {
+   "id": "define-charset-internal/0048",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-charset-internal 'primh-cdef nil [0 3 0 0 0 0 0 0] nil nil nil nil nil nil nil nil 4194304 nil nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument characterp 4194304))"
+  },
+  {
+   "id": "define-charset-internal/0049",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-charset-internal 'primh-cdef nil [0 3 0 0 0 0 0 0] nil nil nil nil nil nil nil nil 'bad nil nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument characterp bad))"
+  },
+  {
+   "id": "define-charset-internal/0050",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-charset-internal 'primh-cdef nil [0 3 0 0 0 0 0 0] nil nil nil nil nil nil nil nil nil nil nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (error \"None of :code-offset, :map, :parents are specified\"))"
+  },
+  {
+   "id": "define-charset-internal/0051",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-charset-internal 'primh-cdef nil [0 3 0 0 0 0 0 0] nil nil nil nil nil nil nil nil 4194303 nil nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (error \"Unsupported max char: 3 + 3d > MAX_CHAR (4194303)\"))"
+  },
+  {
+   "id": "define-charset-internal/0052",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-charset-internal 'primh-cdef nil [0 3 0 0 0 0 0 0] nil nil nil nil nil nil nil nil 1024 nil nil nil 'bad nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp bad))"
+  },
+  {
+   "id": "define-charset-internal/0053",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-charset-internal 'primh-cdef nil [0 3 0 0 0 0 0 0] nil nil nil nil nil nil nil nil 1024 nil nil nil '(1 2) nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument vectorp (1 2)))"
+  },
+  {
+   "id": "define-charset-internal/0054",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-charset-internal 'primh-cdef nil [0 3 0 0 0 0 0 0] nil nil nil nil nil nil nil nil 1024 nil nil nil [] nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "define-charset-internal/0055",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-charset-internal 'primh-cdef nil [0 3 0 0 0 0 0 0] nil nil nil nil nil nil nil nil 1024 nil nil nil \"unused-primh-unify\" nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "define-charset-internal/0056",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-charset-internal 'primh-cdef nil [0 3 0 0 0 0 0 0] nil nil nil nil nil nil nil nil 1024 nil nil nil nil 42)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 42))"
+  },
+  {
+   "id": "define-charset-internal/0057",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-charset-internal 'primh-cdef nil [0 3 0 0 0 0 0 0] nil nil nil nil nil nil nil nil 1024 nil nil nil nil '(:x . 1))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "define-charset-internal/0058",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-charset-internal 'primh-cdef nil [0 3 0 0 0 0 0 0] 2 1 nil nil nil nil nil nil 1024 nil nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (args-out-of-range 2 3 1))"
+  },
+  {
+   "id": "define-charset-internal/0059",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-charset-internal 'primh-cdef 4 [0 255 0 255 0 255 0 255] nil nil nil nil nil nil nil nil 1024 nil nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (error \"Attribute :invalid-code must be specified\"))"
+  },
+  {
+   "id": "define-charset-internal/0060",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (define-charset-internal 'primh-cdef nil [0 3 0 0 0 0 0 0] nil nil nil nil nil nil nil nil 0 nil nil nil nil nil) (list (charset-plist 'primh-cdef) (not (null (memq 'primh-cdef charset-list)))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "define-charset-internal/0061",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-charset-internal 'primh-cdef nil [0 3 0 0 0 0 0 0] nil nil nil nil nil 'yes 42 nil 1024 nil nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "define-charset-internal/0062",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((p (list :probe 7))) (define-charset-internal 'primh-cdef nil [0 3 0 0 0 0 0 0] nil nil nil nil nil nil nil nil 1024 nil nil nil nil p) (list (eq p (charset-plist 'primh-cdef)) (progn (setcar p :changed) (charset-plist 'primh-cdef))))) (error (list 'sig e))))",
+   "expected": "(ok (t (:changed 7)))"
+  },
+  {
+   "id": "define-charset-internal/0063",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((p (list :probe 7))) (define-charset-internal 'primh-cdef nil [0 3 0 0 0 0 0 0] nil nil nil nil nil nil nil nil 1024 nil nil nil nil p) (define-charset-alias 'primh-cdef-alias 'primh-cdef) (list (eq p (charset-plist 'primh-cdef-alias)) (eq (charset-plist 'primh-cdef) (charset-plist 'primh-cdef-alias)) (not (null (memq 'primh-cdef charset-list))) (not (null (memq 'primh-cdef-alias charset-list)))))) (error (list 'sig e))))",
+   "expected": "(ok (t t t t))"
+  },
+  {
+   "id": "define-charset-internal/0064",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((p (list :old 1)) (q (list :new 2))) (define-charset-internal 'primh-cdef nil [0 3 0 0 0 0 0 0] nil nil nil nil nil nil nil nil 1024 nil nil nil nil p) (define-charset-alias 'primh-cdef-alias 'primh-cdef) (define-charset-internal 'primh-cdef nil [0 3 0 0 0 0 0 0] nil nil nil nil nil nil nil nil 2048 nil nil nil nil q) (list (eq q (charset-plist 'primh-cdef)) (eq p (charset-plist 'primh-cdef-alias)) (eq (charset-plist 'primh-cdef) (charset-plist 'primh-cdef-alias)) (not (null (memq 'primh-cdef charset-list))) (not (null (memq 'primh-cdef-alias charset-list)))))) (error (list 'sig e))))",
+   "expected": "(ok (t t nil t t))"
+  },
+  {
+   "id": "define-charset-internal/0065",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((p (list :old 1)) (q (list :new 2))) (define-charset-internal 'primh-cdef nil [0 3 0 0 0 0 0 0] nil nil nil nil nil nil nil nil 1024 nil nil nil nil p) (define-charset-alias 'primh-cdef-alias 'primh-cdef) (define-charset-internal 'primh-cdef-alias nil [0 3 0 0 0 0 0 0] nil nil nil nil nil nil nil nil 2048 nil nil nil nil q) (list (eq p (charset-plist 'primh-cdef)) (eq q (charset-plist 'primh-cdef-alias)) (not (null (memq 'primh-cdef charset-list))) (not (null (memq 'primh-cdef-alias charset-list)))))) (error (list 'sig e))))",
+   "expected": "(ok (t t t t))"
+  },
+  {
+   "id": "define-charset-internal/0066",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((name (make-symbol \"primh-cdef-failed\"))) (list (condition-case e (define-charset-internal name 0 [0 3 0 0 0 0 0 0] nil nil nil nil nil nil nil nil 1024 nil nil nil nil nil) (error e)) (list (condition-case e (charset-plist name) (error e)) (not (null (memq name charset-list))))))) (error (list 'sig e))))",
+   "expected": "(ok ((args-out-of-range 0 1 4) ((wrong-type-argument charsetp primh-cdef-failed) nil)))"
+  },
+  {
+   "id": "define-charset-internal/0067",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((p (list :old 1))) (define-charset-internal 'primh-cdef nil [0 3 0 0 0 0 0 0] nil nil nil nil nil nil nil nil 1024 nil nil nil nil p) (define-charset-alias 'primh-cdef-alias 'primh-cdef) (list (condition-case e (define-charset-internal 'primh-cdef 0 [0 3 0 0 0 0 0 0] nil nil nil nil nil nil nil nil 2048 nil nil nil nil nil) (error e)) (eq p (charset-plist 'primh-cdef)) (eq p (charset-plist 'primh-cdef-alias)) (not (null (memq 'primh-cdef charset-list))) (not (null (memq 'primh-cdef-alias charset-list)))))) (error (list 'sig e))))",
+   "expected": "(ok ((args-out-of-range 0 1 4) t t t t))"
+  },
+  {
+   "id": "define-charset-internal/0068",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((name (make-symbol \"primh-cdef-failed\"))) (list (condition-case e (define-charset-internal name nil [0 3 0 0 0 0 0 0] nil nil nil nil nil nil nil nil 1024 nil nil nil 'bad nil) (error e)) (list (condition-case e (charset-plist name) (error e)) (not (null (memq name charset-list))))))) (error (list 'sig e))))",
+   "expected": "(ok ((wrong-type-argument vectorp bad) ((wrong-type-argument charsetp primh-cdef-failed) nil)))"
+  },
+  {
+   "id": "define-charset-internal/0069",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((p (list :old 1))) (define-charset-internal 'primh-cdef nil [0 3 0 0 0 0 0 0] nil nil nil nil nil nil nil nil 1024 nil nil nil nil p) (define-charset-alias 'primh-cdef-alias 'primh-cdef) (list (condition-case e (define-charset-internal 'primh-cdef nil [0 3 0 0 0 0 0 0] nil nil nil nil nil nil nil nil 2048 nil nil nil 'bad nil) (error e)) (eq p (charset-plist 'primh-cdef)) (eq p (charset-plist 'primh-cdef-alias)) (not (null (memq 'primh-cdef charset-list))) (not (null (memq 'primh-cdef-alias charset-list)))))) (error (list 'sig e))))",
+   "expected": "(ok ((wrong-type-argument vectorp bad) t t t t))"
+  },
+  {
+   "id": "define-charset-internal/0070",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((name (make-symbol \"primh-cdef-failed\"))) (list (condition-case e (define-charset-internal name nil [0 3 0 0 0 0 0 0] nil nil nil nil nil nil nil nil 1024 nil nil nil nil 42) (error e)) (list (condition-case e (charset-plist name) (error e)) (not (null (memq name charset-list))))))) (error (list 'sig e))))",
+   "expected": "(ok ((wrong-type-argument listp 42) ((wrong-type-argument charsetp primh-cdef-failed) nil)))"
+  },
+  {
+   "id": "define-charset-internal/0071",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((p (list :old 1))) (define-charset-internal 'primh-cdef nil [0 3 0 0 0 0 0 0] nil nil nil nil nil nil nil nil 1024 nil nil nil nil p) (define-charset-alias 'primh-cdef-alias 'primh-cdef) (list (condition-case e (define-charset-internal 'primh-cdef nil [0 3 0 0 0 0 0 0] nil nil nil nil nil nil nil nil 2048 nil nil nil nil 42) (error e)) (eq p (charset-plist 'primh-cdef)) (eq p (charset-plist 'primh-cdef-alias)) (not (null (memq 'primh-cdef charset-list))) (not (null (memq 'primh-cdef-alias charset-list)))))) (error (list 'sig e))))",
+   "expected": "(ok ((wrong-type-argument listp 42) t t t t))"
+  },
+  {
+   "id": "define-charset-internal/0072",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'define-charset-internal '())) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr define-charset-internal> 0))"
+  },
+  {
+   "id": "define-charset-internal/0073",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'define-charset-internal '(1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments define-charset-internal . 18))"
+  },
+  {
+   "id": "define-charset-internal/0074",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'define-charset-internal '(1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments define-charset-internal . 20))"
+  },
+  {
+   "id": "define-charset-internal/0075",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-charset-internal 'primh-extra nil [0 3 0 0 0 0 0 0] nil nil nil nil nil nil nil '(16777216 0 . 5) 1024 nil nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (error \"Not an in-range integer, integral float, or cons of integers\"))"
+  },
+  {
+   "id": "define-charset-internal/0076",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-charset-internal 'primh-extra nil (record 0 3 0 0 0 0 0 0) nil nil nil nil nil nil nil nil 1024 nil nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "define-charset-internal/0077",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-charset-internal 'primh-extra nil (string 0 3 0 0 0 0 0 0) nil nil nil nil nil nil nil nil 1024 nil nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "define-charset-internal/0078",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-charset-internal 'primh-extra nil (make-char-table 'extra 0) nil nil nil nil nil nil nil nil 1024 nil nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "define-charset-internal/0079",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-charset-internal 'primh-extra nil [0 3 0 0 0 0 0 0] nil nil nil nil nil nil nil nil 1024 'unused-map 42 42 nil nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  }
+ ]
+}

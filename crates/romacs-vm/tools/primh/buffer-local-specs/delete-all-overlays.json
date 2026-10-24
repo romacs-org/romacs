@@ -1,0 +1,28 @@
+{
+  "name": "delete-all-overlays",
+  "arity": [
+    0,
+    1
+  ],
+  "effect": "global",
+  "gnu_files": [
+    "buffer.c"
+  ],
+  "gnu_def": "buffer.c:3847",
+  "rust": "src/prims/overlays.rs:4",
+  "args": [
+    "projected-buffer-locals"
+  ],
+  "probes": [
+    "(with-temp-buffer (insert \"abc\") (let ((o (make-overlay 1 2))) (overlay-put o 'tag 7) (list (delete-all-overlays) (overlay-buffer o) (overlay-start o) (overlay-get o 'tag) (overlays-in 1 4))))",
+    "(with-temp-buffer (insert \"abc\") (let ((a (make-overlay 1 2)) (b (make-overlay 4 4))) (narrow-to-region 2 3) (delete-all-overlays nil) (list (overlay-buffer a) (overlay-buffer b))))",
+    "(let ((b (get-buffer-create \"overlay-other\")) (o (make-overlay 1 1))) (unwind-protect (let ((p (make-overlay 1 1 b))) (list (delete-all-overlays b) (overlay-buffer p) (eq (overlay-buffer o) (current-buffer)))) (kill-buffer b)))",
+    "(let ((b (get-buffer-create \"overlay-killed\"))) (let ((o (make-overlay 1 1 b))) (kill-buffer b) (list (overlay-buffer o) (delete-all-overlays b))))",
+    "(condition-case e (delete-all-overlays \"no-such-buffer\") (error (car e)))",
+    "(condition-case e (delete-all-overlays 1) (error (car e)))",
+    "(condition-case e (apply #'delete-all-overlays '()) (error (car e)))",
+    "(condition-case e (apply #'delete-all-overlays '(1 2)) (error (car e)))",
+    "(list (fboundp 'delete-all-overlays) (functionp 'delete-all-overlays))",
+    "(with-temp-buffer (funcall 'delete-all-overlays))"
+  ]
+}

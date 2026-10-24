@@ -1,0 +1,254 @@
+{
+  "protocol": "logand-v1",
+  "oracle": {
+    "path": "<recording-path-redacted>/emacs-32.0.50",
+    "resolved": "<recording-path-redacted>/emacs-32.0.50",
+    "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+    "version": "32.0.50",
+    "sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8"
+  },
+  "cases_sha256": "eb63babde73db8d168c18ce02e8bddc21608b3f3156e6dd6aa85f325cefc0eeb",
+  "recorder_sha256": "0e80af8b705a7ded46abb7de916a85b1081460f4c4300c0a0bbbb944f3f895d3",
+  "cases": [
+    {
+      "id": "logand-0",
+      "expression": "(logand)",
+      "form": "(condition-case e (logand) (error e))",
+      "gnu": "-1"
+    },
+    {
+      "id": "logand-1",
+      "expression": "(logand 7)",
+      "form": "(condition-case e (logand 7) (error e))",
+      "gnu": "7"
+    },
+    {
+      "id": "logand-2",
+      "expression": "(logand 128 134217728)",
+      "form": "(condition-case e (logand 128 134217728) (error e))",
+      "gnu": "0"
+    },
+    {
+      "id": "logand-3",
+      "expression": "(logand 1 2 4 8)",
+      "form": "(condition-case e (logand 1 2 4 8) (error e))",
+      "gnu": "0"
+    },
+    {
+      "id": "logand-4",
+      "expression": "(logand -16 3)",
+      "form": "(condition-case e (logand -16 3) (error e))",
+      "gnu": "0"
+    },
+    {
+      "id": "logand-5",
+      "expression": "(logand #x10000000000000000000000000 -1)",
+      "form": "(condition-case e (logand #x10000000000000000000000000 -1) (error e))",
+      "gnu": "1267650600228229401496703205376"
+    },
+    {
+      "id": "logand-6",
+      "expression": "(logand 1 #x10000000000000000000000000)",
+      "form": "(condition-case e (logand 1 #x10000000000000000000000000) (error e))",
+      "gnu": "0"
+    },
+    {
+      "id": "logand-7",
+      "expression": "(logand #x-10000000000000000000000000 3)",
+      "form": "(condition-case e (logand #x-10000000000000000000000000 3) (error e))",
+      "gnu": "0"
+    },
+    {
+      "id": "logand-8",
+      "expression": "(logand #xFFFFFFFFFFFFFFFFFFFFFFFF #x10000000000000000000000000)",
+      "form": "(condition-case e (logand #xFFFFFFFFFFFFFFFFFFFFFFFF #x10000000000000000000000000) (error e))",
+      "gnu": "0"
+    },
+    {
+      "id": "logand-9",
+      "expression": "(logand 1.0)",
+      "form": "(condition-case e (logand 1.0) (error e))",
+      "gnu": "(wrong-type-argument integer-or-marker-p 1.0)"
+    },
+    {
+      "id": "logand-10",
+      "expression": "(logand 'bad)",
+      "form": "(condition-case e (logand 'bad) (error e))",
+      "gnu": "(wrong-type-argument integer-or-marker-p bad)"
+    },
+    {
+      "id": "logand-11",
+      "expression": "(logand 1 'bad)",
+      "form": "(condition-case e (logand 1 'bad) (error e))",
+      "gnu": "(wrong-type-argument number-or-marker-p bad)"
+    },
+    {
+      "id": "logand-12",
+      "expression": "(logand 1 2.0)",
+      "form": "(condition-case e (logand 1 2.0) (error e))",
+      "gnu": "(wrong-type-argument integer-or-marker-p 2.0)"
+    },
+    {
+      "id": "logand-13",
+      "expression": "(logand #x10000000000000000000000000 'bad)",
+      "form": "(condition-case e (logand #x10000000000000000000000000 'bad) (error e))",
+      "gnu": "(wrong-type-argument number-or-marker-p bad)"
+    },
+    {
+      "id": "logand-14",
+      "expression": "(logand #x10000000000000000000000000 2.0)",
+      "form": "(condition-case e (logand #x10000000000000000000000000 2.0) (error e))",
+      "gnu": "(wrong-type-argument integer-or-marker-p 2.0)"
+    },
+    {
+      "id": "logand-15",
+      "expression": "(logand 1 2.0 'bad)",
+      "form": "(condition-case e (logand 1 2.0 'bad) (error e))",
+      "gnu": "(wrong-type-argument integer-or-marker-p 2.0)"
+    },
+    {
+      "id": "logand-16",
+      "expression": "(logand (copy-marker 1) 8)",
+      "form": "(condition-case e (logand (copy-marker 1) 8) (error e))",
+      "gnu": "0"
+    },
+    {
+      "id": "logand-17",
+      "expression": "(logand 8 (copy-marker 1))",
+      "form": "(condition-case e (logand 8 (copy-marker 1)) (error e))",
+      "gnu": "0"
+    },
+    {
+      "id": "logand-18",
+      "expression": "(logand (make-marker))",
+      "form": "(condition-case e (logand (make-marker)) (error e))",
+      "gnu": "(error \"Marker does not point anywhere\")"
+    },
+    {
+      "id": "logand-19",
+      "expression": "(let ((x #x10000000000000000000000000)) (eq x (logand x)))",
+      "form": "(condition-case e (let ((x #x10000000000000000000000000)) (eq x (logand x))) (error e))",
+      "gnu": "t"
+    },
+    {
+      "id": "logand-20",
+      "expression": "(logand #x-10000000000000000000000000 -1)",
+      "form": "(condition-case e (logand #x-10000000000000000000000000 -1) (error e))",
+      "gnu": "-1267650600228229401496703205376"
+    },
+    {
+      "id": "logand-21",
+      "expression": "(logand most-positive-fixnum)",
+      "form": "(condition-case e (logand most-positive-fixnum) (error e))",
+      "gnu": "2305843009213693951"
+    },
+    {
+      "id": "logand-22",
+      "expression": "(logand most-negative-fixnum -1)",
+      "form": "(condition-case e (logand most-negative-fixnum -1) (error e))",
+      "gnu": "-2305843009213693952"
+    },
+    {
+      "id": "logand-23",
+      "expression": "(logand 'bad 1)",
+      "form": "(condition-case e (logand 'bad 1) (error e))",
+      "gnu": "(wrong-type-argument integer-or-marker-p bad)"
+    },
+    {
+      "id": "logand-24",
+      "expression": "(logand #x10000000000000000000000000 (copy-marker 1))",
+      "form": "(condition-case e (logand #x10000000000000000000000000 (copy-marker 1)) (error e))",
+      "gnu": "0"
+    },
+    {
+      "id": "logand-25",
+      "expression": "(logand 1 (make-marker))",
+      "form": "(condition-case e (logand 1 (make-marker)) (error e))",
+      "gnu": "(error \"Marker does not point anywhere\")"
+    },
+    {
+      "id": "logand-26",
+      "expression": "(fixnump (logand #x-10000000000000000000000000 -1))",
+      "form": "(condition-case e (fixnump (logand #x-10000000000000000000000000 -1)) (error e))",
+      "gnu": "nil"
+    },
+    {
+      "id": "logand-27",
+      "expression": "(bignump (logand #x10000000000000000000000000 1))",
+      "form": "(condition-case e (bignump (logand #x10000000000000000000000000 1)) (error e))",
+      "gnu": "nil"
+    },
+    {
+      "id": "logand-28",
+      "expression": "(logand 7 3)",
+      "form": "(condition-case e (logand 7 3) (error e))",
+      "gnu": "3"
+    },
+    {
+      "id": "logand-29",
+      "expression": "(fboundp 'logand)",
+      "form": "(condition-case e (fboundp 'logand) (error e))",
+      "gnu": "t"
+    },
+    {
+      "id": "logand-30",
+      "expression": "(functionp #'logand)",
+      "form": "(condition-case e (functionp #'logand) (error e))",
+      "gnu": "t"
+    },
+    {
+      "id": "logand-31",
+      "expression": "(funcall #'logand 7 3)",
+      "form": "(condition-case e (funcall #'logand 7 3) (error e))",
+      "gnu": "3"
+    },
+    {
+      "id": "logand-32",
+      "expression": "(logand 0 'bad)",
+      "form": "(condition-case e (logand 0 'bad) (error e))",
+      "gnu": "(wrong-type-argument number-or-marker-p bad)"
+    },
+    {
+      "id": "logand-33",
+      "expression": "(logand -1 #x10000000000000000000000000)",
+      "form": "(condition-case e (logand -1 #x10000000000000000000000000) (error e))",
+      "gnu": "1267650600228229401496703205376"
+    },
+    {
+      "id": "logand-34",
+      "expression": "(logand #x1FFFFFFFFFFFFFFFFFFFFFFFF #x10000000000000000000000000)",
+      "form": "(condition-case e (logand #x1FFFFFFFFFFFFFFFFFFFFFFFF #x10000000000000000000000000) (error e))",
+      "gnu": "0"
+    },
+    {
+      "id": "logand-35",
+      "expression": "(logand #x-10000000000000000000000000 -1)",
+      "form": "(condition-case e (logand #x-10000000000000000000000000 -1) (error e))",
+      "gnu": "-1267650600228229401496703205376"
+    },
+    {
+      "id": "logand-36",
+      "expression": "(logand 7 3 2)",
+      "form": "(condition-case e (logand 7 3 2) (error e))",
+      "gnu": "2"
+    },
+    {
+      "id": "logand-37",
+      "expression": "(logand nil)",
+      "form": "(condition-case e (logand nil) (error e))",
+      "gnu": "(wrong-type-argument integer-or-marker-p nil)"
+    },
+    {
+      "id": "logand-38",
+      "expression": "(logand 1 nil)",
+      "form": "(condition-case e (logand 1 nil) (error e))",
+      "gnu": "(wrong-type-argument number-or-marker-p nil)"
+    },
+    {
+      "id": "logand-39",
+      "expression": "(logand (copy-marker 1))",
+      "form": "(condition-case e (logand (copy-marker 1)) (error e))",
+      "gnu": "1"
+    }
+  ]
+}

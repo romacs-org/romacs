@@ -1,0 +1,24 @@
+{
+  "name": "define-charset-alias",
+  "arity": [
+    2,
+    2
+  ],
+  "effect": "global",
+  "gnu_files": [
+    "charset.c",
+    "charset.h"
+  ],
+  "gnu_def": "charset.c:1281",
+  "rust": "src/prims/charset.rs:9",
+  "args": [
+    "no-generated-domain",
+    "no-generated-domain"
+  ],
+  "probes": [
+    "(list (define-charset-alias 'ucs 'unicode) (let ((p (list :probe 9))) (set-charset-plist 'ucs p) (eq (charset-plist 'unicode) p)))",
+    "(define-charset-alias 'ucs 'absent)",
+    "(list (define-charset-alias 42 'ascii) (condition-case e (charset-plist 42) (error e)))",
+    "(progn (define-charset-alias 'ucs 'unicode) (define-charset-alias 'ucs 'ascii) (set-charset-plist 'ucs 9) (list (charset-plist 'ascii) (eq (charset-plist 'unicode) 9)))"
+  ]
+}

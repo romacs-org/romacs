@@ -1,0 +1,5 @@
+error[E0616]: field `0` of struct `Theme` is private
+ --> tests/ui/theme_inner_is_private.rs:3:48
+  |
+3 |     let _ = std::sync::Arc::get_mut(&mut theme.0);
+  |                                                ^ private field

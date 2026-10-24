@@ -1,0 +1,10 @@
+[package]
+name = "romacs-coordinate-contract"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# Reusable acceptance tests, not a second text implementation or VM dependency.
+[dev-dependencies]
+romacs-text = { path = "../../crates/romacs-text" }
+romacs-chars = { path = "../../crates/romacs-chars" }

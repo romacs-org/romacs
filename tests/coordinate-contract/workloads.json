@@ -1,0 +1,77 @@
+{
+  "provenance": "primitive-sweep lexical bytecode, six exact source forms; historical readings are NOT a new reproduction",
+  "workloads": [
+    {
+      "name": "narrow-to-region",
+      "iterations": 10000,
+      "form": ";;; -*- lexical-binding: t; -*-\n(progn (require 'bytecomp)\n(defvar m nil) (defvar ov nil) (defvar st nil) (defvar sample nil)\n(defvar cell nil) (defvar km nil)\n(require 'thingatpt)\n(require 'syntax)\n(setq gc-cons-threshold 100000000 gc-cons-percentage 1.0)\n(setq sweep-global 17)\n(put 'sweep 'probe 19)\n(defun sweep-normalize (x)\n (cond ((markerp x) (marker-position x))\n       ((bufferp x) (buffer-name x))\n       ((overlayp x) (list (overlay-start x) (overlay-end x)))\n       ((consp x) (cons (sweep-normalize (car x)) (sweep-normalize (cdr x))))\n       (t x)))\n\n(when (getenv \"SWEEP_EXPECT_IMAGE\")\n (let ((v (pdumper-stats)))\n  (unless (and (cdr (assq 'dumped-with-pdumper v))\n               (equal (cdr (assq 'dump-file-name v)) (getenv \"SWEEP_EXPECT_IMAGE\")))\n    (error \"REQUIRED SHIPPING IMAGE NOT LOADED: %S\" v))\n  (princ \"IMAGE=\") (prin1 v) (terpri)))\n(with-current-buffer (get-buffer-create \"*sweep*\")\n(let (m ov st sample) (erase-buffer)\n(insert (apply #'concat (make-list 400 \"(alpha beta gamma 123 λ)\n\")))\n(put-text-property 50 120 'sweep 7)\n(setq m (copy-marker 100) ov (make-overlay 200 250) st (syntax-table)\n      sample \"(alpha beta gamma 123 λ) abcdefghijklmnopqrstuvwxyz\")\n(overlay-put ov 'sweep 9)\n(set-mark 20)\n(goto-char 1)\n(re-search-forward \"alpha\")\n(goto-char 1)\n (setq cell (cons 1 2) km (make-sparse-keymap)) (set (quote sweep-input-0) 1)\n(set (quote sweep-input-1) 5000)\n(fset 'sweep-loop (let ((lexical-binding t)) (byte-compile '(lambda (n) (let ((i 0) (p 1) (s nil))\n(while (< i n) (setq p (1+ (% i 4096))) (setq s (progn (narrow-to-region sweep-input-0 sweep-input-1) (widen))) (setq i (1+ i)))\n(list s p i))))))\n(unless (byte-code-function-p (symbol-function (quote sweep-loop))) (error \"loop not bytecode\"))\n(let* ((answer (sweep-loop ITERATIONS_TOKEN))\n       (answer (sweep-normalize answer)))\n(princ \"SWEEP=\") (prin1 (list answer (point) (buffer-size))) (terpri)))))",
+      "historical_mixed_ratio": 80.01158027733439,
+      "historical_ascii_ratio": 2.6903593207074397,
+      "historical_mixed_romacs": 43283.9846,
+      "historical_mixed_gnu": 540.9715,
+      "historical_ascii_romacs": 1281.5645,
+      "historical_ascii_gnu": 476.3544,
+      "target_mixed_ratio": 4.0
+    },
+    {
+      "name": "previous-property-change",
+      "iterations": 20000,
+      "form": ";;; -*- lexical-binding: t; -*-\n(progn (require 'bytecomp)\n(defvar m nil) (defvar ov nil) (defvar st nil) (defvar sample nil)\n(defvar cell nil) (defvar km nil)\n(require 'thingatpt)\n(require 'syntax)\n(setq gc-cons-threshold 100000000 gc-cons-percentage 1.0)\n(setq sweep-global 17)\n(put 'sweep 'probe 19)\n(defun sweep-normalize (x)\n (cond ((markerp x) (marker-position x))\n       ((bufferp x) (buffer-name x))\n       ((overlayp x) (list (overlay-start x) (overlay-end x)))\n       ((consp x) (cons (sweep-normalize (car x)) (sweep-normalize (cdr x))))\n       (t x)))\n\n(when (getenv \"SWEEP_EXPECT_IMAGE\")\n (let ((v (pdumper-stats)))\n  (unless (and (cdr (assq 'dumped-with-pdumper v))\n               (equal (cdr (assq 'dump-file-name v)) (getenv \"SWEEP_EXPECT_IMAGE\")))\n    (error \"REQUIRED SHIPPING IMAGE NOT LOADED: %S\" v))\n  (princ \"IMAGE=\") (prin1 v) (terpri)))\n(with-current-buffer (get-buffer-create \"*sweep*\")\n(let (m ov st sample) (erase-buffer)\n(insert (apply #'concat (make-list 400 \"(alpha beta gamma 123 λ)\n\")))\n(put-text-property 50 120 'sweep 7)\n(setq m (copy-marker 100) ov (make-overlay 200 250) st (syntax-table)\n      sample \"(alpha beta gamma 123 λ) abcdefghijklmnopqrstuvwxyz\")\n(overlay-put ov 'sweep 9)\n(set-mark 20)\n(goto-char 1)\n(re-search-forward \"alpha\")\n(goto-char 1)\n  (set (quote sweep-input-0) 1)\n(set (quote sweep-input-1) 1)\n(fset 'sweep-loop (let ((lexical-binding t)) (byte-compile '(lambda (n) (let ((i 0) (p 1) (s nil))\n(while (< i n) (setq p (1+ (% i 4096))) (setq s (previous-property-change (+ p sweep-input-0) nil sweep-input-1)) (setq i (1+ i)))\n(list s p i))))))\n(unless (byte-code-function-p (symbol-function (quote sweep-loop))) (error \"loop not bytecode\"))\n(let* ((answer (sweep-loop ITERATIONS_TOKEN))\n       (answer (sweep-normalize answer)))\n(princ \"SWEEP=\") (prin1 (list answer (point) (buffer-size))) (terpri)))))",
+      "historical_mixed_ratio": 58.05828156274121,
+      "historical_ascii_ratio": 3.90102337980172,
+      "historical_mixed_romacs": 46119.28395,
+      "historical_mixed_gnu": 794.36185,
+      "historical_ascii_romacs": 3100.6391,
+      "historical_ascii_gnu": 794.8271,
+      "target_mixed_ratio": 4.0
+    },
+    {
+      "name": "previous-char-property-change",
+      "iterations": 20000,
+      "form": ";;; -*- lexical-binding: t; -*-\n(progn (require 'bytecomp)\n(defvar m nil) (defvar ov nil) (defvar st nil) (defvar sample nil)\n(defvar cell nil) (defvar km nil)\n(require 'thingatpt)\n(require 'syntax)\n(setq gc-cons-threshold 100000000 gc-cons-percentage 1.0)\n(setq sweep-global 17)\n(put 'sweep 'probe 19)\n(defun sweep-normalize (x)\n (cond ((markerp x) (marker-position x))\n       ((bufferp x) (buffer-name x))\n       ((overlayp x) (list (overlay-start x) (overlay-end x)))\n       ((consp x) (cons (sweep-normalize (car x)) (sweep-normalize (cdr x))))\n       (t x)))\n\n(when (getenv \"SWEEP_EXPECT_IMAGE\")\n (let ((v (pdumper-stats)))\n  (unless (and (cdr (assq 'dumped-with-pdumper v))\n               (equal (cdr (assq 'dump-file-name v)) (getenv \"SWEEP_EXPECT_IMAGE\")))\n    (error \"REQUIRED SHIPPING IMAGE NOT LOADED: %S\" v))\n  (princ \"IMAGE=\") (prin1 v) (terpri)))\n(with-current-buffer (get-buffer-create \"*sweep*\")\n(let (m ov st sample) (erase-buffer)\n(insert (apply #'concat (make-list 400 \"(alpha beta gamma 123 λ)\n\")))\n(put-text-property 50 120 'sweep 7)\n(setq m (copy-marker 100) ov (make-overlay 200 250) st (syntax-table)\n      sample \"(alpha beta gamma 123 λ) abcdefghijklmnopqrstuvwxyz\")\n(overlay-put ov 'sweep 9)\n(set-mark 20)\n(goto-char 1)\n(re-search-forward \"alpha\")\n(goto-char 1)\n  (set (quote sweep-input-0) 1)\n(set (quote sweep-input-1) 1)\n(fset 'sweep-loop (let ((lexical-binding t)) (byte-compile '(lambda (n) (let ((i 0) (p 1) (s nil))\n(while (< i n) (setq p (1+ (% i 4096))) (setq s (previous-char-property-change (+ p sweep-input-0) sweep-input-1)) (setq i (1+ i)))\n(list s p i))))))\n(unless (byte-code-function-p (symbol-function (quote sweep-loop))) (error \"loop not bytecode\"))\n(let* ((answer (sweep-loop ITERATIONS_TOKEN))\n       (answer (sweep-normalize answer)))\n(princ \"SWEEP=\") (prin1 (list answer (point) (buffer-size))) (terpri)))))",
+      "historical_mixed_ratio": 55.00179720983927,
+      "historical_ascii_ratio": 2.2998149542730335,
+      "historical_mixed_romacs": 56467.42735,
+      "historical_mixed_gnu": 1026.64695,
+      "historical_ascii_romacs": 2360.20775,
+      "historical_ascii_gnu": 1026.25985,
+      "target_mixed_ratio": 4.0
+    },
+    {
+      "name": "save-restriction",
+      "iterations": 10000,
+      "form": ";;; -*- lexical-binding: t; -*-\n(progn (require 'bytecomp)\n(defvar m nil) (defvar ov nil) (defvar st nil) (defvar sample nil)\n(defvar cell nil) (defvar km nil)\n(require 'thingatpt)\n(require 'syntax)\n(setq gc-cons-threshold 100000000 gc-cons-percentage 1.0)\n(setq sweep-global 17)\n(put 'sweep 'probe 19)\n(defun sweep-normalize (x)\n (cond ((markerp x) (marker-position x))\n       ((bufferp x) (buffer-name x))\n       ((overlayp x) (list (overlay-start x) (overlay-end x)))\n       ((consp x) (cons (sweep-normalize (car x)) (sweep-normalize (cdr x))))\n       (t x)))\n\n(when (getenv \"SWEEP_EXPECT_IMAGE\")\n (let ((v (pdumper-stats)))\n  (unless (and (cdr (assq 'dumped-with-pdumper v))\n               (equal (cdr (assq 'dump-file-name v)) (getenv \"SWEEP_EXPECT_IMAGE\")))\n    (error \"REQUIRED SHIPPING IMAGE NOT LOADED: %S\" v))\n  (princ \"IMAGE=\") (prin1 v) (terpri)))\n(with-current-buffer (get-buffer-create \"*sweep*\")\n(let (m ov st sample) (erase-buffer)\n(insert (apply #'concat (make-list 400 \"(alpha beta gamma 123 λ)\n\")))\n(put-text-property 50 120 'sweep 7)\n(setq m (copy-marker 100) ov (make-overlay 200 250) st (syntax-table)\n      sample \"(alpha beta gamma 123 λ) abcdefghijklmnopqrstuvwxyz\")\n(overlay-put ov 'sweep 9)\n(set-mark 20)\n(goto-char 1)\n(re-search-forward \"alpha\")\n(goto-char 1)\n (setq cell (cons 1 2) km (make-sparse-keymap)) (set (quote sweep-input-0) 1)\n(set (quote sweep-input-1) 5000)\n(fset 'sweep-loop (let ((lexical-binding t)) (byte-compile '(lambda (n) (let ((i 0) (p 1) (s nil))\n(while (< i n) (setq p (1+ (% i 4096))) (setq s (save-restriction (narrow-to-region sweep-input-0 sweep-input-1) (point-max))) (setq i (1+ i)))\n(list s p i))))))\n(unless (byte-code-function-p (symbol-function (quote sweep-loop))) (error \"loop not bytecode\"))\n(let* ((answer (sweep-loop ITERATIONS_TOKEN))\n       (answer (sweep-normalize answer)))\n(princ \"SWEEP=\") (prin1 (list answer (point) (buffer-size))) (terpri)))))",
+      "historical_mixed_ratio": 52.347741524433104,
+      "historical_ascii_ratio": 2.3559467949968793,
+      "historical_mixed_romacs": 43841.6209,
+      "historical_mixed_gnu": 837.5074,
+      "historical_ascii_romacs": 1823.1188,
+      "historical_ascii_gnu": 773.837,
+      "target_mixed_ratio": 4.0
+    },
+    {
+      "name": "previous-single-property-change",
+      "iterations": 20000,
+      "form": ";;; -*- lexical-binding: t; -*-\n(progn (require 'bytecomp)\n(defvar m nil) (defvar ov nil) (defvar st nil) (defvar sample nil)\n(defvar cell nil) (defvar km nil)\n(require 'thingatpt)\n(require 'syntax)\n(setq gc-cons-threshold 100000000 gc-cons-percentage 1.0)\n(setq sweep-global 17)\n(put 'sweep 'probe 19)\n(defun sweep-normalize (x)\n (cond ((markerp x) (marker-position x))\n       ((bufferp x) (buffer-name x))\n       ((overlayp x) (list (overlay-start x) (overlay-end x)))\n       ((consp x) (cons (sweep-normalize (car x)) (sweep-normalize (cdr x))))\n       (t x)))\n\n(when (getenv \"SWEEP_EXPECT_IMAGE\")\n (let ((v (pdumper-stats)))\n  (unless (and (cdr (assq 'dumped-with-pdumper v))\n               (equal (cdr (assq 'dump-file-name v)) (getenv \"SWEEP_EXPECT_IMAGE\")))\n    (error \"REQUIRED SHIPPING IMAGE NOT LOADED: %S\" v))\n  (princ \"IMAGE=\") (prin1 v) (terpri)))\n(with-current-buffer (get-buffer-create \"*sweep*\")\n(let (m ov st sample) (erase-buffer)\n(insert (apply #'concat (make-list 400 \"(alpha beta gamma 123 λ)\n\")))\n(put-text-property 50 120 'sweep 7)\n(setq m (copy-marker 100) ov (make-overlay 200 250) st (syntax-table)\n      sample \"(alpha beta gamma 123 λ) abcdefghijklmnopqrstuvwxyz\")\n(overlay-put ov 'sweep 9)\n(set-mark 20)\n(goto-char 1)\n(re-search-forward \"alpha\")\n(goto-char 1)\n  (set (quote sweep-input-0) 1)\n(set (quote sweep-input-1) (quote sweep))\n(set (quote sweep-input-2) 1)\n(fset 'sweep-loop (let ((lexical-binding t)) (byte-compile '(lambda (n) (let ((i 0) (p 1) (s nil))\n(while (< i n) (setq p (1+ (% i 4096))) (setq s (previous-single-property-change (+ p sweep-input-0) sweep-input-1 nil sweep-input-2)) (setq i (1+ i)))\n(list s p i))))))\n(unless (byte-code-function-p (symbol-function (quote sweep-loop))) (error \"loop not bytecode\"))\n(let* ((answer (sweep-loop ITERATIONS_TOKEN))\n       (answer (sweep-normalize answer)))\n(princ \"SWEEP=\") (prin1 (list answer (point) (buffer-size))) (terpri)))))",
+      "historical_mixed_ratio": 50.32086601668928,
+      "historical_ascii_ratio": 2.617671012729359,
+      "historical_mixed_romacs": 45392.0328,
+      "historical_mixed_gnu": 902.0519,
+      "historical_ascii_romacs": 2360.59805,
+      "historical_ascii_gnu": 901.79325,
+      "target_mixed_ratio": 4.0
+    },
+    {
+      "name": "char-after",
+      "iterations": 20000,
+      "form": ";;; -*- lexical-binding: t; -*-\n(progn (require 'bytecomp)\n(defvar m nil) (defvar ov nil) (defvar st nil) (defvar sample nil)\n(defvar cell nil) (defvar km nil)\n(require 'thingatpt)\n(require 'syntax)\n(setq gc-cons-threshold 100000000 gc-cons-percentage 1.0)\n(setq sweep-global 17)\n(put 'sweep 'probe 19)\n(defun sweep-normalize (x)\n (cond ((markerp x) (marker-position x))\n       ((bufferp x) (buffer-name x))\n       ((overlayp x) (list (overlay-start x) (overlay-end x)))\n       ((consp x) (cons (sweep-normalize (car x)) (sweep-normalize (cdr x))))\n       (t x)))\n\n(when (getenv \"SWEEP_EXPECT_IMAGE\")\n (let ((v (pdumper-stats)))\n  (unless (and (cdr (assq 'dumped-with-pdumper v))\n               (equal (cdr (assq 'dump-file-name v)) (getenv \"SWEEP_EXPECT_IMAGE\")))\n    (error \"REQUIRED SHIPPING IMAGE NOT LOADED: %S\" v))\n  (princ \"IMAGE=\") (prin1 v) (terpri)))\n(with-current-buffer (get-buffer-create \"*sweep*\")\n(let (m ov st sample) (erase-buffer)\n(insert (apply #'concat (make-list 400 \"(alpha beta gamma 123 λ)\n\")))\n(put-text-property 50 120 'sweep 7)\n(setq m (copy-marker 100) ov (make-overlay 200 250) st (syntax-table)\n      sample \"(alpha beta gamma 123 λ) abcdefghijklmnopqrstuvwxyz\")\n(overlay-put ov 'sweep 9)\n(set-mark 20)\n(goto-char 1)\n(re-search-forward \"alpha\")\n(goto-char 1)\n  \n(fset 'sweep-loop (let ((lexical-binding t)) (byte-compile '(lambda (n) (let ((i 0) (p 1) (s nil))\n(while (< i n) (setq p (1+ (% i 4096))) (setq s (char-after p)) (setq i (1+ i)))\n(list s p i))))))\n(unless (byte-code-function-p (symbol-function (quote sweep-loop))) (error \"loop not bytecode\"))\n(let* ((answer (sweep-loop ITERATIONS_TOKEN))\n       (answer (sweep-normalize answer)))\n(princ \"SWEEP=\") (prin1 (list answer (point) (buffer-size))) (terpri)))))",
+      "historical_mixed_ratio": 35.04725527768355,
+      "historical_ascii_ratio": 2.359197233914106,
+      "historical_mixed_romacs": 14045.89025,
+      "historical_mixed_gnu": 400.77005,
+      "historical_ascii_romacs": 700.0952,
+      "historical_ascii_gnu": 296.75145,
+      "target_mixed_ratio": 4.0
+    }
+  ]
+}

@@ -1,0 +1,990 @@
+[
+  {
+    "source": "(with-temp-buffer (insert \"aλЖ🙂z\") (vector (byte-to-position 3) (byte-to-position 4) (byte-to-position 0) (position-bytes 0) (position-bytes 9)))",
+    "transport": [
+      "with-temp-buffer",
+      [
+        "insert",
+        {
+          "string": "aλЖ🙂z"
+        }
+      ],
+      [
+        "vector",
+        [
+          "byte-to-position",
+          3
+        ],
+        [
+          "byte-to-position",
+          4
+        ],
+        [
+          "byte-to-position",
+          0
+        ],
+        [
+          "position-bytes",
+          0
+        ],
+        [
+          "position-bytes",
+          9
+        ]
+      ]
+    ],
+    "expected": "[2 3 nil nil nil]",
+    "got": "[2 3 nil nil nil]",
+    "error": "",
+    "passed": true
+  },
+  {
+    "source": "(with-temp-buffer (insert \"λ\") (let ((i 0) (s 0)) (while (< i 3) (setq s (+ s (char-after 1))) (defun char-after (p) 7) (setq i (1+ i))) s))",
+    "transport": [
+      "with-temp-buffer",
+      [
+        "insert",
+        {
+          "string": "λ"
+        }
+      ],
+      [
+        "let",
+        [
+          [
+            "i",
+            0
+          ],
+          [
+            "s",
+            0
+          ]
+        ],
+        [
+          "while",
+          [
+            "<",
+            "i",
+            3
+          ],
+          [
+            "setq",
+            "s",
+            [
+              "+",
+              "s",
+              [
+                "char-after",
+                1
+              ]
+            ]
+          ],
+          [
+            "defun",
+            "char-after",
+            [
+              "p"
+            ],
+            7
+          ],
+          [
+            "setq",
+            "i",
+            [
+              "1+",
+              "i"
+            ]
+          ]
+        ],
+        "s"
+      ]
+    ],
+    "expected": "969",
+    "got": "969",
+    "error": "",
+    "passed": true
+  },
+  {
+    "source": "(with-temp-buffer (insert \"λ\") (let ((i 0) (s 0)) (while (< i 3) (setq s (+ s (goto-char 1))) (defun goto-char (p) 7) (setq i (1+ i))) s))",
+    "transport": [
+      "with-temp-buffer",
+      [
+        "insert",
+        {
+          "string": "λ"
+        }
+      ],
+      [
+        "let",
+        [
+          [
+            "i",
+            0
+          ],
+          [
+            "s",
+            0
+          ]
+        ],
+        [
+          "while",
+          [
+            "<",
+            "i",
+            3
+          ],
+          [
+            "setq",
+            "s",
+            [
+              "+",
+              "s",
+              [
+                "goto-char",
+                1
+              ]
+            ]
+          ],
+          [
+            "defun",
+            "goto-char",
+            [
+              "p"
+            ],
+            7
+          ],
+          [
+            "setq",
+            "i",
+            [
+              "1+",
+              "i"
+            ]
+          ]
+        ],
+        "s"
+      ]
+    ],
+    "expected": "15",
+    "got": "15",
+    "error": "",
+    "passed": true
+  },
+  {
+    "source": "(with-temp-buffer (insert \"λ\") (let ((i 0) (s 0)) (while (< i 3) (setq s (+ s (or (search-forward \"λ\" nil t) 0))) (goto-char 1) (defun search-forward (s b n) 7) (setq i (1+ i))) s))",
+    "transport": [
+      "with-temp-buffer",
+      [
+        "insert",
+        {
+          "string": "λ"
+        }
+      ],
+      [
+        "let",
+        [
+          [
+            "i",
+            0
+          ],
+          [
+            "s",
+            0
+          ]
+        ],
+        [
+          "while",
+          [
+            "<",
+            "i",
+            3
+          ],
+          [
+            "setq",
+            "s",
+            [
+              "+",
+              "s",
+              [
+                "or",
+                [
+                  "search-forward",
+                  {
+                    "string": "λ"
+                  },
+                  "nil",
+                  "t"
+                ],
+                0
+              ]
+            ]
+          ],
+          [
+            "goto-char",
+            1
+          ],
+          [
+            "defun",
+            "search-forward",
+            [
+              "s",
+              "b",
+              "n"
+            ],
+            7
+          ],
+          [
+            "setq",
+            "i",
+            [
+              "1+",
+              "i"
+            ]
+          ]
+        ],
+        "s"
+      ]
+    ],
+    "expected": "14",
+    "got": "14",
+    "error": "",
+    "passed": true
+  },
+  {
+    "source": "(with-temp-buffer (insert \"aλЖ🙂z\") (vector (point) (point-min) (point-max) (buffer-size) (char-after 2) (position-bytes 4) (byte-to-position 6)))",
+    "transport": [
+      "with-temp-buffer",
+      [
+        "insert",
+        {
+          "string": "aλЖ🙂z"
+        }
+      ],
+      [
+        "vector",
+        [
+          "point"
+        ],
+        [
+          "point-min"
+        ],
+        [
+          "point-max"
+        ],
+        [
+          "buffer-size"
+        ],
+        [
+          "char-after",
+          2
+        ],
+        [
+          "position-bytes",
+          4
+        ],
+        [
+          "byte-to-position",
+          6
+        ]
+      ]
+    ],
+    "expected": "[6 1 6 5 955 6 4]",
+    "got": "[6 1 6 5 955 6 4]",
+    "error": "",
+    "passed": true
+  },
+  {
+    "source": "(with-temp-buffer (insert \"aλЖ🙂z\") (buffer-substring-no-properties 2 5))",
+    "transport": [
+      "with-temp-buffer",
+      [
+        "insert",
+        {
+          "string": "aλЖ🙂z"
+        }
+      ],
+      [
+        "buffer-substring-no-properties",
+        2,
+        5
+      ]
+    ],
+    "expected": "\"λЖ🙂\"",
+    "got": "\"λЖ🙂\"",
+    "error": "",
+    "passed": true
+  },
+  {
+    "source": "(with-temp-buffer (insert \"aλЖ🙂z\") (goto-char 3) (delete-region 3 4) (insert \"Z\") (vector (point) (buffer-substring-no-properties 1 6) (position-bytes 5)))",
+    "transport": [
+      "with-temp-buffer",
+      [
+        "insert",
+        {
+          "string": "aλЖ🙂z"
+        }
+      ],
+      [
+        "goto-char",
+        3
+      ],
+      [
+        "delete-region",
+        3,
+        4
+      ],
+      [
+        "insert",
+        {
+          "string": "Z"
+        }
+      ],
+      [
+        "vector",
+        [
+          "point"
+        ],
+        [
+          "buffer-substring-no-properties",
+          1,
+          6
+        ],
+        [
+          "position-bytes",
+          5
+        ]
+      ]
+    ],
+    "expected": "[4 \"aλZ🙂z\" 9]",
+    "got": "[4 \"aλZ🙂z\" 9]",
+    "error": "",
+    "passed": true
+  },
+  {
+    "source": "(with-temp-buffer (insert \"aλЖ🙂z\") (narrow-to-region 2 5) (vector (point-min) (point-max) (char-after 1) (char-after 2) (position-bytes 5) (buffer-size)))",
+    "transport": [
+      "with-temp-buffer",
+      [
+        "insert",
+        {
+          "string": "aλЖ🙂z"
+        }
+      ],
+      [
+        "narrow-to-region",
+        2,
+        5
+      ],
+      [
+        "vector",
+        [
+          "point-min"
+        ],
+        [
+          "point-max"
+        ],
+        [
+          "char-after",
+          1
+        ],
+        [
+          "char-after",
+          2
+        ],
+        [
+          "position-bytes",
+          5
+        ],
+        [
+          "buffer-size"
+        ]
+      ]
+    ],
+    "expected": "[2 5 nil 955 10 5]",
+    "got": "[2 5 nil 955 10 5]",
+    "error": "",
+    "passed": true
+  },
+  {
+    "source": "(with-temp-buffer (insert \"aλЖ🙂z\") (narrow-to-region 2 4) (narrow-to-region 1 6) (vector (point-min) (point-max)))",
+    "transport": [
+      "with-temp-buffer",
+      [
+        "insert",
+        {
+          "string": "aλЖ🙂z"
+        }
+      ],
+      [
+        "narrow-to-region",
+        2,
+        4
+      ],
+      [
+        "narrow-to-region",
+        1,
+        6
+      ],
+      [
+        "vector",
+        [
+          "point-min"
+        ],
+        [
+          "point-max"
+        ]
+      ]
+    ],
+    "expected": "[1 6]",
+    "got": "[1 6]",
+    "error": "",
+    "passed": true
+  },
+  {
+    "source": "(with-temp-buffer (insert \"abc\") (narrow-to-region 2 3) (widen) (point-max))",
+    "transport": [
+      "with-temp-buffer",
+      [
+        "insert",
+        {
+          "string": "abc"
+        }
+      ],
+      [
+        "narrow-to-region",
+        2,
+        3
+      ],
+      [
+        "widen"
+      ],
+      [
+        "point-max"
+      ]
+    ],
+    "expected": "4",
+    "got": "4",
+    "error": "",
+    "passed": true
+  },
+  {
+    "source": "(with-temp-buffer (insert \"aλЖ🙂z\") (put-text-property 2 4 (quote x) (vector 7 \"λ\")) (goto-char 1) (insert \"Q\") (vector (get-text-property 3 (quote x)) (get-text-property 4 (quote x))))",
+    "transport": [
+      "with-temp-buffer",
+      [
+        "insert",
+        {
+          "string": "aλЖ🙂z"
+        }
+      ],
+      [
+        "put-text-property",
+        2,
+        4,
+        [
+          "quote",
+          "x"
+        ],
+        [
+          "vector",
+          7,
+          {
+            "string": "λ"
+          }
+        ]
+      ],
+      [
+        "goto-char",
+        1
+      ],
+      [
+        "insert",
+        {
+          "string": "Q"
+        }
+      ],
+      [
+        "vector",
+        [
+          "get-text-property",
+          3,
+          [
+            "quote",
+            "x"
+          ]
+        ],
+        [
+          "get-text-property",
+          4,
+          [
+            "quote",
+            "x"
+          ]
+        ]
+      ]
+    ],
+    "expected": "[[7 \"λ\"] [7 \"λ\"]]",
+    "got": "[[7 \"λ\"] [7 \"λ\"]]",
+    "error": "",
+    "passed": true
+  },
+  {
+    "source": "(with-temp-buffer (insert \"aλЖ🙂z\") (put-text-property 2 4 (quote x) 7) (delete-region 1 2) (vector (get-text-property 1 (quote x)) (get-text-property 2 (quote x)) (get-text-property 3 (quote x))))",
+    "transport": [
+      "with-temp-buffer",
+      [
+        "insert",
+        {
+          "string": "aλЖ🙂z"
+        }
+      ],
+      [
+        "put-text-property",
+        2,
+        4,
+        [
+          "quote",
+          "x"
+        ],
+        7
+      ],
+      [
+        "delete-region",
+        1,
+        2
+      ],
+      [
+        "vector",
+        [
+          "get-text-property",
+          1,
+          [
+            "quote",
+            "x"
+          ]
+        ],
+        [
+          "get-text-property",
+          2,
+          [
+            "quote",
+            "x"
+          ]
+        ],
+        [
+          "get-text-property",
+          3,
+          [
+            "quote",
+            "x"
+          ]
+        ]
+      ]
+    ],
+    "expected": "[7 7 nil]",
+    "got": "[7 7 nil]",
+    "error": "",
+    "passed": true
+  },
+  {
+    "source": "(with-temp-buffer (insert \"aλ\nЖ🙂z\") (goto-char 1) (vector (search-forward \"\n\" nil t) (point)))",
+    "transport": [
+      "with-temp-buffer",
+      [
+        "insert",
+        {
+          "string": "aλ\nЖ🙂z"
+        }
+      ],
+      [
+        "goto-char",
+        1
+      ],
+      [
+        "vector",
+        [
+          "search-forward",
+          {
+            "string": "\n"
+          },
+          "nil",
+          "t"
+        ],
+        [
+          "point"
+        ]
+      ]
+    ],
+    "expected": "[4 4]",
+    "got": "[4 4]",
+    "error": "",
+    "passed": true
+  },
+  {
+    "source": "(with-temp-buffer (insert \"aλЖ🙂z\") (goto-char 1) (vector (search-forward \"Ж🙂\" nil t) (point) (search-forward \"q\" nil t) (point)))",
+    "transport": [
+      "with-temp-buffer",
+      [
+        "insert",
+        {
+          "string": "aλЖ🙂z"
+        }
+      ],
+      [
+        "goto-char",
+        1
+      ],
+      [
+        "vector",
+        [
+          "search-forward",
+          {
+            "string": "Ж🙂"
+          },
+          "nil",
+          "t"
+        ],
+        [
+          "point"
+        ],
+        [
+          "search-forward",
+          {
+            "string": "q"
+          },
+          "nil",
+          "t"
+        ],
+        [
+          "point"
+        ]
+      ]
+    ],
+    "expected": "[5 5 nil 5]",
+    "got": "[5 5 nil 5]",
+    "error": "",
+    "passed": true
+  },
+  {
+    "source": "(with-temp-buffer (insert \"aλЖ🙂z\") (goto-char 1) (search-forward \"λ\" 2 t))",
+    "transport": [
+      "with-temp-buffer",
+      [
+        "insert",
+        {
+          "string": "aλЖ🙂z"
+        }
+      ],
+      [
+        "goto-char",
+        1
+      ],
+      [
+        "search-forward",
+        {
+          "string": "λ"
+        },
+        2,
+        "t"
+      ]
+    ],
+    "expected": "nil",
+    "got": "nil",
+    "error": "",
+    "passed": true
+  },
+  {
+    "source": "(with-temp-buffer (insert 955 1046 128578) (buffer-substring-no-properties 1 4))",
+    "transport": [
+      "with-temp-buffer",
+      [
+        "insert",
+        955,
+        1046,
+        128578
+      ],
+      [
+        "buffer-substring-no-properties",
+        1,
+        4
+      ]
+    ],
+    "expected": "\"λЖ🙂\"",
+    "got": "\"λЖ🙂\"",
+    "error": "",
+    "passed": true
+  },
+  {
+    "source": "(with-temp-buffer (insert \"λ\") (vector (char-after) (char-after 2) (char-after 0) (char-after -1) (char-after 100)))",
+    "transport": [
+      "with-temp-buffer",
+      [
+        "insert",
+        {
+          "string": "λ"
+        }
+      ],
+      [
+        "vector",
+        [
+          "char-after"
+        ],
+        [
+          "char-after",
+          2
+        ],
+        [
+          "char-after",
+          0
+        ],
+        [
+          "char-after",
+          -1
+        ],
+        [
+          "char-after",
+          100
+        ]
+      ]
+    ],
+    "expected": "[nil nil nil nil nil]",
+    "got": "[nil nil nil nil nil]",
+    "error": "",
+    "passed": true
+  },
+  {
+    "source": "(with-temp-buffer (insert \"λ\") (vector (goto-char 0) (point) (goto-char -1) (point) (goto-char 100) (point)))",
+    "transport": [
+      "with-temp-buffer",
+      [
+        "insert",
+        {
+          "string": "λ"
+        }
+      ],
+      [
+        "vector",
+        [
+          "goto-char",
+          0
+        ],
+        [
+          "point"
+        ],
+        [
+          "goto-char",
+          -1
+        ],
+        [
+          "point"
+        ],
+        [
+          "goto-char",
+          100
+        ],
+        [
+          "point"
+        ]
+      ]
+    ],
+    "expected": "[0 1 -1 1 100 2]",
+    "got": "[0 1 -1 1 100 2]",
+    "error": "",
+    "passed": true
+  },
+  {
+    "source": "(with-temp-buffer (insert \"aλ\") (goto-char 1) (search-forward \"q\" nil 7) (point))",
+    "transport": [
+      "with-temp-buffer",
+      [
+        "insert",
+        {
+          "string": "aλ"
+        }
+      ],
+      [
+        "goto-char",
+        1
+      ],
+      [
+        "search-forward",
+        {
+          "string": "q"
+        },
+        "nil",
+        7
+      ],
+      [
+        "point"
+      ]
+    ],
+    "expected": "3",
+    "got": "3",
+    "error": "",
+    "passed": true
+  },
+  {
+    "source": "(with-temp-buffer (insert \"outer\") (with-temp-buffer (insert \"inner\")) (buffer-substring-no-properties 1 (point-max)))",
+    "transport": [
+      "with-temp-buffer",
+      [
+        "insert",
+        {
+          "string": "outer"
+        }
+      ],
+      [
+        "with-temp-buffer",
+        [
+          "insert",
+          {
+            "string": "inner"
+          }
+        ]
+      ],
+      [
+        "buffer-substring-no-properties",
+        1,
+        [
+          "point-max"
+        ]
+      ]
+    ],
+    "expected": "\"outer\"",
+    "got": "\"outer\"",
+    "error": "",
+    "passed": true
+  },
+  {
+    "source": "(with-temp-buffer (insert \"outer\") (catch (quote end) (with-temp-buffer (insert \"inner\") (throw (quote end) 7))) (buffer-size))",
+    "transport": [
+      "with-temp-buffer",
+      [
+        "insert",
+        {
+          "string": "outer"
+        }
+      ],
+      [
+        "catch",
+        [
+          "quote",
+          "end"
+        ],
+        [
+          "with-temp-buffer",
+          [
+            "insert",
+            {
+              "string": "inner"
+            }
+          ],
+          [
+            "throw",
+            [
+              "quote",
+              "end"
+            ],
+            7
+          ]
+        ]
+      ],
+      [
+        "buffer-size"
+      ]
+    ],
+    "expected": "5",
+    "got": "5",
+    "error": "",
+    "passed": true
+  },
+  {
+    "source": "(with-temp-buffer (insert \"λ\") (condition-case nil (with-temp-buffer (car 1)) (wrong-type-argument 7)) (buffer-size))",
+    "transport": [
+      "with-temp-buffer",
+      [
+        "insert",
+        {
+          "string": "λ"
+        }
+      ],
+      [
+        "condition-case",
+        "nil",
+        [
+          "with-temp-buffer",
+          [
+            "car",
+            1
+          ]
+        ],
+        [
+          "wrong-type-argument",
+          7
+        ]
+      ],
+      [
+        "buffer-size"
+      ]
+    ],
+    "expected": "1",
+    "got": "1",
+    "error": "",
+    "passed": true
+  },
+  {
+    "source": "(let ((s \"aλЖ🙂z\")) (vector (length s) (aref s 2)))",
+    "transport": [
+      "let",
+      [
+        [
+          "s",
+          {
+            "string": "aλЖ🙂z"
+          }
+        ]
+      ],
+      [
+        "vector",
+        [
+          "length",
+          "s"
+        ],
+        [
+          "aref",
+          "s",
+          2
+        ]
+      ]
+    ],
+    "expected": "[5 1046]",
+    "got": "[5 1046]",
+    "error": "",
+    "passed": true
+  },
+  {
+    "source": "(vector (% -7 3) (% 7 -3) (% -7 -3))",
+    "transport": [
+      "vector",
+      [
+        "%",
+        -7,
+        3
+      ],
+      [
+        "%",
+        7,
+        -3
+      ],
+      [
+        "%",
+        -7,
+        -3
+      ]
+    ],
+    "expected": "[-1 1 -1]",
+    "got": "[-1 1 -1]",
+    "error": "",
+    "passed": true
+  }
+]

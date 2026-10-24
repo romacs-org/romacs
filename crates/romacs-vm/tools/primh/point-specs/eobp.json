@@ -1,0 +1,43 @@
+{
+  "name": "eobp",
+  "arity": [
+    0,
+    0
+  ],
+  "effect": "reads",
+  "gnu_files": [
+    "editfns.c"
+  ],
+  "gnu_def": "editfns.c:1009",
+  "rust": "src/prims/point_predicates.rs:22",
+  "args": [],
+  "probes": [
+    "(with-temp-buffer (eobp))",
+    "(with-temp-buffer (insert \"\") (goto-char 1) (eobp))",
+    "(with-temp-buffer (insert \"abc\") (goto-char 1) (eobp))",
+    "(with-temp-buffer (insert \"abc\") (goto-char 2) (eobp))",
+    "(with-temp-buffer (insert \"abc\") (goto-char 3) (eobp))",
+    "(with-temp-buffer (insert \"abc\") (goto-char 4) (eobp))",
+    "(with-temp-buffer (insert \"a\\nb\") (goto-char 1) (eobp))",
+    "(with-temp-buffer (insert \"a\\nb\") (goto-char 2) (eobp))",
+    "(with-temp-buffer (insert \"a\\nb\") (goto-char 3) (eobp))",
+    "(with-temp-buffer (insert \"a\\nb\") (goto-char 4) (eobp))",
+    "(with-temp-buffer (insert \"é🙂a\\nЖb\") (goto-char 1) (eobp))",
+    "(with-temp-buffer (insert \"é🙂a\\nЖb\") (goto-char 2) (eobp))",
+    "(with-temp-buffer (insert \"é🙂a\\nЖb\") (goto-char 3) (eobp))",
+    "(with-temp-buffer (insert \"é🙂a\\nЖb\") (goto-char 4) (eobp))",
+    "(with-temp-buffer (insert \"é🙂a\\nЖb\") (goto-char 5) (eobp))",
+    "(with-temp-buffer (insert \"é🙂a\\nЖb\") (goto-char 6) (eobp))",
+    "(with-temp-buffer (insert \"é🙂a\\nЖb\") (goto-char 7) (eobp))",
+    "(with-temp-buffer (insert \"é🙂a\\nЖb\") (narrow-to-region 3 6) (goto-char 3) (eobp))",
+    "(with-temp-buffer (insert \"é🙂a\\nЖb\") (narrow-to-region 3 6) (goto-char 4) (eobp))",
+    "(with-temp-buffer (insert \"é🙂a\\nЖb\") (narrow-to-region 2 3) (goto-char 3) (eobp))",
+    "(with-temp-buffer (insert \"é🙂a\\nЖb\") (narrow-to-region 3 3) (goto-char 3) (eobp))",
+    "(with-temp-buffer (insert \"é🙂a\\nЖb\") (narrow-to-region 2 6) (goto-char 5) (eobp))",
+    "(with-temp-buffer (set-buffer-multibyte nil) (insert (unibyte-string 255 10 254)) (goto-char 1) (eobp))",
+    "(with-temp-buffer (set-buffer-multibyte nil) (insert (unibyte-string 255 10 254)) (goto-char 2) (eobp))",
+    "(with-temp-buffer (set-buffer-multibyte nil) (insert (unibyte-string 255 10 254)) (goto-char 3) (eobp))",
+    "(with-temp-buffer (set-buffer-multibyte nil) (insert (unibyte-string 255 10 254)) (goto-char 4) (eobp))",
+    "(list (fboundp 'eobp) (functionp #'eobp) (funcall #'eobp))"
+  ]
+}

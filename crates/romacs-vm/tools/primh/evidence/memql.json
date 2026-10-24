@@ -1,0 +1,3499 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "memql",
+ "spec_sha256": "f075b4e2ccd2bed47f9755c92377869fdd687284d12ef774f56d3abf406c91ff",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "memql",
+    "subr",
+    2,
+    2
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "fns.c": "db81c235d7c63f312128ad84c11d55ae4665a2599099be1229dbaa329afdb3bf"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "memql/0000",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql nil nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0001",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql nil t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp t))"
+  },
+  {
+   "id": "memql/0002",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql nil 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 0))"
+  },
+  {
+   "id": "memql/0003",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql nil 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "memql/0004",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql nil 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "memql/0005",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql nil -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp -1))"
+  },
+  {
+   "id": "memql/0006",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql nil most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "memql/0007",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql nil 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1.5))"
+  },
+  {
+   "id": "memql/0008",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql nil 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp sym))"
+  },
+  {
+   "id": "memql/0009",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql nil :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "memql/0010",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql nil (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"\"))"
+  },
+  {
+   "id": "memql/0011",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql nil (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"abc\"))"
+  },
+  {
+   "id": "memql/0012",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql nil (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "memql/0013",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql nil (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0014",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql nil (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0015",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql nil (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 . 2)))"
+  },
+  {
+   "id": "memql/0016",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql nil (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 2 . 3)))"
+  },
+  {
+   "id": "memql/0017",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql nil (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp [1 2]))"
+  },
+  {
+   "id": "memql/0018",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql nil (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "memql/0019",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql nil (list 1.5 0.0 -0.0))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0020",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql nil (let ((x (list 2 3))) (cons 1 (progn (setcdr (cdr x) x) x))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (3 2 3 2 . #2)))"
+  },
+  {
+   "id": "memql/0021",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql t nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0022",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql t t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp t))"
+  },
+  {
+   "id": "memql/0023",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql t 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 0))"
+  },
+  {
+   "id": "memql/0024",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql t 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "memql/0025",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql t 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "memql/0026",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql t -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp -1))"
+  },
+  {
+   "id": "memql/0027",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql t most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "memql/0028",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql t 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1.5))"
+  },
+  {
+   "id": "memql/0029",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql t 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp sym))"
+  },
+  {
+   "id": "memql/0030",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql t :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "memql/0031",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql t (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"\"))"
+  },
+  {
+   "id": "memql/0032",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql t (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"abc\"))"
+  },
+  {
+   "id": "memql/0033",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql t (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "memql/0034",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql t (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0035",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql t (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0036",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql t (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 . 2)))"
+  },
+  {
+   "id": "memql/0037",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql t (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 2 . 3)))"
+  },
+  {
+   "id": "memql/0038",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql t (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp [1 2]))"
+  },
+  {
+   "id": "memql/0039",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql t (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "memql/0040",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql t (list 1.5 0.0 -0.0))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0041",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql t (let ((x (list 2 3))) (cons 1 (progn (setcdr (cdr x) x) x))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (3 2 3 2 . #2)))"
+  },
+  {
+   "id": "memql/0042",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 0 nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0043",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 0 t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp t))"
+  },
+  {
+   "id": "memql/0044",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 0 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 0))"
+  },
+  {
+   "id": "memql/0045",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 0 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "memql/0046",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 0 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "memql/0047",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 0 -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp -1))"
+  },
+  {
+   "id": "memql/0048",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 0 most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "memql/0049",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 0 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1.5))"
+  },
+  {
+   "id": "memql/0050",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 0 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp sym))"
+  },
+  {
+   "id": "memql/0051",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 0 :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "memql/0052",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 0 (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"\"))"
+  },
+  {
+   "id": "memql/0053",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 0 (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"abc\"))"
+  },
+  {
+   "id": "memql/0054",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 0 (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "memql/0055",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 0 (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0056",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 0 (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0057",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 0 (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 . 2)))"
+  },
+  {
+   "id": "memql/0058",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 0 (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 2 . 3)))"
+  },
+  {
+   "id": "memql/0059",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 0 (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp [1 2]))"
+  },
+  {
+   "id": "memql/0060",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 0 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "memql/0061",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 0 (list 1.5 0.0 -0.0))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0062",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 0 (let ((x (list 2 3))) (cons 1 (progn (setcdr (cdr x) x) x))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (3 2 3 2 . #2)))"
+  },
+  {
+   "id": "memql/0063",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 1 nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0064",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 1 t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp t))"
+  },
+  {
+   "id": "memql/0065",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 1 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 0))"
+  },
+  {
+   "id": "memql/0066",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 1 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "memql/0067",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 1 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "memql/0068",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 1 -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp -1))"
+  },
+  {
+   "id": "memql/0069",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 1 most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "memql/0070",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 1 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1.5))"
+  },
+  {
+   "id": "memql/0071",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 1 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp sym))"
+  },
+  {
+   "id": "memql/0072",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 1 :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "memql/0073",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 1 (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"\"))"
+  },
+  {
+   "id": "memql/0074",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 1 (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"abc\"))"
+  },
+  {
+   "id": "memql/0075",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 1 (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "memql/0076",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 1 (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok (1 2 3))"
+  },
+  {
+   "id": "memql/0077",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 1 (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0078",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 1 (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(ok (1 . 2))"
+  },
+  {
+   "id": "memql/0079",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 1 (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(ok (1 2 . 3))"
+  },
+  {
+   "id": "memql/0080",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 1 (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp [1 2]))"
+  },
+  {
+   "id": "memql/0081",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(ok (1 2 1 2 . #2))"
+  },
+  {
+   "id": "memql/0082",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 1 (list 1.5 0.0 -0.0))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0083",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 1 (let ((x (list 2 3))) (cons 1 (progn (setcdr (cdr x) x) x))))) (error (list 'sig e))))",
+   "expected": "(ok (1 2 3 2 . #2))"
+  },
+  {
+   "id": "memql/0084",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 2 nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0085",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 2 t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp t))"
+  },
+  {
+   "id": "memql/0086",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 2 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 0))"
+  },
+  {
+   "id": "memql/0087",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 2 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "memql/0088",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 2 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "memql/0089",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 2 -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp -1))"
+  },
+  {
+   "id": "memql/0090",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 2 most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "memql/0091",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 2 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1.5))"
+  },
+  {
+   "id": "memql/0092",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 2 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp sym))"
+  },
+  {
+   "id": "memql/0093",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 2 :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "memql/0094",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 2 (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"\"))"
+  },
+  {
+   "id": "memql/0095",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 2 (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"abc\"))"
+  },
+  {
+   "id": "memql/0096",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 2 (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "memql/0097",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 2 (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok (2 3))"
+  },
+  {
+   "id": "memql/0098",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 2 (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0099",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 2 (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 . 2)))"
+  },
+  {
+   "id": "memql/0100",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 2 (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(ok (2 . 3))"
+  },
+  {
+   "id": "memql/0101",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 2 (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp [1 2]))"
+  },
+  {
+   "id": "memql/0102",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 2 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(ok (2 1 2 1 . #2))"
+  },
+  {
+   "id": "memql/0103",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 2 (list 1.5 0.0 -0.0))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0104",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 2 (let ((x (list 2 3))) (cons 1 (progn (setcdr (cdr x) x) x))))) (error (list 'sig e))))",
+   "expected": "(ok (2 3 2 3 . #2))"
+  },
+  {
+   "id": "memql/0105",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql -1 nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0106",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql -1 t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp t))"
+  },
+  {
+   "id": "memql/0107",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql -1 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 0))"
+  },
+  {
+   "id": "memql/0108",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql -1 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "memql/0109",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql -1 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "memql/0110",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql -1 -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp -1))"
+  },
+  {
+   "id": "memql/0111",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql -1 most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "memql/0112",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql -1 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1.5))"
+  },
+  {
+   "id": "memql/0113",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql -1 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp sym))"
+  },
+  {
+   "id": "memql/0114",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql -1 :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "memql/0115",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql -1 (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"\"))"
+  },
+  {
+   "id": "memql/0116",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql -1 (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"abc\"))"
+  },
+  {
+   "id": "memql/0117",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql -1 (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "memql/0118",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql -1 (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0119",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql -1 (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0120",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql -1 (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 . 2)))"
+  },
+  {
+   "id": "memql/0121",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql -1 (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 2 . 3)))"
+  },
+  {
+   "id": "memql/0122",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql -1 (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp [1 2]))"
+  },
+  {
+   "id": "memql/0123",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql -1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "memql/0124",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql -1 (list 1.5 0.0 -0.0))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0125",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql -1 (let ((x (list 2 3))) (cons 1 (progn (setcdr (cdr x) x) x))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (3 2 3 2 . #2)))"
+  },
+  {
+   "id": "memql/0126",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql most-positive-fixnum nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0127",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql most-positive-fixnum t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp t))"
+  },
+  {
+   "id": "memql/0128",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql most-positive-fixnum 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 0))"
+  },
+  {
+   "id": "memql/0129",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql most-positive-fixnum 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "memql/0130",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql most-positive-fixnum 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "memql/0131",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql most-positive-fixnum -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp -1))"
+  },
+  {
+   "id": "memql/0132",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql most-positive-fixnum most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "memql/0133",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql most-positive-fixnum 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1.5))"
+  },
+  {
+   "id": "memql/0134",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql most-positive-fixnum 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp sym))"
+  },
+  {
+   "id": "memql/0135",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql most-positive-fixnum :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "memql/0136",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql most-positive-fixnum (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"\"))"
+  },
+  {
+   "id": "memql/0137",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql most-positive-fixnum (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"abc\"))"
+  },
+  {
+   "id": "memql/0138",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql most-positive-fixnum (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "memql/0139",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql most-positive-fixnum (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0140",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql most-positive-fixnum (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0141",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql most-positive-fixnum (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 . 2)))"
+  },
+  {
+   "id": "memql/0142",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql most-positive-fixnum (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 2 . 3)))"
+  },
+  {
+   "id": "memql/0143",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql most-positive-fixnum (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp [1 2]))"
+  },
+  {
+   "id": "memql/0144",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql most-positive-fixnum (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "memql/0145",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql most-positive-fixnum (list 1.5 0.0 -0.0))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0146",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql most-positive-fixnum (let ((x (list 2 3))) (cons 1 (progn (setcdr (cdr x) x) x))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (3 2 3 2 . #2)))"
+  },
+  {
+   "id": "memql/0147",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 1.5 nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0148",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 1.5 t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp t))"
+  },
+  {
+   "id": "memql/0149",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 1.5 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 0))"
+  },
+  {
+   "id": "memql/0150",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 1.5 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "memql/0151",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 1.5 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "memql/0152",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 1.5 -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp -1))"
+  },
+  {
+   "id": "memql/0153",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 1.5 most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "memql/0154",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 1.5 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1.5))"
+  },
+  {
+   "id": "memql/0155",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 1.5 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp sym))"
+  },
+  {
+   "id": "memql/0156",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 1.5 :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "memql/0157",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 1.5 (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"\"))"
+  },
+  {
+   "id": "memql/0158",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 1.5 (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"abc\"))"
+  },
+  {
+   "id": "memql/0159",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 1.5 (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "memql/0160",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 1.5 (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0161",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 1.5 (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0162",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 1.5 (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 . 2)))"
+  },
+  {
+   "id": "memql/0163",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 1.5 (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 2 . 3)))"
+  },
+  {
+   "id": "memql/0164",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 1.5 (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp [1 2]))"
+  },
+  {
+   "id": "memql/0165",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 1.5 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "memql/0166",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 1.5 (list 1.5 0.0 -0.0))) (error (list 'sig e))))",
+   "expected": "(ok (1.5 0.0 -0.0))"
+  },
+  {
+   "id": "memql/0167",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 1.5 (let ((x (list 2 3))) (cons 1 (progn (setcdr (cdr x) x) x))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (3 2 3 2 . #2)))"
+  },
+  {
+   "id": "memql/0168",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 'sym nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0169",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 'sym t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp t))"
+  },
+  {
+   "id": "memql/0170",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 'sym 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 0))"
+  },
+  {
+   "id": "memql/0171",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 'sym 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "memql/0172",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 'sym 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "memql/0173",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 'sym -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp -1))"
+  },
+  {
+   "id": "memql/0174",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 'sym most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "memql/0175",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 'sym 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1.5))"
+  },
+  {
+   "id": "memql/0176",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 'sym 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp sym))"
+  },
+  {
+   "id": "memql/0177",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 'sym :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "memql/0178",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 'sym (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"\"))"
+  },
+  {
+   "id": "memql/0179",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 'sym (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"abc\"))"
+  },
+  {
+   "id": "memql/0180",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 'sym (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "memql/0181",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 'sym (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0182",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 'sym (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0183",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 'sym (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 . 2)))"
+  },
+  {
+   "id": "memql/0184",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 'sym (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 2 . 3)))"
+  },
+  {
+   "id": "memql/0185",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 'sym (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp [1 2]))"
+  },
+  {
+   "id": "memql/0186",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 'sym (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "memql/0187",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 'sym (list 1.5 0.0 -0.0))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0188",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql 'sym (let ((x (list 2 3))) (cons 1 (progn (setcdr (cdr x) x) x))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (3 2 3 2 . #2)))"
+  },
+  {
+   "id": "memql/0189",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql :kw nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0190",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql :kw t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp t))"
+  },
+  {
+   "id": "memql/0191",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql :kw 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 0))"
+  },
+  {
+   "id": "memql/0192",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql :kw 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "memql/0193",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql :kw 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "memql/0194",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql :kw -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp -1))"
+  },
+  {
+   "id": "memql/0195",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql :kw most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "memql/0196",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql :kw 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1.5))"
+  },
+  {
+   "id": "memql/0197",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql :kw 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp sym))"
+  },
+  {
+   "id": "memql/0198",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql :kw :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "memql/0199",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql :kw (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"\"))"
+  },
+  {
+   "id": "memql/0200",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql :kw (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"abc\"))"
+  },
+  {
+   "id": "memql/0201",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql :kw (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "memql/0202",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql :kw (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0203",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql :kw (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0204",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql :kw (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 . 2)))"
+  },
+  {
+   "id": "memql/0205",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql :kw (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 2 . 3)))"
+  },
+  {
+   "id": "memql/0206",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql :kw (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp [1 2]))"
+  },
+  {
+   "id": "memql/0207",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql :kw (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "memql/0208",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql :kw (list 1.5 0.0 -0.0))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0209",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql :kw (let ((x (list 2 3))) (cons 1 (progn (setcdr (cdr x) x) x))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (3 2 3 2 . #2)))"
+  },
+  {
+   "id": "memql/0210",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (copy-sequence \"\") nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0211",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (copy-sequence \"\") t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp t))"
+  },
+  {
+   "id": "memql/0212",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (copy-sequence \"\") 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 0))"
+  },
+  {
+   "id": "memql/0213",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (copy-sequence \"\") 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "memql/0214",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (copy-sequence \"\") 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "memql/0215",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (copy-sequence \"\") -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp -1))"
+  },
+  {
+   "id": "memql/0216",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (copy-sequence \"\") most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "memql/0217",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (copy-sequence \"\") 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1.5))"
+  },
+  {
+   "id": "memql/0218",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (copy-sequence \"\") 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp sym))"
+  },
+  {
+   "id": "memql/0219",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (copy-sequence \"\") :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "memql/0220",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (copy-sequence \"\") (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"\"))"
+  },
+  {
+   "id": "memql/0221",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (copy-sequence \"\") (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"abc\"))"
+  },
+  {
+   "id": "memql/0222",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (copy-sequence \"\") (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "memql/0223",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (copy-sequence \"\") (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0224",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (copy-sequence \"\") (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0225",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (copy-sequence \"\") (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 . 2)))"
+  },
+  {
+   "id": "memql/0226",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (copy-sequence \"\") (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 2 . 3)))"
+  },
+  {
+   "id": "memql/0227",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (copy-sequence \"\") (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp [1 2]))"
+  },
+  {
+   "id": "memql/0228",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (copy-sequence \"\") (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "memql/0229",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (copy-sequence \"\") (list 1.5 0.0 -0.0))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0230",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (copy-sequence \"\") (let ((x (list 2 3))) (cons 1 (progn (setcdr (cdr x) x) x))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (3 2 3 2 . #2)))"
+  },
+  {
+   "id": "memql/0231",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (copy-sequence \"abc\") nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0232",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (copy-sequence \"abc\") t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp t))"
+  },
+  {
+   "id": "memql/0233",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (copy-sequence \"abc\") 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 0))"
+  },
+  {
+   "id": "memql/0234",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (copy-sequence \"abc\") 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "memql/0235",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (copy-sequence \"abc\") 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "memql/0236",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (copy-sequence \"abc\") -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp -1))"
+  },
+  {
+   "id": "memql/0237",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (copy-sequence \"abc\") most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "memql/0238",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (copy-sequence \"abc\") 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1.5))"
+  },
+  {
+   "id": "memql/0239",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (copy-sequence \"abc\") 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp sym))"
+  },
+  {
+   "id": "memql/0240",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (copy-sequence \"abc\") :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "memql/0241",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (copy-sequence \"abc\") (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"\"))"
+  },
+  {
+   "id": "memql/0242",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (copy-sequence \"abc\") (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"abc\"))"
+  },
+  {
+   "id": "memql/0243",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (copy-sequence \"abc\") (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "memql/0244",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (copy-sequence \"abc\") (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0245",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (copy-sequence \"abc\") (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0246",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (copy-sequence \"abc\") (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 . 2)))"
+  },
+  {
+   "id": "memql/0247",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (copy-sequence \"abc\") (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 2 . 3)))"
+  },
+  {
+   "id": "memql/0248",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (copy-sequence \"abc\") (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp [1 2]))"
+  },
+  {
+   "id": "memql/0249",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (copy-sequence \"abc\") (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "memql/0250",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (copy-sequence \"abc\") (list 1.5 0.0 -0.0))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0251",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (copy-sequence \"abc\") (let ((x (list 2 3))) (cons 1 (progn (setcdr (cdr x) x) x))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (3 2 3 2 . #2)))"
+  },
+  {
+   "id": "memql/0252",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (copy-sequence \"λx\") nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0253",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (copy-sequence \"λx\") t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp t))"
+  },
+  {
+   "id": "memql/0254",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (copy-sequence \"λx\") 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 0))"
+  },
+  {
+   "id": "memql/0255",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (copy-sequence \"λx\") 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "memql/0256",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (copy-sequence \"λx\") 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "memql/0257",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (copy-sequence \"λx\") -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp -1))"
+  },
+  {
+   "id": "memql/0258",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (copy-sequence \"λx\") most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "memql/0259",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (copy-sequence \"λx\") 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1.5))"
+  },
+  {
+   "id": "memql/0260",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (copy-sequence \"λx\") 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp sym))"
+  },
+  {
+   "id": "memql/0261",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (copy-sequence \"λx\") :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "memql/0262",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (copy-sequence \"λx\") (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"\"))"
+  },
+  {
+   "id": "memql/0263",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (copy-sequence \"λx\") (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"abc\"))"
+  },
+  {
+   "id": "memql/0264",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (copy-sequence \"λx\") (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "memql/0265",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (copy-sequence \"λx\") (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0266",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (copy-sequence \"λx\") (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0267",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (copy-sequence \"λx\") (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 . 2)))"
+  },
+  {
+   "id": "memql/0268",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (copy-sequence \"λx\") (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 2 . 3)))"
+  },
+  {
+   "id": "memql/0269",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (copy-sequence \"λx\") (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp [1 2]))"
+  },
+  {
+   "id": "memql/0270",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (copy-sequence \"λx\") (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "memql/0271",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (copy-sequence \"λx\") (list 1.5 0.0 -0.0))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0272",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (copy-sequence \"λx\") (let ((x (list 2 3))) (cons 1 (progn (setcdr (cdr x) x) x))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (3 2 3 2 . #2)))"
+  },
+  {
+   "id": "memql/0273",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (list 1 2 3) nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0274",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (list 1 2 3) t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp t))"
+  },
+  {
+   "id": "memql/0275",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (list 1 2 3) 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 0))"
+  },
+  {
+   "id": "memql/0276",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (list 1 2 3) 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "memql/0277",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (list 1 2 3) 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "memql/0278",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (list 1 2 3) -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp -1))"
+  },
+  {
+   "id": "memql/0279",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (list 1 2 3) most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "memql/0280",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (list 1 2 3) 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1.5))"
+  },
+  {
+   "id": "memql/0281",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (list 1 2 3) 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp sym))"
+  },
+  {
+   "id": "memql/0282",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (list 1 2 3) :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "memql/0283",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (list 1 2 3) (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"\"))"
+  },
+  {
+   "id": "memql/0284",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (list 1 2 3) (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"abc\"))"
+  },
+  {
+   "id": "memql/0285",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (list 1 2 3) (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "memql/0286",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (list 1 2 3) (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0287",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (list 1 2 3) (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0288",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (list 1 2 3) (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 . 2)))"
+  },
+  {
+   "id": "memql/0289",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (list 1 2 3) (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 2 . 3)))"
+  },
+  {
+   "id": "memql/0290",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (list 1 2 3) (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp [1 2]))"
+  },
+  {
+   "id": "memql/0291",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (list 1 2 3) (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "memql/0292",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (list 1 2 3) (list 1.5 0.0 -0.0))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0293",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (list 1 2 3) (let ((x (list 2 3))) (cons 1 (progn (setcdr (cdr x) x) x))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (3 2 3 2 . #2)))"
+  },
+  {
+   "id": "memql/0294",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (list 'a (list 'b)) nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0295",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (list 'a (list 'b)) t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp t))"
+  },
+  {
+   "id": "memql/0296",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (list 'a (list 'b)) 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 0))"
+  },
+  {
+   "id": "memql/0297",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (list 'a (list 'b)) 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "memql/0298",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (list 'a (list 'b)) 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "memql/0299",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (list 'a (list 'b)) -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp -1))"
+  },
+  {
+   "id": "memql/0300",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (list 'a (list 'b)) most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "memql/0301",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (list 'a (list 'b)) 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1.5))"
+  },
+  {
+   "id": "memql/0302",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (list 'a (list 'b)) 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp sym))"
+  },
+  {
+   "id": "memql/0303",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (list 'a (list 'b)) :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "memql/0304",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (list 'a (list 'b)) (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"\"))"
+  },
+  {
+   "id": "memql/0305",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (list 'a (list 'b)) (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"abc\"))"
+  },
+  {
+   "id": "memql/0306",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (list 'a (list 'b)) (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "memql/0307",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (list 'a (list 'b)) (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0308",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (list 'a (list 'b)) (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0309",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (list 'a (list 'b)) (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 . 2)))"
+  },
+  {
+   "id": "memql/0310",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (list 'a (list 'b)) (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 2 . 3)))"
+  },
+  {
+   "id": "memql/0311",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (list 'a (list 'b)) (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp [1 2]))"
+  },
+  {
+   "id": "memql/0312",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (list 'a (list 'b)) (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "memql/0313",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (list 'a (list 'b)) (list 1.5 0.0 -0.0))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0314",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (list 'a (list 'b)) (let ((x (list 2 3))) (cons 1 (progn (setcdr (cdr x) x) x))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (3 2 3 2 . #2)))"
+  },
+  {
+   "id": "memql/0315",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (cons 1 2) nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0316",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (cons 1 2) t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp t))"
+  },
+  {
+   "id": "memql/0317",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (cons 1 2) 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 0))"
+  },
+  {
+   "id": "memql/0318",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (cons 1 2) 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "memql/0319",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (cons 1 2) 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "memql/0320",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (cons 1 2) -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp -1))"
+  },
+  {
+   "id": "memql/0321",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (cons 1 2) most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "memql/0322",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (cons 1 2) 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1.5))"
+  },
+  {
+   "id": "memql/0323",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (cons 1 2) 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp sym))"
+  },
+  {
+   "id": "memql/0324",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (cons 1 2) :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "memql/0325",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (cons 1 2) (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"\"))"
+  },
+  {
+   "id": "memql/0326",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (cons 1 2) (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"abc\"))"
+  },
+  {
+   "id": "memql/0327",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (cons 1 2) (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "memql/0328",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (cons 1 2) (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0329",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (cons 1 2) (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0330",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (cons 1 2) (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 . 2)))"
+  },
+  {
+   "id": "memql/0331",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (cons 1 2) (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 2 . 3)))"
+  },
+  {
+   "id": "memql/0332",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (cons 1 2) (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp [1 2]))"
+  },
+  {
+   "id": "memql/0333",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (cons 1 2) (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "memql/0334",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (cons 1 2) (list 1.5 0.0 -0.0))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0335",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (cons 1 2) (let ((x (list 2 3))) (cons 1 (progn (setcdr (cdr x) x) x))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (3 2 3 2 . #2)))"
+  },
+  {
+   "id": "memql/0336",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (cons 1 (cons 2 3)) nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0337",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (cons 1 (cons 2 3)) t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp t))"
+  },
+  {
+   "id": "memql/0338",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (cons 1 (cons 2 3)) 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 0))"
+  },
+  {
+   "id": "memql/0339",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (cons 1 (cons 2 3)) 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "memql/0340",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (cons 1 (cons 2 3)) 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "memql/0341",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (cons 1 (cons 2 3)) -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp -1))"
+  },
+  {
+   "id": "memql/0342",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (cons 1 (cons 2 3)) most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "memql/0343",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (cons 1 (cons 2 3)) 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1.5))"
+  },
+  {
+   "id": "memql/0344",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (cons 1 (cons 2 3)) 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp sym))"
+  },
+  {
+   "id": "memql/0345",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (cons 1 (cons 2 3)) :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "memql/0346",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (cons 1 (cons 2 3)) (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"\"))"
+  },
+  {
+   "id": "memql/0347",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (cons 1 (cons 2 3)) (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"abc\"))"
+  },
+  {
+   "id": "memql/0348",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (cons 1 (cons 2 3)) (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "memql/0349",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (cons 1 (cons 2 3)) (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0350",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (cons 1 (cons 2 3)) (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0351",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (cons 1 (cons 2 3)) (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 . 2)))"
+  },
+  {
+   "id": "memql/0352",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (cons 1 (cons 2 3)) (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 2 . 3)))"
+  },
+  {
+   "id": "memql/0353",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (cons 1 (cons 2 3)) (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp [1 2]))"
+  },
+  {
+   "id": "memql/0354",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (cons 1 (cons 2 3)) (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "memql/0355",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (cons 1 (cons 2 3)) (list 1.5 0.0 -0.0))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0356",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (cons 1 (cons 2 3)) (let ((x (list 2 3))) (cons 1 (progn (setcdr (cdr x) x) x))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (3 2 3 2 . #2)))"
+  },
+  {
+   "id": "memql/0357",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (vector 1 2) nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0358",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (vector 1 2) t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp t))"
+  },
+  {
+   "id": "memql/0359",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (vector 1 2) 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 0))"
+  },
+  {
+   "id": "memql/0360",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (vector 1 2) 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "memql/0361",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (vector 1 2) 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "memql/0362",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (vector 1 2) -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp -1))"
+  },
+  {
+   "id": "memql/0363",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (vector 1 2) most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "memql/0364",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (vector 1 2) 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1.5))"
+  },
+  {
+   "id": "memql/0365",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (vector 1 2) 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp sym))"
+  },
+  {
+   "id": "memql/0366",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (vector 1 2) :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "memql/0367",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (vector 1 2) (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"\"))"
+  },
+  {
+   "id": "memql/0368",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (vector 1 2) (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"abc\"))"
+  },
+  {
+   "id": "memql/0369",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (vector 1 2) (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "memql/0370",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (vector 1 2) (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0371",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (vector 1 2) (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0372",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (vector 1 2) (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 . 2)))"
+  },
+  {
+   "id": "memql/0373",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (vector 1 2) (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 2 . 3)))"
+  },
+  {
+   "id": "memql/0374",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (vector 1 2) (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp [1 2]))"
+  },
+  {
+   "id": "memql/0375",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (vector 1 2) (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "memql/0376",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (vector 1 2) (list 1.5 0.0 -0.0))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0377",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (vector 1 2) (let ((x (list 2 3))) (cons 1 (progn (setcdr (cdr x) x) x))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (3 2 3 2 . #2)))"
+  },
+  {
+   "id": "memql/0378",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (let ((x (list 1 2))) (setcdr (cdr x) x) x) nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0379",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (let ((x (list 1 2))) (setcdr (cdr x) x) x) t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp t))"
+  },
+  {
+   "id": "memql/0380",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (let ((x (list 1 2))) (setcdr (cdr x) x) x) 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 0))"
+  },
+  {
+   "id": "memql/0381",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (let ((x (list 1 2))) (setcdr (cdr x) x) x) 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "memql/0382",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (let ((x (list 1 2))) (setcdr (cdr x) x) x) 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "memql/0383",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (let ((x (list 1 2))) (setcdr (cdr x) x) x) -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp -1))"
+  },
+  {
+   "id": "memql/0384",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (let ((x (list 1 2))) (setcdr (cdr x) x) x) most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "memql/0385",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (let ((x (list 1 2))) (setcdr (cdr x) x) x) 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1.5))"
+  },
+  {
+   "id": "memql/0386",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (let ((x (list 1 2))) (setcdr (cdr x) x) x) 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp sym))"
+  },
+  {
+   "id": "memql/0387",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (let ((x (list 1 2))) (setcdr (cdr x) x) x) :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "memql/0388",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (let ((x (list 1 2))) (setcdr (cdr x) x) x) (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"\"))"
+  },
+  {
+   "id": "memql/0389",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (let ((x (list 1 2))) (setcdr (cdr x) x) x) (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"abc\"))"
+  },
+  {
+   "id": "memql/0390",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (let ((x (list 1 2))) (setcdr (cdr x) x) x) (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "memql/0391",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (let ((x (list 1 2))) (setcdr (cdr x) x) x) (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0392",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (let ((x (list 1 2))) (setcdr (cdr x) x) x) (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0393",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (let ((x (list 1 2))) (setcdr (cdr x) x) x) (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 . 2)))"
+  },
+  {
+   "id": "memql/0394",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (let ((x (list 1 2))) (setcdr (cdr x) x) x) (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 2 . 3)))"
+  },
+  {
+   "id": "memql/0395",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (let ((x (list 1 2))) (setcdr (cdr x) x) x) (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp [1 2]))"
+  },
+  {
+   "id": "memql/0396",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (let ((x (list 1 2))) (setcdr (cdr x) x) x) (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "memql/0397",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (let ((x (list 1 2))) (setcdr (cdr x) x) x) (list 1.5 0.0 -0.0))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0398",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (memql (let ((x (list 1 2))) (setcdr (cdr x) x) x) (let ((x (list 2 3))) (cons 1 (progn (setcdr (cdr x) x) x))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (3 2 3 2 . #2)))"
+  },
+  {
+   "id": "memql/0399",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'memql '(1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr memql> 1))"
+  },
+  {
+   "id": "memql/0400",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'memql '(1 1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr memql> 3))"
+  },
+  {
+   "id": "memql/0401",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 nil)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (memql a0 a1))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0402",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 (cons 1 (cons 2 3)))) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (memql a0 a1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 2 . 3)))"
+  },
+  {
+   "id": "memql/0403",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 (copy-sequence \"abc\"))) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (memql a0 a1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"abc\"))"
+  },
+  {
+   "id": "memql/0404",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1) (a1 most-positive-fixnum)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (memql a0 a1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "memql/0405",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.5) (a1 t)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (memql a0 a1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp t))"
+  },
+  {
+   "id": "memql/0406",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'sym) (a1 (vector 1 2))) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (memql a0 a1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp [1 2]))"
+  },
+  {
+   "id": "memql/0407",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\")) (a1 (copy-sequence \"λx\"))) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (memql a0 a1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "memql/0408",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 1.5)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (memql a0 a1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1.5))"
+  },
+  {
+   "id": "memql/0409",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 'a (list 'b))) (a1 0)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (memql a0 a1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 0))"
+  },
+  {
+   "id": "memql/0410",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 2)) (a1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (memql a0 a1))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "memql/0411",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (vector 1 2)) (a1 (list 1 2 3))) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (memql a0 a1))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0412",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 nil)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (t t))"
+  },
+  {
+   "id": "memql/0413",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 1)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "memql/0414",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 most-positive-fixnum)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "memql/0415",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 :kw)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "memql/0416",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 (copy-sequence \"λx\"))) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "memql/0417",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 (cons 1 2))) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 . 2)))"
+  },
+  {
+   "id": "memql/0418",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "memql/0419",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 nil)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "memql/0420",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 1)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "memql/0421",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 most-positive-fixnum)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "memql/0422",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 :kw)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "memql/0423",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 (copy-sequence \"λx\"))) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "memql/0424",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 (cons 1 2))) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 . 2)))"
+  },
+  {
+   "id": "memql/0425",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "memql/0426",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0) (a1 nil)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "memql/0427",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0) (a1 1)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "memql/0428",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0) (a1 most-positive-fixnum)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "memql/0429",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0) (a1 :kw)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "memql/0430",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0) (a1 (copy-sequence \"λx\"))) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "memql/0431",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0) (a1 (cons 1 2))) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 . 2)))"
+  },
+  {
+   "id": "memql/0432",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0) (a1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "memql/0433",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 nil)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "memql/0434",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 1)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "memql/0435",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 most-positive-fixnum)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "memql/0436",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 :kw)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "memql/0437",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 (copy-sequence \"λx\"))) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "memql/0438",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 (cons 1 2))) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "memql/0439",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "memql/0440",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 2) (a1 nil)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "memql/0441",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 2) (a1 1)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "memql/0442",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 2) (a1 most-positive-fixnum)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "memql/0443",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 2) (a1 :kw)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "memql/0444",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 2) (a1 (copy-sequence \"λx\"))) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "memql/0445",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 2) (a1 (cons 1 2))) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 . 2)))"
+  },
+  {
+   "id": "memql/0446",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 2) (a1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "memql/0447",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1) (a1 nil)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "memql/0448",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1) (a1 1)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "memql/0449",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1) (a1 most-positive-fixnum)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "memql/0450",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1) (a1 :kw)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "memql/0451",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1) (a1 (copy-sequence \"λx\"))) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "memql/0452",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1) (a1 (cons 1 2))) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 . 2)))"
+  },
+  {
+   "id": "memql/0453",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1) (a1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "memql/0454",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-positive-fixnum) (a1 nil)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "memql/0455",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-positive-fixnum) (a1 1)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "memql/0456",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-positive-fixnum) (a1 most-positive-fixnum)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "memql/0457",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-positive-fixnum) (a1 :kw)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "memql/0458",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-positive-fixnum) (a1 (copy-sequence \"λx\"))) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "memql/0459",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-positive-fixnum) (a1 (cons 1 2))) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 . 2)))"
+  },
+  {
+   "id": "memql/0460",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-positive-fixnum) (a1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "memql/0461",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.5) (a1 nil)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "memql/0462",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.5) (a1 1)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "memql/0463",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.5) (a1 most-positive-fixnum)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "memql/0464",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.5) (a1 :kw)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "memql/0465",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.5) (a1 (copy-sequence \"λx\"))) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "memql/0466",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.5) (a1 (cons 1 2))) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 . 2)))"
+  },
+  {
+   "id": "memql/0467",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.5) (a1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "memql/0468",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'sym) (a1 nil)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "memql/0469",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'sym) (a1 1)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "memql/0470",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'sym) (a1 most-positive-fixnum)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "memql/0471",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'sym) (a1 :kw)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "memql/0472",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'sym) (a1 (copy-sequence \"λx\"))) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "memql/0473",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'sym) (a1 (cons 1 2))) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 . 2)))"
+  },
+  {
+   "id": "memql/0474",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'sym) (a1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "memql/0475",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :kw) (a1 nil)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "memql/0476",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :kw) (a1 1)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "memql/0477",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :kw) (a1 most-positive-fixnum)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "memql/0478",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :kw) (a1 :kw)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "memql/0479",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :kw) (a1 (copy-sequence \"λx\"))) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "memql/0480",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :kw) (a1 (cons 1 2))) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 . 2)))"
+  },
+  {
+   "id": "memql/0481",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :kw) (a1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "memql/0482",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\")) (a1 nil)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "memql/0483",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\")) (a1 1)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "memql/0484",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\")) (a1 most-positive-fixnum)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "memql/0485",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\")) (a1 :kw)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "memql/0486",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\")) (a1 (copy-sequence \"λx\"))) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "memql/0487",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\")) (a1 (cons 1 2))) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 . 2)))"
+  },
+  {
+   "id": "memql/0488",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\")) (a1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "memql/0489",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 nil)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "memql/0490",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 1)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "memql/0491",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 most-positive-fixnum)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "memql/0492",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 :kw)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "memql/0493",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 (copy-sequence \"λx\"))) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "memql/0494",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 (cons 1 2))) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 . 2)))"
+  },
+  {
+   "id": "memql/0495",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "memql/0496",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 nil)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "memql/0497",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 1)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "memql/0498",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 most-positive-fixnum)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "memql/0499",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 :kw)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "memql/0500",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 (copy-sequence \"λx\"))) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "memql/0501",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 (cons 1 2))) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 . 2)))"
+  },
+  {
+   "id": "memql/0502",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "memql/0503",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 1 2 3)) (a1 nil)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "memql/0504",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 1 2 3)) (a1 1)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "memql/0505",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 1 2 3)) (a1 most-positive-fixnum)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "memql/0506",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 1 2 3)) (a1 :kw)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "memql/0507",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 1 2 3)) (a1 (copy-sequence \"λx\"))) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "memql/0508",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 1 2 3)) (a1 (cons 1 2))) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 . 2)))"
+  },
+  {
+   "id": "memql/0509",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 1 2 3)) (a1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "memql/0510",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 'a (list 'b))) (a1 nil)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "memql/0511",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 'a (list 'b))) (a1 1)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "memql/0512",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 'a (list 'b))) (a1 most-positive-fixnum)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "memql/0513",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 'a (list 'b))) (a1 :kw)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "memql/0514",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 'a (list 'b))) (a1 (copy-sequence \"λx\"))) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "memql/0515",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 'a (list 'b))) (a1 (cons 1 2))) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 . 2)))"
+  },
+  {
+   "id": "memql/0516",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 'a (list 'b))) (a1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "memql/0517",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 2)) (a1 nil)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "memql/0518",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 2)) (a1 1)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "memql/0519",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 2)) (a1 most-positive-fixnum)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "memql/0520",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 2)) (a1 :kw)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "memql/0521",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 2)) (a1 (copy-sequence \"λx\"))) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "memql/0522",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 2)) (a1 (cons 1 2))) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 . 2)))"
+  },
+  {
+   "id": "memql/0523",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 2)) (a1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "memql/0524",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 (cons 2 3))) (a1 nil)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "memql/0525",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 (cons 2 3))) (a1 1)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "memql/0526",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 (cons 2 3))) (a1 most-positive-fixnum)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "memql/0527",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 (cons 2 3))) (a1 :kw)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "memql/0528",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 (cons 2 3))) (a1 (copy-sequence \"λx\"))) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "memql/0529",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 (cons 2 3))) (a1 (cons 1 2))) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 . 2)))"
+  },
+  {
+   "id": "memql/0530",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 (cons 2 3))) (a1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "memql/0531",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (vector 1 2)) (a1 nil)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "memql/0532",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (vector 1 2)) (a1 1)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "memql/0533",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (vector 1 2)) (a1 most-positive-fixnum)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "memql/0534",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (vector 1 2)) (a1 :kw)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "memql/0535",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (vector 1 2)) (a1 (copy-sequence \"λx\"))) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "memql/0536",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (vector 1 2)) (a1 (cons 1 2))) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 . 2)))"
+  },
+  {
+   "id": "memql/0537",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (vector 1 2)) (a1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "memql/0538",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (a1 nil)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "memql/0539",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (a1 1)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "memql/0540",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (a1 most-positive-fixnum)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "memql/0541",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (a1 :kw)) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "memql/0542",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (a1 (copy-sequence \"λx\"))) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "memql/0543",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (a1 (cons 1 2))) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp (1 . 2)))"
+  },
+  {
+   "id": "memql/0544",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (a1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (memql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "memql/0545",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((x (list 0.0 -0.0 1.5))) (list (eq (memql -0.0 x) (cdr x)) (eq (memql 1.5 x) (cdr (cdr x))) (memql 0.0 x)))) (error (list 'sig e))))",
+   "expected": "(ok (t t (0.0 -0.0 1.5)))"
+  },
+  {
+   "id": "memql/0546",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((s (copy-sequence \"a\"))) (let ((x (list s))) (list (eq (memql s x) x) (memql (copy-sequence s) x))))) (error (list 'sig e))))",
+   "expected": "(ok (t nil))"
+  },
+  {
+   "id": "memql/0547",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 'sym) (error (list 'sig e))))",
+   "expected": "(ok sym)"
+  },
+  {
+   "id": "memql/0548",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (cons 1 (cons 2 3))) (error (list 'sig e))))",
+   "expected": "(ok (1 2 . 3))"
+  },
+  {
+   "id": "memql/0549",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (cons 1 2)) (error (list 'sig e))))",
+   "expected": "(ok (1 . 2))"
+  },
+  {
+   "id": "memql/0550",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"\")) (error (list 'sig e))))",
+   "expected": "(ok \"\")"
+  },
+  {
+   "id": "memql/0551",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"abc\")) (error (list 'sig e))))",
+   "expected": "(ok \"abc\")"
+  },
+  {
+   "id": "memql/0552",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"λx\")) (error (list 'sig e))))",
+   "expected": "(ok \"λx\")"
+  },
+  {
+   "id": "memql/0553",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (error (list 'sig e))))",
+   "expected": "(ok (1 2 1 2 . #2))"
+  },
+  {
+   "id": "memql/0554",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((x (list 2 3))) (cons 1 (progn (setcdr (cdr x) x) x)))) (error (list 'sig e))))",
+   "expected": "(ok (1 2 3 2 . #2))"
+  },
+  {
+   "id": "memql/0555",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list 'a (list 'b))) (error (list 'sig e))))",
+   "expected": "(ok (a (b)))"
+  },
+  {
+   "id": "memql/0556",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list 1 2 3)) (error (list 'sig e))))",
+   "expected": "(ok (1 2 3))"
+  },
+  {
+   "id": "memql/0557",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list 1.5 0.0 -0.0)) (error (list 'sig e))))",
+   "expected": "(ok (1.5 0.0 -0.0))"
+  },
+  {
+   "id": "memql/0558",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vector 1 2)) (error (list 'sig e))))",
+   "expected": "(ok [1 2])"
+  },
+  {
+   "id": "memql/0559",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok -1) (error (list 'sig e))))",
+   "expected": "(ok -1)"
+  },
+  {
+   "id": "memql/0560",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 0) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "memql/0561",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1) (error (list 'sig e))))",
+   "expected": "(ok 1)"
+  },
+  {
+   "id": "memql/0562",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1.5) (error (list 'sig e))))",
+   "expected": "(ok 1.5)"
+  },
+  {
+   "id": "memql/0563",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 2) (error (list 'sig e))))",
+   "expected": "(ok 2)"
+  },
+  {
+   "id": "memql/0564",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok :kw) (error (list 'sig e))))",
+   "expected": "(ok :kw)"
+  },
+  {
+   "id": "memql/0565",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok most-positive-fixnum) (error (list 'sig e))))",
+   "expected": "(ok 2305843009213693951)"
+  },
+  {
+   "id": "memql/0566",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok nil) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "memql/0567",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok t) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  }
+ ],
+ "pinned": {
+  "memql/0018": "PRINTER",
+  "memql/0020": "PRINTER",
+  "memql/0039": "PRINTER",
+  "memql/0041": "PRINTER",
+  "memql/0060": "PRINTER",
+  "memql/0062": "PRINTER",
+  "memql/0081": "PRINTER",
+  "memql/0083": "PRINTER",
+  "memql/0102": "PRINTER",
+  "memql/0104": "PRINTER",
+  "memql/0123": "PRINTER",
+  "memql/0125": "PRINTER",
+  "memql/0144": "PRINTER",
+  "memql/0146": "PRINTER",
+  "memql/0165": "PRINTER",
+  "memql/0167": "PRINTER",
+  "memql/0186": "PRINTER",
+  "memql/0188": "PRINTER",
+  "memql/0207": "PRINTER",
+  "memql/0209": "PRINTER",
+  "memql/0228": "PRINTER",
+  "memql/0230": "PRINTER",
+  "memql/0249": "PRINTER",
+  "memql/0251": "PRINTER",
+  "memql/0270": "PRINTER",
+  "memql/0272": "PRINTER",
+  "memql/0291": "PRINTER",
+  "memql/0293": "PRINTER",
+  "memql/0312": "PRINTER",
+  "memql/0314": "PRINTER",
+  "memql/0333": "PRINTER",
+  "memql/0335": "PRINTER",
+  "memql/0354": "PRINTER",
+  "memql/0356": "PRINTER",
+  "memql/0375": "PRINTER",
+  "memql/0377": "PRINTER",
+  "memql/0396": "PRINTER",
+  "memql/0398": "PRINTER",
+  "memql/0410": "PRINTER",
+  "memql/0418": "PRINTER",
+  "memql/0425": "PRINTER",
+  "memql/0432": "PRINTER",
+  "memql/0453": "PRINTER",
+  "memql/0460": "PRINTER",
+  "memql/0467": "PRINTER",
+  "memql/0474": "PRINTER",
+  "memql/0481": "PRINTER",
+  "memql/0488": "PRINTER",
+  "memql/0495": "PRINTER",
+  "memql/0502": "PRINTER",
+  "memql/0509": "PRINTER",
+  "memql/0516": "PRINTER",
+  "memql/0523": "PRINTER",
+  "memql/0530": "PRINTER",
+  "memql/0537": "PRINTER",
+  "memql/0544": "PRINTER",
+  "memql/0553": "PRINTER",
+  "memql/0554": "PRINTER"
+ }
+}

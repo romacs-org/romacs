@@ -1,0 +1,30 @@
+{
+ "name": "set-match-data",
+ "arity": [
+  1,
+  2
+ ],
+ "effect": "global",
+ "gnu_files": [
+  "search.c"
+ ],
+ "gnu_def": "search.c:2949",
+ "rust": "src/prims/widen.rs:257",
+ "args": [],
+ "probes": [
+  "(progn (set-match-data nil) (list (match-data t) (match-beginning 0) (match-end 0)))",
+  "(progn (set-match-data '(1 3)) (list (match-data t) (match-beginning 0) (match-end 0)))",
+  "(progn (set-match-data '(nil 9 2 5)) (list (match-data t) (match-beginning 0) (match-end 0)))",
+  "(progn (set-match-data '(1)) (list (match-data t) (match-beginning 0) (match-end 0)))",
+  "(progn (set-match-data '(-1 3)) (list (match-data t) (match-beginning 0) (match-end 0)))",
+  "(progn (set-match-data '(2 -1)) (list (match-data t) (match-beginning 0) (match-end 0)))",
+  "(progn (set-match-data '(1 3 nil nil 4 5)) (list (match-data t) (match-beginning 0) (match-end 0)))",
+  "(progn (set-match-data '(1 nil)) (list (match-data t) (match-beginning 0) (match-end 0)))",
+  "(progn (set-match-data '(1 2 . 3)) (list (match-data t) (match-beginning 0) (match-end 0)))",
+  "(let ((m (make-marker))) (set-match-data (list m m)) (list (match-data t) (marker-position m)))",
+  "(progn (erase-buffer) (insert \"abc\") (let* ((m (copy-marker 2)) (l (list m (copy-marker 3)))) (set-match-data l t) (list (match-beginning 0) (match-end 0) l (marker-position m))))",
+  "(progn (string-match \"a\" \"a\") (set-match-data nil) (list (match-data) (match-beginning 0)))",
+  "(progn (set-match-data '(1 3)) (set-match-data '(8)) (match-data))",
+  "(progn (set-match-data '(2 -1)) (match-string 0 \"abcd\"))"
+ ]
+}

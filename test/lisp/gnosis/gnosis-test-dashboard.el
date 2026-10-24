@@ -1,0 +1,1711 @@
+;;; gnosis-test-dashboard.el --- Dashboard tests  -*- lexical-binding: t; -*-
+
+;; Copyright (C) 2026  Free Software Foundation, Inc.
+
+;; Author: Thanos Apollo <public@thanosapollo.org>
+
+;;; Commentary:
+
+;; Tests for gnosis-dashboard.el functionality.
+;; Uses a temporary SQLite database so the user's real DB is untouched.
+
+;;; Code:
+(require 'ert)
+(require 'gnosis)
+(require 'gnosis-review)
+(require 'gnosis-tl)
+(require 'gnosis-dashboard)
+
+(defvar gnosis-dashboard--history)
+
+(require 'gnosis-test-helpers)
+
+;; ──────────────────────────────────────────────────────────
+;; Dashboard-specific test helpers
+;; ──────────────────────────────────────────────────────────
+
+(defmacro gnosis-test-with-dashboard-state (&rest body)
+  "Run BODY with isolated dashboard selection and navigation state."
+  (declare (indent 0) (debug t))
+  `(let ((gnosis-dashboard--selected-ids nil)
+         (gnosis-dashboard--history nil))
+     ,@body))
+
+(defmacro gnosis-test-with-dashboard-buffer (&rest body)
+  "Run BODY in a temporary dashboard buffer with tabulated-list-mode.
+Stubs `pop-to-buffer-same-window' so tests work in batch mode.
+Includes `gnosis-test-with-dashboard-state' for isolation."
+  (declare (indent 0) (debug t))
+  `(gnosis-test-with-dashboard-state
+    (let ((gnosis-dashboard-buffer-name "*Gnosis Dashboard Test*"))
+      (with-current-buffer (get-buffer-create gnosis-dashboard-buffer-name)
+        (gnosis-dashboard-mode))
+      (cl-letf (((symbol-function 'pop-to-buffer-same-window)
+                 (lambda (buf &rest _) (set-buffer (get-buffer-create buf)))))
+        (unwind-protect
+            (progn ,@body)
+          (when (get-buffer gnosis-dashboard-buffer-name)
+            (kill-buffer gnosis-dashboard-buffer-name)))))))
+
+(defun gnosis-test--add-activity (date total new)
+  "Insert an activity-log row for DATE with TOTAL and NEW counts."
+  (gnosis--insert-into 'activity-log `([,date ,total ,new])))
+
+(defun gnosis-test--add-link (thema-id node-id)
+  "Insert a link from THEMA-ID to NODE-ID string."
+  (gnosis--insert-into 'thema-links `([,thema-id ,node-id])))
+
+;; ──────────────────────────────────────────────────────────
+;; Pure function tests
+;; ──────────────────────────────────────────────────────────
+
+(ert-deftest gnosis-test-dashboard-streak-empty ()
+  "Streak with no dates returns \"0\"."
+  (should (equal (gnosis-dashboard--streak nil) "0")))
+
+(ert-deftest gnosis-test-dashboard-streak-yesterday ()
+  "Streak with only yesterday returns \"1\"."
+  (let ((dates (list (gnosis--date-to-int (gnosis-date -1)))))
+    (should (equal (gnosis-dashboard--streak dates) "1"))))
+
+(ert-deftest gnosis-test-dashboard-streak-consecutive ()
+  "Streak with consecutive past days counts correctly."
+  (let ((dates (list (gnosis--date-to-int (gnosis-date -1))
+                     (gnosis--date-to-int (gnosis-date -2))
+                     (gnosis--date-to-int (gnosis-date -3)))))
+    (should (equal (gnosis-dashboard--streak dates) "3"))))
+
+(ert-deftest gnosis-test-dashboard-streak-today-only ()
+  "Streak with only today returns \"1\"."
+  (let ((dates (list (gnosis--today-int))))
+    (should (equal (gnosis-dashboard--streak dates) "1"))))
+
+(ert-deftest gnosis-test-dashboard-streak-today-plus-consecutive ()
+  "Streak includes today bonus on top of consecutive past days."
+  (let ((dates (list (gnosis--today-int)
+                     (gnosis--date-to-int (gnosis-date -1))
+                     (gnosis--date-to-int (gnosis-date -2)))))
+    (should (equal (gnosis-dashboard--streak dates) "3"))))
+
+(ert-deftest gnosis-test-dashboard-streak-gap ()
+  "A gap in dates stops the streak."
+  ;; Yesterday and 3-days-ago, but NOT 2-days-ago
+  (let ((dates (list (gnosis--date-to-int (gnosis-date -1))
+                     (gnosis--date-to-int (gnosis-date -3)))))
+    (should (equal (gnosis-dashboard--streak dates) "1"))))
+
+(ert-deftest gnosis-test-dashboard-activity-renders-aggregate-evidence ()
+  "Render today, average, streak, and history from aggregate activity."
+  (gnosis-test-with-db
+   (let* ((today (gnosis--today-int))
+          (yesterday (gnosis--date-to-int (gnosis-date -1)))
+          (two-days-ago (gnosis--date-to-int (gnosis-date -2)))
+          (id (gnosis-test--add-basic-thema "Q" "A")))
+     (gnosis-sqlite-execute
+      gnosis-db
+      "INSERT INTO review_activity_baseline
+         VALUES (?, ?, ?), (?, ?, ?), (?, ?, ?)"
+      (list two-days-ago 0 0 yesterday 2 1 today 5 1))
+     (gnosis-scheduler-accept-review
+      (make-string 64 ?a) id 'success 1000000 today)
+     (let ((before
+            (list
+             (gnosis-sqlite-select
+              gnosis-db "SELECT * FROM review_activity_baseline")
+             (gnosis-sqlite-select gnosis-db "SELECT * FROM review_events"))))
+       (with-temp-buffer
+         (funcall gnosis-dashboard-module-today-stats)
+         (funcall gnosis-dashboard-module-average-rev)
+         (should (string-search "Studied today: 6 attempts" (buffer-string)))
+         (should (string-search "Reviews per active day: 4.00" (buffer-string)))
+         (should (string-search "Review streak: 2 day(s)" (buffer-string))))
+       (unwind-protect
+           (cl-letf (((symbol-function 'pop-to-buffer) #'ignore))
+             (gnosis-dashboard-history)
+             (with-current-buffer "*Gnosis History*"
+               (should (equal (list today yesterday two-days-ago)
+                              (mapcar #'car tabulated-list-entries)))
+               (should
+                (equal '(("6" "2") ("2" "1") ("0" "0"))
+                       (mapcar
+                        (lambda (entry)
+                          (mapcar #'substring-no-properties
+                                  (list (aref (cadr entry) 1)
+                                        (aref (cadr entry) 2))))
+                        tabulated-list-entries)))))
+         (when (get-buffer "*Gnosis History*")
+           (kill-buffer "*Gnosis History*")))
+       (should
+        (equal before
+               (list
+                (gnosis-sqlite-select
+                 gnosis-db "SELECT * FROM review_activity_baseline")
+                (gnosis-sqlite-select gnosis-db "SELECT * FROM review_events"))))))))
+
+(ert-deftest gnosis-test-dashboard-due-count-does-not-materialize-cards ()
+  "Counting due cards returns aggregates, with the same new-card limit."
+  (gnosis-test-with-db
+    (should (= (gnosis-review-count-due) 0))
+    (dotimes (i 600)
+      (gnosis-test--add-basic-thema "Question" "Answer" nil nil (1+ i)))
+    ;; Include due old, overdue, future and suspended cards in the oracle.
+    (gnosis-sqlite-execute gnosis-db
+                           "UPDATE scheduler_state SET reps = 1 WHERE thema_id <= 20")
+    (gnosis-sqlite-execute gnosis-db
+                           "UPDATE scheduler_state SET suspended = 1 WHERE thema_id = 1")
+    (gnosis-sqlite-execute gnosis-db
+                           "UPDATE scheduler_state SET due_day = ? WHERE thema_id = 2"
+                           (list (1+ (gnosis--today-int))))
+    (let ((gnosis-new-themata-limit -900))
+      (should-error (gnosis-review-get--due-themata))
+      (should-error (gnosis-review-count-due)))
+    (dolist (limit '(nil 0 7 900 -1 -580))
+      (let* ((gnosis-new-themata-limit limit)
+             (expected (length (gnosis-review-get--due-themata)))
+             (select (symbol-function 'gnosis-sqlite-select)))
+        (with-temp-buffer
+          (cl-letf (((symbol-function 'gnosis-sqlite-select)
+                     (lambda (&rest args)
+                       (let ((rows (apply select args)))
+                         (should (<= (length rows) 2))
+                         rows))))
+            (funcall gnosis-dashboard-module-today-stats))
+          (should (string-search (format "Due themata: %d " expected)
+                                 (buffer-string))))))))
+
+(ert-deftest gnosis-test-dashboard-sort-total-themata ()
+  "Sort entries by column index 1 (total themata count)."
+  (let ((entry-small '("tag-a" ["tag-a" "5"]))
+        (entry-large '("tag-b" ["tag-b" "20"])))
+    (should (gnosis-dashboard-sort-total-themata entry-small entry-large))
+    (should-not (gnosis-dashboard-sort-total-themata entry-large entry-small))))
+
+;; ──────────────────────────────────────────────────────────
+;; Data-formatting function tests
+;; ──────────────────────────────────────────────────────────
+
+(ert-deftest gnosis-test-dashboard-output-themata-basic ()
+  "Output-themata returns correctly formatted entries."
+  (gnosis-test-with-db
+   (gnosis-test-with-dashboard-state
+    (let* ((id1 (gnosis-test--add-basic-thema "What is 2+2?" "4"
+                                              '("math")))
+           (id2 (gnosis-test--add-basic-thema "Capital?" "Athens"
+                                              '("geo")))
+           (entries (gnosis-dashboard--output-themata (list id1 id2))))
+      ;; Two entries returned
+      (should (= (length entries) 2))
+      ;; Each entry is (id vector)
+      (let* ((e1 (cl-find id1 entries :key #'car))
+             (vec1 (cadr e1)))
+        (should e1)
+        ;; Keimenon is first field
+        (should (string-search "What is 2+2?" (aref vec1 0)))
+        ;; Type is "basic"
+        (should (equal (aref vec1 4) "basic"))
+        ;; Not suspended → "No"
+        (should (equal (aref vec1 5) "No")))))))
+
+(ert-deftest gnosis-test-dashboard-output-themata-suspended ()
+  "Suspended themata show \"Yes\" in suspend column."
+  (gnosis-test-with-db
+   (gnosis-test-with-dashboard-state
+    (let* ((id1 (gnosis-test--add-basic-thema "Q?" "A" '("t") nil nil 1))
+           (entries (gnosis-dashboard--output-themata (list id1)))
+           (e1 (cl-find id1 entries :key #'car))
+           (vec1 (cadr e1)))
+      (should (equal (aref vec1 5) "Yes"))))))
+
+(ert-deftest gnosis-test-dashboard-scheduler-only-themata-remain-visible ()
+  "Read fresh rows without legacy scheduler records."
+  (gnosis-test-with-db
+    (gnosis-test-with-dashboard-buffer
+      (let ((id 9001))
+        (gnosis-add-thema-fields
+         "basic" "Scheduler only" '("") '("A") "" '("test")
+         1 nil nil id)
+        (should (equal
+                 "Yes"
+                 (aref (cadar (gnosis-dashboard--output-themata (list id))) 5)))
+        (gnosis-update 'scheduler-state '(= suspended 0) `(= thema-id ,id))
+        (should (equal
+                 "No"
+                 (aref (cadar (gnosis-dashboard--output-themata (list id))) 5)))))))
+
+(ert-deftest gnosis-test-dashboard-suspend-tag-refreshes-entry ()
+  "Suspend-by-tag makes the next formatted entry reflect SQLite state."
+  (gnosis-test-with-db
+   (gnosis-test-with-dashboard-buffer
+    (let ((id (gnosis-test--add-basic-thema "Q?" "A" '("math"))))
+      (should (equal
+               (aref (cadar (gnosis-dashboard--output-themata (list id))) 5)
+               "No"))
+      (cl-letf (((symbol-function 'y-or-n-p) (lambda (&rest _) t)))
+        (let ((current-prefix-arg nil))
+          (gnosis-dashboard-output-tags)
+          (call-interactively (local-key-binding (kbd "s")))))
+      (should (= (gnosis-get 'suspended 'scheduler-state
+                             `(= thema-id ,id)) 1))
+      (should (equal
+               (aref (cadar (gnosis-dashboard--output-themata (list id))) 5)
+               "Yes"))))))
+
+(ert-deftest gnosis-test-dashboard-output-themata-list-tags ()
+  "List-valued tags are joined with commas."
+  (gnosis-test-with-db
+   (gnosis-test-with-dashboard-state
+    (let* ((id1 (gnosis-test--add-basic-thema "Q?" "A"
+                                              '("math" "algebra")))
+           (entries (gnosis-dashboard--output-themata (list id1)))
+           (vec (cadr (car entries))))
+      ;; Tags field (index 3) should contain both tags
+      (should (string-search "math" (aref vec 3)))
+      (should (string-search "algebra" (aref vec 3)))))))
+
+(ert-deftest gnosis-test-dashboard-output-themata-strips-org-links ()
+  "Org-mode links in keimenon are simplified to description only."
+  (gnosis-test-with-db
+   (gnosis-test-with-dashboard-state
+    (let* ((id1 (gnosis-test--add-basic-thema
+                 "See [[id:abc-123][My Node]] for details" "A"))
+           (entries (gnosis-dashboard--output-themata (list id1)))
+           (vec (cadr (car entries))))
+      ;; Link syntax removed, description kept
+      (should (string-search "My Node" (aref vec 0)))
+      (should-not (string-search "[[id:" (aref vec 0)))))))
+
+(ert-deftest gnosis-test-dashboard-output-themata-strips-newlines ()
+  "Newlines in fields are replaced with spaces."
+  (gnosis-test-with-db
+   (gnosis-test-with-dashboard-state
+    (let* ((id1 (gnosis-test--add-basic-thema "Line1\nLine2" "A"))
+           (entries (gnosis-dashboard--output-themata (list id1)))
+           (vec (cadr (car entries))))
+      (should-not (string-search "\n" (aref vec 0)))
+      (should (string-search "Line1 Line2" (aref vec 0)))))))
+
+(ert-deftest gnosis-test-dashboard-output-tag ()
+  "Output-tag returns (tag count-string)."
+  (gnosis-test-with-db
+   (gnosis-test--add-basic-thema "Q1" "A1" '("math"))
+   (gnosis-test--add-basic-thema "Q2" "A2" '("math" "geo"))
+   (gnosis-test--add-basic-thema "Q3" "A3" '("geo"))
+   (let ((result (gnosis-dashboard-output-tag "math")))
+     (should (equal (car result) "math"))
+     (should (equal (cadr result) "2")))
+   (let ((result (gnosis-dashboard-output-tag "geo")))
+     (should (equal (cadr result) "2")))))
+
+(ert-deftest gnosis-test-dashboard-get-themata-links ()
+  "Get-themata-links returns thema IDs linked to a node."
+  (gnosis-test-with-db
+   (let* ((id1 (gnosis-test--add-basic-thema "Q1" "A1"))
+          (id2 (gnosis-test--add-basic-thema "Q2" "A2"))
+          (_id3 (gnosis-test--add-basic-thema "Q3" "A3"))
+          (node-id "fake-node-uuid"))
+     ;; Link two themata to the node
+     (gnosis-test--add-link id1 node-id)
+     (gnosis-test--add-link id2 node-id)
+     (let ((result (gnosis-dashboard-get-themata-links node-id)))
+       (should (= (length result) 2))
+       ;; source column is TEXT but returns integers
+       (should (member id1 result))
+       (should (member id2 result))))))
+
+;; ──────────────────────────────────────────────────────────
+;; Entry manipulation tests
+;; ──────────────────────────────────────────────────────────
+
+(ert-deftest gnosis-test-dashboard-remove-entries ()
+  "Remove-entries removes matching entries and updates thema-ids."
+  (gnosis-test-with-db
+   (let* ((id1 (gnosis-test--add-basic-thema "Q1" "A1"))
+          (id2 (gnosis-test--add-basic-thema "Q2" "A2"))
+          (id3 (gnosis-test--add-basic-thema "Q3" "A3")))
+     (gnosis-test-with-dashboard-buffer
+      (with-current-buffer gnosis-dashboard-buffer-name
+        (gnosis-dashboard-themata-mode)
+        (setq tabulated-list-format [("Col" 10 t)])
+        (tabulated-list-init-header)
+        (setq tabulated-list-entries
+              (list (list id1 ["Q1"]) (list id2 ["Q2"]) (list id3 ["Q3"])))
+        (setq gnosis-dashboard-themata-current-ids (list id1 id2 id3))
+        (tabulated-list-print t)
+        ;; Remove id2
+        (gnosis-dashboard--remove-entries (list id2))
+        ;; Two entries remain
+        (should (= (length tabulated-list-entries) 2))
+        (should-not (cl-find id2 tabulated-list-entries :key #'car))
+        ;; Current view state is updated with the rendered entries.
+        (should-not (member id2 gnosis-dashboard-themata-current-ids)))))))
+
+(ert-deftest gnosis-test-dashboard-delete-refresh-keeps-current-ids-exact ()
+  "Refreshing after deletion keeps current IDs equal to rendered entries."
+  (gnosis-test-with-db
+   (let ((id1 (gnosis-test--add-basic-thema "Q1" "A1"))
+         (id2 (gnosis-test--add-basic-thema "Q2" "A2")))
+     (gnosis-test-with-dashboard-buffer
+      (gnosis-dashboard-output-themata (list id1 id2))
+      (with-current-buffer gnosis-dashboard-buffer-name
+        (goto-char (point-min))
+        (let ((deleted-id (tabulated-list-get-id)))
+          (cl-letf (((symbol-function 'y-or-n-p)
+                     (lambda (&rest _) t)))
+            (gnosis-dashboard-delete))
+          (gnosis-dashboard-return)
+          (let ((displayed-ids (mapcar #'car tabulated-list-entries)))
+            (should-not (member deleted-id displayed-ids))
+            (should (equal gnosis-dashboard-themata-current-ids
+                           displayed-ids)))))))))
+
+(ert-deftest gnosis-test-dashboard-update-entries ()
+  "Update-entries refreshes data from DB for specified IDs."
+  (gnosis-test-with-db
+   (let* ((id1 (gnosis-test--add-basic-thema "Original Q" "A1")))
+     (gnosis-test-with-dashboard-buffer
+      (with-current-buffer gnosis-dashboard-buffer-name
+        (gnosis-dashboard-themata-mode)
+        (setq tabulated-list-format [("K" 10 t) ("H" 10 t) ("A" 10 t)
+                                     ("T" 10 t) ("Ty" 10 t) ("S" 5 t)])
+        (tabulated-list-init-header)
+        ;; Initial entries from DB
+        (let ((initial (gnosis-dashboard--output-themata (list id1))))
+          (setq tabulated-list-entries initial)
+          (tabulated-list-print t)
+          ;; Modify the thema in DB
+          (gnosis-update 'themata '(= keimenon "Updated Q") `(= id ,id1))
+          ;; Refresh
+          (gnosis-dashboard--update-entries (list id1))
+          ;; Entry should reflect the update
+          (let* ((entry (cl-find id1 tabulated-list-entries :key #'car))
+                 (vec (cadr entry)))
+            (should (string-search "Updated Q" (aref vec 0))))))))))
+
+;; ──────────────────────────────────────────────────────────
+;; Buffer rendering tests
+;; ──────────────────────────────────────────────────────────
+
+(ert-deftest gnosis-test-dashboard-render-themata ()
+  "Output-themata renders a buffer with themata-mode active."
+  (gnosis-test-with-db
+   (let* ((id1 (gnosis-test--add-basic-thema "Q1" "A1" '("math")))
+          (id2 (gnosis-test--add-basic-thema "Q2" "A2" '("geo"))))
+     (gnosis-test-with-dashboard-buffer
+      (gnosis-dashboard-output-themata (list id1 id2))
+      (with-current-buffer gnosis-dashboard-buffer-name
+        ;; Themata mode should be active
+        (should (eq major-mode 'gnosis-dashboard-themata-mode))
+        ;; Entries populated
+        (should (= (length tabulated-list-entries) 2))
+        ;; Current state tracked
+        (should (equal (plist-get gnosis-dashboard--current :type) 'themata)))))))
+
+(ert-deftest gnosis-test-dashboard-render-tags ()
+  "Output-tags renders a buffer with tags-mode active."
+  (gnosis-test-with-db
+   (gnosis-test--add-basic-thema "Q1" "A1" '("math"))
+   (gnosis-test--add-basic-thema "Q2" "A2" '("geo"))
+   (gnosis-test-with-dashboard-buffer
+    (gnosis-dashboard-output-tags)
+    (with-current-buffer gnosis-dashboard-buffer-name
+      ;; Tags mode active
+      (should (eq major-mode 'gnosis-dashboard-tags-mode))
+      ;; Two unique tags
+      (should (= (length tabulated-list-entries) 2))))))
+
+(ert-deftest gnosis-test-dashboard-render-themata-stores-ids ()
+  "Output-themata stores current IDs for history navigation."
+  (gnosis-test-with-db
+   (let* ((id1 (gnosis-test--add-basic-thema "Q1" "A1"))
+          (id2 (gnosis-test--add-basic-thema "Q2" "A2"))
+          (ids (list id1 id2)))
+     (gnosis-test-with-dashboard-buffer
+      (gnosis-dashboard-output-themata ids)
+      (with-current-buffer gnosis-dashboard-buffer-name
+        (should (equal gnosis-dashboard-themata-current-ids ids)))))))
+
+;; ──────────────────────────────────────────────────────────
+;; Mark/selection tests
+;; ──────────────────────────────────────────────────────────
+
+(ert-deftest gnosis-test-dashboard-mark-all-and-unmark ()
+  "Mark-all collects all IDs, unmark-all clears them."
+  (gnosis-test-with-db
+   (let* ((id1 (gnosis-test--add-basic-thema "Q1" "A1"))
+          (id2 (gnosis-test--add-basic-thema "Q2" "A2")))
+     (gnosis-test-with-dashboard-buffer
+      (gnosis-dashboard-output-themata (list id1 id2))
+      (with-current-buffer gnosis-dashboard-buffer-name
+        ;; Mark all
+        (gnosis-dashboard-mark-all)
+        (should (= (length gnosis-dashboard--selected-ids) 2))
+        ;; Unmark all
+        (gnosis-dashboard-unmark-all)
+        (should (null gnosis-dashboard--selected-ids)))))))
+
+;; ──────────────────────────────────────────────────────────
+;; Review count filter tests
+;; ──────────────────────────────────────────────────────────
+
+(defun gnosis-test--set-review-count (id n)
+  "Set authoritative review count N for thema ID."
+  (gnosis-update 'scheduler-state `(= reps ,n) `(= thema-id ,id)))
+
+(ert-deftest gnosis-test-get-themata-by-reviews-basic ()
+  "Get themata filtered by review count."
+  (gnosis-test-with-db
+   (let* ((id1 (gnosis-test--add-basic-thema "Q1" "A1"))
+          (id2 (gnosis-test--add-basic-thema "Q2" "A2"))
+          (id3 (gnosis-test--add-basic-thema "Q3" "A3")))
+     ;; All start at n=0
+     (gnosis-test--set-review-count id2 3)
+     (gnosis-test--set-review-count id3 5)
+     ;; max-reviews=0: only never-reviewed
+     (let ((result (gnosis-get-themata-by-reviews 0)))
+       (should (= (length result) 1))
+       (should (member id1 result)))
+     ;; max-reviews=3: id1 (0) and id2 (3)
+     (let ((result (gnosis-get-themata-by-reviews 3)))
+       (should (= (length result) 2))
+       (should (member id1 result))
+       (should (member id2 result)))
+     ;; max-reviews=5: all three
+     (let ((result (gnosis-get-themata-by-reviews 5)))
+       (should (= (length result) 3))))))
+
+(ert-deftest gnosis-test-get-themata-by-reviews-with-subset ()
+  "Get themata by review count restricted to a subset."
+  (gnosis-test-with-db
+   (let* ((id1 (gnosis-test--add-basic-thema "Q1" "A1"))
+          (id2 (gnosis-test--add-basic-thema "Q2" "A2"))
+          (id3 (gnosis-test--add-basic-thema "Q3" "A3")))
+     ;; All at n=0
+     (gnosis-test--set-review-count id3 5)
+     ;; Restrict to id1 and id3 with max-reviews=0
+     (let ((result (gnosis-get-themata-by-reviews 0 (list id1 id3))))
+       (should (= (length result) 1))
+       (should (member id1 result))))))
+
+(ert-deftest gnosis-test-dashboard-show-new-renders ()
+  "Show-new renders matching themata in the dashboard."
+  (gnosis-test-with-db
+   (let* ((id1 (gnosis-test--add-basic-thema "New Q" "A1"))
+          (id2 (gnosis-test--add-basic-thema "Old Q" "A2")))
+     (gnosis-test--set-review-count id2 5)
+     (gnosis-test-with-dashboard-buffer
+      (gnosis-dashboard-themata-show-new 0)
+      (with-current-buffer gnosis-dashboard-buffer-name
+        (should (eq major-mode 'gnosis-dashboard-themata-mode))
+        (should (= (length tabulated-list-entries) 1))
+        (should (equal (caar tabulated-list-entries) id1)))))))
+
+(ert-deftest gnosis-test-dashboard-filter-by-reviews ()
+  "Filter current themata by review count."
+  (gnosis-test-with-db
+   (let* ((id1 (gnosis-test--add-basic-thema "Q1" "A1"))
+          (id2 (gnosis-test--add-basic-thema "Q2" "A2"))
+          (id3 (gnosis-test--add-basic-thema "Q3" "A3")))
+     (gnosis-test--set-review-count id2 2)
+     (gnosis-test--set-review-count id3 5)
+     (gnosis-test-with-dashboard-buffer
+      ;; Start with all themata displayed
+      (gnosis-dashboard-output-themata (list id1 id2 id3))
+      (with-current-buffer gnosis-dashboard-buffer-name
+        (should (= (length tabulated-list-entries) 3))
+        ;; Filter to max 2 reviews
+        (gnosis-dashboard-filter-themata-by-reviews 2)
+        (should (= (length tabulated-list-entries) 2))
+        (let ((displayed-ids (mapcar #'car tabulated-list-entries)))
+          (should (member id1 displayed-ids))
+          (should (member id2 displayed-ids))
+          (should-not (member id3 displayed-ids))))))))
+
+(ert-deftest gnosis-test-dashboard-themata-back-restores-view-and-point ()
+  "Themata Back restores the previous IDs and point."
+  (gnosis-test-with-db
+    (let* ((id1 (gnosis-test--add-basic-thema "Needle" "A1"))
+           (id2 (gnosis-test--add-basic-thema "Other" "A2"))
+           (ids (list id1 id2)))
+      (gnosis-test-with-dashboard-buffer
+        (gnosis-dashboard-output-themata ids)
+        (with-current-buffer gnosis-dashboard-buffer-name
+          (gnosis-dashboard--goto-id id2)
+          (gnosis-dashboard-filter-themata "Needle")
+          (should (equal gnosis-dashboard-themata-current-ids (list id1)))
+          (gnosis-dashboard-themata-back)
+          (should (equal gnosis-dashboard-themata-current-ids ids))
+          (should (equal (tabulated-list-get-id) id2)))))))
+
+(ert-deftest gnosis-test-dashboard-themata-back-restores-deferred-point ()
+  "Themata Back restores point after progressive rendering finishes."
+  (gnosis-test-with-db
+    (let* ((id1 (gnosis-test--add-basic-thema "Needle" "A1"))
+           (id2 (gnosis-test--add-basic-thema "Other 2" "A2"))
+           (id3 (gnosis-test--add-basic-thema "Other 3" "A3"))
+           (id4 (gnosis-test--add-basic-thema "Other 4" "A4"))
+           (ids (list id1 id2 id3 id4))
+           (gnosis-dashboard-render-chunk-size 1)
+           timers)
+      (gnosis-test-with-dashboard-buffer
+        (cl-letf (((symbol-function 'run-with-timer)
+                   (lambda (_seconds _repeat function &rest args)
+                     (setq timers
+                           (append timers (list (cons function args)))))))
+          (cl-labels ((drain-timers ()
+                        (while timers
+                          (pcase-let ((`(,function . ,args) (pop timers)))
+                            (apply function args)))))
+            (gnosis-dashboard-output-themata ids)
+            (drain-timers)
+            (with-current-buffer gnosis-dashboard-buffer-name
+              (gnosis-dashboard--goto-id id4)
+              (gnosis-dashboard-filter-themata "Needle")
+              (gnosis-dashboard-themata-back)
+              (drain-timers)
+              (should (equal (tabulated-list-get-id) id4)))))))))
+
+(ert-deftest gnosis-test-dashboard-nodes-back-crosses-view-modes ()
+  "Node history restores exact node view and point across related views."
+  (gnosis-test-with-db
+    (let ((thema-id (gnosis-test--add-basic-thema "Q" "A")))
+      (gnosis--insert-into
+       'nodes '(["n1" "one.org" "One" 0 nil "0" "one"]
+                ["n2" "two.org" "Two" 0 nil "0" "two"]))
+      (gnosis--insert-into 'node-links '(["n1" "n2"]))
+      (gnosis-test--add-link thema-id "n1")
+      (gnosis-test-with-dashboard-buffer
+        (gnosis-dashboard-output-nodes '("n1" "n2"))
+        (with-current-buffer gnosis-dashboard-buffer-name
+          (gnosis-dashboard--goto-id "n1")
+          (gnosis-dashboard-nodes-show-links)
+          (should (equal gnosis-dashboard-nodes-current-ids '("n2")))
+          (gnosis-dashboard-nodes-back)
+          (should (equal (sort (copy-sequence gnosis-dashboard-nodes-current-ids)
+                               #'string<)
+                         '("n1" "n2")))
+          (should (equal (tabulated-list-get-id) "n1"))
+          (gnosis-dashboard-nodes-show-themata-links)
+          (should (eq major-mode 'gnosis-dashboard-themata-mode))
+          (gnosis-dashboard-themata-back)
+          (should (eq major-mode 'gnosis-dashboard-nodes-mode))
+          (should (equal (tabulated-list-get-id) "n1")))))))
+
+(ert-deftest gnosis-test-dashboard-filtered-tags-survive-cross-mode-back ()
+  "Back from a thema restores the filtered tag view and point."
+  (gnosis-test-with-db
+    (gnosis-test--add-basic-thema "Q1" "A1" '("alpha"))
+    (gnosis-test--add-basic-thema "Q2" "A2" '("alpine"))
+    (gnosis-test--add-basic-thema "Q3" "A3" '("beta"))
+    (gnosis-test-with-dashboard-buffer
+      (gnosis-dashboard-output-tags)
+      (with-current-buffer gnosis-dashboard-buffer-name
+        (gnosis-dashboard-filter-tags "^a")
+        (gnosis-dashboard--goto-id "alpine")
+        (gnosis-dashboard-tag-view-themata)
+        (should (eq major-mode 'gnosis-dashboard-themata-mode))
+        (gnosis-dashboard-themata-back)
+        (should (eq major-mode 'gnosis-dashboard-tags-mode))
+        (should (equal (sort (copy-sequence gnosis-dashboard-tags-current)
+                             #'string<)
+                       '("alpha" "alpine")))
+        (should (equal (tabulated-list-get-id) "alpine"))))))
+
+(ert-deftest gnosis-test-dashboard-view-by-tags-back-restores-all-tags ()
+  "Back from main tag filtering restores the complete tags view."
+  (gnosis-test-with-db
+    (gnosis-test--add-basic-thema "Q1" "A1" '("alpha"))
+    (gnosis-test--add-basic-thema "Q2" "A2" '("beta"))
+    (gnosis-test-with-dashboard-buffer
+      (cl-letf (((symbol-function 'run-with-timer) #'ignore)
+                ((symbol-function 'keymap-popup) #'ignore)
+                ((symbol-function 'gnosis-tags-filter-prompt)
+                 (lambda () '(("alpha") . nil))))
+        (gnosis-dashboard)
+        (with-current-buffer gnosis-dashboard-buffer-name
+          (should (eq major-mode 'gnosis-dashboard-mode))
+          (gnosis-dashboard-view-by-tags)
+          (let ((view (car gnosis-dashboard--history)))
+            (should (eq (plist-get view :type) 'tags))
+            (should-not (plist-get view :id))
+            (should (equal (sort (copy-sequence (plist-get view :items))
+                                 #'string<)
+                           '("alpha" "beta"))))
+          (gnosis-dashboard-themata-back)
+          (should (eq major-mode 'gnosis-dashboard-tags-mode))
+          (should (equal (sort (copy-sequence gnosis-dashboard-tags-current)
+                               #'string<)
+                         '("alpha" "beta")))
+          (should (= (point) (point-min))))))))
+
+(ert-deftest gnosis-test-dashboard-view-by-tags-back-restores-empty-tags ()
+  "Back from accepted main filtering restores an empty tags view."
+  (gnosis-test-with-db
+    (gnosis-test--add-basic-thema "Q1" "A1")
+    (gnosis-sqlite-execute gnosis-db "DELETE FROM thema_tag")
+    (gnosis-test-with-dashboard-buffer
+      (cl-letf (((symbol-function 'run-with-timer) #'ignore)
+                ((symbol-function 'keymap-popup) #'ignore)
+                ((symbol-function 'gnosis-tags-filter-prompt)
+                 (lambda () '(nil . nil))))
+        (gnosis-dashboard)
+        (with-current-buffer gnosis-dashboard-buffer-name
+          (should (eq major-mode 'gnosis-dashboard-mode))
+          (gnosis-dashboard-view-by-tags)
+          (should (equal (car gnosis-dashboard--history)
+                         `(:type tags :database ,gnosis-db :id nil :items nil)))
+          (gnosis-test--add-basic-thema "Q2" "A2" '("new"))
+          (should (equal (gnosis-select 'tag 'thema-tag) '(("new"))))
+          (gnosis-dashboard-themata-back)
+          (should (eq major-mode 'gnosis-dashboard-tags-mode))
+          (should-not gnosis-dashboard-tags-current)
+          (should (= (point) (point-min))))))))
+
+;; ──────────────────────────────────────────────────────────
+;; gnosis-tl pure function tests
+;; ──────────────────────────────────────────────────────────
+
+(ert-deftest gnosis-test-tl-column-specs-basic ()
+  "Column specs extracts name, width, pad-right from format vector."
+  (let ((specs (gnosis-tl--column-specs [("Name" 20 t) ("Age" 5 t)])))
+    (should (= (length specs) 2))
+    ;; First column: pad-right defaults to 1
+    (should (equal (plist-get (nth 0 specs) :name) "Name"))
+    (should (= (plist-get (nth 0 specs) :width) 20))
+    (should (= (plist-get (nth 0 specs) :pad-right) 1))
+    ;; Last column: pad-right forced to 0
+    (should (equal (plist-get (nth 1 specs) :name) "Age"))
+    (should (= (plist-get (nth 1 specs) :pad-right) 0))))
+
+(ert-deftest gnosis-test-tl-column-specs-single ()
+  "Single column gets pad-right 0."
+  (let ((specs (gnosis-tl--column-specs [("Only" 10 t)])))
+    (should (= (length specs) 1))
+    (should (= (plist-get (nth 0 specs) :pad-right) 0))))
+
+(ert-deftest gnosis-test-tl-column-specs-custom-pad ()
+  "Custom :pad-right is respected for non-last columns."
+  (let ((specs (gnosis-tl--column-specs [("A" 10 t :pad-right 3) ("B" 5 t)])))
+    (should (= (plist-get (nth 0 specs) :pad-right) 3))
+    (should (= (plist-get (nth 1 specs) :pad-right) 0))))
+
+(ert-deftest gnosis-test-tl-pad-column-short-text ()
+  "Short text is padded to width."
+  (let ((result (gnosis-tl--pad-column "hi" 10 1 nil)))
+    ;; "hi" + 8 spaces padding + 1 pad-right = 11 chars
+    (should (= (length result) 11))
+    (should (string-prefix-p "hi" result))))
+
+(ert-deftest gnosis-test-tl-pad-column-truncation ()
+  "Long text is truncated with ellipsis."
+  (let ((result (gnosis-tl--pad-column "a very long string" 8 1 nil)))
+    (should (string-search "..." result))
+    ;; Total visual width: 8 (column) + 1 (pad-right) = 9
+    (should (= (string-width result) 9))))
+
+(ert-deftest gnosis-test-tl-pad-column-right-align ()
+  "Right-aligned text has leading spaces."
+  (let ((result (gnosis-tl--pad-column "hi" 10 0 t)))
+    ;; 8 spaces + "hi" = 10 chars
+    (should (= (string-width result) 10))
+    (should (string-suffix-p "hi" result))))
+
+(ert-deftest gnosis-test-tl-format-line-properties ()
+  "Format-line attaches tabulated-list-id and tabulated-list-entry properties."
+  (let* ((tabulated-list-padding 2)
+         (specs (gnosis-tl--column-specs [("Col1" 10 t) ("Col2" 5 t)]))
+         (cols (vector "hello" "world"))
+         (line (gnosis-tl--format-line 42 cols specs)))
+    ;; Has the right text properties
+    (should (equal (get-text-property 0 'tabulated-list-id line) 42))
+    (should (equal (get-text-property 0 'tabulated-list-entry line) cols))
+    ;; Ends with newline
+    (should (string-suffix-p "\n" line))
+    ;; Contains the column text
+    (should (string-search "hello" line))
+    (should (string-search "world" line))))
+
+;; ──────────────────────────────────────────────────────────
+;; gnosis-tl entry operation tests
+;; ──────────────────────────────────────────────────────────
+
+(ert-deftest gnosis-test-tl-replace-entry ()
+  "Replace-entry swaps a single line without full re-render."
+  (with-temp-buffer
+    (tabulated-list-mode)
+    (setq tabulated-list-format [("Name" 20 t) ("Val" 10 t)])
+    (setq tabulated-list-padding 2)
+    (tabulated-list-init-header)
+    (setq tabulated-list-entries
+          '((1 ["Alice" "100"])
+            (2 ["Bob" "200"])
+            (3 ["Carol" "300"])))
+    (tabulated-list-print)
+    ;; Verify Bob is present
+    (goto-char (point-min))
+    (should (search-forward "Bob" nil t))
+    ;; Replace Bob's entry
+    (gnosis-tl-replace-entry 2 ["Robert" "250"])
+    ;; Bob is gone, Robert is present
+    (goto-char (point-min))
+    (should-not (search-forward "Bob" nil t))
+    (goto-char (point-min))
+    (should (search-forward "Robert" nil t))
+    ;; Other entries untouched
+    (goto-char (point-min))
+    (should (search-forward "Alice" nil t))
+    (goto-char (point-min))
+    (should (search-forward "Carol" nil t))
+    ;; tabulated-list-get-id works on the replaced line
+    (goto-char (point-min))
+    (while (and (not (eobp))
+                (not (equal (tabulated-list-get-id) 2)))
+      (forward-line 1))
+    (should (equal (tabulated-list-get-id) 2))
+    ;; Total line count unchanged (3 entries)
+    (should (= (count-lines (point-min) (point-max)) 3))))
+
+(ert-deftest gnosis-test-tl-replace-entry-preserves-point ()
+  "Replace-entry preserves cursor position."
+  (with-temp-buffer
+    (tabulated-list-mode)
+    (setq tabulated-list-format [("Name" 20 t)])
+    (setq tabulated-list-padding 2)
+    (tabulated-list-init-header)
+    (setq tabulated-list-entries
+          '((1 ["Alice"])
+            (2 ["Bob"])
+            (3 ["Carol"])))
+    (tabulated-list-print)
+    ;; Position on Carol (line 3)
+    (goto-char (point-min))
+    (forward-line 2)
+    (should (equal (tabulated-list-get-id) 3))
+    ;; Replace Alice (line 1) -- cursor should stay on Carol
+    (gnosis-tl-replace-entry 1 ["Alicia"])
+    (should (equal (tabulated-list-get-id) 3))))
+
+(ert-deftest gnosis-test-tl-replace-entry-nonexistent ()
+  "Replace-entry with nonexistent ID is a no-op."
+  (with-temp-buffer
+    (tabulated-list-mode)
+    (setq tabulated-list-format [("Name" 20 t)])
+    (setq tabulated-list-padding 2)
+    (tabulated-list-init-header)
+    (setq tabulated-list-entries '((1 ["Alice"])))
+    (tabulated-list-print)
+    (let ((before (buffer-string)))
+      (gnosis-tl-replace-entry 999 ["Ghost"])
+      (should (equal (buffer-string) before)))))
+
+(ert-deftest gnosis-test-tl-delete-entry ()
+  "Delete-entry removes a single line without full re-render."
+  (with-temp-buffer
+    (tabulated-list-mode)
+    (setq tabulated-list-format [("Name" 20 t) ("Val" 10 t)])
+    (setq tabulated-list-padding 2)
+    (tabulated-list-init-header)
+    (setq tabulated-list-entries
+          '((1 ["Alice" "100"])
+            (2 ["Bob" "200"])
+            (3 ["Carol" "300"])))
+    (tabulated-list-print)
+    (should (= (count-lines (point-min) (point-max)) 3))
+    ;; Delete Bob
+    (gnosis-tl-delete-entry 2)
+    ;; Bob is gone
+    (goto-char (point-min))
+    (should-not (search-forward "Bob" nil t))
+    ;; Others remain
+    (goto-char (point-min))
+    (should (search-forward "Alice" nil t))
+    (goto-char (point-min))
+    (should (search-forward "Carol" nil t))
+    ;; Line count decreased
+    (should (= (count-lines (point-min) (point-max)) 2))
+    ;; tabulated-list-get-id works on remaining lines
+    (goto-char (point-min))
+    (should (equal (tabulated-list-get-id) 1))
+    (forward-line 1)
+    (should (equal (tabulated-list-get-id) 3))))
+
+(ert-deftest gnosis-test-tl-delete-entry-preserves-point ()
+  "Delete-entry preserves cursor position."
+  (with-temp-buffer
+    (tabulated-list-mode)
+    (setq tabulated-list-format [("Name" 20 t)])
+    (setq tabulated-list-padding 2)
+    (tabulated-list-init-header)
+    (setq tabulated-list-entries
+          '((1 ["Alice"])
+            (2 ["Bob"])
+            (3 ["Carol"])))
+    (tabulated-list-print)
+    ;; Position on Carol (line 3)
+    (goto-char (point-min))
+    (forward-line 2)
+    (should (equal (tabulated-list-get-id) 3))
+    ;; Delete Alice (line 1) -- cursor should stay on Carol
+    (gnosis-tl-delete-entry 1)
+    (should (equal (tabulated-list-get-id) 3))))
+
+(ert-deftest gnosis-test-tl-delete-entry-nonexistent ()
+  "Delete-entry with nonexistent ID is a no-op."
+  (with-temp-buffer
+    (tabulated-list-mode)
+    (setq tabulated-list-format [("Name" 20 t)])
+    (setq tabulated-list-padding 2)
+    (tabulated-list-init-header)
+    (setq tabulated-list-entries '((1 ["Alice"])))
+    (tabulated-list-print)
+    (let ((before (buffer-string)))
+      (gnosis-tl-delete-entry 999)
+      (should (equal (buffer-string) before)))))
+
+;; ──────────────────────────────────────────────────────────
+;; gnosis-tl-print tests
+;; ──────────────────────────────────────────────────────────
+
+(ert-deftest gnosis-test-tl-print-basic ()
+  "gnosis-tl-print renders entries into the buffer."
+  (with-temp-buffer
+    (tabulated-list-mode)
+    (setq tabulated-list-format [("Name" 20 t) ("Val" 10 t)])
+    (setq tabulated-list-padding 2)
+    (tabulated-list-init-header)
+    (setq tabulated-list-entries
+          '((1 ["Alice" "100"])
+            (2 ["Bob" "200"])
+            (3 ["Carol" "300"])))
+    (gnosis-tl-print)
+    ;; All entries present
+    (goto-char (point-min))
+    (should (search-forward "Alice" nil t))
+    (goto-char (point-min))
+    (should (search-forward "Bob" nil t))
+    (goto-char (point-min))
+    (should (search-forward "Carol" nil t))
+    ;; Correct line count
+    (should (= (count-lines (point-min) (point-max)) 3))
+    ;; tabulated-list-id properties are set
+    (goto-char (point-min))
+    (should (equal (get-text-property (point) 'tabulated-list-id) 1))
+    (forward-line 1)
+    (should (equal (get-text-property (point) 'tabulated-list-id) 2))
+    (forward-line 1)
+    (should (equal (get-text-property (point) 'tabulated-list-id) 3))))
+
+(ert-deftest gnosis-test-tl-print-sorting ()
+  "gnosis-tl-print sorts entries by tabulated-list-sort-key."
+  (with-temp-buffer
+    (tabulated-list-mode)
+    (setq tabulated-list-format [("Name" 20 t) ("Val" 10 t)])
+    (setq tabulated-list-padding 2)
+    (tabulated-list-init-header)
+    (setq tabulated-list-entries
+          '((1 ["Charlie" "300"])
+            (2 ["Alice" "100"])
+            (3 ["Bob" "200"])))
+    ;; Sort by Name ascending (flip=nil)
+    (setq tabulated-list-sort-key (cons "Name" nil))
+    (gnosis-tl-print)
+    ;; First entry should be Alice
+    (goto-char (point-min))
+    (should (equal (get-text-property (point) 'tabulated-list-id) 2))
+    ;; Second should be Bob
+    (forward-line 1)
+    (should (equal (get-text-property (point) 'tabulated-list-id) 3))
+    ;; Third should be Charlie
+    (forward-line 1)
+    (should (equal (get-text-property (point) 'tabulated-list-id) 1))))
+
+(ert-deftest gnosis-test-tl-print-sorting-descending ()
+  "gnosis-tl-print respects descending sort (flip=t)."
+  (with-temp-buffer
+    (tabulated-list-mode)
+    (setq tabulated-list-format [("Name" 20 t) ("Val" 10 t)])
+    (setq tabulated-list-padding 2)
+    (tabulated-list-init-header)
+    (setq tabulated-list-entries
+          '((1 ["Alice" "100"])
+            (2 ["Bob" "200"])
+            (3 ["Charlie" "300"])))
+    ;; Sort by Name descending (flip=t)
+    (setq tabulated-list-sort-key (cons "Name" t))
+    (gnosis-tl-print)
+    ;; First entry should be Charlie
+    (goto-char (point-min))
+    (should (equal (get-text-property (point) 'tabulated-list-id) 3))
+    (forward-line 1)
+    (should (equal (get-text-property (point) 'tabulated-list-id) 2))
+    (forward-line 1)
+    (should (equal (get-text-property (point) 'tabulated-list-id) 1))))
+
+(ert-deftest gnosis-test-tl-print-remember-pos ()
+  "gnosis-tl-print restores cursor to saved entry ID."
+  (with-temp-buffer
+    (tabulated-list-mode)
+    (setq tabulated-list-format [("Name" 20 t)])
+    (setq tabulated-list-padding 2)
+    (tabulated-list-init-header)
+    (setq tabulated-list-entries
+          '((1 ["Alice"])
+            (2 ["Bob"])
+            (3 ["Carol"])))
+    (gnosis-tl-print)
+    ;; Position on Bob
+    (goto-char (point-min))
+    (forward-line 1)
+    (should (equal (tabulated-list-get-id) 2))
+    ;; Re-render with remember-pos
+    (gnosis-tl-print t)
+    ;; Should still be on Bob
+    (should (equal (tabulated-list-get-id) 2))))
+
+(ert-deftest gnosis-test-tl-print-empty ()
+  "gnosis-tl-print with no entries produces empty buffer."
+  (with-temp-buffer
+    (tabulated-list-mode)
+    (setq tabulated-list-format [("Name" 20 t)])
+    (setq tabulated-list-padding 2)
+    (tabulated-list-init-header)
+    (setq tabulated-list-entries nil)
+    (gnosis-tl-print)
+    (should (= (buffer-size) 0))))
+
+(ert-deftest gnosis-test-tl-print-remember-pos-column ()
+  "gnosis-tl-print restores both entry and column position."
+  (with-temp-buffer
+    (tabulated-list-mode)
+    (setq tabulated-list-format [("Name" 20 t) ("Val" 10 t)]
+          tabulated-list-padding 2)
+    (tabulated-list-init-header)
+    (setq tabulated-list-entries
+          '((1 ["Alice" "100"])
+            (2 ["Bob" "200"])
+            (3 ["Carol" "300"])))
+    (gnosis-tl-print)
+    ;; Position on Bob, move into the line
+    (goto-char (point-min))
+    (forward-line 1)
+    (move-to-column 10)
+    (let ((col (current-column)))
+      (should (equal (tabulated-list-get-id) 2))
+      ;; Re-render with remember-pos
+      (gnosis-tl-print t)
+      ;; Same entry and column
+      (should (equal (tabulated-list-get-id) 2))
+      (should (= (current-column) col)))))
+
+(ert-deftest gnosis-test-tl-print-sorted-same-as-tabulated-list ()
+  "gnosis-tl-print with sort key produces same order as tabulated-list-print."
+  (let ((entries '((1 ["Charlie" "300"])
+                   (2 ["Alice" "100"])
+                   (3 ["Bob" "200"]))))
+    ;; tabulated-list-print with sort
+    (let (tl-ids)
+      (with-temp-buffer
+        (tabulated-list-mode)
+        (setq tabulated-list-format [("Name" 20 t) ("Val" 10 t)]
+              tabulated-list-padding 2
+              tabulated-list-sort-key (cons "Name" nil)
+              tabulated-list-entries (copy-sequence entries))
+        (tabulated-list-init-header)
+        (tabulated-list-print)
+        (goto-char (point-min))
+        (while (not (eobp))
+          (push (tabulated-list-get-id) tl-ids)
+          (forward-line 1))
+        (setq tl-ids (nreverse tl-ids)))
+      ;; gnosis-tl-print with same sort
+      (let (our-ids)
+        (with-temp-buffer
+          (tabulated-list-mode)
+          (setq tabulated-list-format [("Name" 20 t) ("Val" 10 t)]
+                tabulated-list-padding 2
+                tabulated-list-sort-key (cons "Name" nil)
+                tabulated-list-entries (copy-sequence entries))
+          (tabulated-list-init-header)
+          (gnosis-tl-print)
+          (goto-char (point-min))
+          (while (not (eobp))
+            (push (tabulated-list-get-id) our-ids)
+            (forward-line 1))
+          (setq our-ids (nreverse our-ids)))
+        (should (equal tl-ids our-ids))))))
+
+;; ──────────────────────────────────────────────────────────
+;; gnosis-tl-render-lines tests
+;; ──────────────────────────────────────────────────────────
+
+(ert-deftest gnosis-test-tl-render-lines-basic ()
+  "render-lines returns a propertized string with all entries."
+  (let* ((fmt [("Name" 20 t) ("Val" 10 t)])
+         (entries '((1 ["Alice" "100"])
+                    (2 ["Bob" "200"])))
+         (result (gnosis-tl-render-lines entries fmt 2)))
+    ;; Returns a string
+    (should (stringp result))
+    ;; Contains both entries
+    (should (string-search "Alice" result))
+    (should (string-search "Bob" result))
+    ;; Has text properties
+    (should (equal (get-text-property 0 'tabulated-list-id result) 1))
+    ;; Two newlines (one per entry)
+    (should (= (cl-count ?\n result) 2))))
+
+(ert-deftest gnosis-test-tl-render-lines-empty ()
+  "render-lines with no entries returns empty string."
+  (let ((result (gnosis-tl-render-lines nil [("Name" 20 t)] 2)))
+    (should (equal result ""))))
+
+(ert-deftest gnosis-test-tl-render-lines-padding ()
+  "render-lines respects padding parameter."
+  (let* ((fmt [("Name" 20 t)])
+         (entries '((1 ["Alice"])))
+         (result-0 (gnosis-tl-render-lines entries fmt 0))
+         (result-4 (gnosis-tl-render-lines entries fmt 4)))
+    ;; result-4 should be 4 chars longer (leading spaces)
+    (should (= (- (length result-4) (length result-0)) 4))))
+
+;; ──────────────────────────────────────────────────────────
+;; gnosis-tl--get-sorter tests
+;; ──────────────────────────────────────────────────────────
+
+(ert-deftest gnosis-test-tl-get-sorter-nil-key ()
+  "No sorter when tabulated-list-sort-key is nil."
+  (with-temp-buffer
+    (tabulated-list-mode)
+    (setq tabulated-list-format [("Name" 20 t) ("Val" 10 t)])
+    (setq tabulated-list-sort-key nil)
+    (should (null (gnosis-tl--get-sorter)))))
+
+(ert-deftest gnosis-test-tl-get-sorter-unsortable ()
+  "No sorter when column has nil (not sortable) predicate."
+  (with-temp-buffer
+    (tabulated-list-mode)
+    (setq tabulated-list-format [("Name" 20 nil) ("Val" 10 t)])
+    (setq tabulated-list-sort-key (cons "Name" nil))
+    (should (null (gnosis-tl--get-sorter)))))
+
+(ert-deftest gnosis-test-tl-get-sorter-default-ascending ()
+  "Default sorter (t predicate) sorts by string< ascending."
+  (with-temp-buffer
+    (tabulated-list-mode)
+    (setq tabulated-list-format [("Name" 20 t) ("Val" 10 t)])
+    (setq tabulated-list-sort-key (cons "Name" nil))
+    (let ((sorter (gnosis-tl--get-sorter)))
+      (should (functionp sorter))
+      ;; "Alice" < "Bob"
+      (should (funcall sorter '(1 ["Alice" "x"]) '(2 ["Bob" "y"])))
+      ;; "Bob" NOT < "Alice"
+      (should-not (funcall sorter '(2 ["Bob" "y"]) '(1 ["Alice" "x"]))))))
+
+(ert-deftest gnosis-test-tl-get-sorter-default-descending ()
+  "Default sorter with flip=t reverses to descending."
+  (with-temp-buffer
+    (tabulated-list-mode)
+    (setq tabulated-list-format [("Name" 20 t) ("Val" 10 t)])
+    (setq tabulated-list-sort-key (cons "Name" t))
+    (let ((sorter (gnosis-tl--get-sorter)))
+      (should (functionp sorter))
+      ;; Flipped: "Bob" before "Alice"
+      (should (funcall sorter '(2 ["Bob" "y"]) '(1 ["Alice" "x"])))
+      (should-not (funcall sorter '(1 ["Alice" "x"]) '(2 ["Bob" "y"]))))))
+
+(ert-deftest gnosis-test-tl-get-sorter-equal-elements ()
+  "Sorter returns nil for equal elements in both directions.
+This is the critical bug fix: (not nil) => t was wrong."
+  (with-temp-buffer
+    (tabulated-list-mode)
+    (setq tabulated-list-format [("Name" 20 t)])
+    ;; Ascending: equal elements
+    (setq tabulated-list-sort-key (cons "Name" nil))
+    (let ((sorter (gnosis-tl--get-sorter)))
+      (should-not (funcall sorter '(1 ["Alice"]) '(2 ["Alice"]))))
+    ;; Descending: equal elements must ALSO return nil
+    (setq tabulated-list-sort-key (cons "Name" t))
+    (let ((sorter (gnosis-tl--get-sorter)))
+      (should-not (funcall sorter '(1 ["Alice"]) '(2 ["Alice"]))))))
+
+(ert-deftest gnosis-test-tl-get-sorter-custom-predicate ()
+  "Custom function predicate is called correctly."
+  (with-temp-buffer
+    (tabulated-list-mode)
+    (setq tabulated-list-format
+          [("Name" 20 t)
+           ("Count" 10 (lambda (a b)
+                         (< (string-to-number (aref (cadr a) 1))
+                            (string-to-number (aref (cadr b) 1)))))])
+    (setq tabulated-list-sort-key (cons "Count" nil))
+    (let ((sorter (gnosis-tl--get-sorter)))
+      (should (funcall sorter '(1 ["x" "5"]) '(2 ["y" "10"])))
+      (should-not (funcall sorter '(2 ["y" "10"]) '(1 ["x" "5"]))))))
+
+(ert-deftest gnosis-test-tl-get-sorter-matches-tabulated-list ()
+  "gnosis-tl--get-sorter produces same sort order as tabulated-list--get-sorter."
+  (with-temp-buffer
+    (tabulated-list-mode)
+    (setq tabulated-list-format [("Name" 20 t) ("Val" 10 t)])
+    (let ((entries '((1 ["Charlie" "300"])
+                     (2 ["Alice" "100"])
+                     (3 ["Bob" "200"])
+                     (4 ["Alice" "050"]))))
+      ;; Ascending
+      (setq tabulated-list-sort-key (cons "Name" nil))
+      (let ((our (sort (copy-sequence entries) (gnosis-tl--get-sorter)))
+            (theirs (sort (copy-sequence entries) (tabulated-list--get-sorter))))
+        (should (equal (mapcar #'car our) (mapcar #'car theirs))))
+      ;; Descending
+      (setq tabulated-list-sort-key (cons "Name" t))
+      (let ((our (sort (copy-sequence entries) (gnosis-tl--get-sorter)))
+            (theirs (sort (copy-sequence entries) (tabulated-list--get-sorter))))
+        (should (equal (mapcar #'car our) (mapcar #'car theirs)))))))
+
+;; ──────────────────────────────────────────────────────────
+;; gnosis-tl-sort tests
+;; ──────────────────────────────────────────────────────────
+
+(ert-deftest gnosis-test-tl-sort-by-column-name ()
+  "gnosis-tl-sort detects column at point and sorts."
+  (with-temp-buffer
+    (tabulated-list-mode)
+    (setq tabulated-list-format [("Name" 20 t) ("Val" 10 t)]
+          tabulated-list-padding 2)
+    (tabulated-list-init-header)
+    (setq tabulated-list-entries
+          '((1 ["Charlie" "300"])
+            (2 ["Alice" "100"])
+            (3 ["Bob" "200"])))
+    (gnosis-tl-print)
+    ;; Move past padding to column text
+    (goto-char (point-min))
+    (move-to-column 2)
+    (gnosis-tl-sort)
+    ;; After sorting by Name ascending, Alice should be first
+    (goto-char (point-min))
+    (should (equal (tabulated-list-get-id) 2))
+    ;; Sort key was set
+    (should (equal (car tabulated-list-sort-key) "Name"))
+    (should-not (cdr tabulated-list-sort-key))))
+
+(ert-deftest gnosis-test-tl-sort-toggle-direction ()
+  "Pressing gnosis-tl-sort twice on same column flips direction."
+  (with-temp-buffer
+    (tabulated-list-mode)
+    (setq tabulated-list-format [("Name" 20 t) ("Val" 10 t)]
+          tabulated-list-padding 2)
+    (tabulated-list-init-header)
+    (setq tabulated-list-entries
+          '((1 ["Alice" "100"])
+            (2 ["Bob" "200"])
+            (3 ["Charlie" "300"])))
+    (gnosis-tl-print)
+    ;; Move past padding to column text
+    (goto-char (point-min))
+    (move-to-column 2)
+    ;; First sort: ascending
+    (gnosis-tl-sort)
+    (goto-char (point-min))
+    (should (equal (tabulated-list-get-id) 1))  ;; Alice first
+    ;; Move past padding again for second sort
+    (move-to-column 2)
+    ;; Second sort: descending
+    (gnosis-tl-sort)
+    (goto-char (point-min))
+    (should (equal (tabulated-list-get-id) 3))))  ;; Charlie first
+
+(ert-deftest gnosis-test-tl-sort-by-column-number ()
+  "gnosis-tl-sort with numeric prefix sorts by column index."
+  (with-temp-buffer
+    (tabulated-list-mode)
+    (setq tabulated-list-format [("Name" 20 t) ("Val" 10 t)]
+          tabulated-list-padding 2)
+    (tabulated-list-init-header)
+    (setq tabulated-list-entries
+          '((1 ["Charlie" "100"])
+            (2 ["Alice" "300"])
+            (3 ["Bob" "200"])))
+    (gnosis-tl-print)
+    ;; Sort by column 1 ("Val") ascending
+    (gnosis-tl-sort 1)
+    (goto-char (point-min))
+    ;; "100" < "200" < "300" (string<)
+    (should (equal (tabulated-list-get-id) 1))   ;; Charlie "100"
+    (forward-line 1)
+    (should (equal (tabulated-list-get-id) 3))   ;; Bob "200"
+    (forward-line 1)
+    (should (equal (tabulated-list-get-id) 2)))) ;; Alice "300"
+
+(ert-deftest gnosis-test-tl-sort-preserves-position ()
+  "gnosis-tl-sort preserves cursor on the same entry."
+  (with-temp-buffer
+    (tabulated-list-mode)
+    (setq tabulated-list-format [("Name" 20 t)]
+          tabulated-list-padding 2)
+    (tabulated-list-init-header)
+    (setq tabulated-list-entries
+          '((1 ["Charlie"])
+            (2 ["Alice"])
+            (3 ["Bob"])))
+    (gnosis-tl-print)
+    ;; Position on Bob (line 3)
+    (goto-char (point-min))
+    (forward-line 2)
+    (should (equal (tabulated-list-get-id) 3))
+    ;; Sort — Bob should still be under cursor
+    (gnosis-tl-sort 0)
+    (should (equal (tabulated-list-get-id) 3))))
+
+(ert-deftest gnosis-test-tl-sort-same-as-tabulated-list-sort ()
+  "gnosis-tl-sort produces same entry order as tabulated-list-sort."
+  (let ((entries '((1 ["Charlie" "300"])
+                   (2 ["Alice" "100"])
+                   (3 ["Bob" "200"]))))
+    ;; Sort with tabulated-list-sort
+    (let (tl-ids)
+      (with-temp-buffer
+        (tabulated-list-mode)
+        (setq tabulated-list-format [("Name" 20 t) ("Val" 10 t)]
+              tabulated-list-padding 2
+              tabulated-list-sort-key nil
+              tabulated-list-entries (copy-sequence entries))
+        (tabulated-list-init-header)
+        (tabulated-list-print)
+        (goto-char (point-min))
+        (tabulated-list-sort 0)
+        (goto-char (point-min))
+        (while (not (eobp))
+          (push (tabulated-list-get-id) tl-ids)
+          (forward-line 1))
+        (setq tl-ids (nreverse tl-ids)))
+      ;; Sort with gnosis-tl-sort
+      (let (our-ids)
+        (with-temp-buffer
+          (tabulated-list-mode)
+          (setq tabulated-list-format [("Name" 20 t) ("Val" 10 t)]
+                tabulated-list-padding 2
+                tabulated-list-sort-key nil
+                tabulated-list-entries (copy-sequence entries))
+          (tabulated-list-init-header)
+          (gnosis-tl-print)
+          (goto-char (point-min))
+          (gnosis-tl-sort 0)
+          (goto-char (point-min))
+          (while (not (eobp))
+            (push (tabulated-list-get-id) our-ids)
+            (forward-line 1))
+          (setq our-ids (nreverse our-ids)))
+        (should (equal tl-ids our-ids))))))
+
+;; ──────────────────────────────────────────────────────────
+;; gnosis-tl-print equivalence tests
+;; ──────────────────────────────────────────────────────────
+
+(ert-deftest gnosis-test-tl-print-same-ids-as-tabulated-list-print ()
+  "gnosis-tl-print produces the same entry IDs per line as tabulated-list-print."
+  (let* ((fmt [("Name" 20 t) ("Val" 10 t)])
+         (entries '((1 ["Alice" "100"])
+                    (2 ["Bob" "200"])
+                    (3 ["Carol" "300"]))))
+    ;; Render with tabulated-list-print
+    (let (tl-ids)
+      (with-temp-buffer
+        (tabulated-list-mode)
+        (setq tabulated-list-format fmt
+              tabulated-list-padding 2
+              tabulated-list-sort-key nil
+              tabulated-list-entries (copy-sequence entries))
+        (tabulated-list-init-header)
+        (tabulated-list-print)
+        (goto-char (point-min))
+        (while (not (eobp))
+          (push (tabulated-list-get-id) tl-ids)
+          (forward-line 1))
+        (setq tl-ids (nreverse tl-ids)))
+      ;; Render with gnosis-tl-print
+      (let (our-ids)
+        (with-temp-buffer
+          (tabulated-list-mode)
+          (setq tabulated-list-format fmt
+                tabulated-list-padding 2
+                tabulated-list-sort-key nil
+                tabulated-list-entries (copy-sequence entries))
+          (tabulated-list-init-header)
+          (gnosis-tl-print)
+          (goto-char (point-min))
+          (while (not (eobp))
+            (push (tabulated-list-get-id) our-ids)
+            (forward-line 1))
+          (setq our-ids (nreverse our-ids)))
+        ;; Same IDs in same order
+        (should (equal tl-ids our-ids))))))
+
+;; ──────────────────────────────────────────────────────────
+;; gnosis-dashboard--compute-column-format tests
+;; ──────────────────────────────────────────────────────────
+
+(ert-deftest gnosis-test-dashboard-compute-column-format ()
+  "compute-column-format returns a 6-column format vector."
+  (let ((fmt (gnosis-dashboard--compute-column-format 120)))
+    (should (vectorp fmt))
+    (should (= (length fmt) 6))
+    ;; Column names
+    (should (equal (car (aref fmt 0)) "Keimenon"))
+    (should (equal (car (aref fmt 5)) "Suspend"))
+    ;; Widths are positive
+    (dotimes (i 6)
+      (should (> (nth 1 (aref fmt i)) 0)))))
+
+(ert-deftest gnosis-test-dashboard-compute-column-format-narrow ()
+  "compute-column-format enforces minimum widths for narrow windows."
+  (let ((fmt (gnosis-dashboard--compute-column-format 30)))
+    ;; Minimums enforced
+    (should (>= (nth 1 (aref fmt 0)) 10))  ;; Keimenon
+    (should (>= (nth 1 (aref fmt 4)) 5))   ;; Type
+    (should (>= (nth 1 (aref fmt 5)) 3)))) ;; Suspend
+
+;; ──────────────────────────────────────────────────────────
+;; gnosis-tl-append-entries tests
+;; ──────────────────────────────────────────────────────────
+
+(ert-deftest gnosis-test-tl-append-entries-basic ()
+  "Append-entries adds lines at the end of the buffer."
+  (with-temp-buffer
+    (tabulated-list-mode)
+    (setq tabulated-list-format [("Name" 20 t) ("Val" 10 t)]
+          tabulated-list-padding 2)
+    (tabulated-list-init-header)
+    ;; Render initial entries
+    (setq tabulated-list-entries
+          '((1 ["Alice" "100"])
+            (2 ["Bob" "200"])))
+    (gnosis-tl-print)
+    (should (= (count-lines (point-min) (point-max)) 2))
+    ;; Append more entries
+    (gnosis-tl-append-entries '((3 ["Carol" "300"])
+                                (4 ["Dave" "400"])))
+    ;; Now 4 lines
+    (should (= (count-lines (point-min) (point-max)) 4))
+    ;; All entries present with correct IDs
+    (goto-char (point-min))
+    (should (equal (tabulated-list-get-id) 1))
+    (forward-line 1)
+    (should (equal (tabulated-list-get-id) 2))
+    (forward-line 1)
+    (should (equal (tabulated-list-get-id) 3))
+    (forward-line 1)
+    (should (equal (tabulated-list-get-id) 4))))
+
+(ert-deftest gnosis-test-tl-append-entries-preserves-point ()
+  "Append-entries does not move point."
+  (with-temp-buffer
+    (tabulated-list-mode)
+    (setq tabulated-list-format [("Name" 20 t)]
+          tabulated-list-padding 2)
+    (tabulated-list-init-header)
+    (setq tabulated-list-entries '((1 ["Alice"]) (2 ["Bob"])))
+    (gnosis-tl-print)
+    ;; Position on Bob
+    (goto-char (point-min))
+    (forward-line 1)
+    (should (equal (tabulated-list-get-id) 2))
+    ;; Append — cursor should stay on Bob
+    (gnosis-tl-append-entries '((3 ["Carol"])))
+    (should (equal (tabulated-list-get-id) 2))))
+
+(ert-deftest gnosis-test-tl-append-entries-empty ()
+  "Append-entries with empty list is a no-op."
+  (with-temp-buffer
+    (tabulated-list-mode)
+    (setq tabulated-list-format [("Name" 20 t)]
+          tabulated-list-padding 2)
+    (tabulated-list-init-header)
+    (setq tabulated-list-entries '((1 ["Alice"])))
+    (gnosis-tl-print)
+    (let ((before (buffer-string)))
+      (gnosis-tl-append-entries nil)
+      (should (equal (buffer-string) before)))))
+
+(ert-deftest gnosis-test-tl-append-entries-to-empty-buffer ()
+  "Append-entries works on an empty buffer."
+  (with-temp-buffer
+    (tabulated-list-mode)
+    (setq tabulated-list-format [("Name" 20 t) ("Val" 10 t)]
+          tabulated-list-padding 2)
+    (tabulated-list-init-header)
+    (let ((inhibit-read-only t))
+      (erase-buffer))
+    (gnosis-tl-append-entries '((1 ["Alice" "100"])))
+    (should (= (count-lines (point-min) (point-max)) 1))
+    (goto-char (point-min))
+    (should (equal (tabulated-list-get-id) 1))))
+
+;; ──────────────────────────────────────────────────────────
+;; Progressive rendering tests
+;; ──────────────────────────────────────────────────────────
+
+(ert-deftest gnosis-test-dashboard-progressive-render-small ()
+  "Progressive render with fewer entries than chunk size renders all at once."
+  (gnosis-test-with-db
+   (let* ((id1 (gnosis-test--add-basic-thema "Q1" "A1"))
+          (id2 (gnosis-test--add-basic-thema "Q2" "A2"))
+          (id3 (gnosis-test--add-basic-thema "Q3" "A3")))
+     (gnosis-test-with-dashboard-buffer
+      (gnosis-dashboard-output-themata (list id1 id2 id3))
+      (with-current-buffer gnosis-dashboard-buffer-name
+        ;; All 3 entries rendered immediately (< chunk size)
+        (should (= (length tabulated-list-entries) 3))
+        (should (= (count-lines (point-min) (point-max)) 3))
+        ;; IDs are correct
+        (goto-char (point-min))
+        (let ((ids nil))
+          (while (not (eobp))
+            (push (tabulated-list-get-id) ids)
+            (forward-line 1))
+          (should (= (length ids) 3))))))))
+
+(ert-deftest gnosis-test-dashboard-progressive-render-chunked ()
+  "Progressive render splits entries when exceeding chunk size."
+  (gnosis-test-with-db
+   (let* ((gnosis-dashboard-render-chunk-size 2)
+          (id1 (gnosis-test--add-basic-thema "Q1" "A1"))
+          (id2 (gnosis-test--add-basic-thema "Q2" "A2"))
+          (id3 (gnosis-test--add-basic-thema "Q3" "A3"))
+          (id4 (gnosis-test--add-basic-thema "Q4" "A4"))
+          (id5 (gnosis-test--add-basic-thema "Q5" "A5")))
+     (gnosis-test-with-dashboard-buffer
+      (gnosis-dashboard-output-themata (list id1 id2 id3 id4 id5))
+      (with-current-buffer gnosis-dashboard-buffer-name
+        ;; First chunk: only 2 entries rendered synchronously
+        (should (= (length tabulated-list-entries) 2))
+        (should (= (count-lines (point-min) (point-max)) 2)))))))
+
+(ert-deftest gnosis-test-dashboard-progressive-render-stale-gen ()
+  "Progressive render timer no-ops when generation is stale."
+  (gnosis-test-with-db
+   (let* ((gnosis-dashboard-render-chunk-size 2)
+          (id1 (gnosis-test--add-basic-thema "Q1" "A1"))
+          (id2 (gnosis-test--add-basic-thema "Q2" "A2"))
+          (id3 (gnosis-test--add-basic-thema "Q3" "A3")))
+     (gnosis-test-with-dashboard-buffer
+      (gnosis-dashboard-output-themata (list id1 id2 id3))
+      (with-current-buffer gnosis-dashboard-buffer-name
+        ;; First chunk rendered
+        (should (= (length tabulated-list-entries) 2))
+        ;; Simulate navigation away (bumps generation)
+        (cl-incf gnosis-dashboard--load-generation)
+        ;; Manually call append-chunk with stale gen — should be no-op
+        (let ((old-count (count-lines (point-min) (point-max))))
+          (gnosis-dashboard--append-chunk
+           (current-buffer) (1- gnosis-dashboard--load-generation))
+          (should (= (count-lines (point-min) (point-max)) old-count))))))))
+
+(ert-deftest gnosis-test-dashboard-progressive-render-stops-after-view-change ()
+  "A pending themata chunk must not alter later tags or nodes views."
+  (gnosis-test-with-db
+   (let* ((gnosis-dashboard-render-chunk-size 1)
+          (id1 (gnosis-test--add-basic-thema "Q1" "A1" '("tag")))
+          (id2 (gnosis-test--add-basic-thema "Q2" "A2" '("tag")))
+          pending-function pending-args)
+     (gnosis-test-with-dashboard-buffer
+      (cl-letf (((symbol-function 'run-with-timer)
+                 (lambda (_seconds _repeat function &rest args)
+                   (setq pending-function function
+                         pending-args args))))
+        (gnosis-dashboard-output-themata (list id1 id2))
+        (should (eq pending-function #'gnosis-dashboard--append-chunk))
+        (dolist (renderer '(gnosis-dashboard-output-tags
+                            gnosis-dashboard-output-nodes))
+          (funcall renderer)
+          (with-current-buffer gnosis-dashboard-buffer-name
+            (let ((expected-mode major-mode)
+                  (expected-entries (copy-tree tabulated-list-entries))
+                  (expected-text (buffer-string)))
+              (apply pending-function pending-args)
+              (should (eq major-mode expected-mode))
+              (should (equal tabulated-list-entries expected-entries))
+              (should (equal (buffer-string) expected-text))))))))))
+
+(ert-deftest gnosis-test-dashboard-stats-load-stops-after-view-change ()
+  "Deferred main statistics must not alter later tags or nodes views."
+  (gnosis-test-with-db
+   (gnosis-test--add-basic-thema "Q1" "A1" '("tag"))
+   (gnosis-test-with-dashboard-buffer
+    (with-current-buffer gnosis-dashboard-buffer-name
+      (gnosis-dashboard-mode)
+      (let ((inhibit-read-only t))
+        (insert "Loading statistics..."))
+      (let ((marker (copy-marker (point-min)))
+            (generation gnosis-dashboard--load-generation))
+        (unwind-protect
+            (dolist (renderer '(gnosis-dashboard-output-tags
+                                gnosis-dashboard-output-nodes))
+              (funcall renderer)
+              (with-current-buffer gnosis-dashboard-buffer-name
+                (let ((expected-mode major-mode)
+                      (expected-entries (copy-tree tabulated-list-entries))
+                      (expected-text (buffer-string)))
+                  (cl-letf (((symbol-function 'run-with-idle-timer) #'ignore))
+                    (gnosis-dashboard--load-stats
+                     (current-buffer) marker generation))
+                  (should (eq major-mode expected-mode))
+                  (should (equal tabulated-list-entries expected-entries))
+                  (should (equal (buffer-string) expected-text)))))
+          (set-marker marker nil)))))))
+
+(ert-deftest gnosis-test-dashboard-stale-render-does-not-replace-view ()
+  "A queued append must not alter a later themata view in the same buffer."
+  (gnosis-test-with-db
+    (let ((id1 (gnosis-test--add-basic-thema "Original question" "A1"))
+          (id2 (gnosis-test--add-basic-thema "Second question" "A2"))
+          (gnosis-dashboard-render-chunk-size 1)
+          callback)
+      (gnosis-test-with-dashboard-buffer
+        (cl-letf (((symbol-function 'run-with-timer)
+                   (lambda (_delay _repeat function &rest args)
+                     (setq callback (cons function args))
+                     nil)))
+          (gnosis-dashboard-output-themata (list id1 id2))
+          (gnosis-dashboard-output-themata (list id2))
+          (let ((before (buffer-string)))
+            (apply (car callback) (cdr callback))
+            (should (equal before (buffer-string)))
+            (should (equal (list id2) (mapcar #'car tabulated-list-entries)))))))))
+
+;; ──────────────────────────────────────────────────────────
+;; Benchmark tests
+;; ──────────────────────────────────────────────────────────
+
+(ert-deftest gnosis-test-dashboard-print-entry-benchmark ()
+  "Benchmark gnosis-tl-print vs tabulated-list-print at various sizes."
+  (let ((fmt [("Keimenon" 30 t) ("Hypothesis" 20 t) ("Answer" 20 t)
+              ("Tags" 15 t) ("Type" 10 t) ("Suspend" 10 t)])
+        (cols ["A sample keimenon text" "some hypothesis"
+               "the answer" "tag1,tag2" "basic" "No"]))
+    (dolist (n '(2000 10000 40000))
+      (let ((entries (cl-loop for i from 1 to n
+                              collect (list i cols))))
+        ;; tabulated-list-print
+        (with-temp-buffer
+          (tabulated-list-mode)
+          (setq tabulated-list-format fmt
+                tabulated-list-padding 2
+                tabulated-list-sort-key nil
+                tabulated-list-entries entries)
+          (tabulated-list-init-header)
+          (let ((start (float-time)))
+            (tabulated-list-print t)
+            (message "tabulated-list-print x%d: %.3fs (%.0fus/entry)"
+                     n (- (float-time) start)
+                     (* 1e6 (/ (- (float-time) start) n)))))
+        ;; gnosis-tl-print
+        (with-temp-buffer
+          (tabulated-list-mode)
+          (setq tabulated-list-format fmt
+                tabulated-list-padding 2
+                tabulated-list-sort-key nil
+                tabulated-list-entries entries)
+          (tabulated-list-init-header)
+          (let ((start (float-time)))
+            (gnosis-tl-print)
+            (message "gnosis-tl-print x%d: %.3fs (%.0fus/entry)"
+                     n (- (float-time) start)
+                     (* 1e6 (/ (- (float-time) start) n)))))
+        ;; gnosis-tl-render-lines (pure, no buffer)
+        (let ((start (float-time)))
+          (gnosis-tl-render-lines entries fmt 2)
+          (message "gnosis-tl-render-lines x%d: %.3fs (%.0fus/entry)"
+                   n (- (float-time) start)
+                   (* 1e6 (/ (- (float-time) start) n))))))
+    (should t)))
+
+;; ──────────────────────────────────────────────────────────
+;; Tag rename tests
+;; ──────────────────────────────────────────────────────────
+
+(ert-deftest gnosis-test-tag-rename-simple ()
+  "Simple rename with no conflicts."
+  (gnosis-test-with-db
+   (gnosis-test--add-basic-thema "Q1" "A1" '("old_name"))
+   (gnosis-test--add-basic-thema "Q2" "A2" '("old_name" "other"))
+   (gnosis-tag-rename "old_name" "new_name")
+   (let ((tags (mapcar #'car (gnosis-select 'tag 'thema-tag))))
+     (should (member "new_name" tags))
+     (should-not (member "old_name" tags))
+     (should (member "other" tags)))))
+
+(ert-deftest gnosis-test-tag-rename-merge ()
+  "Rename merges when thema already has the target tag."
+  (gnosis-test-with-db
+   (let ((id1 (gnosis-test--add-basic-thema "Q1" "A1" '("old" "new"))))
+     (gnosis-test--add-basic-thema "Q2" "A2" '("old"))
+     (gnosis-tag-rename "old" "new")
+     ;; old tag gone entirely
+     (should-not (member "old" (mapcar #'car (gnosis-select 'tag 'thema-tag))))
+     ;; id1 has exactly one "new" row, not two
+     (let ((id1-tags (mapcar #'car
+			     (gnosis-select 'tag 'thema-tag `(= thema-id ,id1)))))
+       (should (equal '("new") (sort id1-tags #'string<)))))))
+
+(ert-deftest gnosis-test-tag-rename-all-conflict ()
+  "When all themata have both old and new, old tag is fully removed."
+  (gnosis-test-with-db
+   (gnosis-test--add-basic-thema "Q1" "A1" '("alpha" "beta"))
+   (gnosis-test--add-basic-thema "Q2" "A2" '("alpha" "beta"))
+   (gnosis-tag-rename "alpha" "beta")
+   (let ((tags (mapcar #'car (gnosis-select 'tag 'thema-tag))))
+     (should-not (member "alpha" tags))
+     (should (member "beta" tags)))))
+
+(ert-deftest gnosis-test-tag-rename-same-name-error ()
+  "Renaming a tag to itself signals user-error."
+  (gnosis-test-with-db
+   (gnosis-test--add-basic-thema "Q1" "A1" '("foo"))
+   (should-error (gnosis-tag-rename "foo" "foo") :type 'user-error)))
+
+(ert-deftest gnosis-test-tag-rename-batch ()
+  "Batch rename with multiple pairs including merges."
+  (gnosis-test-with-db
+   (let ((id1 (gnosis-test--add-basic-thema "Q1" "A1" '("01_Math" "Science")))
+	 (_id2 (gnosis-test--add-basic-thema "Q2" "A2" '("01_Math" "02_History"))))
+     (gnosis--tag-rename-batch '(("01_Math" . "Math")
+				 ("02_History" . "History")))
+     (let ((tags (seq-uniq (mapcar #'car (gnosis-select 'tag 'thema-tag)))))
+       (should (member "Math" tags))
+       (should (member "History" tags))
+       (should-not (member "01_Math" tags))
+       (should-not (member "02_History" tags))
+       ;; id1 had Science already, now also has Math (no duplicate)
+       (let ((id1-tags (sort (mapcar #'car
+				     (gnosis-select 'tag 'thema-tag
+						    `(= thema-id ,id1)))
+			     #'string<)))
+	 (should (equal '("Math" "Science") id1-tags)))))))
+
+(ert-deftest gnosis-test-tag-rename-batch-multi-old-same-new ()
+  "Multiple old tags map to the same new tag for the same thema."
+  (gnosis-test-with-db
+   (let ((id1 (gnosis-test--add-basic-thema "Q1" "A1" '("01_Math" "02_Math"))))
+     (gnosis--tag-rename-batch '(("01_Math" . "Math")
+				 ("02_Math" . "Math")))
+     (let ((id1-tags (mapcar #'car
+			     (gnosis-select 'tag 'thema-tag
+					    `(= thema-id ,id1)))))
+       (should (equal '("Math") id1-tags))))))
+
+(ert-deftest gnosis-test-tag-rename-batch-empty-deletes ()
+  "Pairs where new tag is empty string delete those tag rows."
+  (gnosis-test-with-db
+   (let ((id1 (gnosis-test--add-basic-thema "Q1" "A1" '("42" "Math"))))
+     (gnosis--tag-rename-batch '(("42" . "")))
+     (let ((id1-tags (mapcar #'car
+			     (gnosis-select 'tag 'thema-tag
+					    `(= thema-id ,id1)))))
+       (should (equal '("Math") id1-tags))
+       ;; No empty-string tags exist
+       (should-not (gnosis-sqlite-select (gnosis--ensure-db)
+					 "SELECT * FROM thema_tag WHERE tag = ?" (list "")))))))
+
+(provide 'gnosis-test-dashboard)
+
+;;; gnosis-test-dashboard.el ends here

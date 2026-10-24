@@ -1,0 +1,233 @@
+{
+ "blob": "7053f741b27c19660c77d28dc107d33cae95ddb3",
+ "compiled": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": true,
+  "results": {
+   "speedbar-tests--expand-descendants-nested": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-when noninteractive) :form noninteractive :value t))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "speedbar-tests--expand-descendants-nested-wide": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-when noninteractive) :form noninteractive :value t))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "speedbar-tests--expand-descendants-of-first": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-when noninteractive) :form noninteractive :value t))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "speedbar-tests--expand-descendants-of-first-expanded": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-when noninteractive) :form noninteractive :value t))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "speedbar-tests--expand-descendants-of-last": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-when noninteractive) :form noninteractive :value t))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "speedbar-tests--expand-descendants-of-last-expanded": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-when noninteractive) :form noninteractive :value t))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "speedbar-tests--expand-descendants-of-middle": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-when noninteractive) :form noninteractive :value t))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "speedbar-tests--expand-descendants-of-middle-expanded": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-when noninteractive) :form noninteractive :value t))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "speedbar-tests--expand-descendants-single": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-when noninteractive) :form noninteractive :value t))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   }
+  },
+  "timed_out": false
+ },
+ "file": "lisp/speedbar-tests.el",
+ "gnu": {
+  "emacs": "<recording-path-redacted>/emacs-32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+  "version": "32.0.50"
+ },
+ "harness_sha256": "78c20850429a08af22faadf73b5d164c560230e83d7eb88ef60cb995670703ef",
+ "mini": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": null,
+  "results": {
+   "speedbar-tests--expand-descendants-nested": {
+    "as_expected": null,
+    "detail": "((skip-when noninteractive))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "speedbar-tests--expand-descendants-nested-wide": {
+    "as_expected": null,
+    "detail": "((skip-when noninteractive))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "speedbar-tests--expand-descendants-of-first": {
+    "as_expected": null,
+    "detail": "((skip-when noninteractive))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "speedbar-tests--expand-descendants-of-first-expanded": {
+    "as_expected": null,
+    "detail": "((skip-when noninteractive))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "speedbar-tests--expand-descendants-of-last": {
+    "as_expected": null,
+    "detail": "((skip-when noninteractive))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "speedbar-tests--expand-descendants-of-last-expanded": {
+    "as_expected": null,
+    "detail": "((skip-when noninteractive))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "speedbar-tests--expand-descendants-of-middle": {
+    "as_expected": null,
+    "detail": "((skip-when noninteractive))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "speedbar-tests--expand-descendants-of-middle-expanded": {
+    "as_expected": null,
+    "detail": "((skip-when noninteractive))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "speedbar-tests--expand-descendants-single": {
+    "as_expected": null,
+    "detail": "((skip-when noninteractive))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   }
+  },
+  "timed_out": false
+ },
+ "read_error": null,
+ "real": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": true,
+  "results": {
+   "speedbar-tests--expand-descendants-nested": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-when noninteractive) :form noninteractive :value t))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "speedbar-tests--expand-descendants-nested-wide": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-when noninteractive) :form noninteractive :value t))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "speedbar-tests--expand-descendants-of-first": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-when noninteractive) :form noninteractive :value t))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "speedbar-tests--expand-descendants-of-first-expanded": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-when noninteractive) :form noninteractive :value t))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "speedbar-tests--expand-descendants-of-last": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-when noninteractive) :form noninteractive :value t))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "speedbar-tests--expand-descendants-of-last-expanded": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-when noninteractive) :form noninteractive :value t))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "speedbar-tests--expand-descendants-of-middle": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-when noninteractive) :form noninteractive :value t))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "speedbar-tests--expand-descendants-of-middle-expanded": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-when noninteractive) :form noninteractive :value t))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "speedbar-tests--expand-descendants-single": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-when noninteractive) :form noninteractive :value t))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   }
+  },
+  "timed_out": false
+ },
+ "schema": 1,
+ "toplevel_deftests": 9
+}

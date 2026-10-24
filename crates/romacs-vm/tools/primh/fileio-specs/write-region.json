@@ -1,0 +1,91 @@
+{
+ "name": "write-region",
+ "arity": [
+  3,
+  7
+ ],
+ "effect": "global",
+ "gnu_files": [
+  "fileio.c"
+ ],
+ "gnu_def": "fileio.c:5461",
+ "rust": "src/prims/fileio.rs:509",
+ "args": [
+  "none",
+  "none",
+  "none",
+  "none",
+  "none",
+  "none",
+  "none"
+ ],
+ "extra": {
+  "0": [
+   "(progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") nil)",
+   "(progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") 2)",
+   "(progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\") \"strλ\\n\")",
+   "(progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"x\") 'sym)"
+  ],
+  "1": [
+   "nil",
+   "4",
+   "'sym"
+  ],
+  "2": [
+   "\"/tmp/romacs-primh-fio-wr-dom\"",
+   "nil",
+   "\"/tmp/romacs-primh-fio-wr-no-such-dir/x\""
+  ],
+  "3": [
+   "nil",
+   "t"
+  ],
+  "4": [
+   "nil",
+   "t"
+  ],
+  "5": [
+   "nil"
+  ],
+  "6": [
+   "nil"
+  ]
+ },
+ "probes": [
+  "(with-temp-buffer (progn (insert \"héllo\\nwörld\\n\") (narrow-to-region 3 5) (list (write-region nil nil \"/tmp/romacs-primh-fio-wr-narrow\") (point-min) (point-max) last-coding-system-used (let ((coding-system-for-read (quote utf-8-unix))) (with-temp-buffer (insert-file-contents \"/tmp/romacs-primh-fio-wr-narrow\") (append (buffer-string) nil))))))",
+  "(with-temp-buffer (progn (insert \"héllo\\nwörld\\n\") (list (write-region 5 2 \"/tmp/romacs-primh-fio-wr-rev\") (let ((coding-system-for-read (quote utf-8-unix))) (with-temp-buffer (insert-file-contents \"/tmp/romacs-primh-fio-wr-rev\") (append (buffer-string) nil))))))",
+  "(with-temp-buffer (progn (insert \"héllo\\nwörld\\n\") (list (write-region (copy-marker 2) (copy-marker 4) \"/tmp/romacs-primh-fio-wr-marker\") (let ((coding-system-for-read (quote utf-8-unix))) (with-temp-buffer (insert-file-contents \"/tmp/romacs-primh-fio-wr-marker\") (append (buffer-string) nil))))))",
+  "(with-temp-buffer (progn (insert \"abc\") (condition-case e (write-region 10 2 \"/tmp/romacs-primh-fio-wr-oob\") (error (list (car e) (nth 2 e) (nth 3 e))))))",
+  "(with-temp-buffer (progn (insert \"abc\") (narrow-to-region 2 3) (condition-case e (write-region 1 3 \"/tmp/romacs-primh-fio-wr-oob2\") (error (list (car e) (nth 2 e) (nth 3 e))))))",
+  "(with-temp-buffer (progn (insert \"abc\") (condition-case e (write-region 2 nil \"/tmp/romacs-primh-fio-wr-endnil\") (error e))))",
+  "(with-temp-buffer (progn (insert \"abc\") (condition-case e (write-region 1.5 2 \"/tmp/romacs-primh-fio-wr-float\") (error e))))",
+  "(list (write-region \"λ\\n\" nil \"/tmp/romacs-primh-fio-wr-mb\") (let ((coding-system-for-read (quote utf-8-unix))) (with-temp-buffer (insert-file-contents \"/tmp/romacs-primh-fio-wr-mb\") (append (buffer-string) nil))))",
+  "(list (write-region \"\\316\\273!\" nil \"/tmp/romacs-primh-fio-wr-ub\") (let ((coding-system-for-read (quote utf-8-unix))) (with-temp-buffer (insert-file-contents \"/tmp/romacs-primh-fio-wr-ub\") (append (buffer-string) nil))))",
+  "(list (write-region \"a\\r\\nb\" nil \"/tmp/romacs-primh-fio-wr-cr\") (let ((coding-system-for-read (quote utf-8-unix))) (with-temp-buffer (insert-file-contents \"/tmp/romacs-primh-fio-wr-cr\") (append (buffer-string) nil))))",
+  "(list (write-region \"\" nil \"/tmp/romacs-primh-fio-wr-empty\") (let ((coding-system-for-read (quote utf-8-unix))) (with-temp-buffer (insert-file-contents \"/tmp/romacs-primh-fio-wr-empty\") (append (buffer-string) nil))))",
+  "(progn (write-region \"ab\\n\" nil \"/tmp/romacs-primh-fio-wr-app\") (write-region \"cd\\n\" nil \"/tmp/romacs-primh-fio-wr-app\" t) (let ((coding-system-for-read (quote utf-8-unix))) (with-temp-buffer (insert-file-contents \"/tmp/romacs-primh-fio-wr-app\") (append (buffer-string) nil))))",
+  "(progn (write-region \"abcd\" nil \"/tmp/romacs-primh-fio-wr-off\") (write-region \"X\" nil \"/tmp/romacs-primh-fio-wr-off\" 1) (let ((coding-system-for-read (quote utf-8-unix))) (with-temp-buffer (insert-file-contents \"/tmp/romacs-primh-fio-wr-off\") (append (buffer-string) nil))))",
+  "(progn (write-region \"abcd\" nil \"/tmp/romacs-primh-fio-wr-offf\") (write-region \"X\" nil \"/tmp/romacs-primh-fio-wr-offf\" 2.0) (let ((coding-system-for-read (quote utf-8-unix))) (with-temp-buffer (insert-file-contents \"/tmp/romacs-primh-fio-wr-offf\") (append (buffer-string) nil))))",
+  "(progn (write-region \"ab\" nil \"/tmp/romacs-primh-fio-wr-past\") (write-region \"X\" nil \"/tmp/romacs-primh-fio-wr-past\" 4) (let ((coding-system-for-read (quote utf-8-unix))) (with-temp-buffer (insert-file-contents \"/tmp/romacs-primh-fio-wr-past\") (append (buffer-string) nil))))",
+  "(condition-case e (write-region \"X\" nil \"/tmp/romacs-primh-fio-wr-neg\" -1) (error e))",
+  "(progn (write-region \"ab\" nil \"/tmp/romacs-primh-fio-wr-app0\") (write-region \"X\" nil \"/tmp/romacs-primh-fio-wr-app0\" 0) (let ((coding-system-for-read (quote utf-8-unix))) (with-temp-buffer (insert-file-contents \"/tmp/romacs-primh-fio-wr-app0\") (append (buffer-string) nil))))",
+  "(with-temp-buffer (progn (insert \"v\") (list (write-region nil nil \"/tmp/romacs-primh-fio-wr-visit\" nil t) (equal buffer-file-name \"/tmp/romacs-primh-fio-wr-visit\"))))",
+  "(with-temp-buffer (progn (insert \"v\") (list (write-region nil nil \"/tmp/romacs-primh-fio-wr-vs\" nil \"/tmp/romacs-primh-fio-wr-vs-other-never-created\") (equal buffer-file-name \"/tmp/romacs-primh-fio-wr-vs-other-never-created\") (let ((coding-system-for-read (quote utf-8-unix))) (with-temp-buffer (insert-file-contents \"/tmp/romacs-primh-fio-wr-vs\") (append (buffer-string) nil))) (condition-case e (insert-file-contents \"/tmp/romacs-primh-fio-wr-vs-other-never-created\") (file-missing (quote missing))))))",
+  "(with-temp-buffer (progn (insert \"v\") (list (write-region nil nil \"/tmp/romacs-primh-fio-wr-quiet\" nil (quote quiet)) buffer-file-name)))",
+  "(condition-case e (write-region \"x\" nil \"/tmp/romacs-primh-fio-wr-lock\" nil nil (quote foo)) (error e))",
+  "(list (write-region \"x\" nil \"/tmp/romacs-primh-fio-wr-lock2\" nil nil \"/tmp/romacs-primh-fio-wr-lock2-name\") (let ((coding-system-for-read (quote utf-8-unix))) (with-temp-buffer (insert-file-contents \"/tmp/romacs-primh-fio-wr-lock2\") (append (buffer-string) nil))))",
+  "(progn (write-region \"x\" nil \"/tmp/romacs-primh-fio-wr-excl\") (condition-case e (write-region \"y\" nil \"/tmp/romacs-primh-fio-wr-excl\" nil nil nil (quote excl)) (error (list (car e) (nth 1 e) (equal (nth 2 e) \"/tmp/romacs-primh-fio-wr-excl\")))))",
+  "(condition-case e (write-region \"x\" nil \"/tmp/romacs-primh-fio-wr-no-such-dir/x\") (error (list (car e) (nth 1 e) (nth 2 e))))",
+  "(condition-case e (write-region \"x\" nil \"/tmp/\") (error (list (car e) (nth 1 e) (nth 2 e))))",
+  "(condition-case e (write-region \"x\" nil 5) (error e))",
+  "(let ((coding-system-for-write (quote utf-8))) (list (write-region \"λ\\n\" nil \"/tmp/romacs-primh-fio-wr-c8\") last-coding-system-used (let ((coding-system-for-read (quote utf-8-unix))) (with-temp-buffer (insert-file-contents \"/tmp/romacs-primh-fio-wr-c8\") (append (buffer-string) nil)))))",
+  "(let ((coding-system-for-write (quote utf-8-unix))) (list (write-region \"λ\\n\" nil \"/tmp/romacs-primh-fio-wr-c8u\") last-coding-system-used (let ((coding-system-for-read (quote utf-8-unix))) (with-temp-buffer (insert-file-contents \"/tmp/romacs-primh-fio-wr-c8u\") (append (buffer-string) nil)))))",
+  "(let ((coding-system-for-write (quote latin-1))) (list (write-region \"é\\n\" nil \"/tmp/romacs-primh-fio-wr-cl1\") last-coding-system-used))",
+  "(let ((coding-system-for-write (quote utf-8-dos))) (list (write-region \"a\\nb\" nil \"/tmp/romacs-primh-fio-wr-cdos\") last-coding-system-used))",
+  "(with-temp-buffer (progn (set (make-local-variable (quote buffer-file-coding-system)) (quote utf-8)) (insert \"λ\") (list (write-region nil nil \"/tmp/romacs-primh-fio-wr-bf8\") last-coding-system-used (let ((coding-system-for-read (quote utf-8-unix))) (with-temp-buffer (insert-file-contents \"/tmp/romacs-primh-fio-wr-bf8\") (append (buffer-string) nil))))))",
+  "(let ((write-region-annotate-functions (list (lambda (s e) nil)))) (write-region \"x\" nil \"/tmp/romacs-primh-fio-wr-ann\"))",
+  "(with-temp-buffer (progn (set-buffer-multibyte nil) (insert \"ab\") (write-region nil nil \"/tmp/romacs-primh-fio-wr-uni\")))",
+  "(let ((file-name-handler-alist (quote ((\"\\\\`/nowhere/\" . ignore))))) (write-region \"x\" nil \"/tmp/romacs-primh-fio-wr-fnh\"))",
+  "(with-temp-buffer (progn (insert \"* Heading\\nλ body\\n\") (write-region nil nil \"/tmp/romacs-primh-fio-wr-rt\") (with-temp-buffer (insert-file-contents \"/tmp/romacs-primh-fio-wr-rt\" t) (list (equal (buffer-string) \"* Heading\\nλ body\\n\") (equal buffer-file-name \"/tmp/romacs-primh-fio-wr-rt\")))))"
+ ]
+}

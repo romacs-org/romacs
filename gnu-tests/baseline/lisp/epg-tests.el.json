@@ -1,0 +1,191 @@
+{
+ "blob": "d6e89f34f18c1e1886124126dd132d20add74802",
+ "compiled": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": true,
+  "results": {
+   "epg-decrypt-1": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "epg-import-1": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "epg-roundtrip-1": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (epg--gnupg-version-is-not-buggy)) :form (epg--gnupg-version-is-not-buggy) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "epg-roundtrip-2": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (epg--gnupg-version-is-not-buggy)) :form (epg--gnupg-version-is-not-buggy) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "epg-sign-verify-1": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "epg-sign-verify-2": {
+    "as_expected": false,
+    "detail": "(ert-test-failed ((should (equal \"clearsigned\n\" (epg-verify-string epg-tests-context signature))) :form (equal \"clearsigned\n\" \"clearsigned\") :value nil :explanation (arrays-of-different-length 12 11 \"clearsigned\n\" \"clearsigned\" first-mismatch-at 11)))",
+    "expected": ":passed",
+    "outcome": "failed",
+    "tags": []
+   },
+   "epg-sign-verify-3": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   }
+  },
+  "timed_out": false
+ },
+ "file": "lisp/epg-tests.el",
+ "gnu": {
+  "emacs": "<recording-path-redacted>/emacs-32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+  "version": "32.0.50"
+ },
+ "harness_sha256": "78c20850429a08af22faadf73b5d164c560230e83d7eb88ef60cb995670703ef",
+ "mini": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": null,
+  "results": {
+   "epg-decrypt-1": {
+    "as_expected": null,
+    "detail": "(void-function with-epg-tests)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "epg-import-1": {
+    "as_expected": null,
+    "detail": "(void-function with-epg-tests)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "epg-roundtrip-1": {
+    "as_expected": null,
+    "detail": "((skip-unless (epg--gnupg-version-is-not-buggy)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "epg-roundtrip-2": {
+    "as_expected": null,
+    "detail": "((skip-unless (epg--gnupg-version-is-not-buggy)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "epg-sign-verify-1": {
+    "as_expected": null,
+    "detail": "(void-function with-epg-tests)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "epg-sign-verify-2": {
+    "as_expected": null,
+    "detail": "(void-function with-epg-tests)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "epg-sign-verify-3": {
+    "as_expected": null,
+    "detail": "(void-function with-epg-tests)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   }
+  },
+  "timed_out": false
+ },
+ "read_error": null,
+ "real": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": true,
+  "results": {
+   "epg-decrypt-1": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "epg-import-1": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "epg-roundtrip-1": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (epg--gnupg-version-is-not-buggy)) :form (epg--gnupg-version-is-not-buggy) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "epg-roundtrip-2": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (epg--gnupg-version-is-not-buggy)) :form (epg--gnupg-version-is-not-buggy) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "epg-sign-verify-1": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "epg-sign-verify-2": {
+    "as_expected": false,
+    "detail": "(ert-test-failed ((should (equal \"clearsigned\n\" (epg-verify-string epg-tests-context signature))) :form (equal \"clearsigned\n\" \"clearsigned\") :value nil :explanation (arrays-of-different-length 12 11 \"clearsigned\n\" \"clearsigned\" first-mismatch-at 11)))",
+    "expected": ":passed",
+    "outcome": "failed",
+    "tags": []
+   },
+   "epg-sign-verify-3": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   }
+  },
+  "timed_out": false
+ },
+ "schema": 1,
+ "toplevel_deftests": 7
+}

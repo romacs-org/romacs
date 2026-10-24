@@ -1,0 +1,2973 @@
+//! GUI frame window management for the render thread.
+//!
+//! GNU Emacs treats every top-level GUI frame as a native window. This module
+//! owns the render-thread mapping between Emacs frame IDs and winit windows so
+//! redraw, input, resize, focus, and destruction can be frame-addressed instead
+//! of primary-window-addressed.
+
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use winit::dpi::{PhysicalPosition, PhysicalSize, Position, Size};
+use winit::event_loop::ActiveEventLoop;
+use winit::monitor::Fullscreen;
+use winit::window::{
+    ImeCapabilities, ImeEnableRequest, ImeHint, ImePurpose, ImeRequest, ImeRequestData, Window,
+    WindowId,
+};
+
+use super::cursor::{CursorState, CursorTarget};
+pub(crate) use super::frame_compositor::{FrameCompositor, RetainedCursorCell, RetainedStatic};
+use super::geometry_hints::apply_window_geometry_hints;
+use super::state::{
+    FpsCounter, GuiChromeInteractionState, IdleDimState, ImeCursorArea, PendingPointerDamage,
+    PointerAppearanceState, PresentedInteractionKey, PresentedPointerHit, PresentedPressCapture,
+    TypingSpeedState, WindowChrome, effective_window_scale_factor, window_size_from_emacs_pixels,
+};
+use super::transitions::clear_frame_transition_textures;
+use crate::core::frame_glyphs::{FrameGlyph, FrameGlyphBuffer};
+use crate::host_types::GuiFrameGeometryHints;
+use romacs_display_protocol::effect_config::IdleDimConfig;
+use romacs_display_protocol::frame_time::EventTime;
+use romacs_display_protocol::{
+    DeviceScale, FrameRect, GeometrySize, LogicalPixels, PresentMapping, PresentationExtent,
+    PresentationFramePoint, PresentationId, PresentedHit, PresentedHitError, PresentedHitQuery,
+    RetainedImageSet, SurfaceState,
+};
+use romacs_renderer_wgpu::{WgpuGlyphAtlas, WgpuRenderer};
+
+use crate::thread_comm::WindowFullscreenMode;
+
+/// How close together two titlebar clicks must be to count as a double click.
+const TITLEBAR_DOUBLE_CLICK_INTERVAL: std::time::Duration = std::time::Duration::from_millis(400);
+
+/// Unique across resize, device loss, destruction and recreation (no handle ABA).
+pub(super) fn next_surface_generation() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    NEXT.fetch_update(
+        std::sync::atomic::Ordering::Relaxed,
+        std::sync::atomic::Ordering::Relaxed,
+        |id| id.checked_add(1),
+    )
+    .expect("surface generation exhausted")
+}
+
+/// Native window/surface state for a top-level GUI frame.
+pub(crate) struct GuiFrameNativeWindowState {
+    pub(super) window_chrome: crate::window_chrome::WindowChromeController,
+    pub(super) content_insets: romacs_display_protocol::ContentInsets,
+    pub window: Arc<dyn Window>,
+    /// Absent during device-loss recovery; the retained native window stays live.
+    pub surface: Option<wgpu::Surface<'static>>,
+    pub surface_generation: u64,
+    /// Backend of the adapter this surface presents through; wgpu surfaces
+    /// do not expose it, and the GL resize quirk needs it.
+    pub surface_backend: wgpu::Backend,
+    pub surface_config: wgpu::SurfaceConfiguration,
+    pub width: u32,
+    pub height: u32,
+    pub scale_factor: f64,
+    /// Borderless native-window chrome state for this frame window.
+    pub(super) chrome: WindowChrome,
+    /// Hints last applied to `window`, if known.  GNU
+    /// `xg_wm_set_size_hint` skips a request identical to the last one; here
+    /// a repeat is not free either, because winit's Wayland backend requests
+    /// a redraw on every minimum-size update, re-rendering the previous frame
+    /// just ahead of the one that is about to arrive.
+    pub(super) applied_geometry_hints: Option<GuiFrameGeometryHints>,
+}
+
+impl GuiFrameNativeWindowState {
+    pub(super) fn content_insets(&self) -> romacs_display_protocol::ContentInsets {
+        self.content_insets
+    }
+
+    pub(super) fn refresh_content_geometry(&mut self) {
+        self.content_insets = crate::window_chrome::WindowChromeController::insets(
+            self.window.as_ref(),
+            self.chrome.decorations_enabled,
+        );
+    }
+
+    pub(super) fn content_size(&self) -> (u32, u32) {
+        self.content_insets().content_size(self.width, self.height)
+    }
+
+    pub(super) fn surface_state(&self) -> SurfaceState {
+        if self.surface.is_none() {
+            return SurfaceState::Suspended;
+        }
+        match SurfaceState::from_device_size(
+            self.width,
+            self.height,
+            DeviceScale::new(self.scale_factor as f32).expect("validated native scale"),
+        )
+        .expect("validated native surface")
+        {
+            SurfaceState::Drawable(surface) => {
+                SurfaceState::Drawable(surface.with_content_insets(self.content_insets()))
+            }
+            SurfaceState::Suspended => SurfaceState::Suspended,
+        }
+    }
+
+    /// Bring the present surface to `surface_config`'s geometry after a
+    /// window resize, encoding the backend quirk in one place: GL's
+    /// emulated swapchain needs a rebuilt window surface, every other
+    /// backend reconfigures the existing one.  Returns true when the
+    /// surface object was replaced.
+    pub(super) fn surface_configure_or_rebuild(
+        &mut self,
+        device: &wgpu::Device,
+        instance: &wgpu::Instance,
+    ) -> bool {
+        if self.surface.is_none() {
+            return false;
+        }
+        self.surface_generation = next_surface_generation();
+        if self.surface_backend == wgpu::Backend::Gl {
+            let rebuilt = instance
+                .create_surface(self.window.clone())
+                .map_err(|error| {
+                    tracing::warn!("surface rebuild after resize failed: {error:?}");
+                    error
+                });
+            match rebuilt {
+                Ok(surface) => {
+                    self.surface = Some(surface);
+                    #[cfg(target_os = "linux")]
+                    // SAFETY: the rebuilt surface and device share this renderer instance.
+                    unsafe {
+                        romacs_renderer_wgpu::native_presentation::prepare_surface(
+                            device,
+                            self.surface.as_ref().expect("configured surface"),
+                        );
+                    }
+                    self.surface
+                        .as_ref()
+                        .expect("configured surface")
+                        .configure(device, &self.surface_config);
+                    return true;
+                }
+                Err(_) => {
+                    // Fall through to the in-place reconfigure: a stale-
+                    // geometry surface is still better than losing the
+                    // window's present path entirely.
+                }
+            }
+        }
+        #[cfg(target_os = "linux")]
+        // SAFETY: this surface and device share the renderer instance; configure follows immediately.
+        unsafe {
+            romacs_renderer_wgpu::native_presentation::prepare_surface(
+                device,
+                self.surface.as_ref().expect("configured surface"),
+            );
+        }
+        self.surface
+            .as_ref()
+            .expect("configured surface")
+            .configure(device, &self.surface_config);
+        false
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct NativeTextInputPolicy {
+    pub(super) ime_allowed_on_create: bool,
+    pub(super) initial_cursor_area: ImeCursorArea,
+}
+
+impl NativeTextInputPolicy {
+    pub(super) fn for_gui_frame() -> Self {
+        Self {
+            ime_allowed_on_create: true,
+            initial_cursor_area: ImeCursorArea {
+                x: 0,
+                y: 0,
+                width: 1,
+                height: 1,
+            },
+        }
+    }
+
+    pub(super) fn apply_to_window(self, window: &dyn Window) {
+        let request = if self.ime_allowed_on_create {
+            // Enabling declares the capabilities the IME may drive from here
+            // on, so the initial cursor area rides along with the request that
+            // enables the cursor-area capability instead of trailing it.
+            let capabilities = ImeCapabilities::new()
+                .with_hint_and_purpose()
+                .with_cursor_area();
+            let data = ImeRequestData::default()
+                .with_hint_and_purpose(ImeHint::NONE, ImePurpose::Normal)
+                .with_cursor_area(
+                    PhysicalPosition::new(
+                        self.initial_cursor_area.x as f64,
+                        self.initial_cursor_area.y as f64,
+                    )
+                    .into(),
+                    PhysicalSize::new(
+                        self.initial_cursor_area.width as f64,
+                        self.initial_cursor_area.height as f64,
+                    )
+                    .into(),
+                );
+            let enable = ImeEnableRequest::new(capabilities, data)
+                .expect("every requested IME capability carries its initial value");
+            ImeRequest::Enable(enable)
+        } else {
+            ImeRequest::Disable
+        };
+        let _ = window.request_ime_update(request);
+    }
+}
+
+/// Move the IME candidate box, which is what the deprecated
+/// `Window::set_ime_cursor_area` did: the update only means something once
+/// the IME is enabled with the cursor-area capability, and its outcome is
+/// nothing this side can act on.
+fn request_ime_cursor_area(window: &dyn Window, position: Position, size: Size) {
+    if window
+        .ime_capabilities()
+        .is_some_and(|capabilities| capabilities.cursor_area())
+    {
+        let _ = window.request_ime_update(ImeRequest::Update(
+            ImeRequestData::default().with_cursor_area(position, size),
+        ));
+    }
+}
+
+/// Make Option a command modifier the way GNU's compiled-in
+/// `ns-alternate-modifier` default does, or leave it composing characters
+/// when the policy maps Option to `none'.
+///
+/// macOS composes an Option chord in the window server, so AppKit hands over
+/// the composed character: Option+X arrives as `≈`, Option+Shift+, as `¯`.
+/// GNU never reads that when a control-like modifier is down.
+/// `keyDown:` takes its code from
+/// `[theEvent charactersIgnoringModifiers]` (`src/nsterm.m`), which applies
+/// Shift but not Option, and re-derives it with `ns_get_shifted_character` --
+/// `UCKeyTranslate` with only the shift-like modifier bits -- when a
+/// control-like modifier is also down.  With the default
+/// `ns-alternate-modifier` of `meta` those two agree, because Option is then
+/// never shift-like, so `nil_or_none` is false and only `shiftKey` is passed.
+///
+/// `OptionAsAlt` is winit's knob for exactly that split: its rewriting shapes
+/// make `characters` become `charactersIgnoringModifiers` whenever Option is
+/// down and Control and Command are not.  It has to happen here,
+/// at the window, rather than while translating a `KeyEvent`, because winit
+/// applies it before `interpretKeyEvents` -- so an Option chord that lands on
+/// a dead key (Option+E on the US layout) stops opening a preedit and starts
+/// arriving as a key event at all.
+///
+/// The shape is the *policy's* answer (`ModifierPolicy::option_as_alt_shape`),
+/// not a constant: `mac-option-modifier nil` (GNU's `none') must keep
+/// composing characters, so the knob is driven by the NS modifier policy
+/// shipped from Lisp.
+#[cfg(target_os = "macos")]
+pub(super) fn apply_option_key_policy(
+    window: &dyn Window,
+    shape: romacs_display_protocol::OptionAsAltShape,
+) {
+    use romacs_display_protocol::OptionAsAltShape as Shape;
+    use winit::platform::macos::{OptionAsAlt, WindowExtMacOS};
+
+    window.set_option_as_alt(match shape {
+        Shape::None => OptionAsAlt::None,
+        Shape::LeftOnly => OptionAsAlt::OnlyLeft,
+        Shape::RightOnly => OptionAsAlt::OnlyRight,
+        Shape::Both => OptionAsAlt::Both,
+    });
+}
+
+/// No other window system composes an Option/Alt chord into a different
+/// character, so Alt already reaches Emacs as a bare modifier there.
+#[cfg(not(target_os = "macos"))]
+pub(super) fn apply_option_key_policy(
+    _window: &dyn Window,
+    _shape: romacs_display_protocol::OptionAsAltShape,
+) {
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct ActivePresentationTransition {
+    pub activated: romacs_display_protocol::PresentationId,
+    pub replaced: Option<romacs_display_protocol::PresentationId>,
+}
+
+impl ActivePresentationTransition {
+    pub(super) fn between(
+        previous: Option<romacs_display_protocol::PresentationId>,
+        current: romacs_display_protocol::PresentationId,
+    ) -> Option<Self> {
+        if current.get() == 0 || previous == Some(current) {
+            return None;
+        }
+        Some(Self {
+            activated: current,
+            replaced: previous.filter(|presentation| presentation.get() != 0),
+        })
+    }
+}
+
+/// Frame-owned render, input, overlay, and transient visual state.
+pub(crate) struct GuiFrameRenderState {
+    /// The Emacs frame_id that owns this window (used for routing).
+    pub emacs_frame_id: u64,
+    pub(super) trace_last_drawn: Option<romacs_display_protocol::PresentationId>,
+    /// Chromeless glyph composition and rendering state.
+    pub compositor: FrameCompositor,
+    /// The one resolved relationship between the live root surface and the
+    /// immutable root presentation. Updated only at surface/presentation edges.
+    present_state: GuiFramePresentState,
+    /// GUI chrome (menu bar, tool bar, compact bar) for this frame window.
+    pub chrome: ChromeState,
+    /// Snapshot-qualified visual state selected from displayed pointer maps.
+    pub(super) pointer_appearance: PointerAppearanceState,
+    presented_press: Option<PresentedPressCapture>,
+    /// Surface-space paint clips invalidated by transient pointer transitions.
+    pending_pointer_damage: [Option<PendingPointerDamage>; 2],
+    #[cfg(test)]
+    pointer_damage_appearance_lookups: usize,
+    /// Retirements pinned while a presented interaction still references them.
+    deferred_pointer_retirements: Vec<u64>,
+    /// Transient renderer-owned overlays (popup, tooltip, bell, fps, typing, idle).
+    pub overlays: OverlayState,
+    /// Intermediate composition target while a full-frame post shader is
+    /// installed: the whole frame renders here, then the post pass shades it
+    /// into the swapchain as the final step. Recreated on resize.
+    pub(super) frame_post_src: Option<romacs_renderer_wgpu::SnapshotLease>,
+    pub(super) native_content_src: Option<romacs_renderer_wgpu::SnapshotLease>,
+    pub(super) child_opacity_src: Option<romacs_renderer_wgpu::SnapshotLease>,
+    pub(super) child_resize_src: Option<romacs_renderer_wgpu::SnapshotLease>,
+    pub(super) applied_frame_alpha: f32,
+    /// The current native input-method composition, if any.
+    ///
+    /// `Option` is the active-state invariant: a preedit cannot be "active"
+    /// while carrying an empty or stale string.  Each native preedit event
+    /// atomically replaces this complete value.
+    pub(super) input_method: InputMethodState,
+    /// Text cursor animation and blink state for this frame window.
+    pub(super) cursor: CursorState,
+    /// Last known pointer position in native root-surface logical coordinates.
+    pub mouse_pos: (f32, f32),
+    pub(super) scroll_input: super::scroll_input::ScrollInput,
+    /// Whether the native window currently owns the pointer. The last position
+    /// remains useful for input coordinates after leave, but must not reactivate
+    /// a visual range on a captured release.
+    pub(super) pointer_inside: bool,
+}
+
+/// Compile-time separation of a suspended surface from drawable geometry.
+/// A drawable surface may await its first presentation, but it can never carry
+/// a mapping resolved for a different surface.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum GuiFramePresentState {
+    Suspended,
+    Drawable {
+        surface: romacs_display_protocol::DrawableSurface,
+        mapping: Option<PresentMapping>,
+    },
+}
+
+/// GUI chrome state for a frame window.
+#[derive(Default)]
+pub(crate) struct ChromeState {
+    pub interaction: GuiChromeInteractionState,
+}
+
+/// Transient overlay state for a frame window.
+pub(crate) struct OverlayState {
+    pub visual_bell_start: Option<romacs_display_protocol::frame_time::EventTime>,
+    pub(super) fps: FpsCounter,
+    pub(super) typing_speed: TypingSpeedState,
+    pub(super) idle_dim: IdleDimState,
+}
+
+/// One complete native input-method preedit update.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct ImePreedit {
+    pub text: String,
+    /// UTF-8 byte offsets supplied by winit.  A zero-width range is the IME
+    /// caret; a non-empty range is the IME selection.
+    pub cursor_range: Option<(usize, usize)>,
+}
+
+/// Native input-method state, kept separate from renderer-owned overlays.
+/// Its methods are the only way to transition between inactive and preedit.
+#[derive(Default)]
+pub(super) struct InputMethodState {
+    preedit: Option<ImePreedit>,
+}
+
+impl InputMethodState {
+    pub(super) fn replace_preedit(&mut self, text: String, cursor_range: Option<(usize, usize)>) {
+        self.preedit = (!text.is_empty()).then_some(ImePreedit { text, cursor_range });
+    }
+
+    pub(super) fn clear(&mut self) {
+        self.preedit = None;
+    }
+
+    pub(super) fn preedit(&self) -> Option<&ImePreedit> {
+        self.preedit.as_ref()
+    }
+
+    pub(super) fn has_preedit(&self) -> bool {
+        self.preedit.is_some()
+    }
+}
+
+impl ChromeState {
+    /// Apply a mouse press on a chrome hit during a popup interaction.
+    /// Dismisses popup-related state and records the interaction.
+    pub fn press_with_popup(&mut self, press: &ChromePress) {
+        self.interaction.menu_bar_active = None;
+        self.interaction.compact_bar_menu_active = None;
+        let ChromePress::ToolBar(idx) = press;
+        self.interaction.toolbar_pressed = Some(*idx);
+    }
+}
+
+/// Result of a chrome interaction press.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum ChromePress {
+    ToolBar(u32),
+}
+
+/// Per-window state for a top-level GUI frame.
+///
+/// The frame window lifecycle is modeled as an explicit state machine.
+/// Before `resumed`, operations queue into [`FrameLifecycle::Pending`].
+/// After the winit window is created, they apply directly through
+/// [`FrameLifecycle::Active`].
+pub(crate) struct GuiFrameWindowState {
+    pub(super) lifecycle: FrameLifecycle,
+    /// A scale notification is not yet a size observation. Keep it out of
+    /// committed render geometry until the corresponding native size is known.
+    pub(super) pending_scale_factor: Option<f64>,
+    pub render: GuiFrameRenderState,
+}
+
+/// Window lifecycle state machine.
+///
+/// Mirrors GNU Emacs's frame lifecycle: created, mapped (active),
+/// unmapped / destroyed.  Operations are deferred until the native
+/// window exists, eliminating ad-hoc `if native.is_some()` checks
+/// scattered across ~30 methods.
+pub(super) enum FrameLifecycle {
+    /// Window before `resumed` — all operations queue here.
+    Pending {
+        width: u32,
+        height: u32,
+        scale_factor: f64,
+        mouse_hidden_for_typing: bool,
+        ime_enabled: bool,
+        last_ime_cursor_area: Option<ImeCursorArea>,
+        chrome: WindowChrome,
+        geometry_hints: Option<GuiFrameGeometryHints>,
+        fullscreen: Option<WindowFullscreenMode>,
+    },
+    /// Window with a live winit native window and wgpu surface.
+    Active {
+        native: GuiFrameNativeWindowState,
+        mouse_hidden_for_typing: bool,
+        ime_enabled: bool,
+        last_ime_cursor_area: Option<ImeCursorArea>,
+    },
+}
+
+impl GuiFrameRenderState {
+    fn extend_retained_images(&self, retained: &mut RetainedImageSet) {
+        if let Some(frame) = &self.compositor.current_frame {
+            retained.extend(frame.referenced_images());
+        }
+        for entry in self.compositor.child_frames.frames.values() {
+            retained.extend(entry.frame.referenced_images());
+        }
+    }
+
+    pub(super) fn new(
+        emacs_frame_id: u64,
+        device: &wgpu::Device,
+        scale_factor: f64,
+        fps_enabled: bool,
+        at: EventTime,
+    ) -> Self {
+        Self::with_glyph_atlas(
+            emacs_frame_id,
+            Some(WgpuGlyphAtlas::new_with_scale(device, scale_factor as f32)),
+            fps_enabled,
+            at,
+        )
+    }
+
+    /// A frame render state for a window whose wgpu device does not exist yet.
+    ///
+    /// The render thread builds `RenderApp` before winit reports `resumed`, so
+    /// there is no device to make a glyph atlas from at that point; the atlas
+    /// is filled in later by `populate_glyph_atlas`. Device loss takes the same
+    /// path in reverse (`clear_gpu_resident_state`), so the atlas-less state is
+    /// a permanent part of the frame lifecycle, not a test affordance.
+    pub(super) fn new_without_device(
+        emacs_frame_id: u64,
+        fps_enabled: bool,
+        at: EventTime,
+    ) -> Self {
+        Self::with_glyph_atlas(emacs_frame_id, None, fps_enabled, at)
+    }
+
+    /// The one construction path shared by the device and device-less
+    /// constructors, which differ only in whether a glyph atlas exists.
+    fn with_glyph_atlas(
+        emacs_frame_id: u64,
+        glyph_atlas: Option<WgpuGlyphAtlas>,
+        fps_enabled: bool,
+        at: EventTime,
+    ) -> Self {
+        Self {
+            emacs_frame_id,
+            trace_last_drawn: None,
+            compositor: FrameCompositor::new(glyph_atlas),
+            present_state: GuiFramePresentState::Suspended,
+            chrome: ChromeState::default(),
+            pointer_appearance: PointerAppearanceState::default(),
+            presented_press: None,
+            pending_pointer_damage: [None; 2],
+            #[cfg(test)]
+            pointer_damage_appearance_lookups: 0,
+            deferred_pointer_retirements: Vec::new(),
+            overlays: OverlayState {
+                visual_bell_start: None,
+                fps: FpsCounter {
+                    enabled: fps_enabled,
+                    ..FpsCounter::default()
+                },
+                typing_speed: TypingSpeedState::default(),
+                idle_dim: IdleDimState::new(at),
+            },
+            frame_post_src: None,
+            native_content_src: None,
+            child_opacity_src: None,
+            child_resize_src: None,
+            applied_frame_alpha: 1.0,
+            input_method: InputMethodState::default(),
+            cursor: CursorState::new(at),
+            mouse_pos: (0.0, 0.0),
+            scroll_input: super::scroll_input::ScrollInput::default(),
+            pointer_inside: false,
+        }
+    }
+
+    pub(super) fn populate_glyph_atlas(&mut self, device: &wgpu::Device, scale_factor: f64) {
+        if self.compositor.glyph_atlas.is_none() {
+            self.compositor.glyph_atlas =
+                Some(WgpuGlyphAtlas::new_with_scale(device, scale_factor as f32));
+        }
+    }
+
+    fn mapping_for_current_frame(
+        &self,
+        surface: romacs_display_protocol::DrawableSurface,
+    ) -> Option<PresentMapping> {
+        let frame = self.compositor.current_frame.as_ref()?;
+        let logical_size =
+            GeometrySize::<LogicalPixels>::from_px(frame.width, frame.height).ok()?;
+        Some(PresentMapping::top_left_clip(
+            surface,
+            PresentationExtent::new(frame.presentation_id, logical_size),
+        ))
+    }
+
+    pub(super) fn set_surface_state(&mut self, state: SurfaceState) {
+        if let GuiFramePresentState::Drawable { surface, .. } = self.present_state {
+            let compatible = matches!(state, SurfaceState::Drawable(next)
+                if surface.content_surface() == next.content_surface());
+            if !compatible {
+                // Historical pane UVs describe the old content geometry. Keep
+                // motion/interaction CPU state, but use the established missing-
+                // history fallback until an acquired frame publishes placement.
+                self.compositor.layout.discard_outgoing_picture();
+                self.mark_dirty();
+            }
+        }
+        self.present_state = match state {
+            SurfaceState::Suspended => GuiFramePresentState::Suspended,
+            SurfaceState::Drawable(surface) => GuiFramePresentState::Drawable {
+                surface,
+                mapping: self.mapping_for_current_frame(surface),
+            },
+        };
+    }
+
+    fn refresh_present_mapping(&mut self) {
+        let GuiFramePresentState::Drawable { surface, .. } = self.present_state else {
+            return;
+        };
+        self.present_state = GuiFramePresentState::Drawable {
+            surface,
+            mapping: self.mapping_for_current_frame(surface),
+        };
+    }
+
+    pub(super) const fn present_mapping(&self) -> Option<PresentMapping> {
+        match self.present_state {
+            GuiFramePresentState::Suspended => None,
+            GuiFramePresentState::Drawable { mapping, .. } => mapping,
+        }
+    }
+
+    pub(super) fn root_frame_point_from_surface(&self, x: f32, y: f32) -> Option<(f32, f32)> {
+        let surface_point = romacs_display_protocol::GeometryPoint::<
+            romacs_display_protocol::RootSurfaceSpace,
+            LogicalPixels,
+        >::from_px(x, y)
+        .ok()?;
+        self.present_mapping()?
+            .frame_from_surface(surface_point)
+            .map(|point| (point.x(), point.y()))
+    }
+
+    pub(super) fn surface_point_from_frame(&self, x: f32, y: f32) -> Option<(f32, f32)> {
+        let point = romacs_display_protocol::PresentedFramePoint::from_px(x, y).ok()?;
+        let point = self.present_mapping()?.surface_from_frame(point).ok()?;
+        Some((point.x(), point.y()))
+    }
+
+    /// Project already-applied native controls; scenes never replay setters.
+    pub(super) fn apply_frame_opacity(
+        &mut self,
+        controls: &crate::thread_comm::FrameOpacityState,
+    ) -> bool {
+        let mut changed = false;
+        if let Some(alpha) = controls.applied(self.emacs_frame_id)
+            && alpha != self.applied_frame_alpha
+        {
+            self.applied_frame_alpha = alpha;
+            changed = true;
+        }
+        let mut child_changed = false;
+        for (&id, entry) in &mut self.compositor.child_frames.frames {
+            if let Some(alpha) = controls.applied(id)
+                && alpha != entry.applied_frame_alpha
+            {
+                entry.applied_frame_alpha = alpha;
+                child_changed = true;
+            }
+        }
+        if child_changed {
+            self.compositor.current_scene_generation =
+                crate::render_thread::frame_state::next_scene_generation();
+            self.compositor.current_row_damage = None;
+        }
+        if changed || child_changed {
+            self.compositor.dirty = true;
+        }
+        changed || child_changed
+    }
+
+    // Retained for focused render-state tests; production callers inspect the
+    // retained frame through narrower accessors.
+    #[allow(dead_code)]
+    pub(super) fn current_frame_clone(&self) -> Option<FrameGlyphBuffer> {
+        self.compositor.current_frame.clone()
+    }
+
+    /// Whether the retained frame carries a theme-transition effect hint —
+    /// `None` when there is no retained frame at all, so a caller can use `?`
+    /// exactly as it would with [`Self::current_frame_clone`].
+    ///
+    /// The offscreen-compositing decision needs this single bit, and cloning a
+    /// whole `FrameGlyphBuffer` (glyph vector, window info, cursors, hints,
+    /// per-window effects map) to read it cost a full copy on every present,
+    /// including cursor-only ones that never look at the glyphs.
+    ///
+    /// Must be consulted BEFORE [`Self::take_current_frame_for_render`], which
+    /// drains the hints out of the retained frame.
+    /// Whether this frame must render through the transition offscreen because
+    /// a theme change is waiting to be drawn.
+    ///
+    /// Read before the pending observations are drained. If it were read after,
+    /// it would always say no, `compose_offscreen` would be false, and
+    /// the crossfade would render down a branch that cannot show it — silently.
+    /// The `Option` distinguishes "no frame yet" from "no theme change".
+    pub(super) fn pending_theme_change(&self) -> Option<bool> {
+        self.compositor
+            .current_frame
+            .as_ref()
+            .map(|_| self.compositor.pending.theme.is_some())
+    }
+
+    /// Where a frame-local surface point lands in the presentation being shown.
+    ///
+    /// The only way to obtain the `PresentationFramePoint` a hit query needs.
+    /// While the frame is settled this is the identity and the answer equals
+    /// the input; while panes are morphing it undoes the transform the layout
+    /// pass drew with, so hit testing and rendering agree by construction
+    /// rather than by two call sites happening to compute the same thing.
+    ///
+    /// Returns `None` only when the point is outside representable geometry.
+    fn inverse_map(
+        &self,
+        frame: &FrameGlyphBuffer,
+        x: f32,
+        y: f32,
+    ) -> Option<romacs_display_protocol::PresentationFramePoint> {
+        let point = romacs_display_protocol::GeometryPoint::<
+            romacs_display_protocol::RootSurfaceSpace,
+            romacs_display_protocol::LogicalPixels,
+        >::from_px(x, y)
+        .ok()?;
+        self.interaction_projection(frame).map(point)
+    }
+
+    /// The projection for `frame`.
+    ///
+    /// `sample_pane_layout` is the single writer of `compositor.interaction`,
+    /// and it writes only while a morph is in flight. Everything else — a
+    /// settled root frame, a child frame, a presentation installed but not yet
+    /// composed — takes the identity projection synthesised here. Writing a
+    /// settled projection at install as well would be redundant at best, and
+    /// wrong while a morph was running: it would claim the panes were at their
+    /// destination when the last frame drawn had them mid-flight.
+    fn interaction_projection(
+        &self,
+        frame: &FrameGlyphBuffer,
+    ) -> std::borrow::Cow<'_, romacs_display_protocol::InteractionProjection> {
+        match &self.compositor.interaction {
+            Some(projection) if projection.presentation() == frame.presentation_id => {
+                std::borrow::Cow::Borrowed(projection)
+            }
+            _ => std::borrow::Cow::Owned(romacs_display_protocol::InteractionProjection::settled(
+                frame.presentation_id,
+            )),
+        }
+    }
+
+    /// The immutable buffer currently shown for `target_frame_id`.
+    ///
+    /// The root frame and a child frame are looked up in different places, and
+    /// every hit test needs both the buffer and the projection that belongs to
+    /// it; resolving the pair in one place is what keeps them from being
+    /// fetched from two different frames.
+    pub(super) fn frame_for_target(&self, target_frame_id: u64) -> Option<&FrameGlyphBuffer> {
+        if target_frame_id == self.emacs_frame_id {
+            self.compositor.current_frame.as_ref()
+        } else {
+            self.compositor
+                .child_frames
+                .frames
+                .get(&target_frame_id)
+                .map(|entry| &entry.frame)
+        }
+    }
+
+    /// The scroll bar the pointer is over in `frame`, if any.
+    ///
+    /// Resolved here rather than while drawing, because it is a question about
+    /// the composition and the renderer is handed the answer. Asking it at the
+    /// draw site meant comparing the window's `mouse_pos` — a root-surface
+    /// position — against glyph rects that belong to the destination
+    /// presentation. Those are the same pixel only while the panes are
+    /// settled; for the length of a `split-window` morph a pane's content is
+    /// drawn translated away from where its destination rect says it is, so
+    /// the highlight would land on whichever bar happened to sit at the
+    /// pointer's unprojected coordinates, or on none.
+    ///
+    /// `frame` is the buffer being drawn rather than a frame id: a retained
+    /// cursor cell renders a mini-frame of the same presentation, and the
+    /// answer has to be about the presentation, not about whichever buffer the
+    /// compositor is currently holding.
+    pub(super) fn hovered_scroll_bar(
+        &self,
+        frame: &FrameGlyphBuffer,
+    ) -> Option<romacs_display_protocol::ScrollBarIdentity> {
+        let (x, y) = self.root_frame_point_from_surface(self.mouse_pos.0, self.mouse_pos.1)?;
+        let point = self.inverse_map(frame, x, y)?.in_frame_space();
+        let (x, y) = (point.x(), point.y());
+        // Last glyph first, so the bar drawn on top wins where two overlap.
+        // The draw site could not choose: it re-ran the same test per glyph and
+        // lit every bar the pointer fell inside.
+        frame.glyphs.iter().rev().find_map(|glyph| {
+            let FrameGlyph::ScrollBar {
+                x: bar_x,
+                y: bar_y,
+                width,
+                height,
+                ..
+            } = glyph
+            else {
+                return None;
+            };
+            // Inclusive at the far edges, which is the extent the highlight has
+            // always had. Half-open would be the more usual convention and is
+            // what a hit test that decided anything would need; this one only
+            // brightens a colour, and narrowing it would change what a user
+            // sees for no reason connected to the space bug being fixed.
+            if x < *bar_x || x > *bar_x + *width || y < *bar_y || y > *bar_y + *height {
+                return None;
+            }
+            glyph.scroll_bar_identity()
+        })
+    }
+
+    /// The glyphs on screen for `target_frame_id`, paired with where a pointer
+    /// at frame-local `(x, y)` lands among them.
+    ///
+    /// Returned together because apart is where they go wrong: glyph rects are
+    /// in the destination presentation's coordinates, and while a pane is in
+    /// motion the pointer's frame-local position is not. A caller given the
+    /// pair cannot reach for the raw coordinates instead, because the hit tests
+    /// over these glyphs accept nothing but the witnessed point.
+    pub(super) fn glyph_hit_target(
+        &self,
+        target_frame_id: u64,
+        x: f32,
+        y: f32,
+    ) -> Option<(&[FrameGlyph], PresentationFramePoint)> {
+        let frame = self.frame_for_target(target_frame_id)?;
+        let point = self.inverse_map(frame, x, y)?;
+        Some((frame.glyphs.as_slice(), point))
+    }
+
+    /// Hit-tests pointer semantics from the immutable buffer currently shown
+    /// for `target_frame_id`. Coordinates are local to that target frame.
+    pub(super) fn presented_pointer_hit(
+        &self,
+        target_frame_id: u64,
+        x: f32,
+        y: f32,
+    ) -> Result<Option<PresentedPointerHit>, PresentedHitError> {
+        let Some(frame) = self.frame_for_target(target_frame_id) else {
+            return Ok(None);
+        };
+        let Some(point) = self.inverse_map(frame, x, y) else {
+            return Ok(None);
+        };
+        let Some(hit) = frame.resolve_presented_hit(PresentedHitQuery::new(point))? else {
+            return Ok(None);
+        };
+        Ok(Some(PresentedPointerHit::new(
+            target_frame_id,
+            frame.presentation_id,
+            hit.interaction(),
+            hit.appearance(),
+        )))
+    }
+
+    /// Resolve semantic geometry from the exact immutable frame presentation.
+    pub(super) fn presented_region_hit(
+        &self,
+        target_frame_id: u64,
+        presentation: PresentationId,
+        x: f32,
+        y: f32,
+    ) -> Result<Option<PresentedHit>, PresentedHitError> {
+        let Some(frame) = self.frame_for_target(target_frame_id) else {
+            return Ok(None);
+        };
+        let Some(point) = self.inverse_map(frame, x, y) else {
+            return Ok(None);
+        };
+        if point.presentation() != presentation {
+            return Err(PresentedHitError::StalePresentation {
+                expected: point.presentation(),
+                requested: presentation,
+            });
+        }
+        if target_frame_id == self.emacs_frame_id
+            && let Some(hit) = self.compositor.input_scroll.hit(point)
+        {
+            return hit;
+        }
+        frame
+            .resolve_presented_hit(PresentedHitQuery::new(point))
+            .map(|hit| hit.and_then(|hit| hit.semantic()))
+    }
+
+    pub(super) fn presented_region_observation(
+        &self,
+        target_frame_id: u64,
+        x: f32,
+        y: f32,
+    ) -> Result<Option<(PresentationId, Option<PresentedHit>)>, PresentedHitError> {
+        let Some(presentation) = self
+            .frame_for_target(target_frame_id)
+            .map(|frame| frame.presentation_id)
+        else {
+            return Ok(None);
+        };
+        let hit = self.presented_region_hit(target_frame_id, presentation, x, y)?;
+        Ok(Some((presentation, hit)))
+    }
+
+    fn presented_pointer_appearance_at(
+        &self,
+        target: Option<(u64, f32, f32)>,
+    ) -> Option<super::state::PresentedAppearanceKey> {
+        let (target_frame_id, x, y) = target?;
+        match self.presented_pointer_hit(target_frame_id, x, y) {
+            Ok(hit) => hit.and_then(|hit| hit.appearance_key()),
+            Err(error) => {
+                tracing::error!(?error, "rejecting incoherent presented pointer hit");
+                None
+            }
+        }
+    }
+
+    /// Pointer damage snapshot taken before a child-frame edit, so the
+    /// compositor submodule can pair it with `record_pointer_paint_transition`.
+    pub(in crate::render_thread) fn active_pointer_damage(
+        &mut self,
+    ) -> Option<PendingPointerDamage> {
+        let active = self.pointer_appearance.active()?;
+        let key = active.key();
+        let frame_and_offset = if key.frame_id() == 0 || key.frame_id() == self.emacs_frame_id {
+            self.compositor
+                .current_frame
+                .as_ref()
+                .map(|frame| (frame, 0.0, 0.0))
+        } else {
+            self.compositor
+                .child_frames
+                .frames
+                .get(&key.frame_id())
+                .map(|entry| (&entry.frame, entry.abs_x, entry.abs_y))
+        };
+        let (frame, offset_x, offset_y) = frame_and_offset?;
+        if frame.presentation_id != active.presentation() {
+            return None;
+        }
+        #[cfg(test)]
+        {
+            self.pointer_damage_appearance_lookups += 1;
+        }
+        let bounds = frame
+            .presented_pointer()
+            .appearance(active.appearance())?
+            .damage_bounds();
+        let rect = FrameRect::new(
+            bounds.x() + offset_x,
+            bounds.y() + offset_y,
+            bounds.width(),
+            bounds.height(),
+        )
+        .ok()?;
+        Some(PendingPointerDamage::new(key, rect))
+    }
+
+    fn invalidate_pointer_damage_rows(&mut self, damage: PendingPointerDamage) {
+        let key = damage.key();
+        if key.frame_id() != 0 && key.frame_id() != self.emacs_frame_id {
+            return;
+        }
+        let (Some(frame), Some(row_damage)) = (
+            self.compositor.current_frame.as_ref(),
+            self.compositor.current_row_damage.as_mut(),
+        ) else {
+            return;
+        };
+        if frame.presentation_id != key.presentation() {
+            return;
+        }
+        if let Some(appearance) = frame.presented_pointer().appearance(key.appearance()) {
+            row_damage.invalidate_pointer_rows(appearance.damage_rows());
+        }
+    }
+
+    /// Records pointer repaint needs after a child-frame edit changed what the
+    /// pointer overlaps. Paired with `active_pointer_damage`.
+    pub(in crate::render_thread) fn record_pointer_paint_transition(
+        &mut self,
+        before: Option<PendingPointerDamage>,
+    ) {
+        let after = self.active_pointer_damage();
+        if let Some(damage) = before {
+            self.invalidate_pointer_damage_rows(damage);
+        }
+        if let Some(damage) = after {
+            self.invalidate_pointer_damage_rows(damage);
+        }
+
+        if self.pending_pointer_damage.iter().all(Option::is_none) {
+            self.pending_pointer_damage[0] = before.or(after);
+        }
+        let initial = self.pending_pointer_damage[0];
+        self.pending_pointer_damage[1] = after.filter(|damage| Some(*damage) != initial);
+    }
+
+    #[cfg(test)]
+    pub(super) fn pointer_paint_damage(&self) -> [Option<FrameRect>; 2] {
+        self.pending_pointer_damage
+            .map(|damage| damage.map(PendingPointerDamage::rect))
+    }
+
+    #[cfg(test)]
+    pub(super) const fn pointer_damage_appearance_lookups(&self) -> usize {
+        self.pointer_damage_appearance_lookups
+    }
+
+    pub(super) fn finish_pointer_paint_render(&mut self) {
+        self.pending_pointer_damage = [None; 2];
+    }
+
+    pub(super) fn has_pointer_paint_damage(&self) -> bool {
+        self.pending_pointer_damage.iter().any(Option::is_some)
+    }
+
+    #[cfg(test)]
+    pub(super) fn capture_presented(&mut self, target: Option<PresentedInteractionKey>) {
+        self.presented_press = Some(PresentedPressCapture::new(target));
+    }
+
+    pub(super) fn capture_presented_at(
+        &mut self,
+        target: PresentedInteractionKey,
+        surface_origin: (f32, f32),
+    ) {
+        self.presented_press = Some(PresentedPressCapture::with_surface_origin(
+            target,
+            surface_origin,
+        ));
+    }
+
+    pub(super) const fn presented_capture(&self) -> Option<PresentedPressCapture> {
+        self.presented_press
+    }
+
+    pub(super) fn take_presented_capture(&mut self) -> Option<PresentedPressCapture> {
+        self.presented_press.take()
+    }
+
+    pub(super) fn clear_presented_capture(&mut self) {
+        self.presented_press = None;
+    }
+
+    /// Apply pointer motion to the immutable root or child presentation that
+    /// currently owns the hit. Returns whether the selected paint changed.
+    pub(super) fn update_presented_pointer_motion(
+        &mut self,
+        target: Option<(u64, f32, f32)>,
+    ) -> bool {
+        let appearance = self.presented_pointer_appearance_at(target);
+        if !self.pointer_appearance.hover_would_change(appearance) {
+            return false;
+        }
+        let before = self.active_pointer_damage();
+        let changed = self.pointer_appearance.hover(appearance);
+        if changed {
+            self.record_pointer_paint_transition(before);
+            self.mark_dirty();
+        }
+        changed
+    }
+
+    /// Apply a primary-button phase after resolving hover from the same
+    /// displayed snapshot. Input capture remains owned by the interaction
+    /// pipeline; this operation changes only renderer-facing appearance.
+    pub(super) fn update_presented_pointer_button(
+        &mut self,
+        target: Option<(u64, f32, f32)>,
+        pressed: bool,
+    ) -> bool {
+        let appearance = self.presented_pointer_appearance_at(target);
+        if !self
+            .pointer_appearance
+            .button_would_change(appearance, pressed)
+        {
+            return false;
+        }
+        let before = self.active_pointer_damage();
+        let mut changed = self.pointer_appearance.hover(appearance);
+        changed |= if pressed {
+            self.pointer_appearance.press()
+        } else {
+            self.pointer_appearance.release()
+        };
+        if changed {
+            self.record_pointer_paint_transition(before);
+            self.mark_dirty();
+        }
+        changed
+    }
+
+    /// Resolve the active runtime appearance only when it belongs to this
+    /// exact immutable frame snapshot. Renderer entry points use this seam so
+    /// stale state can never become an unqualified appearance ID.
+    pub(super) fn pointer_selection_for(
+        &self,
+        frame: &FrameGlyphBuffer,
+    ) -> Option<romacs_display_protocol::PointerAppearanceSelection> {
+        // The projected frame owns a newly resolved pointer map. Appearance
+        // IDs from the authoritative frame cannot address it; resolve hover
+        // against the exact temporary paint geometry instead.
+        if self.compositor.input_scroll.active() {
+            if !self.pointer_inside || self.presented_press.is_some() {
+                return None;
+            }
+            let (x, y) = self.root_frame_point_from_surface(self.mouse_pos.0, self.mouse_pos.1)?;
+            let point = self.inverse_map(frame, x, y)?;
+            let appearance = frame
+                .resolve_presented_hit(PresentedHitQuery::new(point))
+                .ok()??
+                .appearance()?;
+            return Some(romacs_display_protocol::PointerAppearanceSelection::new(
+                appearance,
+                romacs_display_protocol::PointerAppearancePhase::Hover,
+            ));
+        }
+        self.pointer_appearance.selection_for(frame)
+    }
+
+    pub(super) fn font_metrics(&self) -> (f32, f32, f32) {
+        self.compositor
+            .glyph_atlas
+            .as_ref()
+            .map_or((13.0, 17.0, 13.0 * 0.6), |atlas| {
+                (
+                    atlas.default_font_size(),
+                    atlas.default_line_height(),
+                    atlas.default_char_width(),
+                )
+            })
+    }
+
+    pub(super) fn set_ime_preedit(&mut self, text: String, cursor_range: Option<(usize, usize)>) {
+        self.input_method.replace_preedit(text, cursor_range);
+        self.compositor.dirty = true;
+    }
+
+    pub(super) fn clear_ime_preedit(&mut self) {
+        if self.input_method.has_preedit() {
+            self.input_method.clear();
+            self.compositor.dirty = true;
+        }
+    }
+
+    pub(super) fn has_ime_preedit(&self) -> bool {
+        self.input_method.has_preedit()
+    }
+
+    pub(super) fn mark_dirty(&mut self) {
+        self.compositor.dirty = true;
+    }
+
+    pub(super) fn has_presentable_dirty_content(&self) -> bool {
+        self.compositor.dirty && self.compositor.current_frame.is_some()
+    }
+
+    /// Whether only the cursor layer needs to reach the screen. Never true at
+    /// the same time as a content repaint is owed: the caller checks
+    /// [`Self::has_presentable_dirty_content`] first and that wins.
+    pub(super) fn has_presentable_cursor_change(&self) -> bool {
+        self.compositor.cursor_dirty && self.compositor.current_frame.is_some()
+    }
+
+    pub(super) fn begin_presentable_render(&mut self) {
+        self.compositor.dirty = false;
+        self.compositor.cursor_dirty = false;
+        // The measurement baseline advances here and nowhere else, because this
+        // is the first point at which the retained presentation is committed to
+        // reaching the screen. Advancing it at install instead would let a
+        // presentation that was superseded before any frame drew it become the
+        // thing the next commit is measured against — see the note on
+        // `FrameCompositor::baseline`.
+        let Some(frame) = self.compositor.current_frame.as_ref() else {
+            return;
+        };
+        let presentation = frame.presentation_id;
+        if self
+            .compositor
+            .baseline
+            .as_ref()
+            .is_some_and(|baseline| baseline.presentation == presentation)
+        {
+            // Already the baseline. Composing the same presentation again — a
+            // cursor blink, a pointer repaint — must not re-promote, or the
+            // staged anchors (now empty, or belonging to a later install) would
+            // replace the ones this presentation was measured with.
+            return;
+        }
+        let window_infos = frame.window_infos.clone();
+        let background = frame.background;
+        self.compositor.baseline = Some(super::frame_compositor::MeasurementBaseline {
+            presentation,
+            window_infos,
+            background,
+        });
+        self.compositor.scroll_anchors =
+            std::mem::take(&mut self.compositor.incoming_scroll_anchors);
+        self.compositor.reflow_imprints =
+            std::mem::take(&mut self.compositor.incoming_reflow_imprints);
+    }
+
+    pub(super) fn set_dirty(&mut self, dirty: bool) {
+        self.compositor.dirty = dirty;
+        if dirty {
+            return;
+        }
+        // Starting a frame satisfies the cursor layer too: every render path
+        // draws the cursor at its current blink state.
+        self.compositor.cursor_dirty = false;
+    }
+
+    pub(super) fn clear_all_chrome_pressed(&mut self) {
+        self.clear_presented_capture();
+        self.chrome.interaction.compact_bar_tool_pressed = None;
+        self.chrome.interaction.toolbar_pressed = None;
+        self.chrome.interaction.toolbar_press_captured = false;
+        self.mark_dirty();
+    }
+
+    pub(super) fn set_emacs_frame_id(&mut self, frame_id: u64) {
+        self.emacs_frame_id = frame_id;
+    }
+
+    pub(super) fn set_mouse_pos(&mut self, pos: (f32, f32)) {
+        self.mouse_pos = pos;
+        self.pointer_inside = true;
+    }
+
+    pub(super) fn clear_pointer_hover(&mut self) -> bool {
+        self.pointer_inside = false;
+        let before = self.active_pointer_damage();
+        let changed = self.pointer_appearance.hover(None);
+        if changed {
+            self.record_pointer_paint_transition(before);
+            self.mark_dirty();
+        }
+        changed
+    }
+
+    pub(super) fn route_presentation_retirement(&mut self, presentation: u64) -> Option<u64> {
+        let pinned = self
+            .presented_capture()
+            .and_then(|capture| capture.target())
+            .is_some_and(|target| target.presentation().get() == presentation);
+        if pinned {
+            if !self.deferred_pointer_retirements.contains(&presentation) {
+                self.deferred_pointer_retirements.push(presentation);
+            }
+            None
+        } else {
+            Some(presentation)
+        }
+    }
+
+    pub(super) fn take_deferred_pointer_retirements(&mut self) -> Vec<u64> {
+        std::mem::take(&mut self.deferred_pointer_retirements)
+    }
+
+    pub(super) fn cancel_pointer_interaction(&mut self) -> (bool, Vec<u64>) {
+        let previous_chrome = self.chrome.interaction;
+        let before = self.active_pointer_damage();
+        let visual_changed = self.pointer_appearance.cancel();
+        self.pointer_inside = false;
+        self.chrome.interaction.clear_menu_bar();
+        self.clear_presented_capture();
+        self.chrome.interaction.clear_toolbar();
+        self.chrome.interaction.toolbar_press_captured = false;
+        self.chrome.interaction.clear_compact_bar();
+        let changed = visual_changed || self.chrome.interaction != previous_chrome;
+        if changed {
+            if visual_changed {
+                self.record_pointer_paint_transition(before);
+            }
+            self.mark_dirty();
+        }
+        (changed, self.take_deferred_pointer_retirements())
+    }
+
+    pub(super) fn set_current_frame(
+        &mut self,
+        frame: Option<crate::core::frame_glyphs::FrameGlyphBuffer>,
+        row_damage: Option<romacs_renderer_wgpu::FrameRowDamage>,
+        scroll_anchors: super::frame_compositor::ScrollAnchorsByWindow,
+        reflow_imprints: super::frame_compositor::ReflowImprintsByWindow,
+    ) -> Option<ActivePresentationTransition> {
+        // One observation for the whole install: every measurement below is
+        // about the same moment, so they must not each mint a slightly later
+        // time and disagree about when the presentation arrived.
+        let installed_at = romacs_display_protocol::frame_time::observe_platform_now();
+        // Selection and theme are observed unconditionally: neither is layout
+        // motion, and a theme changed mid-drag must still cross-fade.
+        self.observe_selection_change(frame.as_ref());
+        self.observe_theme_change(frame.as_ref());
+        // Viewport, reflow and pane motion are all measured against the
+        // presentation being replaced, while both sets of anchors are still in
+        // hand — but only when this presentation is something to travel to.
+        super::frame_compositor::layout_continuity::LayoutContinuity::of(
+            frame.as_ref(),
+            &scroll_anchors,
+            &reflow_imprints,
+            installed_at,
+        )
+        .apply(self);
+        if let Some(window) = self.compositor.input_scroll.reconcile(frame.as_ref()) {
+            // Projected motion has already been drawn; do not animate it twice.
+            self.compositor
+                .pending
+                .scrolls
+                .retain(|scroll| scroll.window != window);
+        }
+        // Staged, not installed: these describe the incoming presentation, and
+        // they become the baseline only if a frame is actually drawn from it.
+        self.compositor.incoming_reflow_imprints = reflow_imprints;
+        self.compositor.incoming_scroll_anchors = scroll_anchors;
+        let before = self.active_pointer_damage();
+        let previous_presentation = self
+            .compositor
+            .current_frame
+            .as_ref()
+            .map(|frame| frame.presentation_id);
+        let next_presentation = frame.as_ref().map(|frame| frame.presentation_id);
+        let transition = next_presentation.and_then(|current| {
+            ActivePresentationTransition::between(previous_presentation, current)
+        });
+        self.compositor.child_frames.set_root_frame(frame.as_ref());
+        if romacs_display_protocol::present_trace::enabled() {
+            let detail = format!(
+                "old_presentation={} new_presentation={} old_was_drawn={}",
+                previous_presentation.map_or(0, |p| p.get()),
+                next_presentation.map_or(0, |p| p.get()),
+                previous_presentation.is_some() && self.trace_last_drawn == previous_presentation
+            );
+            romacs_display_protocol::present_trace::record_detail(
+                romacs_display_protocol::present_trace::Stage::Replaced,
+                self.emacs_frame_id,
+                next_presentation
+                    .unwrap_or_else(|| romacs_display_protocol::PresentationId::new(0)),
+                &detail,
+            );
+        }
+        self.compositor.current_frame = frame;
+        #[cfg(feature = "video")]
+        self.refresh_visible_videos();
+        self.refresh_present_mapping();
+        let appearance_changed = if let Some(previous) = previous_presentation
+            && Some(previous) != next_presentation
+        {
+            self.pointer_appearance.retire(previous)
+        } else {
+            false
+        };
+        self.compositor.current_scene_generation = super::frame_state::next_scene_generation();
+        self.compositor.current_row_damage = row_damage;
+        if appearance_changed {
+            self.record_pointer_paint_transition(before);
+            self.compositor.dirty = true;
+        }
+        transition
+    }
+
+    #[cfg(test)]
+    pub(super) fn with_chrome_interaction_mut(
+        &mut self,
+        f: impl FnOnce(&mut GuiChromeInteractionState),
+    ) -> bool {
+        let previous = self.chrome.interaction;
+        f(&mut self.chrome.interaction);
+        let changed = self.chrome.interaction != previous;
+        if changed {
+            self.compositor.dirty = true;
+        }
+        changed
+    }
+
+    /// Take the retained presentation to draw from.
+    ///
+    /// Takes the acquisition proof because this drains the frame's one-shot
+    /// transition hints: doing it above a surface-loss return would consume
+    /// them for a frame that is then abandoned, and they would never be drawn.
+    pub(super) fn take_current_frame_for_render(
+        &mut self,
+        _acquired: &super::render_pass::surface::SurfaceAcquired,
+    ) -> Option<FrameGlyphBuffer> {
+        let current_frame = self.compositor.current_frame.as_mut()?;
+        let mut frame = Self::take_frame_for_render(current_frame);
+        self.compositor.input_scroll.paint(&mut frame);
+        Some(frame)
+    }
+
+    pub(super) fn take_frame_for_render(current_frame: &mut FrameGlyphBuffer) -> FrameGlyphBuffer {
+        let transition_hints = current_frame.take_transition_hints();
+        let mut frame = current_frame.clone();
+        frame.transition_hints = transition_hints;
+        frame
+    }
+}
+
+impl FrameLifecycle {
+    pub fn native(&self) -> Option<&GuiFrameNativeWindowState> {
+        match self {
+            Self::Active { native, .. } => Some(native),
+            _ => None,
+        }
+    }
+
+    pub fn is_active(&self) -> bool {
+        matches!(self, Self::Active { .. })
+    }
+
+    pub fn window(&self) -> Option<&Arc<dyn Window>> {
+        self.native().map(|n| &n.window)
+    }
+
+    pub fn native_size(&self) -> (u32, u32) {
+        match self {
+            Self::Active { native, .. } => (native.width, native.height),
+            Self::Pending { width, height, .. } => (*width, *height),
+        }
+    }
+
+    pub fn scale_factor(&self) -> f64 {
+        match self {
+            Self::Active { native, .. } => native.scale_factor,
+            Self::Pending { scale_factor, .. } => *scale_factor,
+        }
+    }
+
+    pub fn chrome(&self) -> &WindowChrome {
+        match self {
+            Self::Active { native, .. } => &native.chrome,
+            Self::Pending { chrome, .. } => chrome,
+        }
+    }
+
+    pub fn chrome_mut(&mut self) -> &mut WindowChrome {
+        match self {
+            Self::Active { native, .. } => &mut native.chrome,
+            Self::Pending { chrome, .. } => chrome,
+        }
+    }
+
+    pub fn ime_enabled(&self) -> bool {
+        match self {
+            Self::Active { ime_enabled, .. } => *ime_enabled,
+            Self::Pending { ime_enabled, .. } => *ime_enabled,
+        }
+    }
+
+    pub fn set_ime_enabled(&mut self, enabled: bool) {
+        match self {
+            Self::Active {
+                ime_enabled: ie, ..
+            } => *ie = enabled,
+            Self::Pending {
+                ime_enabled: ie, ..
+            } => *ie = enabled,
+        }
+    }
+
+    pub fn mouse_hidden_for_typing(&self) -> bool {
+        match self {
+            Self::Active {
+                mouse_hidden_for_typing: m,
+                ..
+            } => *m,
+            Self::Pending {
+                mouse_hidden_for_typing: m,
+                ..
+            } => *m,
+        }
+    }
+
+    pub fn set_mouse_hidden_for_typing(&mut self, hidden: bool) {
+        match self {
+            Self::Active {
+                mouse_hidden_for_typing: m,
+                ..
+            } => *m = hidden,
+            Self::Pending {
+                mouse_hidden_for_typing: m,
+                ..
+            } => *m = hidden,
+        }
+    }
+
+    pub fn last_ime_cursor_area(&self) -> Option<ImeCursorArea> {
+        match self {
+            Self::Active {
+                last_ime_cursor_area,
+                ..
+            } => *last_ime_cursor_area,
+            Self::Pending {
+                last_ime_cursor_area,
+                ..
+            } => *last_ime_cursor_area,
+        }
+    }
+
+    pub fn geometry_hints(&self) -> Option<GuiFrameGeometryHints> {
+        match self {
+            Self::Pending { geometry_hints, .. } => *geometry_hints,
+            _ => None,
+        }
+    }
+
+    pub fn request_redraw(&self) {
+        if let Self::Active { native, .. } = self {
+            super::frame_stats::count(&super::frame_stats::REDRAW_REQUESTS);
+            native.window.request_redraw();
+        }
+    }
+}
+
+impl GuiFrameWindowState {
+    /// Redraw is also winit's safe-area-change notification. Observe native
+    /// chrome here so an inset-only change reaches layout without requiring
+    /// a surface resize event.
+    pub(super) fn synchronize_window_chrome(&mut self) -> Option<(u32, u32)> {
+        let FrameLifecycle::Active { native, .. } = &mut self.lifecycle else {
+            return None;
+        };
+        let previous_size = native.content_size();
+        if let Some(frame) = self.render.compositor.current_frame.as_ref() {
+            native.window_chrome.synchronize(
+                native.window.as_ref(),
+                native.chrome.decorations_enabled,
+                frame.background,
+            );
+        }
+        native.refresh_content_geometry();
+        self.render.set_surface_state(native.surface_state());
+        let size = native.content_size();
+        (size != previous_size).then_some(size)
+    }
+
+    pub(super) fn content_size(&self) -> (u32, u32) {
+        match &self.lifecycle {
+            FrameLifecycle::Active { native, .. } => native.content_size(),
+            FrameLifecycle::Pending { width, height, .. } => (*width, *height),
+        }
+    }
+
+    /// Record every native observation, including suspension, independently
+    /// of whether a GPU surface can be configured for it.
+    fn observe_surface_size(&mut self, width: u32, height: u32) -> SurfaceState {
+        let scale = DeviceScale::new(self.lifecycle.scale_factor() as f32)
+            .expect("effective window scale is finite and positive");
+        let surface_state = SurfaceState::from_device_size(width, height, scale)
+            .expect("wgpu surface dimensions have finite logical extents");
+        let surface_state = match &mut self.lifecycle {
+            FrameLifecycle::Active { native, .. } => {
+                native.width = width;
+                native.height = height;
+                native.refresh_content_geometry();
+                native.surface_state()
+            }
+            FrameLifecycle::Pending {
+                width: pw,
+                height: ph,
+                ..
+            } => {
+                *pw = width;
+                *ph = height;
+                surface_state
+            }
+        };
+        self.render.set_surface_state(surface_state);
+        surface_state
+    }
+
+    pub fn handle_resize(
+        &mut self,
+        device: &wgpu::Device,
+        instance: &wgpu::Instance,
+        width: u32,
+        height: u32,
+    ) {
+        if let Some(scale_factor) = self.pending_scale_factor.take() {
+            self.set_scale_factor(scale_factor);
+        }
+        let SurfaceState::Drawable(surface) = self.observe_surface_size(width, height) else {
+            return;
+        };
+        if let FrameLifecycle::Active { native, .. } = &mut self.lifecycle {
+            native.surface_config.width = surface.device_width().get();
+            native.surface_config.height = surface.device_height().get();
+            // The GL backend's emulated swapchain does not survive a
+            // reconfigure-and-keep-surface resize: presents after it land a
+            // buffer with stale geometry (the present-path contract test
+            // shows exactly the stale-height fraction).  Rebuilding the
+            // surface from the window gives EGL a fresh window surface at
+            // the new size; every other backend reconfigures in place, as
+            // the same contract verifies for Vulkan.
+            native.surface_configure_or_rebuild(device, instance);
+            clear_frame_transition_textures(&mut self.render.compositor.transitions);
+            self.render.compositor.dirty = true;
+        }
+    }
+
+    fn set_scale_factor(&mut self, scale_factor: f64) {
+        let effective_scale = effective_window_scale_factor(scale_factor);
+        match &mut self.lifecycle {
+            FrameLifecycle::Active { native, .. } => {
+                native.scale_factor = effective_scale;
+                native.refresh_content_geometry();
+                if let Some(atlas) = self.render.compositor.glyph_atlas.as_mut() {
+                    atlas.set_scale_factor(effective_scale as f32);
+                }
+                self.render.compositor.dirty = true;
+            }
+            FrameLifecycle::Pending {
+                scale_factor: sf, ..
+            } => {
+                *sf = effective_scale;
+            }
+        }
+        let (width, height) = self.lifecycle.native_size();
+        let scale = DeviceScale::new(effective_scale as f32)
+            .expect("effective window scale is finite and positive");
+        let surface_state = SurfaceState::from_device_size(width, height, scale)
+            .expect("native surface dimensions have finite logical extents");
+        self.render.set_surface_state(surface_state);
+        if let FrameLifecycle::Active { native, .. } = &self.lifecycle {
+            self.render.set_surface_state(native.surface_state());
+        }
+    }
+
+    /// Replay retained cosmetic state onto this frame's owner-held window.
+    /// Never request a size: primary adoption must preserve native host geometry.
+    pub(super) fn replay_pending_native_state(&self, window: &dyn Window) {
+        if let FrameLifecycle::Pending {
+            chrome, fullscreen, ..
+        } = &self.lifecycle
+        {
+            window.set_title(&chrome.title);
+            if let Some(hints) = self.lifecycle.geometry_hints() {
+                apply_window_geometry_hints(window, hints);
+            }
+            if let Some(mode) = fullscreen {
+                apply_native_fullscreen_mode(window, *mode);
+            }
+        }
+    }
+
+    pub(super) fn set_title(&mut self, title: String) {
+        match &mut self.lifecycle {
+            FrameLifecycle::Active { native, .. } => {
+                native.chrome.title = title.clone();
+                native.window.set_title(&title);
+                if !native.chrome.decorations_enabled {
+                    self.render.compositor.dirty = true;
+                }
+            }
+            FrameLifecycle::Pending { chrome, .. } => {
+                chrome.title = title;
+            }
+        }
+    }
+
+    pub(super) fn set_fullscreen_mode(&mut self, mode: WindowFullscreenMode) {
+        match &mut self.lifecycle {
+            FrameLifecycle::Pending { fullscreen, .. } => *fullscreen = Some(mode),
+            FrameLifecycle::Active { native, .. } => {
+                apply_native_fullscreen_mode(native.window.as_ref(), mode);
+                match mode {
+                    WindowFullscreenMode::Fullscreen | WindowFullscreenMode::Fullboth => {
+                        native.chrome.is_fullscreen = true;
+                    }
+                    WindowFullscreenMode::None | WindowFullscreenMode::Maximized => {
+                        native.chrome.is_fullscreen = false;
+                    }
+                    WindowFullscreenMode::Fullwidth | WindowFullscreenMode::Fullheight => {}
+                }
+            }
+        }
+        self.render.compositor.dirty = true;
+    }
+
+    pub(super) fn request_inner_size(
+        &mut self,
+        width: u32,
+        height: u32,
+    ) -> super::surface_resize::ResizeRequestOutcome {
+        use super::surface_resize::ResizeRequestOutcome;
+        match &mut self.lifecycle {
+            FrameLifecycle::Active { native, .. } => {
+                let content: PhysicalSize<u32> = window_size_from_emacs_pixels(width, height)
+                    .to_physical(native.window.scale_factor());
+                let insets = native.content_insets();
+                let (width, height) = insets.surface_size(content.width, content.height);
+                let size = PhysicalSize::new(width, height);
+                match native.window.request_surface_size(size.into()) {
+                    Some(size) => ResizeRequestOutcome::Applied {
+                        window: native.window.id(),
+                        size,
+                    },
+                    None => ResizeRequestOutcome::AwaitingConfigure,
+                }
+            }
+            FrameLifecycle::Pending {
+                width: pw,
+                height: ph,
+                ..
+            } => {
+                *pw = width;
+                *ph = height;
+                ResizeRequestOutcome::PendingRealization
+            }
+        }
+    }
+
+    pub(super) fn apply_geometry_hints(&mut self, geometry_hints: GuiFrameGeometryHints) {
+        match &mut self.lifecycle {
+            FrameLifecycle::Active { native, .. } => {
+                if native.applied_geometry_hints != Some(geometry_hints) {
+                    apply_window_geometry_hints(native.window.as_ref(), geometry_hints);
+                    native.applied_geometry_hints = Some(geometry_hints);
+                }
+            }
+            FrameLifecycle::Pending {
+                geometry_hints: gh, ..
+            } => {
+                *gh = Some(geometry_hints);
+            }
+        }
+    }
+
+    /// Forget which hints the native window holds, so the next request is
+    /// applied even if identical.  On a scale change winit's X11 backend
+    /// rewrites WM_NORMAL_HINTS from its own state, dropping the base size
+    /// applied here.
+    pub(super) fn forget_applied_geometry_hints(&mut self) {
+        if let FrameLifecycle::Active { native, .. } = &mut self.lifecycle {
+            native.applied_geometry_hints = None;
+        }
+    }
+
+    pub(super) fn set_decorations(&mut self, decorated: bool) {
+        match &mut self.lifecycle {
+            FrameLifecycle::Active { native, .. } => {
+                native.chrome.decorations_enabled = decorated;
+                native.window_chrome.invalidate();
+                native.window.set_decorations(decorated);
+                self.render.compositor.dirty = true;
+            }
+            FrameLifecycle::Pending { chrome, .. } => {
+                chrome.decorations_enabled = decorated;
+            }
+        }
+    }
+
+    pub(super) fn set_mouse_hidden_for_typing(&mut self, hidden: bool) {
+        if let FrameLifecycle::Active {
+            native,
+            mouse_hidden_for_typing,
+            ..
+        } = &mut self.lifecycle
+            && *mouse_hidden_for_typing != hidden
+        {
+            native.window.set_cursor_visible(!hidden);
+        }
+        self.lifecycle.set_mouse_hidden_for_typing(hidden);
+    }
+
+    pub(super) fn reset_ime_cursor_area(&mut self) {
+        match &mut self.lifecycle {
+            FrameLifecycle::Active {
+                native,
+                last_ime_cursor_area,
+                ..
+            } => {
+                *last_ime_cursor_area = None;
+                request_ime_cursor_area(
+                    native.window.as_ref(),
+                    PhysicalPosition::new(0.0, 0.0).into(),
+                    PhysicalSize::new(1.0, 1.0).into(),
+                );
+            }
+            FrameLifecycle::Pending {
+                last_ime_cursor_area,
+                ..
+            } => {
+                *last_ime_cursor_area = None;
+            }
+        }
+    }
+
+    pub(super) fn update_ime_cursor_area(&mut self, area: ImeCursorArea) {
+        match &mut self.lifecycle {
+            FrameLifecycle::Active {
+                native,
+                last_ime_cursor_area,
+                ..
+            } => {
+                if *last_ime_cursor_area == Some(area) {
+                    return;
+                }
+                request_ime_cursor_area(
+                    native.window.as_ref(),
+                    PhysicalPosition::new(area.x as f64, area.y as f64).into(),
+                    PhysicalSize::new(area.width as f64, area.height as f64).into(),
+                );
+                *last_ime_cursor_area = Some(area);
+            }
+            FrameLifecycle::Pending {
+                last_ime_cursor_area,
+                ..
+            } => {
+                *last_ime_cursor_area = Some(area);
+            }
+        }
+    }
+
+    pub(super) fn clear_ime_preedit(&mut self) {
+        self.render.clear_ime_preedit();
+        self.reset_ime_cursor_area();
+    }
+
+    pub(super) fn remove_child_frame(&mut self, frame_id: u64) -> bool {
+        let target_was_child = self
+            .render
+            .cursor
+            .target_cloned()
+            .is_some_and(|target| target.frame_id == frame_id);
+        let changed = self.render.remove_child_frame(frame_id);
+        if target_was_child {
+            self.reset_ime_cursor_area();
+        }
+        changed
+    }
+
+    pub(super) fn show_child_frame(&mut self, frame_id: u64) -> bool {
+        self.render.show_child_frame(frame_id)
+    }
+
+    pub(super) fn drag_resize_for_current_edge(&self) -> bool {
+        let FrameLifecycle::Active { native, .. } = &self.lifecycle else {
+            return false;
+        };
+        let Some(dir) = native.chrome.resize_edge else {
+            return false;
+        };
+        let _ = native.window.drag_resize_window(dir);
+        true
+    }
+
+    pub(super) fn handle_titlebar_action(&mut self, action: u32) -> bool {
+        let FrameLifecycle::Active { native, .. } = &mut self.lifecycle else {
+            return false;
+        };
+        match action {
+            1 => {
+                let now = romacs_display_protocol::frame_time::observe_platform_now();
+                let is_double_click = native.chrome.last_titlebar_click.is_some_and(|previous| {
+                    now.saturating_since(previous) < TITLEBAR_DOUBLE_CLICK_INTERVAL
+                });
+                if is_double_click {
+                    native.window.set_maximized(!native.window.is_maximized());
+                } else {
+                    let _ = native.window.drag_window();
+                }
+                native.chrome.last_titlebar_click = Some(now);
+                true
+            }
+            3 => {
+                native.window.set_maximized(!native.window.is_maximized());
+                true
+            }
+            4 => {
+                native.window.set_minimized(true);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    pub(super) fn drag_window(&self) {
+        if let Some(native) = self.lifecycle.native() {
+            let _ = native.window.drag_window();
+        }
+    }
+
+    pub fn native_size(&self) -> (u32, u32) {
+        self.lifecycle.native_size()
+    }
+
+    pub fn scale_factor(&self) -> f64 {
+        self.lifecycle.scale_factor()
+    }
+
+    pub(super) fn chrome(&self) -> &WindowChrome {
+        self.lifecycle.chrome()
+    }
+
+    pub(super) fn chrome_mut(&mut self) -> &mut WindowChrome {
+        self.lifecycle.chrome_mut()
+    }
+
+    pub fn ime_enabled(&self) -> bool {
+        self.lifecycle.ime_enabled()
+    }
+
+    pub fn set_ime_enabled(&mut self, enabled: bool) {
+        self.lifecycle.set_ime_enabled(enabled);
+    }
+
+    pub fn request_redraw(&self) {
+        self.lifecycle.request_redraw();
+    }
+
+    pub(super) fn has_presentable_dirty_content(&self) -> bool {
+        self.lifecycle.is_active() && self.render.has_presentable_dirty_content()
+    }
+
+    pub(super) fn has_presentable_cursor_change(&self) -> bool {
+        self.lifecycle.is_active() && self.render.has_presentable_cursor_change()
+    }
+
+    pub fn window(&self) -> Option<&Arc<dyn Window>> {
+        self.lifecycle.window()
+    }
+}
+
+/// Key for frame-window lookup in the manager's `windows` HashMap.
+///
+/// Matches GNU Emacs convention: 0 is never a valid frame ID
+/// (`frame_next_id = 1` in GNU Emacs `frame.c:343`).  The primary
+/// frame starts under [`FrameKey::Pending`] and is re-keyed to
+/// [`FrameKey::Adopted`] once `adopt_primary_frame_id` is called.
+#[derive(Debug, Clone, Copy, Hash, Eq, PartialEq)]
+pub(crate) enum FrameKey {
+    /// Primary frame before Emacs assigns a real frame ID (bootstrap).
+    Pending,
+    /// Frame with a real Emacs-assigned frame ID.
+    Adopted(u64),
+}
+
+impl FrameKey {
+    pub(super) fn from_primary(emacs_id: Option<u64>) -> Self {
+        match emacs_id {
+            Some(id) => Self::Adopted(id),
+            None => Self::Pending,
+        }
+    }
+}
+
+/// Manages top-level GUI frame windows in the render thread.
+pub(crate) struct GuiFrameWindowManager {
+    /// All top-level frame windows, keyed by [`FrameKey`].
+    pub windows: HashMap<FrameKey, GuiFrameWindowState>,
+    /// Winit WindowId → Emacs frame_id (reverse mapping for event dispatch)
+    pub winit_to_emacs: HashMap<WindowId, u64>,
+    /// Emacs frame_id adopted by the primary process window.
+    pub primary_emacs_frame_id: Option<u64>,
+    /// winit id of the primary process window.
+    pub primary_winit_id: Option<WindowId>,
+    /// Pending window creation requests (processed in resumed/about_to_wait)
+    pub pending_creates: Vec<PendingWindow>,
+    /// Pending window destruction requests
+    pub pending_destroys: Vec<u64>,
+    ready_replies: HashMap<u64, crossbeam_channel::Sender<Result<(), String>>>,
+    /// Native chrome defaults applied to future secondary frame windows.
+    pub(super) chrome_defaults: WindowChrome,
+    /// Whether future secondary frame windows should start with FPS enabled.
+    pub(super) fps_enabled: bool,
+    /// The NS modifier policy's Option rewrite shape, applied to every live
+    /// window and to windows opened later (issue #442).
+    pub(super) option_as_alt: romacs_display_protocol::OptionAsAltShape,
+}
+
+fn apply_native_fullscreen_mode(window: &dyn Window, mode: WindowFullscreenMode) {
+    match mode {
+        WindowFullscreenMode::Fullscreen | WindowFullscreenMode::Fullboth => {
+            window.set_fullscreen(Some(Fullscreen::Borderless(None)));
+        }
+        WindowFullscreenMode::Maximized => {
+            window.set_fullscreen(None);
+            window.set_maximized(true);
+        }
+        WindowFullscreenMode::None => {
+            window.set_fullscreen(None);
+            window.set_maximized(false);
+        }
+        WindowFullscreenMode::Fullwidth | WindowFullscreenMode::Fullheight => {
+            tracing::warn!(
+                "partial fullscreen modes are not implemented by the native window backend"
+            );
+        }
+    }
+}
+
+/// A request to create a new OS window.
+pub(crate) struct PendingWindow {
+    pub emacs_frame_id: u64,
+    pub width: u32,
+    pub height: u32,
+    pub title: String,
+    pub geometry_hints: GuiFrameGeometryHints,
+    pub fullscreen: Option<WindowFullscreenMode>,
+}
+
+impl GuiFrameWindowManager {
+    pub fn new() -> Self {
+        Self {
+            windows: HashMap::new(),
+            winit_to_emacs: HashMap::new(),
+            primary_emacs_frame_id: None,
+            primary_winit_id: None,
+            pending_creates: Vec::new(),
+            pending_destroys: Vec::new(),
+            ready_replies: HashMap::new(),
+            chrome_defaults: WindowChrome::default(),
+            fps_enabled: false,
+            option_as_alt: romacs_display_protocol::OptionAsAltShape::Both,
+        }
+    }
+
+    pub(super) fn cursor_target_for_frame(
+        emacs_frame_id: u64,
+        frame: &FrameGlyphBuffer,
+    ) -> Option<CursorTarget> {
+        frame.active_cursor().map(|cursor| {
+            // Slide toward the exact rect the static cursor is drawn at -- the
+            // shared cursor_draw_rect -- not the grid-approximate cursor
+            // geometry. Under scaled fonts the two diverge and the animated box
+            // would strand itself as a second cursor.
+            let (x, y, width, height) = frame.cursor_draw_rect(
+                cursor.slot_id,
+                cursor.style,
+                cursor.ascent,
+                (cursor.x, cursor.y, cursor.width, cursor.height),
+            );
+            CursorTarget {
+                window_id: cursor.window_id.get(),
+                x,
+                y,
+                width,
+                height,
+                style: cursor.style,
+                frame_id: emacs_frame_id,
+            }
+        })
+    }
+
+    pub fn adopt_primary_frame_id(&mut self, emacs_frame_id: u64) {
+        let old_key = FrameKey::from_primary(self.primary_emacs_frame_id);
+        self.primary_emacs_frame_id = Some(emacs_frame_id);
+        if let Some(window_state) = self.windows.remove(&old_key) {
+            self.windows
+                .insert(FrameKey::Adopted(emacs_frame_id), window_state);
+        }
+        if let Some(ws) = self.windows.get_mut(&FrameKey::Adopted(emacs_frame_id)) {
+            ws.render.set_emacs_frame_id(emacs_frame_id);
+        }
+        self.sync_primary_mapping();
+    }
+
+    #[allow(dead_code)] // used by the frame-window manager tests
+    pub fn primary_frame_id(&self) -> Option<u64> {
+        self.primary_emacs_frame_id
+    }
+
+    pub fn primary_event_frame_id(&self) -> u64 {
+        self.primary_emacs_frame_id.unwrap_or(0)
+    }
+
+    pub fn is_primary_frame_id(&self, emacs_frame_id: u64) -> bool {
+        emacs_frame_id == 0 || self.primary_emacs_frame_id == Some(emacs_frame_id)
+    }
+
+    fn primary_frame_key(&self) -> FrameKey {
+        FrameKey::from_primary(self.primary_emacs_frame_id)
+    }
+
+    pub(super) fn primary_window(&self) -> Option<&GuiFrameWindowState> {
+        self.windows.get(&self.primary_frame_key())
+    }
+
+    pub(super) fn primary_window_mut(&mut self) -> Option<&mut GuiFrameWindowState> {
+        self.windows.get_mut(&self.primary_frame_key())
+    }
+
+    pub(super) fn set_primary_pending(&mut self, window_state: GuiFrameWindowState) {
+        self.windows.insert(FrameKey::Pending, window_state);
+        self.sync_primary_mapping();
+    }
+
+    pub(super) fn populate_primary_native(&mut self, mut native: GuiFrameNativeWindowState) {
+        native.refresh_content_geometry();
+        let key = self.primary_frame_key();
+        if let Some(window_state) = self.windows.get_mut(&key) {
+            window_state.replay_pending_native_state(native.window.as_ref());
+            if let FrameLifecycle::Pending {
+                fullscreen: Some(mode),
+                ..
+            } = &window_state.lifecycle
+            {
+                native.chrome.is_fullscreen = matches!(
+                    mode,
+                    WindowFullscreenMode::Fullscreen | WindowFullscreenMode::Fullboth
+                );
+            }
+            let winit_id = native.window.id();
+            let surface_state = native.surface_state();
+            self.primary_winit_id = Some(winit_id);
+            window_state.lifecycle = FrameLifecycle::Active {
+                native,
+                mouse_hidden_for_typing: window_state.lifecycle.mouse_hidden_for_typing(),
+                ime_enabled: window_state.lifecycle.ime_enabled(),
+                last_ime_cursor_area: window_state.lifecycle.last_ime_cursor_area(),
+            };
+            window_state.render.set_surface_state(surface_state);
+            self.sync_primary_mapping();
+        }
+    }
+
+    pub(super) fn take_primary_window(&mut self) -> Option<GuiFrameWindowState> {
+        let key = self.primary_frame_key();
+        if let Some(winit_id) = self.primary_winit_id.take() {
+            self.winit_to_emacs.remove(&winit_id);
+        }
+        self.windows.remove(&key)
+    }
+
+    pub fn is_primary_winit(&self, winit_id: WindowId) -> bool {
+        self.primary_winit_id == Some(winit_id)
+    }
+
+    pub fn clear_primary_mapping(&mut self) {
+        if let Some(winit_id) = self.primary_winit_id.take() {
+            self.winit_to_emacs.remove(&winit_id);
+        }
+        self.primary_emacs_frame_id = None;
+    }
+
+    fn sync_primary_mapping(&mut self) {
+        if let (Some(winit_id), Some(emacs_frame_id)) =
+            (self.primary_winit_id, self.primary_emacs_frame_id)
+        {
+            self.winit_to_emacs.insert(winit_id, emacs_frame_id);
+        }
+    }
+
+    /// Schedule a new window to be created on the next event loop iteration.
+    pub fn request_create(
+        &mut self,
+        emacs_frame_id: u64,
+        width: u32,
+        height: u32,
+        title: String,
+        geometry_hints: GuiFrameGeometryHints,
+    ) {
+        self.pending_creates.push(PendingWindow {
+            emacs_frame_id,
+            width,
+            height,
+            title,
+            geometry_hints,
+            fullscreen: None,
+        });
+    }
+
+    /// Schedule a window for destruction.
+    pub fn request_destroy(&mut self, emacs_frame_id: u64) {
+        self.pending_destroys.push(emacs_frame_id);
+    }
+
+    pub fn destroy_pending(&self, emacs_frame_id: u64) -> bool {
+        self.pending_destroys.contains(&emacs_frame_id)
+    }
+
+    pub fn await_ready(
+        &mut self,
+        frame: u64,
+        reply: crossbeam_channel::Sender<Result<(), String>>,
+    ) {
+        if self
+            .get(frame)
+            .is_some_and(|window| matches!(window.lifecycle, FrameLifecycle::Active { .. }))
+        {
+            if reply.send(Ok(())).is_err() {
+                self.request_destroy(frame);
+            }
+        } else if self.get(frame).is_some()
+            || self
+                .pending_creates
+                .iter()
+                .any(|request| request.emacs_frame_id == frame)
+        {
+            self.ready_replies.insert(frame, reply);
+        } else {
+            let _ = reply.send(Err(format!(
+                "Native window for frame {frame} was not realized"
+            )));
+        }
+    }
+
+    /// Process pending window creations. Must be called from the event loop
+    /// (requires ActiveEventLoop for window creation).
+    pub fn process_creates(
+        &mut self,
+        event_loop: &dyn ActiveEventLoop,
+        comms: &crate::thread_comm::RenderComms,
+        window_icon: &mut crate::window_icon::WindowIconService,
+        instance: &wgpu::Instance,
+        device: &wgpu::Device,
+        adapter: &wgpu::Adapter,
+    ) {
+        let pending = std::mem::take(&mut self.pending_creates);
+        for req in pending {
+            if self.destroy_pending(req.emacs_frame_id) {
+                continue;
+            }
+            if self
+                .windows
+                .contains_key(&FrameKey::Adopted(req.emacs_frame_id))
+            {
+                tracing::warn!("Window for frame {} already exists", req.emacs_frame_id);
+                continue;
+            }
+
+            let attrs = winit::window::WindowAttributes::default()
+                .with_title(&req.title)
+                .with_surface_size(window_size_from_emacs_pixels(req.width, req.height))
+                .with_transparent(true)
+                .with_decorations(self.chrome_defaults.decorations_enabled);
+            let attrs = crate::window_chrome::WindowChromeController::prepare(
+                attrs,
+                self.chrome_defaults.decorations_enabled,
+            );
+            let attrs = crate::window_identity::apply_platform_window_identity(attrs, event_loop);
+
+            match comms.create_window(event_loop, attrs, req.emacs_frame_id) {
+                Ok(window) => {
+                    let window: Arc<dyn winit::window::Window> = Arc::from(window);
+                    window_icon.apply(window.as_ref());
+                    let raw_scale_factor = window.scale_factor();
+                    let scale_factor = effective_window_scale_factor(raw_scale_factor);
+                    let phys =
+                        crate::window_chrome::WindowChromeController::request_initial_content_size(
+                            window.as_ref(),
+                            self.chrome_defaults.decorations_enabled,
+                            window_size_from_emacs_pixels(req.width, req.height)
+                                .to_physical(raw_scale_factor),
+                        );
+
+                    // Create surface for this window using the primary display-bound instance.
+                    let surface = match instance.create_surface(window.clone()) {
+                        Ok(s) => s,
+                        Err(e) => {
+                            tracing::error!(
+                                "Failed to create surface for frame {}: {:?}",
+                                req.emacs_frame_id,
+                                e
+                            );
+                            continue;
+                        }
+                    };
+
+                    // Configure surface
+                    let caps = surface.get_capabilities(adapter);
+                    let format = caps
+                        .formats
+                        .iter()
+                        .copied()
+                        .find(|f| f.is_srgb())
+                        .unwrap_or(caps.formats[0]);
+                    let alpha_mode = if caps
+                        .alpha_modes
+                        .contains(&wgpu::CompositeAlphaMode::PreMultiplied)
+                    {
+                        wgpu::CompositeAlphaMode::PreMultiplied
+                    } else {
+                        caps.alpha_modes[0]
+                    };
+                    let config = wgpu::SurfaceConfiguration {
+                        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                        format,
+                        color_space: wgpu::SurfaceColorSpace::Auto,
+                        width: phys.width,
+                        height: phys.height,
+                        present_mode: crate::presentation::pacing::present_mode(
+                            &caps.present_modes,
+                        ),
+                        alpha_mode,
+                        view_formats: vec![],
+                        desired_maximum_frame_latency:
+                            crate::presentation::pacing::MAXIMUM_FRAME_LATENCY,
+                    };
+                    #[cfg(target_os = "linux")]
+                    // SAFETY: this surface and device share the renderer instance; configure follows immediately.
+                    unsafe {
+                        romacs_renderer_wgpu::native_presentation::prepare_surface(
+                            device, &surface,
+                        );
+                    }
+                    surface.configure(device, &config);
+                    romacs_renderer_wgpu::diagnostics::surface_fingerprint(
+                        adapter, &surface, &config,
+                    );
+
+                    NativeTextInputPolicy::for_gui_frame().apply_to_window(window.as_ref());
+                    apply_option_key_policy(window.as_ref(), self.option_as_alt);
+                    apply_window_geometry_hints(window.as_ref(), req.geometry_hints);
+
+                    let winit_id = window.id();
+                    tracing::info!(
+                        "Created window for frame {} (winit {:?}, {}x{}, raw_scale={}, effective_scale={})",
+                        req.emacs_frame_id,
+                        winit_id,
+                        phys.width,
+                        phys.height,
+                        raw_scale_factor,
+                        scale_factor
+                    );
+
+                    self.winit_to_emacs.insert(winit_id, req.emacs_frame_id);
+                    let chrome = WindowChrome {
+                        title: req.title.clone(),
+                        titlebar_hover: 0,
+                        resize_edge: None,
+                        last_titlebar_click: None,
+                        ..self.chrome_defaults.clone()
+                    };
+                    let mut render = GuiFrameRenderState::new(
+                        req.emacs_frame_id,
+                        device,
+                        scale_factor,
+                        self.fps_enabled,
+                        romacs_display_protocol::frame_time::observe_platform_now(),
+                    );
+                    render.set_surface_state(
+                        SurfaceState::from_device_size(
+                            phys.width,
+                            phys.height,
+                            DeviceScale::new(scale_factor as f32)
+                                .expect("effective window scale is finite and positive"),
+                        )
+                        .expect("native surface dimensions have finite logical extents"),
+                    );
+                    self.windows.insert(
+                        FrameKey::Adopted(req.emacs_frame_id),
+                        GuiFrameWindowState {
+                            pending_scale_factor: None,
+                            lifecycle: FrameLifecycle::Active {
+                                native: GuiFrameNativeWindowState {
+                                    window_chrome: Default::default(),
+                                    content_insets: Default::default(),
+                                    window,
+                                    surface: Some(surface),
+                                    surface_generation: next_surface_generation(),
+                                    surface_backend: adapter.get_info().backend,
+                                    surface_config: config,
+                                    width: phys.width,
+                                    height: phys.height,
+                                    scale_factor,
+                                    chrome: chrome.clone(),
+                                    applied_geometry_hints: Some(req.geometry_hints),
+                                },
+                                mouse_hidden_for_typing: false,
+                                ime_enabled: false,
+                                last_ime_cursor_area: None,
+                            },
+                            render,
+                        },
+                    );
+                    if let Some(mode) = req.fullscreen
+                        && let Some(state) =
+                            self.windows.get_mut(&FrameKey::Adopted(req.emacs_frame_id))
+                    {
+                        state.set_fullscreen_mode(mode);
+                    }
+                    if let Some(state) =
+                        self.windows.get_mut(&FrameKey::Adopted(req.emacs_frame_id))
+                        && let FrameLifecycle::Active { native, .. } = &mut state.lifecycle
+                    {
+                        native.refresh_content_geometry();
+                        state.render.set_surface_state(native.surface_state());
+                        if native.content_insets != Default::default() {
+                            let (width, height) = native.content_size();
+                            let (width, height) = super::state::emacs_pixels_from_window_size(
+                                width,
+                                height,
+                                native.scale_factor,
+                            );
+                            comms.send_input(crate::thread_comm::InputEvent::WindowResize {
+                                width,
+                                height,
+                                scale_factor: native.scale_factor,
+                                emacs_frame_id: req.emacs_frame_id,
+                            });
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::error!(
+                        "Failed to create window for frame {}: {:?}",
+                        req.emacs_frame_id,
+                        e
+                    );
+                }
+            }
+        }
+        self.settle_ready_replies();
+    }
+
+    pub(super) fn reject_ready(&mut self, frame: u64, error: &str) {
+        if let Some(reply) = self.ready_replies.remove(&frame) {
+            let _ = reply.try_send(Err(error.to_owned()));
+        }
+    }
+
+    pub(super) fn prepare_primary(
+        &mut self,
+        frame: u64,
+        width: u32,
+        height: u32,
+        title: String,
+        geometry_hints: Option<GuiFrameGeometryHints>,
+    ) {
+        self.set_primary_pending(GuiFrameWindowState {
+            pending_scale_factor: None,
+            lifecycle: FrameLifecycle::Pending {
+                width,
+                height,
+                scale_factor: 1.0,
+                mouse_hidden_for_typing: false,
+                ime_enabled: false,
+                last_ime_cursor_area: None,
+                chrome: WindowChrome {
+                    title,
+                    ..WindowChrome::default()
+                },
+                geometry_hints,
+                fullscreen: None,
+            },
+            render: GuiFrameRenderState::new_without_device(
+                frame,
+                false,
+                romacs_display_protocol::frame_time::observe_platform_now(),
+            ),
+        });
+        self.adopt_primary_frame_id(frame);
+    }
+
+    fn settle_ready_replies(&mut self) {
+        for (frame, reply) in std::mem::take(&mut self.ready_replies) {
+            let ready = self
+                .get(frame)
+                .is_some_and(|window| matches!(window.lifecycle, FrameLifecycle::Active { .. }));
+            let result = if ready {
+                Ok(())
+            } else {
+                Err(format!(
+                    "Native window/surface creation failed for frame {frame}"
+                ))
+            };
+            if reply.send(result).is_err() && ready {
+                self.request_destroy(frame);
+            }
+        }
+    }
+
+    /// Process pending window destructions, reporting the frames that went
+    /// away so their GPU accounting can be retired with them.
+    pub fn process_destroys(&mut self) -> Vec<u64> {
+        let pending = std::mem::take(&mut self.pending_destroys);
+        let mut destroyed = Vec::new();
+        for frame_id in pending {
+            if let Some(state) = self.windows.remove(&FrameKey::Adopted(frame_id)) {
+                if let Some(native) = state.lifecycle.native() {
+                    self.winit_to_emacs.remove(&native.window.id());
+                }
+                destroyed.push(frame_id);
+                tracing::info!("Destroyed window for frame {}", frame_id);
+            }
+        }
+        destroyed
+    }
+
+    /// Drop all windows and their wgpu surfaces (for clean shutdown).
+    pub fn destroy_all(&mut self) {
+        self.pending_creates.clear();
+        self.pending_destroys.clear();
+        self.ready_replies.clear();
+        self.winit_to_emacs.clear();
+        self.primary_winit_id = None;
+        self.primary_emacs_frame_id = None;
+        self.windows.clear();
+    }
+
+    /// Look up the Emacs frame_id for a winit WindowId.
+    pub fn emacs_frame_for_winit(&self, winit_id: WindowId) -> Option<u64> {
+        self.winit_to_emacs.get(&winit_id).copied()
+    }
+
+    pub fn event_frame_for_winit(&self, winit_id: WindowId) -> Option<u64> {
+        if self.is_primary_winit(winit_id) {
+            Some(self.primary_event_frame_id())
+        } else {
+            self.emacs_frame_for_winit(winit_id)
+        }
+    }
+
+    /// Get a window state by Emacs frame_id.
+    pub fn get(&self, emacs_frame_id: u64) -> Option<&GuiFrameWindowState> {
+        if self.is_primary_frame_id(emacs_frame_id) {
+            self.primary_window()
+        } else {
+            self.windows.get(&FrameKey::Adopted(emacs_frame_id))
+        }
+    }
+
+    /// Get a mutable window state by Emacs frame_id.
+    pub fn get_mut(&mut self, emacs_frame_id: u64) -> Option<&mut GuiFrameWindowState> {
+        if self.is_primary_frame_id(emacs_frame_id) {
+            self.primary_window_mut()
+        } else {
+            self.windows.get_mut(&FrameKey::Adopted(emacs_frame_id))
+        }
+    }
+
+    /// Resolve the native top-level window that owns a presented frame.
+    /// `frame_id` may name the top-level frame itself or any installed child
+    /// in its immutable ancestry scene.
+    pub(super) fn get_mut_by_presented_frame(
+        &mut self,
+        frame_id: u64,
+    ) -> Option<&mut GuiFrameWindowState> {
+        let owner = if self.is_primary_frame_id(frame_id) {
+            Some(self.primary_frame_key())
+        } else if self.windows.contains_key(&FrameKey::Adopted(frame_id)) {
+            Some(FrameKey::Adopted(frame_id))
+        } else {
+            self.windows.iter().find_map(|(key, window)| {
+                window
+                    .render
+                    .compositor
+                    .child_frames
+                    .frames
+                    .contains_key(&frame_id)
+                    .then_some(*key)
+            })
+        }?;
+        self.windows.get_mut(&owner)
+    }
+
+    pub(super) fn has_presented_frame(&self, frame_id: u64) -> bool {
+        self.windows.values().any(|window| {
+            window
+                .render
+                .compositor
+                .current_frame
+                .as_ref()
+                .is_some_and(|frame| frame.frame_placement.frame().get() == frame_id)
+                || window
+                    .render
+                    .compositor
+                    .child_frames
+                    .frames
+                    .contains_key(&frame_id)
+        })
+    }
+
+    /// Get a window state by winit WindowId.
+    pub fn get_by_winit(&self, winit_id: WindowId) -> Option<&GuiFrameWindowState> {
+        if self.primary_winit_id == Some(winit_id) {
+            return self.primary_window();
+        }
+        self.winit_to_emacs
+            .get(&winit_id)
+            .and_then(|id| self.windows.get(&FrameKey::Adopted(*id)))
+    }
+
+    /// Get a mutable window state by winit WindowId.
+    pub fn get_by_winit_mut(&mut self, winit_id: WindowId) -> Option<&mut GuiFrameWindowState> {
+        if self.primary_winit_id == Some(winit_id) {
+            return self.primary_window_mut();
+        }
+        self.winit_to_emacs
+            .get(&winit_id)
+            .copied()
+            .and_then(move |id| self.windows.get_mut(&FrameKey::Adopted(id)))
+    }
+
+    pub(super) fn for_each_top_level_window(&self, mut f: impl FnMut(&GuiFrameWindowState)) {
+        for window_state in self.windows.values() {
+            f(window_state);
+        }
+    }
+
+    /// Complete image residency fence owned by accepted root and child
+    /// presentations across every native window.
+    pub(super) fn retained_images(&self) -> RetainedImageSet {
+        let mut retained = RetainedImageSet::default();
+        self.for_each_top_level_window(|window_state| {
+            window_state.render.extend_retained_images(&mut retained);
+        });
+        retained
+    }
+
+    pub(super) fn for_each_top_level_window_mut(
+        &mut self,
+        mut f: impl FnMut(&mut GuiFrameWindowState),
+    ) {
+        for window_state in self.windows.values_mut() {
+            f(window_state);
+        }
+    }
+
+    pub(super) fn mark_top_level_dirty(&mut self) {
+        self.for_each_top_level_window_mut(|window_state| {
+            window_state.render.compositor.dirty = true;
+        });
+    }
+
+    pub(super) fn mark_active_top_level_visuals_dirty(&mut self) -> bool {
+        let mut dirty = false;
+        self.for_each_top_level_window_mut(|window_state| {
+            dirty |= window_state.render.mark_active_visuals_dirty();
+        });
+        dirty
+    }
+
+    pub(super) fn tick_top_level_cursor_blinks(
+        &mut self,
+        now: romacs_display_protocol::frame_time::EventTime,
+        cursor_wake_enabled: bool,
+        renderer: Option<&WgpuRenderer>,
+    ) -> bool {
+        let primary_winit_id = self.primary_winit_id;
+        let mut dirty = false;
+        self.for_each_top_level_window_mut(|window_state| {
+            let is_primary = window_state
+                .lifecycle
+                .native()
+                .is_some_and(|n| primary_winit_id == Some(n.window.id()));
+            dirty |= window_state.render.tick_cursor_blink(
+                now,
+                cursor_wake_enabled && is_primary,
+                renderer,
+            );
+        });
+        dirty
+    }
+
+    pub(super) fn tick_top_level_cursor_animations(
+        &mut self,
+        at: romacs_display_protocol::frame_time::EventTime,
+    ) -> bool {
+        let mut dirty = false;
+        self.for_each_top_level_window_mut(|window_state| {
+            dirty |= window_state.render.tick_cursor_animation(at);
+        });
+        dirty
+    }
+
+    pub(super) fn tick_top_level_cursor_size_animations(
+        &mut self,
+        at: romacs_display_protocol::frame_time::EventTime,
+    ) -> bool {
+        let mut dirty = false;
+        self.for_each_top_level_window_mut(|window_state| {
+            dirty |= window_state.render.tick_cursor_size_animation(at);
+        });
+        dirty
+    }
+
+    pub(super) fn tick_top_level_idle_dim(
+        &mut self,
+        config: &IdleDimConfig,
+        now: romacs_display_protocol::frame_time::EventTime,
+    ) -> bool {
+        let mut dirty = false;
+        self.for_each_top_level_window_mut(|window_state| {
+            dirty |= window_state.render.tick_idle_dim(config, now);
+        });
+        dirty
+    }
+
+    pub(super) fn clear_top_level_idle_dim(&mut self) {
+        self.for_each_top_level_window_mut(|window_state| {
+            window_state.render.clear_idle_dim();
+        });
+    }
+
+    pub(super) fn set_top_level_titlebar_height(&mut self, height: f32) {
+        self.chrome_defaults.titlebar_height = height;
+        self.for_each_top_level_window_mut(|window_state| {
+            window_state.chrome_mut().titlebar_height = height;
+            window_state.render.compositor.dirty = true;
+        });
+    }
+
+    pub(super) fn set_top_level_corner_radius(&mut self, radius: f32) {
+        self.chrome_defaults.corner_radius = radius;
+        self.for_each_top_level_window_mut(|window_state| {
+            window_state.chrome_mut().corner_radius = radius;
+            window_state.render.compositor.dirty = true;
+        });
+    }
+
+    /// Apply the NS modifier policy's Option rewrite shape to every live
+    /// window and remember it for windows opened later.
+    pub(super) fn apply_option_key_policy(
+        &mut self,
+        shape: romacs_display_protocol::OptionAsAltShape,
+    ) {
+        self.option_as_alt = shape;
+        self.for_each_top_level_window(|window_state| {
+            if let Some(window) = window_state.lifecycle.window() {
+                apply_option_key_policy(window.as_ref(), shape);
+            }
+        });
+    }
+
+    pub(super) fn set_top_level_fps_enabled(&mut self, enabled: bool) {
+        self.fps_enabled = enabled;
+        self.for_each_top_level_window_mut(|window_state| {
+            window_state.render.overlays.fps.enabled = enabled;
+            window_state.render.compositor.dirty = true;
+        });
+    }
+
+    pub(super) fn set_top_level_decorations(&mut self, decorated: bool) {
+        self.chrome_defaults.decorations_enabled = decorated;
+        self.for_each_top_level_window_mut(|window_state| {
+            window_state.set_decorations(decorated);
+        });
+    }
+
+    pub(super) fn remove_child_frame_from_top_level_windows(&mut self, frame_id: u64) -> bool {
+        let mut changed = false;
+        self.for_each_top_level_window_mut(|window_state| {
+            changed |= window_state.remove_child_frame(frame_id);
+        });
+        changed
+    }
+
+    pub(super) fn show_child_frame_in_top_level_windows(&mut self, frame_id: u64) -> bool {
+        let mut changed = false;
+        self.for_each_top_level_window_mut(|window_state| {
+            changed |= window_state.show_child_frame(frame_id);
+        });
+        changed
+    }
+
+    pub(super) fn sync_top_level_cursor_config(&mut self, defaults: &CursorState, dirty: bool) {
+        self.for_each_top_level_window_mut(|window_state| {
+            window_state.render.sync_cursor_config(defaults, dirty);
+        });
+    }
+
+    /// Tick child frame counters. The primary removal path is
+    /// `remove_child_frame` triggered by
+    /// `set-frame-parameter 'visibility nil` → `set_frame_visibility`
+    /// → `notify_gui_child_frame_hidden` → `RemoveChildFrame`.
+    ///
+    /// `prune_stale` is intentionally NOT called here: it would
+    /// incorrectly remove visible-but-idle child frames (e.g. a
+    /// static posframe tooltip) that haven't received a
+    /// `FrameDisplayState` update in a while. The root-cause fix
+    /// ensures explicit removal on every visibility change.
+    pub(super) fn tick_top_level_child_frames(&mut self) {
+        self.for_each_top_level_window_mut(|window_state| {
+            window_state.render.compositor.child_frames.tick();
+        });
+    }
+
+    pub(super) fn force_top_level_cursor_blink_on(&mut self) -> bool {
+        let mut dirty = false;
+        self.for_each_top_level_window_mut(|window_state| {
+            dirty |= window_state.render.force_cursor_blink_on();
+        });
+        dirty
+    }
+
+    pub(super) fn apply_top_level_transition_policy(
+        &mut self,
+        policy: romacs_display_protocol::TransitionPolicy,
+    ) {
+        self.for_each_top_level_window_mut(|window_state| {
+            window_state
+                .render
+                .compositor
+                .transitions
+                .apply_policy(policy);
+        });
+    }
+
+    /// Publish how panes should travel under the current quality policy.
+    ///
+    /// Only affects morphs measured after this point: one already in flight
+    /// finishes on the spec it started with, because retargeting a motion
+    /// mid-flight is a separate question (step 11) and stopping it dead would
+    /// leave panes wherever the policy change happened to catch them.
+    pub(super) fn apply_top_level_pane_motion(
+        &mut self,
+        specs: crate::render_thread::render_quality::WindowAnimationSpecs,
+    ) {
+        self.for_each_top_level_window_mut(|window_state| {
+            window_state.render.compositor.pane_motion = specs;
+        });
+    }
+
+    /// Publish how child frames should live and die under the current policy.
+    ///
+    /// Like the pane-motion publication above, this only affects lifecycle
+    /// events measured after this point: a fade already in flight finishes on
+    /// the spec it started with.
+    pub(super) fn apply_top_level_child_frame_motion(
+        &mut self,
+        specs: crate::render_thread::render_quality::ChildFrameMotionSpecs,
+    ) {
+        self.for_each_top_level_window_mut(|window_state| {
+            window_state.render.compositor.child_frame_motion = specs;
+        });
+    }
+
+    /// Discard renderer-owned animation timelines for every top-level window.
+    ///
+    /// A quality-policy downgrade must remove the state that advertises frame
+    /// demand, not merely disable the emitters that would eventually drain it.
+    pub(super) fn discard_top_level_renderer_effects(&mut self) {
+        self.for_each_top_level_window_mut(|window_state| {
+            window_state.render.compositor.renderer_effects =
+                romacs_renderer_wgpu::RendererFrameEffects::default();
+        });
+    }
+
+    /// Drop every GPU-resident object owned by per-window render state after
+    /// the wgpu device was lost. CPU state — `current_frame`, row damage,
+    /// child frames, overlays, cursors, floating-WebView rects — is kept: the
+    /// next redraw re-renders the same scene on the rebuilt device.
+    pub(super) fn clear_gpu_resident_state(&mut self) {
+        self.for_each_top_level_window_mut(|window_state| {
+            let render = &mut window_state.render;
+            // Resize crossfades lease snapshot-pool textures; theirs died
+            // with the device and the crossfades themselves have no meaning
+            // on a rebuilt device. CPU child-frame state is kept.
+            render.compositor.child_frames.drop_all_crossfades();
+            // Glyph atlas textures (recreated against the new device by
+            // populate_glyph_atlas / recreate_secondary_native_surfaces).
+            render.compositor.glyph_atlas = None;
+            // Retained cursorless scene: texture + view + bind group.
+            render.compositor.retained_static = None;
+            render.compositor.retained_scroll = None;
+            // Composition ring plus every running transition's leased
+            // source picture.
+            clear_frame_transition_textures(&mut render.compositor.transitions);
+            render.compositor.layout.discard_outgoing_picture();
+            // Full-frame post shader composition target.
+            render.frame_post_src = None;
+            render.native_content_src = None;
+            render.compositor.dirty = true;
+        });
+    }
+
+    /// Destroy all old native associations before creating any replacements.
+    /// Windows, input state and CPU frames remain owned by the same lifecycle.
+    pub(super) fn retire_native_surfaces(&mut self) {
+        self.for_each_top_level_window_mut(|window_state| {
+            if let FrameLifecycle::Active { native, .. } = &mut window_state.lifecycle {
+                drop(native.surface.take());
+                native.surface_generation = next_surface_generation();
+                window_state
+                    .render
+                    .set_surface_state(SurfaceState::Suspended);
+            }
+        });
+    }
+
+    /// Recreate the wgpu surface of every non-primary Active window on a new
+    /// instance/device after device-loss recovery (the primary window is
+    /// rebuilt by `init_wgpu` via `populate_primary_native`). Surfaces are
+    /// instance-owned, so old ones can never be configured against the new
+    /// device. Also repopulates the glyph atlases cleared by
+    /// `clear_gpu_resident_state`.
+    pub(super) fn recreate_secondary_native_surfaces(
+        &mut self,
+        instance: &wgpu::Instance,
+        device: &wgpu::Device,
+        adapter: &wgpu::Adapter,
+    ) -> bool {
+        let mut complete = true;
+        let primary_key = self.primary_frame_key();
+        for (key, window_state) in self.windows.iter_mut() {
+            if *key == primary_key {
+                continue;
+            }
+            let FrameLifecycle::Active { native, .. } = &mut window_state.lifecycle else {
+                continue;
+            };
+            #[cfg(all(feature = "gui-test-hooks", target_os = "linux"))]
+            if super::native_image_probe::fail_secondary_once() {
+                complete = false;
+                continue;
+            }
+            let surface = match instance.create_surface(native.window.clone()) {
+                Ok(surface) => surface,
+                Err(error) => {
+                    tracing::error!(
+                        ?key,
+                        ?error,
+                        "device-loss recovery: failed to recreate window surface"
+                    );
+                    complete = false;
+                    continue;
+                }
+            };
+            let caps = surface.get_capabilities(adapter);
+            let format = caps
+                .formats
+                .iter()
+                .copied()
+                .find(|f| f.is_srgb())
+                .unwrap_or(caps.formats[0]);
+            let alpha_mode = if caps
+                .alpha_modes
+                .contains(&wgpu::CompositeAlphaMode::PreMultiplied)
+            {
+                wgpu::CompositeAlphaMode::PreMultiplied
+            } else {
+                caps.alpha_modes[0]
+            };
+            let config = wgpu::SurfaceConfiguration {
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                format,
+                color_space: wgpu::SurfaceColorSpace::Auto,
+                width: native.width,
+                height: native.height,
+                present_mode: crate::presentation::pacing::present_mode(&caps.present_modes),
+                alpha_mode,
+                view_formats: vec![],
+                desired_maximum_frame_latency: crate::presentation::pacing::MAXIMUM_FRAME_LATENCY,
+            };
+            #[cfg(target_os = "linux")]
+            // SAFETY: this surface and device share the renderer instance; configure follows immediately.
+            unsafe {
+                romacs_renderer_wgpu::native_presentation::prepare_surface(device, &surface);
+            }
+            surface.configure(device, &config);
+            romacs_renderer_wgpu::diagnostics::surface_fingerprint(adapter, &surface, &config);
+            native.surface_generation = next_surface_generation();
+            // All old associations were retired before primary re-initialization.
+            native.surface = Some(surface);
+            native.surface_config = config;
+            let scale_factor = native.scale_factor;
+            window_state
+                .render
+                .populate_glyph_atlas(device, scale_factor);
+            window_state.render.compositor.dirty = true;
+        }
+        complete
+    }
+
+    pub(super) fn apply_top_level_visual_cursor_animations(&mut self) {
+        self.for_each_top_level_window_mut(|window_state| {
+            window_state.render.apply_visual_cursor_animations();
+        });
+    }
+
+    pub fn count(&self) -> usize {
+        self.windows.len()
+    }
+}
+
+#[cfg(test)]
+#[path = "frame_windows/tests/frame_windows_test.rs"]
+mod tests;

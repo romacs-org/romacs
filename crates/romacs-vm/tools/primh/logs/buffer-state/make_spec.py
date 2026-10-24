@@ -1,0 +1,13 @@
+#!/usr/bin/env python3
+"""Inputs only; answers must come from live GNU record."""
+import json
+from pathlib import Path
+root = Path(__file__).resolve().parents[2]
+probes = {
+'overlayp': ['(overlayp nil)', '(overlayp (make-marker))', '(overlayp (current-buffer))', '(with-temp-buffer (overlayp (make-overlay 1 1)))', '(with-temp-buffer (let ((o (make-overlay 1 1))) (delete-overlay o) (overlayp o)))'],
+'buffer-live-p': ['(buffer-live-p (current-buffer))', '(buffer-live-p (get-buffer-create "primh-live"))', '(buffer-live-p "*scratch*")', '(buffer-live-p (with-temp-buffer (current-buffer)))', '(let ((b nil)) (condition-case nil (with-temp-buffer (setq b (current-buffer)) (error "test")) (error nil)) (buffer-live-p b))', '(let ((b nil)) (catch \'done (with-temp-buffer (setq b (current-buffer)) (throw \'done t))) (buffer-live-p b))', '(with-temp-buffer (buffer-live-p (current-buffer)))'],
+'buffer-name': ['(buffer-name)', '(buffer-name nil)', '(buffer-name (current-buffer))', '(buffer-name (get-buffer-create "primh-name"))', '(buffer-name (get-buffer-create (generate-new-buffer-name "primh-name")))', '(with-temp-buffer (buffer-name))', '(with-temp-buffer (with-temp-buffer (buffer-name)))', '(buffer-name (with-temp-buffer (current-buffer)))', '(let ((b nil)) (condition-case nil (with-temp-buffer (setq b (current-buffer)) (error "test")) (error nil)) (buffer-name b))', '(let ((b (get-buffer-create "primh-name"))) (eq (buffer-name b) (buffer-name b)))', '(let ((b (with-temp-buffer (current-buffer)))) (set-buffer b) (buffer-name))'],
+'buffer-modified-p': ['(buffer-modified-p)', '(buffer-modified-p nil)', '(buffer-modified-p (get-buffer-create "primh-mod"))', '(with-temp-buffer (buffer-modified-p))', '(with-temp-buffer (insert "abc") (buffer-modified-p))', '(with-temp-buffer (erase-buffer) (buffer-modified-p))', '(with-temp-buffer (insert "abc") (erase-buffer) (buffer-modified-p))', '(with-temp-buffer (insert "abc") (delete-region 1 2) (buffer-modified-p))', '(with-temp-buffer (insert "abc") (put-text-property 1 2 \'face \'bold) (buffer-modified-p))', '(buffer-modified-p (with-temp-buffer (current-buffer)))', '(buffer-modified-p (with-temp-buffer (insert "x") (current-buffer)))', '(let ((b (with-temp-buffer (current-buffer)))) (set-buffer b) (insert "x") (buffer-modified-p))', '(with-temp-buffer (insert "x") (setq buffer-auto-save-file-name (make-temp-file "primh-autosave")) (unwind-protect (progn (do-auto-save t t) (buffer-modified-p)) (delete-file buffer-auto-save-file-name)))']
+}
+for name, ps in probes.items():
+ p=root/'buffer-specs'/f'{name}.json'; spec=json.loads(p.read_text()); spec['probes']=ps; p.write_text(json.dumps(spec)+'\n')

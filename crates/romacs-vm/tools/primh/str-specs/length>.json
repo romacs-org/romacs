@@ -1,0 +1,18 @@
+{
+ "name": "length>",
+ "arity": [
+  2,
+  2
+ ],
+ "effect": "pure",
+ "gnu_files": [
+  "fns.c"
+ ],
+ "gnu_def": "fns.c:211",
+ "rust": "src/prims/str.rs:230",
+ "args": [],
+ "probes": [
+  "(length> (quote (1 . tail)) -1)",
+  "(length> (quote (1 2)) 4294967297)"
+ ]
+}

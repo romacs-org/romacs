@@ -1,0 +1,627 @@
+;;; jabber-httpupload.el --- HTTP File Upload (XEP-0363)  -*- lexical-binding: t; -*-
+
+;; Copyright (C) 2026  Thanos Apollo
+
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
+
+;; This file is a part of jabber.el.
+
+;; This program is free software; you can redistribute it and/or modify
+;; it under the terms of the GNU General Public License as published by
+;; the Free Software Foundation; either version 2 of the License, or
+;; (at your option) any later version.
+
+;; This program is distributed in the hope that it will be useful,
+;; but WITHOUT ANY WARRANTY; without even the implied warranty of
+;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+;; GNU General Public License for more details.
+
+;; You should have received a copy of the GNU General Public License
+;; along with this program; if not, write to the Free Software
+;; Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+
+;;; Commentary:
+
+;; This file implements XEP-0363: HTTP File Upload, providing a way to
+;; send files through XMPP by uploading them to the server's HTTP
+;; storage.  The procedure is:
+;;
+;; 1. Discover HTTP Upload support via Disco (urn:xmpp:http:upload:0).
+;; 2. Request a slot (PUT + GET URLs) from the upload service.
+;; 3. Upload the file to the PUT URL via curl.
+;; 4. Send the GET URL to the recipient (with OOB metadata), or copy
+;;    it to the kill ring.
+;;
+;; Commands:
+;;   `jabber-httpupload-send-file'   - Upload and send to a contact/MUC.
+;;   `jabber-httpupload-upload-file' - Upload and copy URL to kill ring.
+
+;;; Code:
+
+(require 'cl-lib)
+(require 'fsm)
+(require 'mailcap)
+(require 'subr-x)
+(require 'jabber-chat)
+(require 'jabber-conn)
+(require 'jabber-core)
+(require 'jabber-disco)
+(require 'jabber-iq)
+(require 'jabber-muc-state)
+(require 'jabber-util)
+(require 'jabber-xml)
+
+(defconst jabber-httpupload-xmlns "urn:xmpp:http:upload:0"
+  "XML namespace for XEP-0363 HTTP File Upload.")
+
+(defgroup jabber-httpupload nil "Jabber HTTP Upload Settings."
+  :group 'jabber)
+
+(defcustom jabber-httpupload-upload-function #'jabber-httpupload-put-file-curl
+  "Function to upload a file to the HTTP server.
+Must accept (FILEPATH HEADERS PUT-URL CALLBACK CALLBACK-ARG
+&optional IGNORE-CERT-PROBLEMS) and call (funcall CALLBACK
+CALLBACK-ARG) on success.  Return non-nil if the upload started."
+  :type 'function)
+
+(defvar jabber-httpupload-pre-upload-transform nil
+  "When non-nil, a function to transform a file before upload.
+Called with (FILEPATH CALLBACK) inside `jabber-httpupload--upload'
+after HTTP Upload support is confirmed.  The function and
+`jabber-chat-encryption' selection are captured before discovery;
+the function runs with that selection even if the chat is closed or changed.
+Must return
+\(TRANSFORMED-FILEPATH . WRAPPED-CALLBACK) to replace both, or nil
+to upload the original file unchanged.  Signal an error to abort the
+upload when a selected transform fails; nil is not a failure result.
+
+OMEMO sets this to encrypt the file and wrap the callback to build
+an aesgcm:// URL from the server's HTTPS get-url.")
+
+(defvar jabber-httpupload-send-url-function nil
+  "When non-nil, a function to override URL delivery.
+Called with (JC JID GET-URL) at the start of
+`jabber-httpupload--send-url'.  If it returns non-nil, the default
+plaintext+OOB send is skipped.
+
+OMEMO sets this to send aesgcm:// URLs as encrypted messages.")
+
+;; Discovering support
+
+(defvar jabber-httpupload-support nil
+  "Alist of Jabber connections and the node with HTTP Upload support.
+Each element is (jabber-connection . upload-iri).")
+
+(defvar jabber-httpupload-max-file-size nil
+  "Alist of Jabber connections and advertised HTTP Upload size limits.
+Each element is (jabber-connection . max-file-size), where
+max-file-size is in bytes.")
+
+(defvar jabber-httpupload--discoveries nil
+  "Active upload discovery operations, each a list containing its connection.
+A nil connection marks a retired operation, including for cached callbacks.")
+
+(defun jabber-httpupload--finish-discovery (operation)
+  "Retire OPERATION and its pending disco IQs before running other work."
+  (setcar operation nil)
+  (setq jabber-httpupload--discoveries
+        (delq operation jabber-httpupload--discoveries)
+        jabber-open-info-queries
+        (cl-delete-if
+         (lambda (query)
+           ;; Disco stores (CALLBACK . CLOSURE-DATA) in each IQ continuation.
+           (eq (car-safe (cdr-safe (cdr-safe (nth 1 query)))) operation))
+         jabber-open-info-queries)))
+
+(defun jabber-httpupload--session-reset (jc)
+  "Retire upload discovery and cached service metadata belonging to JC."
+  (dolist (operation (copy-sequence jabber-httpupload--discoveries))
+    (when (eq (car operation) jc)
+      (jabber-httpupload--finish-discovery operation)))
+  (setq jabber-httpupload-support
+        (assq-delete-all jc jabber-httpupload-support)
+        jabber-httpupload-max-file-size
+        (assq-delete-all jc jabber-httpupload-max-file-size)))
+
+(defun jabber-httpupload--start-discovery (jc)
+  "Return a new upload discovery operation owned by JC."
+  (let ((operation (list jc)))
+    (push operation jabber-httpupload--discoveries)
+    operation))
+
+(defun jabber-httpupload--query (operation iri items-p callback)
+  "Query IRI for OPERATION and pass its parsed result to CALLBACK.
+ITEMS-P selects disco items rather than info.  Consume the owned IQ before
+calling CALLBACK, and retire all sibling queries on a nonlocal exit.
+Always request fresh data: the shared disco cache is not session-qualified."
+  (let ((request (list operation))
+        (completed nil))
+    (unwind-protect
+        (progn
+          (funcall
+           (if items-p #'jabber-disco-get-items #'jabber-disco-get-info)
+           (car operation) iri nil
+           (lambda (jc _data result)
+             (when (and (car request) (eq jc (car operation)))
+               (setq jabber-open-info-queries
+                     (cl-delete-if
+                      (lambda (query) (eq (cdr-safe (cdr-safe (nth 1 query))) request))
+                      jabber-open-info-queries))
+               (setcar request nil)
+               (let ((returned nil))
+                 (unwind-protect
+                     (progn (funcall callback jc result) (setq returned t))
+                   (unless returned
+                     (jabber-httpupload--finish-discovery operation))))))
+           request t)
+          (setq completed t))
+      (unless completed
+        (jabber-httpupload--finish-discovery operation)))))
+
+(defun jabber-httpupload-test-connection-support (jc)
+  "Test if HTTP Upload is supported on the JC connection's server.
+If supported, store the item IRI in `jabber-httpupload-support'."
+  (jabber-httpupload-apply-to-items jc
+				    (lambda (jc result)
+				      (jabber-httpupload-test-item-support jc (elt result 1)))))
+
+(defun jabber-httpupload-test-item-support (jc iri)
+  "Test if the IRI Disco item supports HTTP Upload.
+Get the Disco Info from IRI on JC; if the HTTP Upload namespace
+is present, store the IRI in `jabber-httpupload-support'."
+  (let ((operation (jabber-httpupload--start-discovery jc)))
+    (jabber-httpupload--query
+     operation iri nil
+     (lambda (jc result)
+       (jabber-httpupload--finish-discovery operation)
+       (when (and (not (jabber-httpupload--disco-error-p result))
+                  (member jabber-httpupload-xmlns (nth 1 result)))
+         (jabber-httpupload--record-support jc iri result))))))
+
+(defun jabber-httpupload-apply-to-items (jc callback)
+  "Retrieve Disco items from JC's server and call CALLBACK on each.
+CALLBACK receives two arguments: the Jabber connection and the item vector."
+  (let ((operation (jabber-httpupload--start-discovery jc))
+        (node (plist-get (fsm-get-state-data jc) :server)))
+    (jabber-httpupload--query
+     operation node t
+     (lambda (jc result)
+       (unwind-protect
+           (unless (jabber-httpupload--disco-error-p result)
+             (dolist (item result)
+               (when (car operation)
+                 (funcall callback jc item))))
+         (jabber-httpupload--finish-discovery operation))))))
+
+(defun jabber-httpupload-server-has-support (jc)
+  "Return (JC . upload-iri) if the server supports HTTP Upload, nil otherwise."
+  (assq jc jabber-httpupload-support))
+
+(defun jabber-httpupload--xdata-field-value (form var)
+  "Return the first value for xdata FORM field VAR."
+  (when-let* ((field (cl-find-if
+                      (lambda (field)
+                        (string= (jabber-xml-get-attribute field 'var) var))
+                      (jabber-xml-get-children form 'field)))
+              (value (car (jabber-xml-get-children field 'value)))
+              (text (car (jabber-xml-node-children value)))
+              ((stringp text)))
+    text))
+
+(defun jabber-httpupload--parse-max-file-size (value)
+  "Return positive integer VALUE, or nil when VALUE is invalid."
+  (when (and (stringp value)
+             (string-match-p "\\`[0-9]+\\'" value))
+    (let ((size (string-to-number value)))
+      (and (> size 0) size))))
+
+(defun jabber-httpupload--max-file-size (result)
+  "Return HTTP Upload max-file-size from disco info RESULT, or nil."
+  (cl-some (lambda (form)
+             (when (string= (jabber-httpupload--xdata-field-value
+                             form "FORM_TYPE")
+                            jabber-httpupload-xmlns)
+               (jabber-httpupload--parse-max-file-size
+                (jabber-httpupload--xdata-field-value
+                 form "max-file-size"))))
+           (nth 2 result)))
+
+(defun jabber-httpupload--record-support (jc iri result)
+  "Record HTTP Upload support for JC through IRI using disco RESULT."
+  (unless (assq jc jabber-httpupload-support)
+    (push (cons jc iri) jabber-httpupload-support))
+  (when (equal iri (cdr (assq jc jabber-httpupload-support)))
+    (if-let* ((max-file-size (jabber-httpupload--max-file-size result)))
+        (setf (alist-get jc jabber-httpupload-max-file-size) max-file-size)
+      (setq jabber-httpupload-max-file-size
+            (assq-delete-all jc jabber-httpupload-max-file-size)))))
+
+(defun jabber-httpupload--validate-file-size (jc filepath size)
+  "Signal a user error if FILEPATH is larger than JC's advertised SIZE limit."
+  (when-let* ((max-file-size (cdr (assq jc jabber-httpupload-max-file-size))))
+    (when (> size max-file-size)
+      (user-error "File %s is too large for HTTP Upload (maximum %s bytes)"
+                  (file-name-nondirectory filepath)
+                  max-file-size))))
+
+(defun jabber-httpupload--error-child (error child-name)
+  "Return ERROR's XEP-0363 child named CHILD-NAME."
+  (cl-find-if (lambda (child)
+                (and (eq (jabber-xml-node-name child) child-name)
+                     (string= (jabber-xml-get-attribute child 'xmlns)
+                              jabber-httpupload-xmlns)))
+              (jabber-xml-node-children error)))
+
+(defun jabber-httpupload--child-text (node child-name)
+  "Return NODE's first CHILD-NAME text."
+  (when-let* ((child (car (jabber-xml-get-children node child-name)))
+              (text (car (jabber-xml-node-children child)))
+              ((stringp text)))
+    text))
+
+(defun jabber-httpupload--slot-error-message (filename xml-data)
+  "Return a user-facing slot error message for FILENAME and XML-DATA."
+  (let* ((error (jabber-iq-error xml-data))
+         (file-too-large (and error
+                              (jabber-httpupload--error-child
+                               error 'file-too-large)))
+         (retry (and error
+                     (jabber-httpupload--error-child error 'retry))))
+    (cond
+     (file-too-large
+      (if-let* ((max-file-size
+                 (jabber-httpupload--parse-max-file-size
+                  (jabber-httpupload--child-text
+                   file-too-large 'max-file-size))))
+          (format "File %s is too large for HTTP Upload (maximum %s bytes)"
+                  filename max-file-size)
+        (format "File %s is too large for HTTP Upload" filename)))
+     (retry
+      (if-let* ((stamp (jabber-xml-get-attribute retry 'stamp)))
+          (format "HTTP Upload temporarily unavailable for %s; retry after %s"
+                  filename stamp)
+        (format "HTTP Upload temporarily unavailable for %s" filename)))
+     (error
+      (format "HTTP Upload slot rejected for %s: %s"
+              filename (jabber-parse-error error)))
+     (t
+      (format "HTTP Upload slot rejected for %s" filename)))))
+
+;; Slot parsing
+
+(defun jabber-httpupload--sanitize-header (value)
+  "Strip newline characters from header VALUE per XEP-0363 Section 11."
+  (when value
+    (replace-regexp-in-string "[\r\n]" "" value)))
+
+(defun jabber-httpupload--child (node child-name &optional inherited-namespace)
+  "Return NODE's XEP-0363 child named CHILD-NAME.
+When INHERITED-NAMESPACE is non-nil, children without an explicit
+xmlns inherit it from NODE."
+  (cl-find-if (lambda (child)
+                (and (eq (jabber-xml-node-name child) child-name)
+                     (let ((xmlns (jabber-xml-get-attribute child 'xmlns)))
+                       (string= (or xmlns inherited-namespace)
+                                jabber-httpupload-xmlns))))
+              (jabber-xml-get-children node child-name)))
+
+(defun jabber-httpupload-parse-slot-answer (xml-data)
+  "Parse PUT/GET URLs from a slot response XML-DATA.
+Return ((put-url . ((header-name . header-value) ...)) get-url).
+Header names are matched case-insensitively and newlines are
+stripped from both names and values per XEP-0363 Section 11."
+  (let* ((slot (jabber-httpupload--child xml-data 'slot))
+         (put (and slot (jabber-httpupload--child
+                         slot 'put jabber-httpupload-xmlns)))
+         (get (and slot (jabber-httpupload--child
+                         slot 'get jabber-httpupload-xmlns)))
+         (put-url (jabber-xml-get-attribute put 'url))
+         (get-url (jabber-xml-get-attribute get 'url)))
+    (unless (and put-url get-url)
+      (error "HTTP Upload: server returned incomplete slot (put=%s get=%s)"
+             put-url get-url))
+    (unless (and (string-prefix-p "https://" (downcase put-url))
+                 (string-prefix-p "https://" (downcase get-url)))
+      (error "HTTP Upload: server returned non-HTTPS URL (put=%s get=%s)"
+             put-url get-url))
+    (list (cons
+           put-url
+           (cl-loop for header in (jabber-xml-get-children put 'header)
+                    for raw-name = (jabber-xml-get-attribute header 'name)
+                    for name = (jabber-httpupload--sanitize-header raw-name)
+                    when (member (downcase name)
+                                 '("authorization" "cookie" "expires"))
+                    for value = (jabber-httpupload--sanitize-header
+                                 (car (jabber-xml-node-children header)))
+                    when value
+                    collect (cons name value)))
+          get-url)))
+
+;; Curl upload
+
+(defun jabber-httpupload-ignore-certificate (jc)
+  "Return non-nil if JC's server is in `jabber-invalid-certificate-servers'."
+  (member (plist-get (fsm-get-state-data jc) :server)
+          jabber-invalid-certificate-servers))
+
+(defun jabber-httpupload--curl-header-args (headers &optional redact)
+  "Return curl -H arguments for HEADERS.
+When REDACT is non-nil, omit header values from the returned arguments."
+  (cl-loop for (name . value) in headers
+           append (list "-H" (format "%s: %s" name
+                                     (if redact "<redacted>" value)))))
+
+(defun jabber-httpupload--curl-command (curl-path filepath headers put-url
+                                                  ignore-cert-problems
+                                                  &optional redact)
+  "Return a CURL-PATH command for FILEPATH, HEADERS, and PUT-URL.
+IGNORE-CERT-PROBLEMS adds curl's insecure certificate option.
+REDACT omits header values from the command."
+  `(,curl-path
+    ,@(and ignore-cert-problems '("--insecure"))
+    "--fail" "--upload-file" ,filepath
+    ,@(jabber-httpupload--curl-header-args headers redact)
+    ,put-url))
+
+(defun jabber-httpupload--curl-buffer-tail (process)
+  "Return a short sanitized tail from PROCESS buffer, or nil."
+  (when-let* ((buffer (process-buffer process))
+              ((buffer-live-p buffer)))
+    (with-current-buffer buffer
+      (let* ((end (point-max))
+             (start (max (point-min) (- end 500)))
+             (tail (string-trim
+                    (buffer-substring-no-properties start end))))
+        (unless (string-empty-p tail)
+          (let ((case-fold-search t))
+            (replace-regexp-in-string
+             "\\(Authorization\\|Cookie\\)[[:space:]]*:[[:space:]]*.*"
+             "\\1: <redacted>" tail)))))))
+
+(defun jabber-httpupload--curl-status-message (process-status exit-status)
+  "Return a curl failure status message for PROCESS-STATUS and EXIT-STATUS."
+  (pcase process-status
+    ('exit (format "exit status %s" exit-status))
+    ('signal (format "signal status %s" exit-status))
+    (_ (format "%s status %s" process-status exit-status))))
+
+(defun jabber-httpupload--curl-failure-message (filename process-status
+                                                         exit-status event tail)
+  "Return a curl failure message.
+FILENAME, PROCESS-STATUS, EXIT-STATUS, EVENT, and TAIL describe the failure."
+  (string-join
+   (delq nil
+         (list (format "HTTP Upload failed for %s: %s"
+                       filename
+                       (jabber-httpupload--curl-status-message
+                        process-status exit-status))
+               (format "event: %s" (string-trim event))
+               (and tail (format "curl output: %s" tail))))
+   "; "))
+
+(defun jabber-httpupload--curl-log-sentinel (process event)
+  "Append curl PROCESS sentinel EVENT to its buffer."
+  (when (buffer-live-p (process-buffer process))
+    (with-current-buffer (process-buffer process)
+      (let ((inhibit-read-only t))
+        (goto-char (point-max))
+        (insert (format "Sentinel: %S\n" event))))))
+
+(defun jabber-httpupload--curl-sentinel (process event callback callback-arg)
+  "Handle curl upload PROCESS EVENT.
+Call CALLBACK with CALLBACK-ARG only when curl exits with status zero."
+  (let ((tail (jabber-httpupload--curl-buffer-tail process)))
+    (jabber-httpupload--curl-log-sentinel process event)
+    (when (memq (process-status process) '(exit signal))
+      (let ((process-status (process-status process))
+            (exit-status (process-exit-status process)))
+        (if (and (eq process-status 'exit) (zerop exit-status))
+            (funcall callback callback-arg)
+          (message "%s"
+                   (jabber-httpupload--curl-failure-message
+                    (or (process-get process :jabber-httpupload-filename)
+                        "unknown file")
+                    process-status exit-status event tail)))))))
+
+(defun jabber-httpupload-put-file-curl (filepath headers put-url
+                                                 callback callback-arg
+                                                 &optional ignore-cert-problems)
+  "Upload FILEPATH to PUT-URL via curl with HEADERS.
+When done, call (funcall CALLBACK CALLBACK-ARG).
+IGNORE-CERT-PROBLEMS allows connecting to servers with invalid
+certificates.  Return the process on success, nil if curl is not found."
+  (when-let* ((curl-path (executable-find "curl")))
+    (let* ((buffer (get-buffer-create "*jabber-httpupload-curl*"))
+           (command (jabber-httpupload--curl-command
+                     curl-path filepath headers put-url ignore-cert-problems))
+           (logged-command (jabber-httpupload--curl-command
+                            curl-path filepath headers put-url
+                            ignore-cert-problems t)))
+      (with-current-buffer buffer
+        (let ((inhibit-read-only t))
+          (goto-char (point-max))
+          (insert (format "%s Uploading with curl:\n%S\n"
+                          (current-time-string) logged-command))))
+      (let ((process
+             (make-process :name "jabber-httpupload-curl"
+                           :buffer buffer
+                           :command command
+                           :sentinel (lambda (process event)
+                                       (jabber-httpupload--curl-sentinel
+                                        process event callback callback-arg)))))
+        (process-put process :jabber-httpupload-filename
+                     (file-name-nondirectory filepath))
+        process))))
+
+;; Core upload pipeline
+
+(defun jabber-httpupload--disco-error-p (result)
+  "Return non-nil when RESULT is a disco error node."
+  (eq (car-safe result) 'error))
+
+(defun jabber-httpupload--unsupported-error ()
+  "Report that the current server has no HTTP Upload service."
+  (user-error "HTTP Upload is not supported by this server"))
+
+(defun jabber-httpupload--discover-from-items (operation upload items)
+  "Inspect ITEMS for OPERATION and call UPLOAD once support is found.
+Retire the discovery before invoking the fallible upload continuation."
+  (if (or (null items)
+          (jabber-httpupload--disco-error-p items))
+      (progn
+        (jabber-httpupload--finish-discovery operation)
+        (jabber-httpupload--unsupported-error))
+    (let ((remaining (length items)))
+      (dolist (item items)
+        (when (car operation)
+          (let ((iri (elt item 1)))
+            (jabber-httpupload--query
+             operation iri nil
+             (lambda (jc result)
+               (if (and (not (jabber-httpupload--disco-error-p result))
+                        (member jabber-httpupload-xmlns (nth 1 result)))
+                   (progn
+                     (jabber-httpupload--finish-discovery operation)
+                     (jabber-httpupload--record-support jc iri result)
+                     (funcall upload))
+                 (setq remaining (1- remaining))
+                 (when (zerop remaining)
+                   (jabber-httpupload--finish-discovery operation)
+                   (jabber-httpupload--unsupported-error)))))))))))
+
+(defun jabber-httpupload--discover-and-upload (jc upload)
+  "Discover HTTP Upload support for JC, then call UPLOAD without arguments.
+Error if the server does not support HTTP Upload."
+  (message "Discovering HTTP Upload support...")
+  (let ((operation (jabber-httpupload--start-discovery jc))
+        (node (plist-get (fsm-get-state-data jc) :server)))
+    (jabber-httpupload--query
+     operation node t
+     (lambda (_jc result)
+       (jabber-httpupload--discover-from-items operation upload result)))))
+
+(defun jabber-httpupload--upload (jc filepath callback)
+  "Upload FILEPATH via HTTP Upload on JC.
+On success, call (funcall CALLBACK get-url).
+Capture the transform and encryption selection before asynchronous discovery."
+  (let* ((filepath (expand-file-name filepath))
+         (transform jabber-httpupload-pre-upload-transform)
+         (encryption jabber-chat-encryption)
+         (upload (lambda ()
+                   (jabber-httpupload--upload-file
+                    jc filepath callback transform encryption))))
+    (if (jabber-httpupload-server-has-support jc)
+        (funcall upload)
+      (jabber-httpupload--discover-and-upload jc upload))))
+
+(defun jabber-httpupload--upload-file (jc filepath callback transform encryption)
+  "Upload FILEPATH on JC after discovery, passing the URL to CALLBACK.
+Apply the captured TRANSFORM with the request's ENCRYPTION selection."
+  (let* ((transform (and transform
+                        (let ((jabber-chat-encryption encryption))
+                          (funcall transform filepath callback))))
+         (filepath (expand-file-name (if transform (car transform) filepath)))
+         (callback (if transform (cdr transform) callback))
+         (size (file-attribute-size (file-attributes filepath)))
+         (content-type
+          (or (and-let* ((ext (file-name-extension filepath)))
+                (mailcap-extension-to-mime ext))
+              "application/octet-stream"))
+         (filename (file-name-nondirectory filepath)))
+    (jabber-httpupload--validate-file-size jc filepath size)
+    (jabber-send-iq jc (cdr (jabber-httpupload-server-has-support jc)) "get"
+                    `(request ((xmlns . ,jabber-httpupload-xmlns)
+                               (filename . ,filename)
+                               (size . ,size)
+                               (content-type . ,content-type)))
+                    (lambda (_jc xml-data _data)
+                      (let* ((urls (jabber-httpupload-parse-slot-answer xml-data))
+                             (get-url (cadr urls))
+                             (put-url (caar urls))
+                             (headers (cdar urls)))
+                        (push (cons "content-length" size) headers)
+                        (push (cons "content-type" content-type) headers)
+                        (unless (funcall jabber-httpupload-upload-function
+                                         filepath headers put-url
+                                         callback get-url
+                                         (jabber-httpupload-ignore-certificate jc))
+                          (error "Upload function failed to PUT %s" filename))))
+                    nil
+                    (lambda (_jc xml-data _data)
+                      (user-error "%s"
+                                  (jabber-httpupload--slot-error-message
+                                   filename xml-data)))
+                    nil)))
+
+;; Pending OOB for deferred sends (C-c C-a in chat buffers)
+
+(defvar-local jabber-httpupload--pending-url nil
+  "URL from a pending upload, awaiting send.")
+
+(defun jabber-httpupload--send-hook (body _id)
+  "Attach OOB element when BODY carries a pending upload URL.
+Return the OOB element list for `jabber-chat-send-hooks', and
+clear the pending state.  If the URL is no longer in BODY (user
+deleted it), clear the pending state with no effect."
+  (when-let* ((url jabber-httpupload--pending-url))
+    (setq jabber-httpupload--pending-url nil)
+    (when (string-match-p (regexp-quote url) body)
+      (list `(x ((xmlns . ,jabber-oob-xmlns))
+                (url () ,url))))))
+
+(add-hook 'jabber-chat-send-hooks #'jabber-httpupload--send-hook)
+
+;; Sending the URL
+
+(defun jabber-httpupload--send-url (jc jid get-url)
+  "Send GET-URL to JID over connection JC with OOB metadata.
+For groupchat, send directly.  For 1:1, use `jabber-chat-send'.
+If `jabber-httpupload-send-url-function' is set and handles the URL,
+skip the default plaintext send."
+  (unless (and jabber-httpupload-send-url-function
+               (funcall jabber-httpupload-send-url-function jc jid get-url))
+    (if (jabber-muc-joined-p jid)
+	(jabber-send-sexp jc
+			  `(message ((to . ,jid) (type . "groupchat"))
+				    (body () ,get-url)
+				    (x ((xmlns . ,jabber-oob-xmlns))
+				       (url () ,get-url))))
+      (with-current-buffer (jabber-chat-create-buffer jc jid)
+	(jabber-chat-send
+	 jc get-url
+	 (list `(x ((xmlns . ,jabber-oob-xmlns))
+                   (url () ,get-url))))))))
+
+;; Interactive commands
+
+;;;###autoload
+(defun jabber-httpupload-send-file (jc jid filepath)
+  "Upload FILEPATH and send the URL to JID via connection JC."
+  (interactive
+   (let ((jc (jabber-read-account)))
+     (list jc
+           (jabber-read-jid-completing "Send file to: " nil nil nil 'full t jc)
+           (read-file-name "File to send: "))))
+  (jabber-httpupload--upload
+   jc filepath
+   (lambda (get-url)
+     (jabber-httpupload--send-url jc jid get-url))))
+
+;;;###autoload
+(defun jabber-httpupload-upload-file (jc filepath)
+  "Upload FILEPATH via connection JC and copy the URL to the kill ring."
+  (interactive (list (jabber-read-account)
+                     (read-file-name "File to upload: ")))
+  (jabber-httpupload--upload
+   jc filepath
+   (lambda (get-url)
+     (kill-new get-url)
+     (message "Uploaded: %s (copied to kill ring)" get-url))))
+
+(add-hook 'jabber-post-connect-hooks #'jabber-httpupload-test-connection-support)
+(add-hook 'jabber-lifecycle-session-reset-functions
+          #'jabber-httpupload--session-reset)
+
+(provide 'jabber-httpupload)
+
+;;; jabber-httpupload.el ends here

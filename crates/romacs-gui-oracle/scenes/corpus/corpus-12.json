@@ -1,0 +1,310 @@
+{
+ "name": "corpus-12",
+ "frame": {
+  "width": 480,
+  "height": 168,
+  "bg": "#ffffff",
+  "fg": "#000000"
+ },
+ "font": {
+  "family": "Liberation Mono",
+  "pixel_size": 20,
+  "regular": "/usr/share/fonts/liberation/LiberationMono-Regular.ttf",
+  "bold": "/usr/share/fonts/liberation/LiberationMono-Bold.ttf",
+  "italic": "/usr/share/fonts/liberation/LiberationMono-Italic.ttf"
+ },
+ "cursor_color": "#00a000",
+ "buffer": [
+  {
+   "text": "θάλασσα",
+   "fg": "#8b0000"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "R2D2",
+   "fg": "#8b0000",
+   "italic": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "lazy",
+   "italic": true,
+   "bg": "#e0e0ff"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "ΣΟΦΙΑ"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "lazy",
+   "fg": "#a020f0"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "q?"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "#if",
+   "underline": true,
+   "bg": "#ffff00"
+  },
+  {
+   "text": "\n"
+  },
+  {
+   "text": "Emacs",
+   "underline": true,
+   "bg": "#e0e0ff"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "{ok}",
+   "fg": "#2e8b57"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "Αθήνα",
+   "fg": "#008000",
+   "italic": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "fox",
+   "fg": "#b8860b"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "@user",
+   "fg": "#b8860b"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "cursor",
+   "fg": "#a020f0"
+  },
+  {
+   "text": "\n"
+  },
+  {
+   "text": "@user",
+   "fg": "#2e8b57",
+   "italic": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "{ok}"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "καλημέρα",
+   "bold": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "@user",
+   "bold": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "Χάος",
+   "italic": true
+  },
+  {
+   "text": "\n"
+  },
+  {
+   "text": "a&b"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "θάλασσα",
+   "bold": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "κόσμε"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "βιβλίο",
+   "fg": "#008000"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "φως"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "ξένος"
+  },
+  {
+   "text": "\n"
+  }
+ ],
+ "point": 89,
+ "expect": {
+  "origin": [
+   0,
+   0
+  ],
+  "rows": [
+   {
+    "text": "θάλασσα R2D2 lazy ΣΟΦΙΑ lazy q? #if",
+    "runs": [
+     {
+      "start": 0,
+      "end": 7,
+      "fg": "#8b0000"
+     },
+     {
+      "start": 8,
+      "end": 12,
+      "fg": "#8b0000",
+      "italic": true
+     },
+     {
+      "start": 13,
+      "end": 17,
+      "italic": true,
+      "bg": "#e0e0ff"
+     },
+     {
+      "start": 24,
+      "end": 28,
+      "fg": "#a020f0"
+     },
+     {
+      "start": 32,
+      "end": 35,
+      "underline": true,
+      "bg": "#ffff00"
+     }
+    ]
+   },
+   {
+    "text": "Emacs {ok} Αθήνα fox @user cursor",
+    "runs": [
+     {
+      "start": 0,
+      "end": 5,
+      "underline": true,
+      "bg": "#e0e0ff"
+     },
+     {
+      "start": 6,
+      "end": 10,
+      "fg": "#2e8b57"
+     },
+     {
+      "start": 11,
+      "end": 16,
+      "fg": "#008000",
+      "italic": true
+     },
+     {
+      "start": 17,
+      "end": 20,
+      "fg": "#b8860b"
+     },
+     {
+      "start": 21,
+      "end": 26,
+      "fg": "#b8860b"
+     },
+     {
+      "start": 27,
+      "end": 33,
+      "fg": "#a020f0"
+     }
+    ]
+   },
+   {
+    "text": "@user {ok} καλημέρα @user Χάος",
+    "runs": [
+     {
+      "start": 0,
+      "end": 5,
+      "fg": "#2e8b57",
+      "italic": true
+     },
+     {
+      "start": 11,
+      "end": 19,
+      "bold": true
+     },
+     {
+      "start": 20,
+      "end": 25,
+      "bold": true
+     },
+     {
+      "start": 26,
+      "end": 30,
+      "italic": true
+     }
+    ]
+   },
+   {
+    "text": "a&b θάλασσα κόσμε βιβλίο φως ξένος",
+    "runs": [
+     {
+      "start": 4,
+      "end": 11,
+      "bold": true
+     },
+     {
+      "start": 18,
+      "end": 24,
+      "fg": "#008000"
+     }
+    ]
+   }
+  ],
+  "cursor": {
+   "row": 2,
+   "col": 18
+  }
+ }
+}

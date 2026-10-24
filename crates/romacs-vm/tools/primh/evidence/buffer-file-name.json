@@ -1,0 +1,127 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "buffer-file-name",
+ "spec_sha256": "c4596c69de877d995fd7394593172476833f821482ac5cab5e2a7bb536e505a5",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "buffer-file-name",
+    "subr",
+    0,
+    1
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "buffer.c": "bb93b33042953fab31294645204d46c48c3a3d7b8516f7b923c7d86b9766b91d"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "buffer-file-name/0000",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'buffer-file-name '(1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr buffer-file-name> 2))"
+  },
+  {
+   "id": "buffer-file-name/0001",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (buffer-file-name)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "buffer-file-name/0002",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (buffer-file-name nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "buffer-file-name/0003",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((b (get-buffer-create \"bf-empty\"))) (buffer-file-name b))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "buffer-file-name/0004",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((b (get-buffer-create \"bf-live\"))) (with-current-buffer b (setq buffer-file-name \"λ/文.txt\")) (buffer-file-name b))) (error (list 'sig e))))",
+   "expected": "(ok \"λ/文.txt\")"
+  },
+  {
+   "id": "buffer-file-name/0005",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((b (get-buffer-create \"bf-killed\"))) (with-current-buffer b (setq buffer-file-name \"λ/文.txt\")) (kill-buffer b) (buffer-file-name b))) (error (list 'sig e))))",
+   "expected": "(ok \"λ/文.txt\")"
+  },
+  {
+   "id": "buffer-file-name/0006",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((b (get-buffer-create \"bf-killed-empty\"))) (kill-buffer b) (buffer-file-name b))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "buffer-file-name/0007",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (insert \"λ文\") (narrow-to-region 2 3) (setq buffer-file-name \"narrow\") (list (buffer-file-name) (progn (widen) (buffer-file-name))))) (error (list 'sig e))))",
+   "expected": "(ok (\"narrow\" \"narrow\"))"
+  },
+  {
+   "id": "buffer-file-name/0008",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (setq buffer-file-name \"outer\") (let ((buffer-file-name \"inner\")) (buffer-file-name)))) (error (list 'sig e))))",
+   "expected": "(ok \"inner\")"
+  },
+  {
+   "id": "buffer-file-name/0009",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (let ((name (copy-sequence \"λ.txt\"))) (setq buffer-file-name name) (eq name (buffer-file-name))))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "buffer-file-name/0010",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a (get-buffer-create \"bf-a\")) (b (get-buffer-create \"bf-b\"))) (with-current-buffer a (setq buffer-file-name \"A\")) (with-current-buffer b (setq buffer-file-name \"B\") (list (buffer-file-name a) (buffer-file-name b) (buffer-file-name))))) (error (list 'sig e))))",
+   "expected": "(ok (\"A\" \"B\" \"B\"))"
+  },
+  {
+   "id": "buffer-file-name/0011",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (buffer-file-name \"absent\")) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument bufferp \"absent\"))"
+  },
+  {
+   "id": "buffer-file-name/0012",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (buffer-file-name 7)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument bufferp 7))"
+  },
+  {
+   "id": "buffer-file-name/0013",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (buffer-file-name t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument bufferp t))"
+  },
+  {
+   "id": "buffer-file-name/0014",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (fboundp 'buffer-file-name) (functionp 'buffer-file-name))) (error (list 'sig e))))",
+   "expected": "(ok (t t))"
+  },
+  {
+   "id": "buffer-file-name/0015",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (setq buffer-file-name \"indirect\") (funcall 'buffer-file-name (current-buffer)))) (error (list 'sig e))))",
+   "expected": "(ok \"indirect\")"
+  }
+ ]
+}

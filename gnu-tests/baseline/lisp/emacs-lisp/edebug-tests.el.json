@@ -1,0 +1,968 @@
+{
+ "blob": "61e909437c73b9bebeeb633c2fe3da627401dea3",
+ "compiled": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": true,
+  "results": {
+   "edebug-cl-defmethod-qualifier": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-test-dot-reader": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests--&rest-behavior": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests--conflicting-internal-names": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-backtrace-goto-source": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-bounce-point": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-break-in-lambda-out-of-defining-context": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-check-keymap": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-circular-read-syntax": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-cl-flet": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-cl-macrolet": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-clear-breakpoint": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-conditional-breakpoints-can-use-lexical-variables": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-dotted-forms": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-duplicate-&define": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-duplicate-symbol-backtrack": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-error-stepping-into-subr": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-error-trying-to-set-breakpoint-in-uninstrumented-code": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-gv-expander": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-hash-read-syntax": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-inline": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-jump-forward-one-sexp": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-jump-to-point": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-list-containing-empty-string-result-printing": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-move-point-back-to-stop-point": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-move-point-to-next-breakpoint": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-observe-breakpoint-in-source": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-respects-initial-mode": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-run-out-of-containing-sexp": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-set-and-break-on-global-condition": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-set-breakpoint-at-point": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-set-conditional-breakpoint": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-set-temporary-breakpoint-at-point": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-step-into-macro-error": {
+    "as_expected": true,
+    "detail": "(ert-test-failed \"Forcing failure because letting this test run aborts the others.\")",
+    "expected": ":failed",
+    "outcome": "failed",
+    "tags": []
+   },
+   "edebug-tests-step-showing-evaluation-results": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-step-through-non-definition": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-stop-point-at-start-of-first-instrumented-function": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-trace-function-call-and-return": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-trace-showing-results-at-breakpoints": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-trace-showing-results-at-stop-points": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-trivial-comma": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-writable-buffer-state-is-preserved": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   }
+  },
+  "timed_out": false
+ },
+ "file": "lisp/emacs-lisp/edebug-tests.el",
+ "gnu": {
+  "emacs": "<recording-path-redacted>/emacs-32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+  "version": "32.0.50"
+ },
+ "harness_sha256": "78c20850429a08af22faadf73b5d164c560230e83d7eb88ef60cb995670703ef",
+ "mini": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": null,
+  "results": {
+   "edebug-cl-defmethod-qualifier": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "edebug-test-dot-reader": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "edebug-tests--&rest-behavior": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "edebug-tests--conflicting-internal-names": {
+    "as_expected": null,
+    "detail": "(error \"edebug-test-code is not a currently loaded feature\")",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "edebug-tests-backtrace-goto-source": {
+    "as_expected": null,
+    "detail": "(error \"edebug-test-code is not a currently loaded feature\")",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "edebug-tests-bounce-point": {
+    "as_expected": null,
+    "detail": "(error \"edebug-test-code is not a currently loaded feature\")",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "edebug-tests-bounce-to-previous-non-position": {
+    "as_expected": null,
+    "detail": "(error \"edebug-test-code is not a currently loaded feature\")",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "edebug-tests-bounce-to-previous-value": {
+    "as_expected": null,
+    "detail": "(error \"edebug-test-code is not a currently loaded feature\")",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "edebug-tests-break-in-lambda-out-of-defining-context": {
+    "as_expected": null,
+    "detail": "(error \"edebug-test-code is not a currently loaded feature\")",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "edebug-tests-check-keymap": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "edebug-tests-circular-read-syntax": {
+    "as_expected": null,
+    "detail": "(error \"edebug-test-code is not a currently loaded feature\")",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "edebug-tests-cl-flet": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "edebug-tests-cl-macrolet": {
+    "as_expected": null,
+    "detail": "(error \"edebug-test-code is not a currently loaded feature\")",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "edebug-tests-clear-breakpoint": {
+    "as_expected": null,
+    "detail": "(error \"edebug-test-code is not a currently loaded feature\")",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "edebug-tests-conditional-breakpoints-can-use-lexical-variables": {
+    "as_expected": null,
+    "detail": "(error \"edebug-test-code is not a currently loaded feature\")",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "edebug-tests-dotted-forms": {
+    "as_expected": null,
+    "detail": "(error \"edebug-test-code is not a currently loaded feature\")",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "edebug-tests-duplicate-&define": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "edebug-tests-duplicate-symbol-backtrack": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "edebug-tests-error-stepping-into-subr": {
+    "as_expected": null,
+    "detail": "(error \"edebug-test-code is not a currently loaded feature\")",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "edebug-tests-error-trying-to-set-breakpoint-in-uninstrumented-code": {
+    "as_expected": null,
+    "detail": "(error \"edebug-test-code is not a currently loaded feature\")",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "edebug-tests-evaluate-expressions": {
+    "as_expected": null,
+    "detail": "(error \"edebug-test-code is not a currently loaded feature\")",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "edebug-tests-evaluation-of-current-buffer-bug-19611": {
+    "as_expected": null,
+    "detail": "(error \"edebug-test-code is not a currently loaded feature\")",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "edebug-tests-gv-expander": {
+    "as_expected": null,
+    "detail": "(error \"edebug-test-code is not a currently loaded feature\")",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "edebug-tests-hash-read-syntax": {
+    "as_expected": null,
+    "detail": "(error \"edebug-test-code is not a currently loaded feature\")",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "edebug-tests-inline": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "edebug-tests-jump-forward-one-sexp": {
+    "as_expected": null,
+    "detail": "(error \"edebug-test-code is not a currently loaded feature\")",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "edebug-tests-jump-to-point": {
+    "as_expected": null,
+    "detail": "(error \"edebug-test-code is not a currently loaded feature\")",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "edebug-tests-list-containing-empty-string-result-printing": {
+    "as_expected": null,
+    "detail": "(error \"edebug-test-code is not a currently loaded feature\")",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "edebug-tests-move-point-back-to-stop-point": {
+    "as_expected": null,
+    "detail": "(error \"edebug-test-code is not a currently loaded feature\")",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "edebug-tests-move-point-to-next-breakpoint": {
+    "as_expected": null,
+    "detail": "(error \"edebug-test-code is not a currently loaded feature\")",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "edebug-tests-observe-breakpoint-in-source": {
+    "as_expected": null,
+    "detail": "(error \"edebug-test-code is not a currently loaded feature\")",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "edebug-tests-respects-initial-mode": {
+    "as_expected": null,
+    "detail": "(error \"edebug-test-code is not a currently loaded feature\")",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "edebug-tests-run-out-of-containing-sexp": {
+    "as_expected": null,
+    "detail": "(error \"edebug-test-code is not a currently loaded feature\")",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "edebug-tests-set-and-break-on-global-condition": {
+    "as_expected": null,
+    "detail": "(error \"edebug-test-code is not a currently loaded feature\")",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "edebug-tests-set-breakpoint-at-point": {
+    "as_expected": null,
+    "detail": "(error \"edebug-test-code is not a currently loaded feature\")",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "edebug-tests-set-conditional-breakpoint": {
+    "as_expected": null,
+    "detail": "(error \"edebug-test-code is not a currently loaded feature\")",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "edebug-tests-set-temporary-breakpoint-at-point": {
+    "as_expected": null,
+    "detail": "(error \"edebug-test-code is not a currently loaded feature\")",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "edebug-tests-step-into-function": {
+    "as_expected": null,
+    "detail": "(error \"edebug-test-code is not a currently loaded feature\")",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "edebug-tests-step-into-generic-method": {
+    "as_expected": null,
+    "detail": "(error \"edebug-test-code is not a currently loaded feature\")",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "edebug-tests-step-into-macro-error": {
+    "as_expected": null,
+    "detail": "(\"Forcing failure because letting this test run aborts the others.\")",
+    "expected": ":failed",
+    "outcome": "failed",
+    "tags": null
+   },
+   "edebug-tests-step-showing-evaluation-results": {
+    "as_expected": null,
+    "detail": "(error \"edebug-test-code is not a currently loaded feature\")",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "edebug-tests-step-through-non-definition": {
+    "as_expected": null,
+    "detail": "(error \"edebug-test-code is not a currently loaded feature\")",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "edebug-tests-stop-point-at-start-of-first-instrumented-function": {
+    "as_expected": null,
+    "detail": "(error \"edebug-test-code is not a currently loaded feature\")",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "edebug-tests-trace-function-call-and-return": {
+    "as_expected": null,
+    "detail": "(error \"edebug-test-code is not a currently loaded feature\")",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "edebug-tests-trace-showing-results-at-breakpoints": {
+    "as_expected": null,
+    "detail": "(error \"edebug-test-code is not a currently loaded feature\")",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "edebug-tests-trace-showing-results-at-stop-points": {
+    "as_expected": null,
+    "detail": "(error \"edebug-test-code is not a currently loaded feature\")",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "edebug-tests-trivial-comma": {
+    "as_expected": null,
+    "detail": "(error \"edebug-test-code is not a currently loaded feature\")",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "edebug-tests-writable-buffer-state-is-preserved": {
+    "as_expected": null,
+    "detail": "(error \"edebug-test-code is not a currently loaded feature\")",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   }
+  },
+  "timed_out": false
+ },
+ "read_error": null,
+ "real": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": true,
+  "results": {
+   "edebug-cl-defmethod-qualifier": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-test-dot-reader": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests--&rest-behavior": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests--conflicting-internal-names": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-backtrace-goto-source": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-bounce-point": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-break-in-lambda-out-of-defining-context": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-check-keymap": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-circular-read-syntax": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-cl-flet": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-cl-macrolet": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-clear-breakpoint": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-conditional-breakpoints-can-use-lexical-variables": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-dotted-forms": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-duplicate-&define": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-duplicate-symbol-backtrack": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-error-stepping-into-subr": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-error-trying-to-set-breakpoint-in-uninstrumented-code": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-gv-expander": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-hash-read-syntax": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-inline": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-jump-forward-one-sexp": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-jump-to-point": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-list-containing-empty-string-result-printing": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-move-point-back-to-stop-point": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-move-point-to-next-breakpoint": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-observe-breakpoint-in-source": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-respects-initial-mode": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-run-out-of-containing-sexp": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-set-and-break-on-global-condition": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-set-breakpoint-at-point": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-set-conditional-breakpoint": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-set-temporary-breakpoint-at-point": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-step-into-macro-error": {
+    "as_expected": true,
+    "detail": "(ert-test-failed \"Forcing failure because letting this test run aborts the others.\")",
+    "expected": ":failed",
+    "outcome": "failed",
+    "tags": []
+   },
+   "edebug-tests-step-showing-evaluation-results": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-step-through-non-definition": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-stop-point-at-start-of-first-instrumented-function": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-trace-function-call-and-return": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-trace-showing-results-at-breakpoints": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-trace-showing-results-at-stop-points": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-trivial-comma": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "edebug-tests-writable-buffer-state-is-preserved": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   }
+  },
+  "timed_out": false
+ },
+ "schema": 1,
+ "toplevel_deftests": 49
+}

@@ -1,0 +1,3266 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "/=",
+ "spec_sha256": "73471e180409a5789a87b356c5b91906842ee61907bc02c537251a60df4a71dd",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "/=",
+    "subr",
+    2,
+    2
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "data.c": "eca7895a8043cd0a960dfe037a46028374d1a40cc6ee4d0cf6de90ac56c242ae"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "/=/0000",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p nil))"
+  },
+  {
+   "id": "/=/0001",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= nil t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p t))",
+   "gnu_regime_variant": "(sig (wrong-type-argument number-or-marker-p nil))"
+  },
+  {
+   "id": "/=/0002",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= nil 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p nil))"
+  },
+  {
+   "id": "/=/0003",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= nil 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p nil))"
+  },
+  {
+   "id": "/=/0004",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= nil 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p nil))"
+  },
+  {
+   "id": "/=/0005",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= nil -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p nil))"
+  },
+  {
+   "id": "/=/0006",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= nil most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p nil))"
+  },
+  {
+   "id": "/=/0007",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= nil 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p nil))"
+  },
+  {
+   "id": "/=/0008",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= nil 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p sym))",
+   "gnu_regime_variant": "(sig (wrong-type-argument number-or-marker-p nil))"
+  },
+  {
+   "id": "/=/0009",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= nil :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p :kw))",
+   "gnu_regime_variant": "(sig (wrong-type-argument number-or-marker-p nil))"
+  },
+  {
+   "id": "/=/0010",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= nil (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"\"))",
+   "gnu_regime_variant": "(sig (wrong-type-argument number-or-marker-p nil))"
+  },
+  {
+   "id": "/=/0011",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= nil (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"abc\"))",
+   "gnu_regime_variant": "(sig (wrong-type-argument number-or-marker-p nil))"
+  },
+  {
+   "id": "/=/0012",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= nil (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"λx\"))",
+   "gnu_regime_variant": "(sig (wrong-type-argument number-or-marker-p nil))"
+  },
+  {
+   "id": "/=/0013",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= nil (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 3)))",
+   "gnu_regime_variant": "(sig (wrong-type-argument number-or-marker-p nil))"
+  },
+  {
+   "id": "/=/0014",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= nil (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (a (b))))",
+   "gnu_regime_variant": "(sig (wrong-type-argument number-or-marker-p nil))"
+  },
+  {
+   "id": "/=/0015",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= nil (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 . 2)))",
+   "gnu_regime_variant": "(sig (wrong-type-argument number-or-marker-p nil))"
+  },
+  {
+   "id": "/=/0016",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= nil (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 . 3)))",
+   "gnu_regime_variant": "(sig (wrong-type-argument number-or-marker-p nil))"
+  },
+  {
+   "id": "/=/0017",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= nil (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p [1 2]))",
+   "gnu_regime_variant": "(sig (wrong-type-argument number-or-marker-p nil))"
+  },
+  {
+   "id": "/=/0018",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= nil (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 1 2 . #2)))",
+   "gnu_regime_variant": "(sig (wrong-type-argument number-or-marker-p nil))"
+  },
+  {
+   "id": "/=/0019",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= t nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p nil))",
+   "gnu_regime_variant": "(sig (wrong-type-argument number-or-marker-p t))"
+  },
+  {
+   "id": "/=/0020",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= t t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p t))"
+  },
+  {
+   "id": "/=/0021",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= t 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p t))"
+  },
+  {
+   "id": "/=/0022",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= t 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p t))"
+  },
+  {
+   "id": "/=/0023",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= t 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p t))"
+  },
+  {
+   "id": "/=/0024",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= t -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p t))"
+  },
+  {
+   "id": "/=/0025",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= t most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p t))"
+  },
+  {
+   "id": "/=/0026",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= t 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p t))"
+  },
+  {
+   "id": "/=/0027",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= t 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p sym))",
+   "gnu_regime_variant": "(sig (wrong-type-argument number-or-marker-p t))"
+  },
+  {
+   "id": "/=/0028",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= t :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p :kw))",
+   "gnu_regime_variant": "(sig (wrong-type-argument number-or-marker-p t))"
+  },
+  {
+   "id": "/=/0029",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= t (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"\"))",
+   "gnu_regime_variant": "(sig (wrong-type-argument number-or-marker-p t))"
+  },
+  {
+   "id": "/=/0030",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= t (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"abc\"))",
+   "gnu_regime_variant": "(sig (wrong-type-argument number-or-marker-p t))"
+  },
+  {
+   "id": "/=/0031",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= t (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"λx\"))",
+   "gnu_regime_variant": "(sig (wrong-type-argument number-or-marker-p t))"
+  },
+  {
+   "id": "/=/0032",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= t (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 3)))",
+   "gnu_regime_variant": "(sig (wrong-type-argument number-or-marker-p t))"
+  },
+  {
+   "id": "/=/0033",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= t (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (a (b))))",
+   "gnu_regime_variant": "(sig (wrong-type-argument number-or-marker-p t))"
+  },
+  {
+   "id": "/=/0034",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= t (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 . 2)))",
+   "gnu_regime_variant": "(sig (wrong-type-argument number-or-marker-p t))"
+  },
+  {
+   "id": "/=/0035",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= t (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 . 3)))",
+   "gnu_regime_variant": "(sig (wrong-type-argument number-or-marker-p t))"
+  },
+  {
+   "id": "/=/0036",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= t (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p [1 2]))",
+   "gnu_regime_variant": "(sig (wrong-type-argument number-or-marker-p t))"
+  },
+  {
+   "id": "/=/0037",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= t (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 1 2 . #2)))",
+   "gnu_regime_variant": "(sig (wrong-type-argument number-or-marker-p t))"
+  },
+  {
+   "id": "/=/0038",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 0 nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p nil))"
+  },
+  {
+   "id": "/=/0039",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 0 t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p t))"
+  },
+  {
+   "id": "/=/0040",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 0 0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "/=/0041",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 0 1)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "/=/0042",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 0 2)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "/=/0043",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 0 -1)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "/=/0044",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 0 most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "/=/0045",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 0 1.5)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "/=/0046",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 0 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p sym))"
+  },
+  {
+   "id": "/=/0047",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 0 :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p :kw))"
+  },
+  {
+   "id": "/=/0048",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 0 (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"\"))"
+  },
+  {
+   "id": "/=/0049",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 0 (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"abc\"))"
+  },
+  {
+   "id": "/=/0050",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 0 (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"λx\"))"
+  },
+  {
+   "id": "/=/0051",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 0 (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 3)))"
+  },
+  {
+   "id": "/=/0052",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 0 (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (a (b))))"
+  },
+  {
+   "id": "/=/0053",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 0 (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 . 2)))"
+  },
+  {
+   "id": "/=/0054",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 0 (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 . 3)))"
+  },
+  {
+   "id": "/=/0055",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 0 (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p [1 2]))"
+  },
+  {
+   "id": "/=/0056",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 0 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "/=/0057",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 1 nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p nil))"
+  },
+  {
+   "id": "/=/0058",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 1 t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p t))"
+  },
+  {
+   "id": "/=/0059",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 1 0)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "/=/0060",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 1 1)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "/=/0061",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 1 2)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "/=/0062",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 1 -1)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "/=/0063",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 1 most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "/=/0064",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 1 1.5)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "/=/0065",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 1 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p sym))"
+  },
+  {
+   "id": "/=/0066",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 1 :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p :kw))"
+  },
+  {
+   "id": "/=/0067",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 1 (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"\"))"
+  },
+  {
+   "id": "/=/0068",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 1 (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"abc\"))"
+  },
+  {
+   "id": "/=/0069",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 1 (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"λx\"))"
+  },
+  {
+   "id": "/=/0070",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 1 (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 3)))"
+  },
+  {
+   "id": "/=/0071",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 1 (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (a (b))))"
+  },
+  {
+   "id": "/=/0072",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 1 (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 . 2)))"
+  },
+  {
+   "id": "/=/0073",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 1 (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 . 3)))"
+  },
+  {
+   "id": "/=/0074",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 1 (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p [1 2]))"
+  },
+  {
+   "id": "/=/0075",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "/=/0076",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 2 nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p nil))"
+  },
+  {
+   "id": "/=/0077",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 2 t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p t))"
+  },
+  {
+   "id": "/=/0078",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 2 0)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "/=/0079",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 2 1)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "/=/0080",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 2 2)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "/=/0081",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 2 -1)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "/=/0082",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 2 most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "/=/0083",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 2 1.5)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "/=/0084",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 2 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p sym))"
+  },
+  {
+   "id": "/=/0085",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 2 :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p :kw))"
+  },
+  {
+   "id": "/=/0086",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 2 (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"\"))"
+  },
+  {
+   "id": "/=/0087",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 2 (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"abc\"))"
+  },
+  {
+   "id": "/=/0088",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 2 (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"λx\"))"
+  },
+  {
+   "id": "/=/0089",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 2 (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 3)))"
+  },
+  {
+   "id": "/=/0090",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 2 (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (a (b))))"
+  },
+  {
+   "id": "/=/0091",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 2 (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 . 2)))"
+  },
+  {
+   "id": "/=/0092",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 2 (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 . 3)))"
+  },
+  {
+   "id": "/=/0093",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 2 (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p [1 2]))"
+  },
+  {
+   "id": "/=/0094",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 2 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "/=/0095",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= -1 nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p nil))"
+  },
+  {
+   "id": "/=/0096",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= -1 t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p t))"
+  },
+  {
+   "id": "/=/0097",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= -1 0)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "/=/0098",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= -1 1)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "/=/0099",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= -1 2)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "/=/0100",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= -1 -1)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "/=/0101",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= -1 most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "/=/0102",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= -1 1.5)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "/=/0103",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= -1 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p sym))"
+  },
+  {
+   "id": "/=/0104",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= -1 :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p :kw))"
+  },
+  {
+   "id": "/=/0105",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= -1 (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"\"))"
+  },
+  {
+   "id": "/=/0106",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= -1 (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"abc\"))"
+  },
+  {
+   "id": "/=/0107",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= -1 (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"λx\"))"
+  },
+  {
+   "id": "/=/0108",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= -1 (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 3)))"
+  },
+  {
+   "id": "/=/0109",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= -1 (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (a (b))))"
+  },
+  {
+   "id": "/=/0110",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= -1 (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 . 2)))"
+  },
+  {
+   "id": "/=/0111",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= -1 (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 . 3)))"
+  },
+  {
+   "id": "/=/0112",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= -1 (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p [1 2]))"
+  },
+  {
+   "id": "/=/0113",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= -1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "/=/0114",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= most-positive-fixnum nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p nil))"
+  },
+  {
+   "id": "/=/0115",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= most-positive-fixnum t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p t))"
+  },
+  {
+   "id": "/=/0116",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= most-positive-fixnum 0)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "/=/0117",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= most-positive-fixnum 1)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "/=/0118",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= most-positive-fixnum 2)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "/=/0119",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= most-positive-fixnum -1)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "/=/0120",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= most-positive-fixnum most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "/=/0121",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= most-positive-fixnum 1.5)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "/=/0122",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= most-positive-fixnum 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p sym))"
+  },
+  {
+   "id": "/=/0123",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= most-positive-fixnum :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p :kw))"
+  },
+  {
+   "id": "/=/0124",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= most-positive-fixnum (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"\"))"
+  },
+  {
+   "id": "/=/0125",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= most-positive-fixnum (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"abc\"))"
+  },
+  {
+   "id": "/=/0126",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= most-positive-fixnum (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"λx\"))"
+  },
+  {
+   "id": "/=/0127",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= most-positive-fixnum (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 3)))"
+  },
+  {
+   "id": "/=/0128",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= most-positive-fixnum (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (a (b))))"
+  },
+  {
+   "id": "/=/0129",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= most-positive-fixnum (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 . 2)))"
+  },
+  {
+   "id": "/=/0130",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= most-positive-fixnum (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 . 3)))"
+  },
+  {
+   "id": "/=/0131",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= most-positive-fixnum (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p [1 2]))"
+  },
+  {
+   "id": "/=/0132",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= most-positive-fixnum (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "/=/0133",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 1.5 nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p nil))"
+  },
+  {
+   "id": "/=/0134",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 1.5 t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p t))"
+  },
+  {
+   "id": "/=/0135",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 1.5 0)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "/=/0136",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 1.5 1)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "/=/0137",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 1.5 2)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "/=/0138",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 1.5 -1)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "/=/0139",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 1.5 most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "/=/0140",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 1.5 1.5)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "/=/0141",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 1.5 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p sym))"
+  },
+  {
+   "id": "/=/0142",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 1.5 :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p :kw))"
+  },
+  {
+   "id": "/=/0143",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 1.5 (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"\"))"
+  },
+  {
+   "id": "/=/0144",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 1.5 (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"abc\"))"
+  },
+  {
+   "id": "/=/0145",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 1.5 (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"λx\"))"
+  },
+  {
+   "id": "/=/0146",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 1.5 (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 3)))"
+  },
+  {
+   "id": "/=/0147",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 1.5 (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (a (b))))"
+  },
+  {
+   "id": "/=/0148",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 1.5 (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 . 2)))"
+  },
+  {
+   "id": "/=/0149",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 1.5 (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 . 3)))"
+  },
+  {
+   "id": "/=/0150",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 1.5 (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p [1 2]))"
+  },
+  {
+   "id": "/=/0151",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 1.5 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "/=/0152",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 'sym nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p nil))",
+   "gnu_regime_variant": "(sig (wrong-type-argument number-or-marker-p sym))"
+  },
+  {
+   "id": "/=/0153",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 'sym t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p t))",
+   "gnu_regime_variant": "(sig (wrong-type-argument number-or-marker-p sym))"
+  },
+  {
+   "id": "/=/0154",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 'sym 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p sym))"
+  },
+  {
+   "id": "/=/0155",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 'sym 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p sym))"
+  },
+  {
+   "id": "/=/0156",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 'sym 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p sym))"
+  },
+  {
+   "id": "/=/0157",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 'sym -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p sym))"
+  },
+  {
+   "id": "/=/0158",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 'sym most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p sym))"
+  },
+  {
+   "id": "/=/0159",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 'sym 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p sym))"
+  },
+  {
+   "id": "/=/0160",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 'sym 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p sym))"
+  },
+  {
+   "id": "/=/0161",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 'sym :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p :kw))",
+   "gnu_regime_variant": "(sig (wrong-type-argument number-or-marker-p sym))"
+  },
+  {
+   "id": "/=/0162",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 'sym (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"\"))",
+   "gnu_regime_variant": "(sig (wrong-type-argument number-or-marker-p sym))"
+  },
+  {
+   "id": "/=/0163",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 'sym (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"abc\"))",
+   "gnu_regime_variant": "(sig (wrong-type-argument number-or-marker-p sym))"
+  },
+  {
+   "id": "/=/0164",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 'sym (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"λx\"))",
+   "gnu_regime_variant": "(sig (wrong-type-argument number-or-marker-p sym))"
+  },
+  {
+   "id": "/=/0165",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 'sym (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 3)))",
+   "gnu_regime_variant": "(sig (wrong-type-argument number-or-marker-p sym))"
+  },
+  {
+   "id": "/=/0166",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 'sym (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (a (b))))",
+   "gnu_regime_variant": "(sig (wrong-type-argument number-or-marker-p sym))"
+  },
+  {
+   "id": "/=/0167",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 'sym (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 . 2)))",
+   "gnu_regime_variant": "(sig (wrong-type-argument number-or-marker-p sym))"
+  },
+  {
+   "id": "/=/0168",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 'sym (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 . 3)))",
+   "gnu_regime_variant": "(sig (wrong-type-argument number-or-marker-p sym))"
+  },
+  {
+   "id": "/=/0169",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 'sym (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p [1 2]))",
+   "gnu_regime_variant": "(sig (wrong-type-argument number-or-marker-p sym))"
+  },
+  {
+   "id": "/=/0170",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 'sym (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 1 2 . #2)))",
+   "gnu_regime_variant": "(sig (wrong-type-argument number-or-marker-p sym))"
+  },
+  {
+   "id": "/=/0171",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= :kw nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p nil))",
+   "gnu_regime_variant": "(sig (wrong-type-argument number-or-marker-p :kw))"
+  },
+  {
+   "id": "/=/0172",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= :kw t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p t))",
+   "gnu_regime_variant": "(sig (wrong-type-argument number-or-marker-p :kw))"
+  },
+  {
+   "id": "/=/0173",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= :kw 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p :kw))"
+  },
+  {
+   "id": "/=/0174",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= :kw 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p :kw))"
+  },
+  {
+   "id": "/=/0175",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= :kw 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p :kw))"
+  },
+  {
+   "id": "/=/0176",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= :kw -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p :kw))"
+  },
+  {
+   "id": "/=/0177",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= :kw most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p :kw))"
+  },
+  {
+   "id": "/=/0178",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= :kw 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p :kw))"
+  },
+  {
+   "id": "/=/0179",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= :kw 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p sym))",
+   "gnu_regime_variant": "(sig (wrong-type-argument number-or-marker-p :kw))"
+  },
+  {
+   "id": "/=/0180",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= :kw :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p :kw))"
+  },
+  {
+   "id": "/=/0181",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= :kw (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"\"))",
+   "gnu_regime_variant": "(sig (wrong-type-argument number-or-marker-p :kw))"
+  },
+  {
+   "id": "/=/0182",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= :kw (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"abc\"))",
+   "gnu_regime_variant": "(sig (wrong-type-argument number-or-marker-p :kw))"
+  },
+  {
+   "id": "/=/0183",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= :kw (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"λx\"))",
+   "gnu_regime_variant": "(sig (wrong-type-argument number-or-marker-p :kw))"
+  },
+  {
+   "id": "/=/0184",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= :kw (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 3)))",
+   "gnu_regime_variant": "(sig (wrong-type-argument number-or-marker-p :kw))"
+  },
+  {
+   "id": "/=/0185",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= :kw (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (a (b))))",
+   "gnu_regime_variant": "(sig (wrong-type-argument number-or-marker-p :kw))"
+  },
+  {
+   "id": "/=/0186",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= :kw (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 . 2)))",
+   "gnu_regime_variant": "(sig (wrong-type-argument number-or-marker-p :kw))"
+  },
+  {
+   "id": "/=/0187",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= :kw (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 . 3)))",
+   "gnu_regime_variant": "(sig (wrong-type-argument number-or-marker-p :kw))"
+  },
+  {
+   "id": "/=/0188",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= :kw (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p [1 2]))",
+   "gnu_regime_variant": "(sig (wrong-type-argument number-or-marker-p :kw))"
+  },
+  {
+   "id": "/=/0189",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= :kw (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 1 2 . #2)))",
+   "gnu_regime_variant": "(sig (wrong-type-argument number-or-marker-p :kw))"
+  },
+  {
+   "id": "/=/0190",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (copy-sequence \"\") nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"\"))"
+  },
+  {
+   "id": "/=/0191",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (copy-sequence \"\") t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"\"))"
+  },
+  {
+   "id": "/=/0192",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (copy-sequence \"\") 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"\"))"
+  },
+  {
+   "id": "/=/0193",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (copy-sequence \"\") 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"\"))"
+  },
+  {
+   "id": "/=/0194",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (copy-sequence \"\") 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"\"))"
+  },
+  {
+   "id": "/=/0195",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (copy-sequence \"\") -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"\"))"
+  },
+  {
+   "id": "/=/0196",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (copy-sequence \"\") most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"\"))"
+  },
+  {
+   "id": "/=/0197",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (copy-sequence \"\") 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"\"))"
+  },
+  {
+   "id": "/=/0198",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (copy-sequence \"\") 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"\"))"
+  },
+  {
+   "id": "/=/0199",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (copy-sequence \"\") :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"\"))"
+  },
+  {
+   "id": "/=/0200",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (copy-sequence \"\") (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"\"))"
+  },
+  {
+   "id": "/=/0201",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (copy-sequence \"\") (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"\"))"
+  },
+  {
+   "id": "/=/0202",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (copy-sequence \"\") (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"\"))"
+  },
+  {
+   "id": "/=/0203",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (copy-sequence \"\") (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"\"))"
+  },
+  {
+   "id": "/=/0204",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (copy-sequence \"\") (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"\"))"
+  },
+  {
+   "id": "/=/0205",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (copy-sequence \"\") (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"\"))"
+  },
+  {
+   "id": "/=/0206",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (copy-sequence \"\") (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"\"))"
+  },
+  {
+   "id": "/=/0207",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (copy-sequence \"\") (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"\"))"
+  },
+  {
+   "id": "/=/0208",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (copy-sequence \"\") (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"\"))"
+  },
+  {
+   "id": "/=/0209",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (copy-sequence \"abc\") nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"abc\"))"
+  },
+  {
+   "id": "/=/0210",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (copy-sequence \"abc\") t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"abc\"))"
+  },
+  {
+   "id": "/=/0211",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (copy-sequence \"abc\") 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"abc\"))"
+  },
+  {
+   "id": "/=/0212",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (copy-sequence \"abc\") 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"abc\"))"
+  },
+  {
+   "id": "/=/0213",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (copy-sequence \"abc\") 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"abc\"))"
+  },
+  {
+   "id": "/=/0214",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (copy-sequence \"abc\") -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"abc\"))"
+  },
+  {
+   "id": "/=/0215",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (copy-sequence \"abc\") most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"abc\"))"
+  },
+  {
+   "id": "/=/0216",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (copy-sequence \"abc\") 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"abc\"))"
+  },
+  {
+   "id": "/=/0217",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (copy-sequence \"abc\") 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"abc\"))"
+  },
+  {
+   "id": "/=/0218",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (copy-sequence \"abc\") :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"abc\"))"
+  },
+  {
+   "id": "/=/0219",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (copy-sequence \"abc\") (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"abc\"))"
+  },
+  {
+   "id": "/=/0220",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (copy-sequence \"abc\") (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"abc\"))"
+  },
+  {
+   "id": "/=/0221",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (copy-sequence \"abc\") (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"abc\"))"
+  },
+  {
+   "id": "/=/0222",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (copy-sequence \"abc\") (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"abc\"))"
+  },
+  {
+   "id": "/=/0223",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (copy-sequence \"abc\") (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"abc\"))"
+  },
+  {
+   "id": "/=/0224",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (copy-sequence \"abc\") (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"abc\"))"
+  },
+  {
+   "id": "/=/0225",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (copy-sequence \"abc\") (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"abc\"))"
+  },
+  {
+   "id": "/=/0226",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (copy-sequence \"abc\") (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"abc\"))"
+  },
+  {
+   "id": "/=/0227",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (copy-sequence \"abc\") (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"abc\"))"
+  },
+  {
+   "id": "/=/0228",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (copy-sequence \"λx\") nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"λx\"))"
+  },
+  {
+   "id": "/=/0229",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (copy-sequence \"λx\") t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"λx\"))"
+  },
+  {
+   "id": "/=/0230",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (copy-sequence \"λx\") 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"λx\"))"
+  },
+  {
+   "id": "/=/0231",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (copy-sequence \"λx\") 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"λx\"))"
+  },
+  {
+   "id": "/=/0232",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (copy-sequence \"λx\") 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"λx\"))"
+  },
+  {
+   "id": "/=/0233",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (copy-sequence \"λx\") -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"λx\"))"
+  },
+  {
+   "id": "/=/0234",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (copy-sequence \"λx\") most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"λx\"))"
+  },
+  {
+   "id": "/=/0235",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (copy-sequence \"λx\") 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"λx\"))"
+  },
+  {
+   "id": "/=/0236",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (copy-sequence \"λx\") 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"λx\"))"
+  },
+  {
+   "id": "/=/0237",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (copy-sequence \"λx\") :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"λx\"))"
+  },
+  {
+   "id": "/=/0238",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (copy-sequence \"λx\") (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"λx\"))"
+  },
+  {
+   "id": "/=/0239",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (copy-sequence \"λx\") (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"λx\"))"
+  },
+  {
+   "id": "/=/0240",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (copy-sequence \"λx\") (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"λx\"))"
+  },
+  {
+   "id": "/=/0241",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (copy-sequence \"λx\") (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"λx\"))"
+  },
+  {
+   "id": "/=/0242",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (copy-sequence \"λx\") (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"λx\"))"
+  },
+  {
+   "id": "/=/0243",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (copy-sequence \"λx\") (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"λx\"))"
+  },
+  {
+   "id": "/=/0244",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (copy-sequence \"λx\") (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"λx\"))"
+  },
+  {
+   "id": "/=/0245",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (copy-sequence \"λx\") (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"λx\"))"
+  },
+  {
+   "id": "/=/0246",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (copy-sequence \"λx\") (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"λx\"))"
+  },
+  {
+   "id": "/=/0247",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (list 1 2 3) nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 3)))"
+  },
+  {
+   "id": "/=/0248",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (list 1 2 3) t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 3)))"
+  },
+  {
+   "id": "/=/0249",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (list 1 2 3) 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 3)))"
+  },
+  {
+   "id": "/=/0250",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (list 1 2 3) 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 3)))"
+  },
+  {
+   "id": "/=/0251",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (list 1 2 3) 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 3)))"
+  },
+  {
+   "id": "/=/0252",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (list 1 2 3) -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 3)))"
+  },
+  {
+   "id": "/=/0253",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (list 1 2 3) most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 3)))"
+  },
+  {
+   "id": "/=/0254",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (list 1 2 3) 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 3)))"
+  },
+  {
+   "id": "/=/0255",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (list 1 2 3) 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 3)))"
+  },
+  {
+   "id": "/=/0256",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (list 1 2 3) :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 3)))"
+  },
+  {
+   "id": "/=/0257",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (list 1 2 3) (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 3)))"
+  },
+  {
+   "id": "/=/0258",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (list 1 2 3) (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 3)))"
+  },
+  {
+   "id": "/=/0259",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (list 1 2 3) (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 3)))"
+  },
+  {
+   "id": "/=/0260",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (list 1 2 3) (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 3)))"
+  },
+  {
+   "id": "/=/0261",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (list 1 2 3) (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 3)))"
+  },
+  {
+   "id": "/=/0262",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (list 1 2 3) (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 3)))"
+  },
+  {
+   "id": "/=/0263",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (list 1 2 3) (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 3)))"
+  },
+  {
+   "id": "/=/0264",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (list 1 2 3) (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 3)))"
+  },
+  {
+   "id": "/=/0265",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (list 1 2 3) (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 3)))"
+  },
+  {
+   "id": "/=/0266",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (list 'a (list 'b)) nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (a (b))))"
+  },
+  {
+   "id": "/=/0267",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (list 'a (list 'b)) t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (a (b))))"
+  },
+  {
+   "id": "/=/0268",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (list 'a (list 'b)) 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (a (b))))"
+  },
+  {
+   "id": "/=/0269",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (list 'a (list 'b)) 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (a (b))))"
+  },
+  {
+   "id": "/=/0270",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (list 'a (list 'b)) 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (a (b))))"
+  },
+  {
+   "id": "/=/0271",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (list 'a (list 'b)) -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (a (b))))"
+  },
+  {
+   "id": "/=/0272",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (list 'a (list 'b)) most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (a (b))))"
+  },
+  {
+   "id": "/=/0273",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (list 'a (list 'b)) 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (a (b))))"
+  },
+  {
+   "id": "/=/0274",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (list 'a (list 'b)) 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (a (b))))"
+  },
+  {
+   "id": "/=/0275",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (list 'a (list 'b)) :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (a (b))))"
+  },
+  {
+   "id": "/=/0276",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (list 'a (list 'b)) (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (a (b))))"
+  },
+  {
+   "id": "/=/0277",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (list 'a (list 'b)) (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (a (b))))"
+  },
+  {
+   "id": "/=/0278",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (list 'a (list 'b)) (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (a (b))))"
+  },
+  {
+   "id": "/=/0279",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (list 'a (list 'b)) (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (a (b))))"
+  },
+  {
+   "id": "/=/0280",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (list 'a (list 'b)) (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (a (b))))"
+  },
+  {
+   "id": "/=/0281",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (list 'a (list 'b)) (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (a (b))))"
+  },
+  {
+   "id": "/=/0282",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (list 'a (list 'b)) (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (a (b))))"
+  },
+  {
+   "id": "/=/0283",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (list 'a (list 'b)) (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (a (b))))"
+  },
+  {
+   "id": "/=/0284",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (list 'a (list 'b)) (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (a (b))))"
+  },
+  {
+   "id": "/=/0285",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (cons 1 2) nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 . 2)))"
+  },
+  {
+   "id": "/=/0286",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (cons 1 2) t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 . 2)))"
+  },
+  {
+   "id": "/=/0287",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (cons 1 2) 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 . 2)))"
+  },
+  {
+   "id": "/=/0288",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (cons 1 2) 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 . 2)))"
+  },
+  {
+   "id": "/=/0289",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (cons 1 2) 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 . 2)))"
+  },
+  {
+   "id": "/=/0290",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (cons 1 2) -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 . 2)))"
+  },
+  {
+   "id": "/=/0291",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (cons 1 2) most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 . 2)))"
+  },
+  {
+   "id": "/=/0292",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (cons 1 2) 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 . 2)))"
+  },
+  {
+   "id": "/=/0293",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (cons 1 2) 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 . 2)))"
+  },
+  {
+   "id": "/=/0294",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (cons 1 2) :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 . 2)))"
+  },
+  {
+   "id": "/=/0295",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (cons 1 2) (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 . 2)))"
+  },
+  {
+   "id": "/=/0296",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (cons 1 2) (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 . 2)))"
+  },
+  {
+   "id": "/=/0297",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (cons 1 2) (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 . 2)))"
+  },
+  {
+   "id": "/=/0298",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (cons 1 2) (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 . 2)))"
+  },
+  {
+   "id": "/=/0299",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (cons 1 2) (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 . 2)))"
+  },
+  {
+   "id": "/=/0300",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (cons 1 2) (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 . 2)))"
+  },
+  {
+   "id": "/=/0301",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (cons 1 2) (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 . 2)))"
+  },
+  {
+   "id": "/=/0302",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (cons 1 2) (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 . 2)))"
+  },
+  {
+   "id": "/=/0303",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (cons 1 2) (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 . 2)))"
+  },
+  {
+   "id": "/=/0304",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (cons 1 (cons 2 3)) nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 . 3)))"
+  },
+  {
+   "id": "/=/0305",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (cons 1 (cons 2 3)) t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 . 3)))"
+  },
+  {
+   "id": "/=/0306",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (cons 1 (cons 2 3)) 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 . 3)))"
+  },
+  {
+   "id": "/=/0307",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (cons 1 (cons 2 3)) 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 . 3)))"
+  },
+  {
+   "id": "/=/0308",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (cons 1 (cons 2 3)) 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 . 3)))"
+  },
+  {
+   "id": "/=/0309",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (cons 1 (cons 2 3)) -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 . 3)))"
+  },
+  {
+   "id": "/=/0310",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (cons 1 (cons 2 3)) most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 . 3)))"
+  },
+  {
+   "id": "/=/0311",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (cons 1 (cons 2 3)) 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 . 3)))"
+  },
+  {
+   "id": "/=/0312",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (cons 1 (cons 2 3)) 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 . 3)))"
+  },
+  {
+   "id": "/=/0313",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (cons 1 (cons 2 3)) :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 . 3)))"
+  },
+  {
+   "id": "/=/0314",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (cons 1 (cons 2 3)) (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 . 3)))"
+  },
+  {
+   "id": "/=/0315",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (cons 1 (cons 2 3)) (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 . 3)))"
+  },
+  {
+   "id": "/=/0316",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (cons 1 (cons 2 3)) (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 . 3)))"
+  },
+  {
+   "id": "/=/0317",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (cons 1 (cons 2 3)) (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 . 3)))"
+  },
+  {
+   "id": "/=/0318",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (cons 1 (cons 2 3)) (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 . 3)))"
+  },
+  {
+   "id": "/=/0319",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (cons 1 (cons 2 3)) (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 . 3)))"
+  },
+  {
+   "id": "/=/0320",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (cons 1 (cons 2 3)) (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 . 3)))"
+  },
+  {
+   "id": "/=/0321",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (cons 1 (cons 2 3)) (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 . 3)))"
+  },
+  {
+   "id": "/=/0322",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (cons 1 (cons 2 3)) (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 . 3)))"
+  },
+  {
+   "id": "/=/0323",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (vector 1 2) nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p [1 2]))"
+  },
+  {
+   "id": "/=/0324",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (vector 1 2) t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p [1 2]))"
+  },
+  {
+   "id": "/=/0325",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (vector 1 2) 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p [1 2]))"
+  },
+  {
+   "id": "/=/0326",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (vector 1 2) 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p [1 2]))"
+  },
+  {
+   "id": "/=/0327",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (vector 1 2) 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p [1 2]))"
+  },
+  {
+   "id": "/=/0328",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (vector 1 2) -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p [1 2]))"
+  },
+  {
+   "id": "/=/0329",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (vector 1 2) most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p [1 2]))"
+  },
+  {
+   "id": "/=/0330",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (vector 1 2) 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p [1 2]))"
+  },
+  {
+   "id": "/=/0331",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (vector 1 2) 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p [1 2]))"
+  },
+  {
+   "id": "/=/0332",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (vector 1 2) :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p [1 2]))"
+  },
+  {
+   "id": "/=/0333",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (vector 1 2) (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p [1 2]))"
+  },
+  {
+   "id": "/=/0334",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (vector 1 2) (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p [1 2]))"
+  },
+  {
+   "id": "/=/0335",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (vector 1 2) (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p [1 2]))"
+  },
+  {
+   "id": "/=/0336",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (vector 1 2) (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p [1 2]))"
+  },
+  {
+   "id": "/=/0337",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (vector 1 2) (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p [1 2]))"
+  },
+  {
+   "id": "/=/0338",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (vector 1 2) (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p [1 2]))"
+  },
+  {
+   "id": "/=/0339",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (vector 1 2) (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p [1 2]))"
+  },
+  {
+   "id": "/=/0340",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (vector 1 2) (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p [1 2]))"
+  },
+  {
+   "id": "/=/0341",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (vector 1 2) (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p [1 2]))"
+  },
+  {
+   "id": "/=/0342",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (let ((x (list 1 2))) (setcdr (cdr x) x) x) nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "/=/0343",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (let ((x (list 1 2))) (setcdr (cdr x) x) x) t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "/=/0344",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (let ((x (list 1 2))) (setcdr (cdr x) x) x) 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "/=/0345",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (let ((x (list 1 2))) (setcdr (cdr x) x) x) 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "/=/0346",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (let ((x (list 1 2))) (setcdr (cdr x) x) x) 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "/=/0347",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (let ((x (list 1 2))) (setcdr (cdr x) x) x) -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "/=/0348",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (let ((x (list 1 2))) (setcdr (cdr x) x) x) most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "/=/0349",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (let ((x (list 1 2))) (setcdr (cdr x) x) x) 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "/=/0350",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (let ((x (list 1 2))) (setcdr (cdr x) x) x) 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "/=/0351",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (let ((x (list 1 2))) (setcdr (cdr x) x) x) :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "/=/0352",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (let ((x (list 1 2))) (setcdr (cdr x) x) x) (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "/=/0353",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (let ((x (list 1 2))) (setcdr (cdr x) x) x) (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "/=/0354",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (let ((x (list 1 2))) (setcdr (cdr x) x) x) (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "/=/0355",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (let ((x (list 1 2))) (setcdr (cdr x) x) x) (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "/=/0356",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (let ((x (list 1 2))) (setcdr (cdr x) x) x) (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "/=/0357",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (let ((x (list 1 2))) (setcdr (cdr x) x) x) (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "/=/0358",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (let ((x (list 1 2))) (setcdr (cdr x) x) x) (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "/=/0359",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (let ((x (list 1 2))) (setcdr (cdr x) x) x) (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "/=/0360",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= (let ((x (list 1 2))) (setcdr (cdr x) x) x) (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "/=/0361",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'/= '(1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr /=> 1))"
+  },
+  {
+   "id": "/=/0362",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'/= '(1 1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr /=> 3))"
+  },
+  {
+   "id": "/=/0363",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 nil)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (/= a0 a1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p nil))"
+  },
+  {
+   "id": "/=/0364",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (/= a0 a1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 1 2 . #2)))",
+   "gnu_regime_variant": "(sig (wrong-type-argument number-or-marker-p t))"
+  },
+  {
+   "id": "/=/0365",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 (vector 1 2))) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (/= a0 a1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p [1 2]))"
+  },
+  {
+   "id": "/=/0366",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1) (a1 (cons 1 (cons 2 3)))) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (/= a0 a1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 . 3)))"
+  },
+  {
+   "id": "/=/0367",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.5) (a1 (cons 1 2))) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (/= a0 a1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 . 2)))"
+  },
+  {
+   "id": "/=/0368",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :kw) (a1 (list 'a (list 'b)))) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (/= a0 a1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (a (b))))",
+   "gnu_regime_variant": "(sig (wrong-type-argument number-or-marker-p :kw))"
+  },
+  {
+   "id": "/=/0369",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 (list 1 2 3))) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (/= a0 a1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"abc\"))"
+  },
+  {
+   "id": "/=/0370",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 1 2 3)) (a1 (copy-sequence \"λx\"))) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (/= a0 a1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 3)))"
+  },
+  {
+   "id": "/=/0371",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 2)) (a1 (copy-sequence \"abc\"))) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (/= a0 a1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 . 2)))"
+  },
+  {
+   "id": "/=/0372",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (vector 1 2)) (a1 (copy-sequence \"\"))) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (/= a0 a1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p [1 2]))"
+  },
+  {
+   "id": "/=/0373",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 nil)) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p nil))"
+  },
+  {
+   "id": "/=/0374",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 1)) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p nil))"
+  },
+  {
+   "id": "/=/0375",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 most-positive-fixnum)) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p nil))"
+  },
+  {
+   "id": "/=/0376",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 :kw)) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p :kw))",
+   "gnu_regime_variant": "(sig (wrong-type-argument number-or-marker-p nil))"
+  },
+  {
+   "id": "/=/0377",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 (copy-sequence \"λx\"))) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"λx\"))",
+   "gnu_regime_variant": "(sig (wrong-type-argument number-or-marker-p nil))"
+  },
+  {
+   "id": "/=/0378",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 (cons 1 2))) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 . 2)))",
+   "gnu_regime_variant": "(sig (wrong-type-argument number-or-marker-p nil))"
+  },
+  {
+   "id": "/=/0379",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 1 2 . #2)))",
+   "gnu_regime_variant": "(sig (wrong-type-argument number-or-marker-p nil))"
+  },
+  {
+   "id": "/=/0380",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 0)) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p t))"
+  },
+  {
+   "id": "/=/0381",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 -1)) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p t))"
+  },
+  {
+   "id": "/=/0382",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 'sym)) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p sym))",
+   "gnu_regime_variant": "(sig (wrong-type-argument number-or-marker-p t))"
+  },
+  {
+   "id": "/=/0383",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 (copy-sequence \"abc\"))) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"abc\"))",
+   "gnu_regime_variant": "(sig (wrong-type-argument number-or-marker-p t))"
+  },
+  {
+   "id": "/=/0384",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 (list 'a (list 'b)))) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (a (b))))",
+   "gnu_regime_variant": "(sig (wrong-type-argument number-or-marker-p t))"
+  },
+  {
+   "id": "/=/0385",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 (vector 1 2))) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p [1 2]))",
+   "gnu_regime_variant": "(sig (wrong-type-argument number-or-marker-p t))"
+  },
+  {
+   "id": "/=/0386",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0) (a1 t)) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p t))"
+  },
+  {
+   "id": "/=/0387",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0) (a1 2)) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "/=/0388",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0) (a1 1.5)) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "/=/0389",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0) (a1 (copy-sequence \"\"))) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"\"))"
+  },
+  {
+   "id": "/=/0390",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0) (a1 (list 1 2 3))) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 3)))"
+  },
+  {
+   "id": "/=/0391",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0) (a1 (cons 1 (cons 2 3)))) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 . 3)))"
+  },
+  {
+   "id": "/=/0392",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 nil)) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p nil))"
+  },
+  {
+   "id": "/=/0393",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 1)) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "/=/0394",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 most-positive-fixnum)) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "/=/0395",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 :kw)) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p :kw))"
+  },
+  {
+   "id": "/=/0396",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 (copy-sequence \"λx\"))) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"λx\"))"
+  },
+  {
+   "id": "/=/0397",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 (cons 1 2))) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 . 2)))"
+  },
+  {
+   "id": "/=/0398",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "/=/0399",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 2) (a1 0)) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "/=/0400",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 2) (a1 -1)) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "/=/0401",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 2) (a1 'sym)) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p sym))"
+  },
+  {
+   "id": "/=/0402",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 2) (a1 (copy-sequence \"abc\"))) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"abc\"))"
+  },
+  {
+   "id": "/=/0403",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 2) (a1 (list 'a (list 'b)))) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (a (b))))"
+  },
+  {
+   "id": "/=/0404",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 2) (a1 (vector 1 2))) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p [1 2]))"
+  },
+  {
+   "id": "/=/0405",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1) (a1 t)) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p t))"
+  },
+  {
+   "id": "/=/0406",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1) (a1 2)) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "/=/0407",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1) (a1 1.5)) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "/=/0408",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1) (a1 (copy-sequence \"\"))) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"\"))"
+  },
+  {
+   "id": "/=/0409",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1) (a1 (list 1 2 3))) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 3)))"
+  },
+  {
+   "id": "/=/0410",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1) (a1 (cons 1 (cons 2 3)))) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 . 3)))"
+  },
+  {
+   "id": "/=/0411",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-positive-fixnum) (a1 nil)) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p nil))"
+  },
+  {
+   "id": "/=/0412",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-positive-fixnum) (a1 1)) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "/=/0413",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-positive-fixnum) (a1 most-positive-fixnum)) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "/=/0414",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-positive-fixnum) (a1 :kw)) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p :kw))"
+  },
+  {
+   "id": "/=/0415",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-positive-fixnum) (a1 (copy-sequence \"λx\"))) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"λx\"))"
+  },
+  {
+   "id": "/=/0416",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-positive-fixnum) (a1 (cons 1 2))) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 . 2)))"
+  },
+  {
+   "id": "/=/0417",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-positive-fixnum) (a1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "/=/0418",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.5) (a1 0)) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "/=/0419",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.5) (a1 -1)) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "/=/0420",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.5) (a1 'sym)) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p sym))"
+  },
+  {
+   "id": "/=/0421",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.5) (a1 (copy-sequence \"abc\"))) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"abc\"))"
+  },
+  {
+   "id": "/=/0422",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.5) (a1 (list 'a (list 'b)))) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (a (b))))"
+  },
+  {
+   "id": "/=/0423",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.5) (a1 (vector 1 2))) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p [1 2]))"
+  },
+  {
+   "id": "/=/0424",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'sym) (a1 t)) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p t))",
+   "gnu_regime_variant": "(sig (wrong-type-argument number-or-marker-p sym))"
+  },
+  {
+   "id": "/=/0425",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'sym) (a1 2)) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p sym))"
+  },
+  {
+   "id": "/=/0426",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'sym) (a1 1.5)) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p sym))"
+  },
+  {
+   "id": "/=/0427",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'sym) (a1 (copy-sequence \"\"))) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"\"))",
+   "gnu_regime_variant": "(sig (wrong-type-argument number-or-marker-p sym))"
+  },
+  {
+   "id": "/=/0428",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'sym) (a1 (list 1 2 3))) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 3)))",
+   "gnu_regime_variant": "(sig (wrong-type-argument number-or-marker-p sym))"
+  },
+  {
+   "id": "/=/0429",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'sym) (a1 (cons 1 (cons 2 3)))) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 . 3)))",
+   "gnu_regime_variant": "(sig (wrong-type-argument number-or-marker-p sym))"
+  },
+  {
+   "id": "/=/0430",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :kw) (a1 nil)) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p nil))",
+   "gnu_regime_variant": "(sig (wrong-type-argument number-or-marker-p :kw))"
+  },
+  {
+   "id": "/=/0431",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :kw) (a1 1)) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p :kw))"
+  },
+  {
+   "id": "/=/0432",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :kw) (a1 most-positive-fixnum)) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p :kw))"
+  },
+  {
+   "id": "/=/0433",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :kw) (a1 :kw)) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p :kw))"
+  },
+  {
+   "id": "/=/0434",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :kw) (a1 (copy-sequence \"λx\"))) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"λx\"))",
+   "gnu_regime_variant": "(sig (wrong-type-argument number-or-marker-p :kw))"
+  },
+  {
+   "id": "/=/0435",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :kw) (a1 (cons 1 2))) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 . 2)))",
+   "gnu_regime_variant": "(sig (wrong-type-argument number-or-marker-p :kw))"
+  },
+  {
+   "id": "/=/0436",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :kw) (a1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 1 2 . #2)))",
+   "gnu_regime_variant": "(sig (wrong-type-argument number-or-marker-p :kw))"
+  },
+  {
+   "id": "/=/0437",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\")) (a1 0)) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"\"))"
+  },
+  {
+   "id": "/=/0438",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\")) (a1 -1)) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"\"))"
+  },
+  {
+   "id": "/=/0439",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\")) (a1 'sym)) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"\"))"
+  },
+  {
+   "id": "/=/0440",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\")) (a1 (copy-sequence \"abc\"))) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"\"))"
+  },
+  {
+   "id": "/=/0441",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\")) (a1 (list 'a (list 'b)))) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"\"))"
+  },
+  {
+   "id": "/=/0442",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\")) (a1 (vector 1 2))) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"\"))"
+  },
+  {
+   "id": "/=/0443",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 t)) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"abc\"))"
+  },
+  {
+   "id": "/=/0444",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 2)) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"abc\"))"
+  },
+  {
+   "id": "/=/0445",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 1.5)) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"abc\"))"
+  },
+  {
+   "id": "/=/0446",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 (copy-sequence \"\"))) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"abc\"))"
+  },
+  {
+   "id": "/=/0447",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 (list 1 2 3))) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"abc\"))"
+  },
+  {
+   "id": "/=/0448",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 (cons 1 (cons 2 3)))) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"abc\"))"
+  },
+  {
+   "id": "/=/0449",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 nil)) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"λx\"))"
+  },
+  {
+   "id": "/=/0450",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 1)) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"λx\"))"
+  },
+  {
+   "id": "/=/0451",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 most-positive-fixnum)) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"λx\"))"
+  },
+  {
+   "id": "/=/0452",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 :kw)) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"λx\"))"
+  },
+  {
+   "id": "/=/0453",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 (copy-sequence \"λx\"))) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"λx\"))"
+  },
+  {
+   "id": "/=/0454",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 (cons 1 2))) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"λx\"))"
+  },
+  {
+   "id": "/=/0455",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"λx\"))"
+  },
+  {
+   "id": "/=/0456",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 1 2 3)) (a1 0)) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 3)))"
+  },
+  {
+   "id": "/=/0457",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 1 2 3)) (a1 -1)) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 3)))"
+  },
+  {
+   "id": "/=/0458",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 1 2 3)) (a1 'sym)) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 3)))"
+  },
+  {
+   "id": "/=/0459",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 1 2 3)) (a1 (copy-sequence \"abc\"))) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 3)))"
+  },
+  {
+   "id": "/=/0460",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 1 2 3)) (a1 (list 'a (list 'b)))) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 3)))"
+  },
+  {
+   "id": "/=/0461",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 1 2 3)) (a1 (vector 1 2))) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 3)))"
+  },
+  {
+   "id": "/=/0462",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 'a (list 'b))) (a1 t)) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (a (b))))"
+  },
+  {
+   "id": "/=/0463",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 'a (list 'b))) (a1 2)) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (a (b))))"
+  },
+  {
+   "id": "/=/0464",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 'a (list 'b))) (a1 1.5)) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (a (b))))"
+  },
+  {
+   "id": "/=/0465",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 'a (list 'b))) (a1 (copy-sequence \"\"))) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (a (b))))"
+  },
+  {
+   "id": "/=/0466",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 'a (list 'b))) (a1 (list 1 2 3))) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (a (b))))"
+  },
+  {
+   "id": "/=/0467",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 'a (list 'b))) (a1 (cons 1 (cons 2 3)))) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (a (b))))"
+  },
+  {
+   "id": "/=/0468",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 2)) (a1 nil)) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 . 2)))"
+  },
+  {
+   "id": "/=/0469",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 2)) (a1 1)) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 . 2)))"
+  },
+  {
+   "id": "/=/0470",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 2)) (a1 most-positive-fixnum)) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 . 2)))"
+  },
+  {
+   "id": "/=/0471",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 2)) (a1 :kw)) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 . 2)))"
+  },
+  {
+   "id": "/=/0472",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 2)) (a1 (copy-sequence \"λx\"))) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 . 2)))"
+  },
+  {
+   "id": "/=/0473",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 2)) (a1 (cons 1 2))) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 . 2)))"
+  },
+  {
+   "id": "/=/0474",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 2)) (a1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 . 2)))"
+  },
+  {
+   "id": "/=/0475",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 (cons 2 3))) (a1 0)) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 . 3)))"
+  },
+  {
+   "id": "/=/0476",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 (cons 2 3))) (a1 -1)) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 . 3)))"
+  },
+  {
+   "id": "/=/0477",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 (cons 2 3))) (a1 'sym)) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 . 3)))"
+  },
+  {
+   "id": "/=/0478",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 (cons 2 3))) (a1 (copy-sequence \"abc\"))) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 . 3)))"
+  },
+  {
+   "id": "/=/0479",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 (cons 2 3))) (a1 (list 'a (list 'b)))) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 . 3)))"
+  },
+  {
+   "id": "/=/0480",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 (cons 2 3))) (a1 (vector 1 2))) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 . 3)))"
+  },
+  {
+   "id": "/=/0481",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (vector 1 2)) (a1 t)) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p [1 2]))"
+  },
+  {
+   "id": "/=/0482",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (vector 1 2)) (a1 2)) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p [1 2]))"
+  },
+  {
+   "id": "/=/0483",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (vector 1 2)) (a1 1.5)) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p [1 2]))"
+  },
+  {
+   "id": "/=/0484",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (vector 1 2)) (a1 (copy-sequence \"\"))) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p [1 2]))"
+  },
+  {
+   "id": "/=/0485",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (vector 1 2)) (a1 (list 1 2 3))) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p [1 2]))"
+  },
+  {
+   "id": "/=/0486",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (vector 1 2)) (a1 (cons 1 (cons 2 3)))) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p [1 2]))"
+  },
+  {
+   "id": "/=/0487",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (a1 nil)) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "/=/0488",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (a1 1)) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "/=/0489",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (a1 most-positive-fixnum)) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "/=/0490",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (a1 :kw)) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "/=/0491",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (a1 (copy-sequence \"λx\"))) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "/=/0492",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (a1 (cons 1 2))) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "/=/0493",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (a1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (/= a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "/=/0494",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 1 1.0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "/=/0495",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 0.0e+NaN 0.0e+NaN)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "/=/0496",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= most-positive-fixnum 2.305843009213694e18)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "/=/0497",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 2.305843009213694e18 most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "/=/0498",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= -0.0 0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "/=/0499",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 'a 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p a))"
+  },
+  {
+   "id": "/=/0500",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (/= 1 'a)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p a))"
+  },
+  {
+   "id": "/=/0501",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (insert \"abcdef\") (let ((m (copy-marker 3))) (list (/= m 3) (/= m 2) (/= 3.0 m))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t nil))"
+  },
+  {
+   "id": "/=/0502",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((m (make-marker))) (/= m 1))) (error (list 'sig e))))",
+   "expected": "(sig (error \"Marker does not point anywhere\"))"
+  },
+  {
+   "id": "/=/0503",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 'sym) (error (list 'sig e))))",
+   "expected": "(ok sym)"
+  },
+  {
+   "id": "/=/0504",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (cons 1 (cons 2 3))) (error (list 'sig e))))",
+   "expected": "(ok (1 2 . 3))"
+  },
+  {
+   "id": "/=/0505",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (cons 1 2)) (error (list 'sig e))))",
+   "expected": "(ok (1 . 2))"
+  },
+  {
+   "id": "/=/0506",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"\")) (error (list 'sig e))))",
+   "expected": "(ok \"\")"
+  },
+  {
+   "id": "/=/0507",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"abc\")) (error (list 'sig e))))",
+   "expected": "(ok \"abc\")"
+  },
+  {
+   "id": "/=/0508",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"λx\")) (error (list 'sig e))))",
+   "expected": "(ok \"λx\")"
+  },
+  {
+   "id": "/=/0509",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (error (list 'sig e))))",
+   "expected": "(ok (1 2 1 2 . #2))"
+  },
+  {
+   "id": "/=/0510",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list 'a (list 'b))) (error (list 'sig e))))",
+   "expected": "(ok (a (b)))"
+  },
+  {
+   "id": "/=/0511",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list 1 2 3)) (error (list 'sig e))))",
+   "expected": "(ok (1 2 3))"
+  },
+  {
+   "id": "/=/0512",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vector 1 2)) (error (list 'sig e))))",
+   "expected": "(ok [1 2])"
+  },
+  {
+   "id": "/=/0513",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok -1) (error (list 'sig e))))",
+   "expected": "(ok -1)"
+  },
+  {
+   "id": "/=/0514",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 0) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "/=/0515",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1) (error (list 'sig e))))",
+   "expected": "(ok 1)"
+  },
+  {
+   "id": "/=/0516",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1.5) (error (list 'sig e))))",
+   "expected": "(ok 1.5)"
+  },
+  {
+   "id": "/=/0517",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 2) (error (list 'sig e))))",
+   "expected": "(ok 2)"
+  },
+  {
+   "id": "/=/0518",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok :kw) (error (list 'sig e))))",
+   "expected": "(ok :kw)"
+  },
+  {
+   "id": "/=/0519",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok most-positive-fixnum) (error (list 'sig e))))",
+   "expected": "(ok 2305843009213693951)"
+  },
+  {
+   "id": "/=/0520",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok nil) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "/=/0521",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok t) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  }
+ ],
+ "pinned": {
+  "/=/0056": "PRINTER",
+  "/=/0075": "PRINTER",
+  "/=/0094": "PRINTER",
+  "/=/0113": "PRINTER",
+  "/=/0132": "PRINTER",
+  "/=/0151": "PRINTER",
+  "/=/0342": "PRINTER",
+  "/=/0343": "PRINTER",
+  "/=/0344": "PRINTER",
+  "/=/0345": "PRINTER",
+  "/=/0346": "PRINTER",
+  "/=/0347": "PRINTER",
+  "/=/0348": "PRINTER",
+  "/=/0349": "PRINTER",
+  "/=/0350": "PRINTER",
+  "/=/0351": "PRINTER",
+  "/=/0352": "PRINTER",
+  "/=/0353": "PRINTER",
+  "/=/0354": "PRINTER",
+  "/=/0355": "PRINTER",
+  "/=/0356": "PRINTER",
+  "/=/0357": "PRINTER",
+  "/=/0358": "PRINTER",
+  "/=/0359": "PRINTER",
+  "/=/0360": "PRINTER",
+  "/=/0398": "PRINTER",
+  "/=/0417": "PRINTER",
+  "/=/0487": "PRINTER",
+  "/=/0488": "PRINTER",
+  "/=/0489": "PRINTER",
+  "/=/0490": "PRINTER",
+  "/=/0491": "PRINTER",
+  "/=/0492": "PRINTER",
+  "/=/0493": "PRINTER",
+  "/=/0509": "PRINTER"
+ }
+}

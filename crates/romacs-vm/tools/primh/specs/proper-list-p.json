@@ -1,0 +1,1 @@
+{"name": "proper-list-p", "arity": [1, 1], "effect": "pure", "gnu_files": ["fns.c"], "gnu_def": "fns.c:244", "rust": "src/prims/fns.rs:69", "args": []}

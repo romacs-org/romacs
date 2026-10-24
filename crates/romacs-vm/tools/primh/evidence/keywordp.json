@@ -1,0 +1,622 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "keywordp",
+ "spec_sha256": "fa4c2bad14c29359874b778f016c91db15c6a48a128d644a449551c27efe0612",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "keywordp",
+    "subr",
+    1,
+    1
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "data.c": "eca7895a8043cd0a960dfe037a46028374d1a40cc6ee4d0cf6de90ac56c242ae"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "keywordp/0000",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (keywordp nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "keywordp/0001",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (keywordp t)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "keywordp/0002",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (keywordp 0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "keywordp/0003",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (keywordp 1)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "keywordp/0004",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (keywordp 2)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "keywordp/0005",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (keywordp -1)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "keywordp/0006",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (keywordp most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "keywordp/0007",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (keywordp 1.5)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "keywordp/0008",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (keywordp 'sym)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "keywordp/0009",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (keywordp :kw)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "keywordp/0010",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (keywordp (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "keywordp/0011",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (keywordp (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "keywordp/0012",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (keywordp (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "keywordp/0013",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (keywordp (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "keywordp/0014",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (keywordp (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "keywordp/0015",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (keywordp (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "keywordp/0016",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (keywordp (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "keywordp/0017",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (keywordp (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "keywordp/0018",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (keywordp (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "keywordp/0019",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (keywordp :a)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "keywordp/0020",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (keywordp ':)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "keywordp/0021",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (keywordp 'a)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "keywordp/0022",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (keywordp 'a:)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "keywordp/0023",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (keywordp (intern \":x\"))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "keywordp/0024",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (keywordp (make-symbol \":x\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "keywordp/0025",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (keywordp (make-symbol \":\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "keywordp/0026",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (keywordp (intern \"\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "keywordp/0027",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (keywordp (make-symbol \"\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "keywordp/0028",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (keywordp :λ)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "keywordp/0029",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (keywordp (intern \":λé\"))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "keywordp/0030",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (keywordp (make-symbol \":λ\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "keywordp/0031",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (keywordp (intern \"λ:\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "keywordp/0032",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (keywordp \":a\")) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "keywordp/0033",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (keywordp (list :a))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "keywordp/0034",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (keywordp (vector :a))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "keywordp/0035",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (keywordp (symbol-function 'car))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "keywordp/0036",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (keywordp ?:)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "keywordp/0037",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'keywordp '())) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr keywordp> 0))"
+  },
+  {
+   "id": "keywordp/0038",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'keywordp '(1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr keywordp> 2))"
+  },
+  {
+   "id": "keywordp/0039",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (keywordp a0))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "keywordp/0040",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil)) (let ((r (keywordp a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (t))"
+  },
+  {
+   "id": "keywordp/0041",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1)) (let ((r (keywordp a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "keywordp/0042",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-positive-fixnum)) (let ((r (keywordp a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "keywordp/0043",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :kw)) (let ((r (keywordp a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "keywordp/0044",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\"))) (let ((r (keywordp a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "keywordp/0045",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 2))) (let ((r (keywordp a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "keywordp/0046",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (keywordp a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "keywordp/0047",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'a)) (let ((r (keywordp a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "keywordp/0048",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (make-symbol \":x\"))) (let ((r (keywordp a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "keywordp/0049",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (make-symbol \"\"))) (let ((r (keywordp a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "keywordp/0050",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (make-symbol \":λ\"))) (let ((r (keywordp a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "keywordp/0051",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list :a))) (let ((r (keywordp a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "keywordp/0052",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 ?:)) (let ((r (keywordp a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "keywordp/0053",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (keywordp :a) (keywordp ':) (keywordp 'a) (keywordp nil) (keywordp t) (keywordp 42) (keywordp \"str\") (keywordp (list :a)))) (error (list 'sig e))))",
+   "expected": "(ok (t t nil nil nil nil nil nil))"
+  },
+  {
+   "id": "keywordp/0054",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((s (make-symbol \":x\"))) (list (keywordp s) (eq s :x) (keywordp (intern \":x\")) (eq (intern \":x\") :x)))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil t t))"
+  },
+  {
+   "id": "keywordp/0055",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((s (make-symbol \":fresh-kw\"))) (list (keywordp s) (keywordp (intern (symbol-name s)))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "keywordp/0056",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (keywordp (car '(:k 1)))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "keywordp/0057",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (keywordp (intern (concat \":\" \"made\")))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "keywordp/0058",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((xs (list :a 'b :c \":d\" (make-symbol \":e\") nil)) r) (while xs (setq r (cons (funcall #'keywordp (car xs)) r) xs (cdr xs))) (nreverse r))) (error (list 'sig e))))",
+   "expected": "(ok (t nil t nil nil nil))"
+  },
+  {
+   "id": "keywordp/0059",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (keywordp (intern \":λ\"))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "keywordp/0060",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eq (keywordp :λ) t)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "keywordp/0061",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \":a\") (error (list 'sig e))))",
+   "expected": "(ok \":a\")"
+  },
+  {
+   "id": "keywordp/0062",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok ':) (error (list 'sig e))))",
+   "expected": "(ok :)"
+  },
+  {
+   "id": "keywordp/0063",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 'a) (error (list 'sig e))))",
+   "expected": "(ok a)"
+  },
+  {
+   "id": "keywordp/0064",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 'a:) (error (list 'sig e))))",
+   "expected": "(ok a:)"
+  },
+  {
+   "id": "keywordp/0065",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 'sym) (error (list 'sig e))))",
+   "expected": "(ok sym)"
+  },
+  {
+   "id": "keywordp/0066",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (cons 1 (cons 2 3))) (error (list 'sig e))))",
+   "expected": "(ok (1 2 . 3))"
+  },
+  {
+   "id": "keywordp/0067",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (cons 1 2)) (error (list 'sig e))))",
+   "expected": "(ok (1 . 2))"
+  },
+  {
+   "id": "keywordp/0068",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"\")) (error (list 'sig e))))",
+   "expected": "(ok \"\")"
+  },
+  {
+   "id": "keywordp/0069",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"abc\")) (error (list 'sig e))))",
+   "expected": "(ok \"abc\")"
+  },
+  {
+   "id": "keywordp/0070",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"λx\")) (error (list 'sig e))))",
+   "expected": "(ok \"λx\")"
+  },
+  {
+   "id": "keywordp/0071",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (intern \"\")) (error (list 'sig e))))",
+   "expected": "(ok ##)"
+  },
+  {
+   "id": "keywordp/0072",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (intern \":x\")) (error (list 'sig e))))",
+   "expected": "(ok :x)"
+  },
+  {
+   "id": "keywordp/0073",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (intern \":λé\")) (error (list 'sig e))))",
+   "expected": "(ok :λé)"
+  },
+  {
+   "id": "keywordp/0074",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (intern \"λ:\")) (error (list 'sig e))))",
+   "expected": "(ok λ:)"
+  },
+  {
+   "id": "keywordp/0075",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (error (list 'sig e))))",
+   "expected": "(ok (1 2 1 2 . #2))"
+  },
+  {
+   "id": "keywordp/0076",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list 'a (list 'b))) (error (list 'sig e))))",
+   "expected": "(ok (a (b)))"
+  },
+  {
+   "id": "keywordp/0077",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list 1 2 3)) (error (list 'sig e))))",
+   "expected": "(ok (1 2 3))"
+  },
+  {
+   "id": "keywordp/0078",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list :a)) (error (list 'sig e))))",
+   "expected": "(ok (:a))"
+  },
+  {
+   "id": "keywordp/0079",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (make-symbol \"\")) (error (list 'sig e))))",
+   "expected": "(ok ##)"
+  },
+  {
+   "id": "keywordp/0080",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (make-symbol \":\")) (error (list 'sig e))))",
+   "expected": "(ok :)"
+  },
+  {
+   "id": "keywordp/0081",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (make-symbol \":x\")) (error (list 'sig e))))",
+   "expected": "(ok :x)"
+  },
+  {
+   "id": "keywordp/0082",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (make-symbol \":λ\")) (error (list 'sig e))))",
+   "expected": "(ok :λ)"
+  },
+  {
+   "id": "keywordp/0083",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (symbol-function 'car)) (error (list 'sig e))))",
+   "expected": "(ok #<subr car>)"
+  },
+  {
+   "id": "keywordp/0084",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vector 1 2)) (error (list 'sig e))))",
+   "expected": "(ok [1 2])"
+  },
+  {
+   "id": "keywordp/0085",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vector :a)) (error (list 'sig e))))",
+   "expected": "(ok [:a])"
+  },
+  {
+   "id": "keywordp/0086",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok -1) (error (list 'sig e))))",
+   "expected": "(ok -1)"
+  },
+  {
+   "id": "keywordp/0087",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 0) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "keywordp/0088",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1) (error (list 'sig e))))",
+   "expected": "(ok 1)"
+  },
+  {
+   "id": "keywordp/0089",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1.5) (error (list 'sig e))))",
+   "expected": "(ok 1.5)"
+  },
+  {
+   "id": "keywordp/0090",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 2) (error (list 'sig e))))",
+   "expected": "(ok 2)"
+  },
+  {
+   "id": "keywordp/0091",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok :a) (error (list 'sig e))))",
+   "expected": "(ok :a)"
+  },
+  {
+   "id": "keywordp/0092",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok :kw) (error (list 'sig e))))",
+   "expected": "(ok :kw)"
+  },
+  {
+   "id": "keywordp/0093",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok :λ) (error (list 'sig e))))",
+   "expected": "(ok :λ)"
+  },
+  {
+   "id": "keywordp/0094",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok ?:) (error (list 'sig e))))",
+   "expected": "(ok 58)"
+  },
+  {
+   "id": "keywordp/0095",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok most-positive-fixnum) (error (list 'sig e))))",
+   "expected": "(ok 2305843009213693951)"
+  },
+  {
+   "id": "keywordp/0096",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok nil) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "keywordp/0097",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok t) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  }
+ ],
+ "pinned": {
+  "keywordp/0075": "PRINTER"
+ }
+}

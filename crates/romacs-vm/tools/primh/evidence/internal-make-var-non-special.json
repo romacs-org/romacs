@@ -1,0 +1,182 @@
+{
+ "protocol": "primh-v1",
+ "pinned": {"internal-make-var-non-special/0018": "VALUE"},
+ "primitive": "internal-make-var-non-special",
+ "spec_sha256": "c362f74f5c6c016171eded40fb2f70837c10821d64f3abf1e8612cd7b3bd5658",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "internal-make-var-non-special",
+    "subr",
+    1,
+    1
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "eval.c": "db894444b2edc1e7e675d5d8f97cba7e6f77f2beb0e5c3a130afc505c6f387b4"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "internal-make-var-non-special/0000",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal-make-var-non-special nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "internal-make-var-non-special/0001",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal-make-var-non-special t)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "internal-make-var-non-special/0002",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal-make-var-non-special 'leaf-x)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "internal-make-var-non-special/0003",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal-make-var-non-special 3)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 3))"
+  },
+  {
+   "id": "internal-make-var-non-special/0004",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal-make-var-non-special \"x\")) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"x\"))"
+  },
+  {
+   "id": "internal-make-var-non-special/0005",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (internal-make-var-non-special [1])) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp [1]))"
+  },
+  {
+   "id": "internal-make-var-non-special/0006",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'internal-make-var-non-special '())) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr internal-make-var-non-special> 0))"
+  },
+  {
+   "id": "internal-make-var-non-special/0007",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'internal-make-var-non-special '(1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr internal-make-var-non-special> 2))"
+  },
+  {
+   "id": "internal-make-var-non-special/0008",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (internal-make-var-non-special a0))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "internal-make-var-non-special/0009",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil)) (let ((r (internal-make-var-non-special a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (t))"
+  },
+  {
+   "id": "internal-make-var-non-special/0010",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 3)) (let ((r (internal-make-var-non-special a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 3))"
+  },
+  {
+   "id": "internal-make-var-non-special/0011",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defvar leaf-x 7) (list (special-variable-p 'leaf-x) (internal-make-var-non-special 'leaf-x) (special-variable-p 'leaf-x) leaf-x))) (error (list 'sig e))))",
+   "expected": "(ok (t nil nil 7))"
+  },
+  {
+   "id": "internal-make-var-non-special/0012",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((s (make-symbol \"leaf-x\"))) (internal--define-uninitialized-variable s) (list (special-variable-p s) (internal-make-var-non-special s) (special-variable-p s)))) (error (list 'sig e))))",
+   "expected": "(ok (t nil nil))"
+  },
+  {
+   "id": "internal-make-var-non-special/0013",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defvaralias 'leaf-alias 'leaf-base) (internal-make-var-non-special 'leaf-alias) (list (special-variable-p 'leaf-alias) (special-variable-p 'leaf-base)))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "internal-make-var-non-special/0014",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (fboundp 'internal-make-var-non-special) (functionp #'internal-make-var-non-special) (funcall #'internal-make-var-non-special 'leaf-y))) (error (list 'sig e))))",
+   "expected": "(ok (t t nil))"
+  },
+  {
+   "id": "internal-make-var-non-special/0015",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (boundp 'debug-on-error) debug-on-error (special-variable-p 'debug-on-error))) (error (list 'sig e))))",
+   "expected": "(ok (t nil t))"
+  },
+  {
+   "id": "internal-make-var-non-special/0016",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (let ((debug-on-error '(error))) (funcall (lambda () debug-on-error))) debug-on-error)) (error (list 'sig e))))",
+   "expected": "(ok ((error) nil))"
+  },
+  {
+   "id": "internal-make-var-non-special/0017",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq debug-on-error [1]) (list debug-on-error (default-value 'debug-on-error)))) (error (list 'sig e))))",
+   "expected": "(ok ([1] [1]))"
+  },
+  {
+   "id": "internal-make-var-non-special/0018",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq debug-on-error 3) (list debug-on-error (condition-case e (symbol-value 2) (error e))))) (error (list 'sig e))))",
+   "expected": "(ok (3 (wrong-type-argument symbolp 2)))"
+  },
+  {
+   "id": "internal-make-var-non-special/0019",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"x\") (error (list 'sig e))))",
+   "expected": "(ok \"x\")"
+  },
+  {
+   "id": "internal-make-var-non-special/0020",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 'leaf-x) (error (list 'sig e))))",
+   "expected": "(ok leaf-x)"
+  },
+  {
+   "id": "internal-make-var-non-special/0021",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 3) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "internal-make-var-non-special/0022",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok [1]) (error (list 'sig e))))",
+   "expected": "(ok [1])"
+  },
+  {
+   "id": "internal-make-var-non-special/0023",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok nil) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "internal-make-var-non-special/0024",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok t) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  }
+ ]
+}

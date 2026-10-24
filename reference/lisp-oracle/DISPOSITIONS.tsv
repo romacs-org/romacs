@@ -1,0 +1,51 @@
+# Disposition of the 48 EDIT rows of POPULATIONS.tsv (Phase 0, lane vm2/oracle).
+# path	disposition	class	commits (provenance: git log --reverse -- PATH; "import" = d4912095, edited at import)	what the edit was
+# OVERLAY = moved to lisp-overlay/ (rebased on the pin). DROPPED = GNU's file restored, edit discarded (history keeps it).
+lisp/README	OVERLAY	curation	80c44bb5	bundled package notes
+lisp/autoinsert.el	DROPPED	lexical-binding-sweep	fa165730	only the designed one-dialect sweep; patch kept in lisp-overlay/proposed/ (OWNER DECISION)
+lisp/button.el	DROPPED	lexical-binding-sweep	20daa2b5	only the designed one-dialect sweep; patch kept in lisp-overlay/proposed/ (OWNER DECISION)
+lisp/custom.el	DROPPED	lexical-binding-sweep	fa165730	only the designed one-dialect sweep; patch kept in lisp-overlay/proposed/ (OWNER DECISION)
+lisp/emacs-lisp/bindat.el	DROPPED	lexical-binding-sweep	fa165730	only the designed one-dialect sweep; patch kept in lisp-overlay/proposed/ (OWNER DECISION)
+lisp/emacs-lisp/byte-opt.el	DROPPED	lexical-binding-sweep	fa165730+93bda88d	only the designed one-dialect sweep; patch kept in lisp-overlay/proposed/ (OWNER DECISION)
+lisp/emacs-lisp/byte-run.el	DROPPED	vm-workaround+sweep	fa165730; 166988d4,d8f5bdda	eval-and-compile -> (cons progn body) [ledger VM2-BOOT1]; eval-when-compile eval ... t
+lisp/emacs-lisp/bytecomp.el	DROPPED	lexical-binding-sweep	93bc1f49+fa165730 (+327ce136/f3299556 net 0)	only the designed one-dialect sweep; patch kept in lisp-overlay/proposed/ (OWNER DECISION)
+lisp/emacs-lisp/cconv.el	DROPPED	lexical-binding-sweep	fa165730	only the designed one-dialect sweep; patch kept in lisp-overlay/proposed/ (OWNER DECISION)
+lisp/emacs-lisp/cl-generic.el	DROPPED	lexical-binding-sweep	fa165730	only the designed one-dialect sweep; patch kept in lisp-overlay/proposed/ (OWNER DECISION)
+lisp/emacs-lisp/cl-macs.el	DROPPED	lexical-binding-sweep	fa165730+ef25f693 (cl-progv, a sweep consequence)	only the designed one-dialect sweep; patch kept in lisp-overlay/proposed/ (OWNER DECISION)
+lisp/emacs-lisp/cl-print.el	DROPPED	lexical-binding-sweep	fa165730	only the designed one-dialect sweep; patch kept in lisp-overlay/proposed/ (OWNER DECISION)
+lisp/emacs-lisp/comp.el	DROPPED	lexical-binding-sweep	fa165730	only the designed one-dialect sweep; patch kept in lisp-overlay/proposed/ (OWNER DECISION)
+lisp/emacs-lisp/disass.el	DROPPED	lexical-binding-sweep	fa165730	only the designed one-dialect sweep; patch kept in lisp-overlay/proposed/ (OWNER DECISION)
+lisp/emacs-lisp/eldoc.el	OVERLAY	curation	import	scroll-prediction witness
+lisp/emacs-lisp/ert.el	DROPPED	lexical-binding-sweep	fa165730	only the designed one-dialect sweep; patch kept in lisp-overlay/proposed/ (OWNER DECISION)
+lisp/emacs-lisp/generator.el	DROPPED	lexical-binding-sweep	fa165730	only the designed one-dialect sweep; patch kept in lisp-overlay/proposed/ (OWNER DECISION)
+lisp/emacs-lisp/gv.el	DROPPED	lexical-binding-sweep	fa165730	only the designed one-dialect sweep; patch kept in lisp-overlay/proposed/ (OWNER DECISION)
+lisp/emacs-lisp/macroexp.el	DROPPED	vm-workaround+sweep	fa165730; a96f0395	cadr -> (car (cdr ..)) [VM2-BOOTSTRAP1]; dynamic-variable-p drops (not lexical-binding)
+lisp/emacs-lisp/oclosure.el	DROPPED	lexical-binding-sweep	fa165730	only the designed one-dialect sweep; patch kept in lisp-overlay/proposed/ (OWNER DECISION)
+lisp/emacs-lisp/pcase.el	DROPPED	upstream-backport-variant	import	pre-release pcase-let*-strict + separate memo table; the pin carries upstream 541f693ca2e instead
+lisp/emacs-lisp/pp.el	DROPPED	lexical-binding-sweep	fa165730	only the designed one-dialect sweep; patch kept in lisp-overlay/proposed/ (OWNER DECISION)
+lisp/emacs-lisp/rx.el	DROPPED	lexical-binding-sweep	fa165730	only the designed one-dialect sweep; patch kept in lisp-overlay/proposed/ (OWNER DECISION)
+lisp/emacs-lisp/subr-x.el	OVERLAY	curation+sweep	269d80af+7590336d; sweep fa165730	string-pixel-width via romacs primitive; named-let sweep hunk -> proposed/
+lisp/emacs-lisp/thunk.el	DROPPED	lexical-binding-sweep	fa165730	only the designed one-dialect sweep; patch kept in lisp-overlay/proposed/ (OWNER DECISION)
+lisp/faces.el	OVERLAY	curation	import+a900b5a7	frame type romacs in face specs
+lisp/files-x.el	DROPPED	lexical-binding-sweep	fa165730	only the designed one-dialect sweep; patch kept in lisp-overlay/proposed/ (OWNER DECISION)
+lisp/files.el	DROPPED	lexical-binding-sweep	93bc1f49 (+327ce136/f3299556 net 0)	only the designed one-dialect sweep; patch kept in lisp-overlay/proposed/ (OWNER DECISION)
+lisp/frame.el	OVERLAY	curation	import(Neomacs)+a900b5a7	frame type romacs
+lisp/gnus/gnus-util.el	DROPPED	lexical-binding-sweep	fa165730	only the designed one-dialect sweep; patch kept in lisp-overlay/proposed/ (OWNER DECISION)
+lisp/ielm.el	DROPPED	lexical-binding-sweep	fa165730	only the designed one-dialect sweep; patch kept in lisp-overlay/proposed/ (OWNER DECISION)
+lisp/image.el	OVERLAY	curation	import+327ce136/f3299556(net 0)	romacs image type; animation intro/loop
+lisp/international/emoji.el	OVERLAY	curation	80c44bb5	transient -> keymap-popup port
+lisp/ldefs-boot.el	OVERLAY	curation	import+80c44bb5	bundled-package autoloads; transient removed
+lisp/loadup.el	OVERLAY	curation+sweep	import; sweep fa165730	romacs dump protocol; sweep hunk -> proposed/
+lisp/menu-bar.el	OVERLAY	curation	import+a900b5a7	romacs-menu-bar-open
+lisp/net/tramp-integration.el	OVERLAY	curation	import	loaddefs-gen bootstrap tolerance
+lisp/org/ob-emacs-lisp.el	DROPPED	lexical-binding-sweep	fa165730	only the designed one-dialect sweep; patch kept in lisp-overlay/proposed/ (OWNER DECISION)
+lisp/org/ox-html.el	DROPPED	accidental-rename	import	"Neo-Euler" MathJax font renamed "Romacs-Euler" by a Neomacs->Romacs sweep: a bug
+lisp/pixel-scroll.el	OVERLAY	curation	import	scroll-prediction witnesses
+lisp/progmodes/elisp-mode.el	DROPPED	lexical-binding-sweep	93bc1f49+fa165730	only the designed one-dialect sweep; patch kept in lisp-overlay/proposed/ (OWNER DECISION)
+lisp/shadowfile.el	DROPPED	lexical-binding-sweep	fa165730	only the designed one-dialect sweep; patch kept in lisp-overlay/proposed/ (OWNER DECISION)
+lisp/simple.el	DROPPED	lexical-binding-sweep	fa165730	only the designed one-dialect sweep; patch kept in lisp-overlay/proposed/ (OWNER DECISION)
+lisp/startup.el	OVERLAY	curation+sweep	import+421d2cd4+0e702733+825716ff; sweep fa165730	Rum theme, preload helpers; sweep hunks -> proposed/
+lisp/subr.el	DROPPED	vm-workaround+sweep+perf	71a394a0 perf; fa165730 sweep; 166988d4,d8f5bdda,5b8fa6bb,b67b49d5,50198e69 bootstrap	pcase-dolist->dolist, 3-arg <= split, #o literals->decimal, ?\M-\C-@ ->134217856, setf nth->setcar nthcdr; (eval c lexical-binding)->t; string-replace no-match copy
+lisp/tab-bar.el	OVERLAY	curation	import	navigation-intent report
+lisp/tooltip.el	OVERLAY	curation	import	scroll-prediction witness
+lisp/window.el	OVERLAY	curation	import	navigation-intent report

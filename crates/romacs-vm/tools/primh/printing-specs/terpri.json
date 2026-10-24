@@ -1,0 +1,24 @@
+{
+ "name": "terpri",
+ "arity": [
+  0,
+  2
+ ],
+ "effect": "global",
+ "gnu_files": [
+  "print.c"
+ ],
+ "gnu_def": "print.c:627",
+ "rust": "src/prims/printing.rs:18",
+ "args": [
+  "printing-probe-only",
+  "printing-probe-only"
+ ],
+ "probes": [
+  "(let ((out nil)) (list (terpri (lambda (c) (setq out (cons c out)))) out))",
+  "(condition-case e (terpri (lambda (c) nil) t) (error (car e)))",
+  "(terpri (current-buffer) t)",
+  "(terpri 7)",
+  "(let ((out nil) (standard-output (lambda (c) (setq out (cons c out))))) (list (terpri) out))"
+ ]
+}

@@ -1,0 +1,855 @@
+use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
+use std::num::NonZeroU32;
+use std::path::PathBuf;
+use std::str::FromStr;
+use std::time::Duration;
+
+use serde::{Deserialize, Serialize};
+
+use crate::{
+    EditorProvenance, Frontend, MetricName, MetricUnit, NativeVideoComparisonIdentity,
+    NativeVideoExecutionIdentity, PortableDumpProvenance, RunVerdict, ScenarioId, scenario,
+};
+
+pub const COMPARISON_ARTIFACT_SCHEMA_VERSION: u32 = 8;
+
+/// Immutable parameters shared by every run in one comparison.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ComparisonInput {
+    pub scenario: ScenarioId,
+    pub frontend: Frontend,
+    pub iterations: NonZeroU32,
+    pub samples_per_side: ComparisonSampleCount,
+    pub primary_metric: MetricName,
+    pub baseline_editor: PathBuf,
+    pub candidate_editor: PathBuf,
+    pub machine: crate::MachinePolicy,
+    pub counters: Option<crate::CounterScope>,
+    pub video_file: Option<PathBuf>,
+    pub journal_file: Option<PathBuf>,
+    pub baseline_execution_overrides: crate::ExecutionOverrides,
+    pub candidate_execution_overrides: crate::ExecutionOverrides,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ComparisonRunRole {
+    Baseline,
+    Candidate,
+}
+
+/// One underlying workload run retained by a comparison artifact.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ComparisonRun {
+    pub role: ComparisonRunRole,
+    pub sample_index: u32,
+    pub run_id: String,
+    pub artifact_path: PathBuf,
+    pub scenario: ScenarioId,
+    pub frontend: Frontend,
+    pub editor: PathBuf,
+    pub iterations: u32,
+    pub editor_provenance: Option<EditorProvenance>,
+    pub execution_environment: Option<BTreeMap<String, String>>,
+    pub native_video_input: Option<NativeVideoComparisonIdentity>,
+    pub native_video_execution: Option<NativeVideoExecutionIdentity>,
+    pub outcome: ComparisonRunOutcome,
+}
+
+/// Classification only; detailed child results remain in the linked run artifact.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ComparisonRunOutcome {
+    Valid,
+    CorrectnessMismatch,
+    InfrastructureFailure,
+}
+
+impl From<&RunVerdict> for ComparisonRunOutcome {
+    fn from(verdict: &RunVerdict) -> Self {
+        match verdict {
+            RunVerdict::Valid { .. } => Self::Valid,
+            RunVerdict::CorrectnessMismatch { .. } => Self::CorrectnessMismatch,
+            RunVerdict::InfrastructureFailure { .. } => Self::InfrastructureFailure,
+        }
+    }
+}
+
+/// Evaluation-only data. It is deliberately not serializable so rejected
+/// comparisons cannot accidentally embed valid child measurements.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ComparisonObservation {
+    pub run: ComparisonRun,
+    pub verdict: RunVerdict,
+}
+
+/// Descriptive primary-metric values paired by the scheduled sample index.
+/// These retain pairing when the marginal sample arrays below are sorted.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ComparisonPairedSample {
+    pub sample_index: u32,
+    pub baseline: f64,
+    pub candidate: f64,
+    pub candidate_to_baseline_ratio: f64,
+    pub percent_change: f64,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ComparisonMetricSummary {
+    pub metric: MetricName,
+    pub unit: MetricUnit,
+    pub baseline_samples: Vec<f64>,
+    pub candidate_samples: Vec<f64>,
+    pub paired_samples: Vec<ComparisonPairedSample>,
+    pub baseline_median: f64,
+    pub candidate_median: f64,
+    pub baseline_median_absolute_deviation: f64,
+    pub candidate_median_absolute_deviation: f64,
+    pub candidate_to_baseline_ratio: f64,
+    pub percent_change: f64,
+}
+
+/// The minimum useful descriptive repetition count per editor.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(try_from = "u32", into = "u32")]
+pub struct ComparisonSampleCount(NonZeroU32);
+
+impl ComparisonSampleCount {
+    pub const MINIMUM: u32 = 3;
+
+    pub const fn new(value: u32) -> Option<Self> {
+        match NonZeroU32::new(value) {
+            Some(value) if value.get() >= Self::MINIMUM => Some(Self(value)),
+            Some(_) | None => None,
+        }
+    }
+
+    pub const fn get(self) -> u32 {
+        self.0.get()
+    }
+}
+
+impl TryFrom<u32> for ComparisonSampleCount {
+    type Error = String;
+
+    fn try_from(value: u32) -> Result<Self, Self::Error> {
+        Self::new(value)
+            .ok_or_else(|| format!("comparison sample count must be at least {}", Self::MINIMUM))
+    }
+}
+
+impl From<ComparisonSampleCount> for u32 {
+    fn from(value: ComparisonSampleCount) -> Self {
+        value.get()
+    }
+}
+
+impl fmt::Display for ComparisonSampleCount {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.get().fmt(formatter)
+    }
+}
+
+impl FromStr for ComparisonSampleCount {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        value
+            .parse::<u32>()
+            .map_err(|_| {
+                format!("comparison sample count must be an unsigned integer, got `{value}`")
+            })?
+            .try_into()
+    }
+}
+
+/// Machine-readable record for one interleaved two-editor comparison.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ComparisonArtifact {
+    pub schema_version: u32,
+    pub comparison_id: String,
+    pub input: ComparisonInput,
+    pub started_unix_ms: u128,
+    pub total_elapsed_us: u128,
+    pub verdict: ComparisonVerdict,
+    pub runs: Vec<ComparisonRun>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ComparisonRequest {
+    scenario: ScenarioId,
+    baseline_editor: PathBuf,
+    candidate_editor: PathBuf,
+    samples_per_side: ComparisonSampleCount,
+    iterations: NonZeroU32,
+    frontend: Option<Frontend>,
+    timeout: Duration,
+    machine: crate::MachinePolicy,
+    counters: Option<crate::CounterScope>,
+    video_file: Option<PathBuf>,
+    journal_file: Option<PathBuf>,
+    baseline_execution_overrides: crate::ExecutionOverrides,
+    candidate_execution_overrides: crate::ExecutionOverrides,
+    inherited_environment: BTreeMap<String, std::ffi::OsString>,
+}
+
+impl ComparisonRequest {
+    pub fn new(
+        scenario: ScenarioId,
+        baseline_editor: impl Into<PathBuf>,
+        candidate_editor: impl Into<PathBuf>,
+        samples_per_side: ComparisonSampleCount,
+        iterations: NonZeroU32,
+    ) -> Self {
+        Self {
+            scenario,
+            baseline_editor: baseline_editor.into(),
+            candidate_editor: candidate_editor.into(),
+            samples_per_side,
+            iterations,
+            frontend: None,
+            timeout: Duration::from_secs(300),
+            machine: crate::MachinePolicy::default(),
+            counters: None,
+            video_file: None,
+            journal_file: None,
+            baseline_execution_overrides: crate::ExecutionOverrides::default(),
+            candidate_execution_overrides: crate::ExecutionOverrides::default(),
+            inherited_environment: BTreeMap::new(),
+        }
+    }
+
+    pub fn with_frontend(mut self, frontend: Frontend) -> Self {
+        self.frontend = Some(frontend);
+        self
+    }
+
+    pub fn with_timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = timeout;
+        self
+    }
+
+    pub fn with_machine_policy(mut self, machine: crate::MachinePolicy) -> Self {
+        self.machine = machine;
+        self
+    }
+
+    pub fn with_counters(mut self, counters: Option<crate::CounterScope>) -> Self {
+        self.counters = counters;
+        self
+    }
+
+    pub fn with_video_file(mut self, video_file: Option<PathBuf>) -> Self {
+        self.video_file = video_file;
+        self
+    }
+
+    pub fn with_journal_file(mut self, journal_file: Option<PathBuf>) -> Self {
+        self.journal_file = journal_file;
+        self
+    }
+
+    pub fn with_execution_overrides(
+        mut self,
+        baseline: crate::ExecutionOverrides,
+        candidate: crate::ExecutionOverrides,
+    ) -> Self {
+        self.baseline_execution_overrides = baseline;
+        self.candidate_execution_overrides = candidate;
+        self
+    }
+
+    pub fn frontend(&self) -> Frontend {
+        self.frontend
+            .unwrap_or_else(|| scenario(self.scenario).default_frontend)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ComparisonReport {
+    pub artifact: ComparisonArtifact,
+    pub artifact_path: PathBuf,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum ComparisonRejection {
+    WrongSampleCount {
+        role: ComparisonRunRole,
+        expected: u32,
+        actual: u32,
+    },
+    WrongSampleIndexes {
+        role: ComparisonRunRole,
+        expected: Vec<u32>,
+        actual: Vec<u32>,
+    },
+    DuplicateRunId {
+        run_id: String,
+    },
+    DuplicateArtifactPath {
+        artifact_path: PathBuf,
+    },
+    ScenarioMismatch {
+        role: ComparisonRunRole,
+        sample_index: u32,
+        run_id: String,
+        expected: ScenarioId,
+        actual: ScenarioId,
+    },
+    FrontendMismatch {
+        role: ComparisonRunRole,
+        sample_index: u32,
+        run_id: String,
+        expected: Frontend,
+        actual: Frontend,
+    },
+    EditorMismatch {
+        role: ComparisonRunRole,
+        sample_index: u32,
+        run_id: String,
+        expected: PathBuf,
+        actual: PathBuf,
+    },
+    IterationsMismatch {
+        role: ComparisonRunRole,
+        sample_index: u32,
+        run_id: String,
+        expected: u32,
+        actual: u32,
+    },
+    ExecutionEnvironmentMismatch {
+        role: ComparisonRunRole,
+        sample_index: u32,
+        run_id: String,
+        reason: String,
+    },
+    MissingEditorProvenance {
+        role: ComparisonRunRole,
+        sample_index: u32,
+        run_id: String,
+    },
+    EditorProvenanceMismatch {
+        role: ComparisonRunRole,
+        sample_index: u32,
+        run_id: String,
+        expected: EditorProvenance,
+        actual: EditorProvenance,
+    },
+    MissingPortableDumpProvenance {
+        role: ComparisonRunRole,
+        sample_index: u32,
+        run_id: String,
+    },
+    PortableDumpStateMismatch {
+        baseline: PortableDumpProvenance,
+        candidate: PortableDumpProvenance,
+    },
+    MissingNativeVideoInput {
+        role: ComparisonRunRole,
+        sample_index: u32,
+        run_id: String,
+    },
+    NativeVideoInputMismatch {
+        role: ComparisonRunRole,
+        sample_index: u32,
+        run_id: String,
+        expected: NativeVideoComparisonIdentity,
+        actual: NativeVideoComparisonIdentity,
+    },
+    MissingNativeVideoExecution {
+        role: ComparisonRunRole,
+        sample_index: u32,
+        run_id: String,
+    },
+    NativeVideoExecutionMismatch {
+        role: ComparisonRunRole,
+        sample_index: u32,
+        run_id: String,
+        expected: NativeVideoExecutionIdentity,
+        actual: NativeVideoExecutionIdentity,
+    },
+    InvalidRun {
+        role: ComparisonRunRole,
+        sample_index: u32,
+        run_id: String,
+    },
+    MissingMetric {
+        role: ComparisonRunRole,
+        sample_index: u32,
+        run_id: String,
+        metric: MetricName,
+    },
+    DuplicateMetric {
+        role: ComparisonRunRole,
+        sample_index: u32,
+        run_id: String,
+        metric: MetricName,
+    },
+    InvalidMetricValue {
+        role: ComparisonRunRole,
+        sample_index: u32,
+        run_id: String,
+        metric: MetricName,
+    },
+    MetricUnitMismatch {
+        role: ComparisonRunRole,
+        sample_index: u32,
+        run_id: String,
+        expected: MetricUnit,
+        actual: MetricUnit,
+    },
+    CrossEditorParityMismatch {
+        metric: MetricName,
+        baseline_values: Vec<String>,
+        candidate_values: Vec<String>,
+    },
+}
+
+/// Aggregate outcome. Statistics exist only when every underlying run is valid.
+///
+/// **`Valid` means the runs completed and the workload checksums matched. It
+/// does NOT mean the number is trustworthy.** A wall- or CPU-time metric is
+/// hostage to whatever else the machine is doing; only instruction counts and
+/// cycles (`--hardware-counters`) are deterministic. Gate on those and read
+/// time as a secondary signal.
+///
+/// The comparison interleaves baseline and candidate samples, which makes the
+/// BASELINE a control worth reading before believing any delta: if both sides
+/// inflated and both MADs blew out, the machine was loaded and the run should
+/// be discarded; if the baseline sat in its usual band and only the candidate
+/// moved, the effect is real. See the crate README, "Which number decides".
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum ComparisonVerdict {
+    Valid { summary: ComparisonMetricSummary },
+    Rejected { reasons: Vec<ComparisonRejection> },
+}
+
+impl ComparisonVerdict {
+    pub const fn is_valid(&self) -> bool {
+        matches!(self, Self::Valid { .. })
+    }
+}
+
+/// Interleave pairs and reverse odd pairs to reduce time-order bias.
+pub fn comparison_schedule(
+    samples_per_side: ComparisonSampleCount,
+) -> Vec<(ComparisonRunRole, u32)> {
+    let mut schedule = Vec::with_capacity(samples_per_side.get() as usize * 2);
+    for sample_index in 0..samples_per_side.get() {
+        if sample_index.is_multiple_of(2) {
+            schedule.push((ComparisonRunRole::Baseline, sample_index));
+            schedule.push((ComparisonRunRole::Candidate, sample_index));
+        } else {
+            schedule.push((ComparisonRunRole::Candidate, sample_index));
+            schedule.push((ComparisonRunRole::Baseline, sample_index));
+        }
+    }
+    schedule
+}
+
+pub fn evaluate_comparison(
+    input: &ComparisonInput,
+    observations: &[ComparisonObservation],
+) -> ComparisonVerdict {
+    let mut reasons = Vec::new();
+    for role in [ComparisonRunRole::Baseline, ComparisonRunRole::Candidate] {
+        let mut actual_indexes = observations
+            .iter()
+            .filter_map(|observation| {
+                (observation.run.role == role).then_some(observation.run.sample_index)
+            })
+            .collect::<Vec<_>>();
+        actual_indexes.sort_unstable();
+        let actual_count = actual_indexes.len() as u32;
+        if actual_count != input.samples_per_side.get() {
+            reasons.push(ComparisonRejection::WrongSampleCount {
+                role,
+                expected: input.samples_per_side.get(),
+                actual: actual_count,
+            });
+        }
+        let expected_indexes = (0..input.samples_per_side.get()).collect::<Vec<_>>();
+        if actual_indexes != expected_indexes {
+            reasons.push(ComparisonRejection::WrongSampleIndexes {
+                role,
+                expected: expected_indexes,
+                actual: actual_indexes,
+            });
+        }
+    }
+
+    let mut run_ids = BTreeSet::new();
+    let mut artifact_paths = BTreeSet::new();
+    let mut baseline_provenance: Option<EditorProvenance> = None;
+    let mut candidate_provenance: Option<EditorProvenance> = None;
+    let mut native_video_input: Option<NativeVideoComparisonIdentity> = None;
+    let mut native_video_execution: Option<NativeVideoExecutionIdentity> = None;
+    let mut execution_environments = BTreeMap::new();
+    let mut samples = Vec::with_capacity(observations.len());
+    let expected_unit = input.primary_metric.canonical_unit();
+    for observation in observations {
+        let run = &observation.run;
+        if !run_ids.insert(run.run_id.clone()) {
+            reasons.push(ComparisonRejection::DuplicateRunId {
+                run_id: run.run_id.clone(),
+            });
+        }
+        if !artifact_paths.insert(run.artifact_path.clone()) {
+            reasons.push(ComparisonRejection::DuplicateArtifactPath {
+                artifact_path: run.artifact_path.clone(),
+            });
+        }
+        if run.scenario != input.scenario {
+            reasons.push(ComparisonRejection::ScenarioMismatch {
+                role: run.role,
+                sample_index: run.sample_index,
+                run_id: run.run_id.clone(),
+                expected: input.scenario,
+                actual: run.scenario,
+            });
+        }
+        if run.frontend != input.frontend {
+            reasons.push(ComparisonRejection::FrontendMismatch {
+                role: run.role,
+                sample_index: run.sample_index,
+                run_id: run.run_id.clone(),
+                expected: input.frontend,
+                actual: run.frontend,
+            });
+        }
+        let expected_editor = match run.role {
+            ComparisonRunRole::Baseline => &input.baseline_editor,
+            ComparisonRunRole::Candidate => &input.candidate_editor,
+        };
+        if run.editor != *expected_editor {
+            reasons.push(ComparisonRejection::EditorMismatch {
+                role: run.role,
+                sample_index: run.sample_index,
+                run_id: run.run_id.clone(),
+                expected: expected_editor.clone(),
+                actual: run.editor.clone(),
+            });
+        }
+        if run.iterations != input.iterations.get() {
+            reasons.push(ComparisonRejection::IterationsMismatch {
+                role: run.role,
+                sample_index: run.sample_index,
+                run_id: run.run_id.clone(),
+                expected: input.iterations.get(),
+                actual: run.iterations,
+            });
+        }
+        let overrides = match run.role {
+            ComparisonRunRole::Baseline => &input.baseline_execution_overrides,
+            ComparisonRunRole::Candidate => &input.candidate_execution_overrides,
+        };
+        let environment_check = match &run.execution_environment {
+            None => Err("missing execution environment provenance".to_owned()),
+            Some(actual) => overrides.validate_recorded(actual).and_then(|()| {
+                match execution_environments.get(&run.role) {
+                    Some(expected) if expected != actual => {
+                        Err("execution settings changed between samples of the same arm".to_owned())
+                    }
+                    Some(_) => Ok(()),
+                    None => {
+                        execution_environments.insert(run.role, actual.clone());
+                        Ok(())
+                    }
+                }
+            }),
+        };
+        if let Err(reason) = environment_check {
+            reasons.push(ComparisonRejection::ExecutionEnvironmentMismatch {
+                role: run.role,
+                sample_index: run.sample_index,
+                run_id: run.run_id.clone(),
+                reason,
+            });
+        }
+        match &run.editor_provenance {
+            None => reasons.push(ComparisonRejection::MissingEditorProvenance {
+                role: run.role,
+                sample_index: run.sample_index,
+                run_id: run.run_id.clone(),
+            }),
+            Some(actual) => {
+                if actual.portable_dump == PortableDumpProvenance::Unknown {
+                    reasons.push(ComparisonRejection::MissingPortableDumpProvenance {
+                        role: run.role,
+                        sample_index: run.sample_index,
+                        run_id: run.run_id.clone(),
+                    });
+                }
+                let expected = match run.role {
+                    ComparisonRunRole::Baseline => &mut baseline_provenance,
+                    ComparisonRunRole::Candidate => &mut candidate_provenance,
+                };
+                match expected {
+                    Some(expected) if expected != actual => {
+                        reasons.push(ComparisonRejection::EditorProvenanceMismatch {
+                            role: run.role,
+                            sample_index: run.sample_index,
+                            run_id: run.run_id.clone(),
+                            expected: expected.clone(),
+                            actual: actual.clone(),
+                        });
+                    }
+                    Some(_) => {}
+                    None => *expected = Some(actual.clone()),
+                }
+            }
+        }
+        if input.scenario == ScenarioId::SustainedNativeVideo {
+            match &run.native_video_input {
+                None => reasons.push(ComparisonRejection::MissingNativeVideoInput {
+                    role: run.role,
+                    sample_index: run.sample_index,
+                    run_id: run.run_id.clone(),
+                }),
+                Some(actual) => match &native_video_input {
+                    Some(expected) if expected != actual => {
+                        reasons.push(ComparisonRejection::NativeVideoInputMismatch {
+                            role: run.role,
+                            sample_index: run.sample_index,
+                            run_id: run.run_id.clone(),
+                            expected: expected.clone(),
+                            actual: actual.clone(),
+                        });
+                    }
+                    Some(_) => {}
+                    None => native_video_input = Some(actual.clone()),
+                },
+            }
+            match &run.native_video_execution {
+                None => reasons.push(ComparisonRejection::MissingNativeVideoExecution {
+                    role: run.role,
+                    sample_index: run.sample_index,
+                    run_id: run.run_id.clone(),
+                }),
+                Some(actual) => match &native_video_execution {
+                    Some(expected) if expected != actual => {
+                        reasons.push(ComparisonRejection::NativeVideoExecutionMismatch {
+                            role: run.role,
+                            sample_index: run.sample_index,
+                            run_id: run.run_id.clone(),
+                            expected: expected.clone(),
+                            actual: actual.clone(),
+                        });
+                    }
+                    Some(_) => {}
+                    None => native_video_execution = Some(actual.clone()),
+                },
+            }
+        }
+
+        let Some(measurements) = observation.verdict.measurements() else {
+            reasons.push(ComparisonRejection::InvalidRun {
+                role: run.role,
+                sample_index: run.sample_index,
+                run_id: run.run_id.clone(),
+            });
+            continue;
+        };
+        let mut seen_metrics = BTreeSet::new();
+        let mut duplicate_metrics = BTreeSet::new();
+        for measurement in measurements {
+            if !seen_metrics.insert(measurement.name) && duplicate_metrics.insert(measurement.name)
+            {
+                reasons.push(ComparisonRejection::DuplicateMetric {
+                    role: run.role,
+                    sample_index: run.sample_index,
+                    run_id: run.run_id.clone(),
+                    metric: measurement.name,
+                });
+            }
+            let value_is_invalid = !measurement.value.is_finite()
+                || measurement.value < 0.0
+                || (measurement.name == input.primary_metric && measurement.value == 0.0)
+                || (measurement.name.canonical_unit() == MetricUnit::Count
+                    && measurement.value.fract() != 0.0);
+            if value_is_invalid {
+                reasons.push(ComparisonRejection::InvalidMetricValue {
+                    role: run.role,
+                    sample_index: run.sample_index,
+                    run_id: run.run_id.clone(),
+                    metric: measurement.name,
+                });
+            }
+            let canonical_unit = measurement.name.canonical_unit();
+            if measurement.unit != canonical_unit {
+                reasons.push(ComparisonRejection::MetricUnitMismatch {
+                    role: run.role,
+                    sample_index: run.sample_index,
+                    run_id: run.run_id.clone(),
+                    expected: canonical_unit,
+                    actual: measurement.unit,
+                });
+            }
+        }
+        let matching = measurements
+            .iter()
+            .filter(|measurement| measurement.name == input.primary_metric)
+            .collect::<Vec<_>>();
+        let measurement = match matching.as_slice() {
+            [] => {
+                reasons.push(ComparisonRejection::MissingMetric {
+                    role: run.role,
+                    sample_index: run.sample_index,
+                    run_id: run.run_id.clone(),
+                    metric: input.primary_metric,
+                });
+                continue;
+            }
+            [measurement] => *measurement,
+            _ => continue,
+        };
+        if !measurement.value.is_finite() || measurement.value <= 0.0 {
+            continue;
+        }
+        if measurement.unit != expected_unit {
+            continue;
+        }
+        samples.push((run.role, run.sample_index, measurement.value));
+    }
+
+    if let (Some(baseline), Some(candidate)) = (&baseline_provenance, &candidate_provenance) {
+        if baseline.portable_dump != PortableDumpProvenance::Unknown
+            && candidate.portable_dump != PortableDumpProvenance::Unknown
+            && !baseline
+                .portable_dump
+                .same_load_state(&candidate.portable_dump)
+        {
+            reasons.push(ComparisonRejection::PortableDumpStateMismatch {
+                baseline: baseline.portable_dump.clone(),
+                candidate: candidate.portable_dump.clone(),
+            });
+        }
+    }
+
+    for parity_metric in scenario(input.scenario).cross_editor_parity_metrics {
+        let metric = parity_metric.metric_name();
+        let mut baseline_values =
+            parity_metric_values(observations, ComparisonRunRole::Baseline, metric);
+        let mut candidate_values =
+            parity_metric_values(observations, ComparisonRunRole::Candidate, metric);
+        baseline_values.sort_by(f64::total_cmp);
+        candidate_values.sort_by(f64::total_cmp);
+        if baseline_values != candidate_values {
+            reasons.push(ComparisonRejection::CrossEditorParityMismatch {
+                metric,
+                baseline_values: render_metric_values(&baseline_values),
+                candidate_values: render_metric_values(&candidate_values),
+            });
+        }
+    }
+
+    if !reasons.is_empty() {
+        return ComparisonVerdict::Rejected { reasons };
+    }
+
+    let mut paired_values = BTreeMap::new();
+    for &(role, sample_index, value) in &samples {
+        let pair = paired_values.entry(sample_index).or_insert([None, None]);
+        pair[match role {
+            ComparisonRunRole::Baseline => 0,
+            ComparisonRunRole::Candidate => 1,
+        }] = Some(value);
+    }
+    let paired_samples = paired_values
+        .into_iter()
+        .map(|(sample_index, pair)| {
+            let [Some(baseline), Some(candidate)] = pair else {
+                unreachable!("validated comparison has both roles at every sample index")
+            };
+            let ratio = candidate / baseline;
+            ComparisonPairedSample {
+                sample_index,
+                baseline,
+                candidate,
+                candidate_to_baseline_ratio: ratio,
+                percent_change: (ratio - 1.0) * 100.0,
+            }
+        })
+        .collect();
+
+    let mut baseline_samples = samples
+        .iter()
+        .filter_map(|(role, _, value)| (*role == ComparisonRunRole::Baseline).then_some(*value))
+        .collect::<Vec<_>>();
+    let mut candidate_samples = samples
+        .iter()
+        .filter_map(|(role, _, value)| (*role == ComparisonRunRole::Candidate).then_some(*value))
+        .collect::<Vec<_>>();
+    baseline_samples.sort_by(f64::total_cmp);
+    candidate_samples.sort_by(f64::total_cmp);
+    let baseline_median = median(baseline_samples.iter().copied());
+    let candidate_median = median(candidate_samples.iter().copied());
+    let baseline_mad = median_absolute_deviation(&baseline_samples, baseline_median);
+    let candidate_mad = median_absolute_deviation(&candidate_samples, candidate_median);
+    let ratio = candidate_median / baseline_median;
+    ComparisonVerdict::Valid {
+        summary: ComparisonMetricSummary {
+            metric: input.primary_metric,
+            unit: expected_unit,
+            baseline_samples,
+            candidate_samples,
+            paired_samples,
+            baseline_median,
+            candidate_median,
+            baseline_median_absolute_deviation: baseline_mad,
+            candidate_median_absolute_deviation: candidate_mad,
+            candidate_to_baseline_ratio: ratio,
+            percent_change: (ratio - 1.0) * 100.0,
+        },
+    }
+}
+
+fn parity_metric_values(
+    observations: &[ComparisonObservation],
+    role: ComparisonRunRole,
+    metric: MetricName,
+) -> Vec<f64> {
+    observations
+        .iter()
+        .filter(|observation| observation.run.role == role)
+        .filter_map(|observation| {
+            let measurements = observation.verdict.measurements()?;
+            let mut matching = measurements
+                .iter()
+                .filter(|measurement| measurement.name == metric);
+            let measurement = matching.next()?;
+            matching.next().is_none().then_some(measurement.value)
+        })
+        .collect()
+}
+
+fn render_metric_values(values: &[f64]) -> Vec<String> {
+    values.iter().map(ToString::to_string).collect()
+}
+
+fn median(values: impl Iterator<Item = f64>) -> f64 {
+    let mut values = values.collect::<Vec<_>>();
+    values.sort_by(f64::total_cmp);
+    let midpoint = values.len() / 2;
+    if values.len().is_multiple_of(2) {
+        (values[midpoint - 1] + values[midpoint]) / 2.0
+    } else {
+        values[midpoint]
+    }
+}
+
+fn median_absolute_deviation(values: &[f64], center: f64) -> f64 {
+    median(values.iter().map(|value| (value - center).abs()))
+}
+
+#[cfg(test)]
+#[path = "comparison/tests/comparison_test.rs"]
+mod tests;

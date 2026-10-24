@@ -1,0 +1,191 @@
+{
+ "blob": "56fcbeee66fd08885b1d95a85ad0d56098ca410e",
+ "compiled": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": true,
+  "results": {
+   "message-all-epg-keys-available-p": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (epg-check-configuration (epg-find-configuration 'OpenPGP))) :form (epg-check-configuration ((program . \"/usr/bin/gpg2\") (curve . \"cv25519;ed25519;cv25519;ed25519;cv448;ed448;nistp256;nistp384;nistp521;brainpoolP256r1;brainpoolP384r1;brainpoolP512r1;secp256k1\") (compressname . \"Uncompressed;ZIP;ZLIB;BZIP2\") (compress 0 1 2 3) (digestname . \"SHA1;RIPEMD160;SHA256;SHA384;SHA512;SHA224\") (digest 2 3 8 9 10 11) (ciphername . \"IDEA;3DES;CAST5;BLOWFISH;AES;AES192;AES256;TWOFISH;CAMELLIA128;CAMELLIA192;CAMELLIA256\") (cipher 1 2 3 4 7 8 9 10 11 12 13) (pubkeyname . \"RSA;ELG;DSA;ECDH;ECDSA;EDDSA\") (pubkey 1 16 17 18 19 22) (version . \"2.4.9\")))))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "message-all-recipients": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "message-alter-repeat-address": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "message-default-buffer-type": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "message-mode-propertize": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "message-replace-header": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "message-strip-subject-trailing-was": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   }
+  },
+  "timed_out": false
+ },
+ "file": "lisp/gnus/message-tests.el",
+ "gnu": {
+  "emacs": "<recording-path-redacted>/emacs-32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+  "version": "32.0.50"
+ },
+ "harness_sha256": "78c20850429a08af22faadf73b5d164c560230e83d7eb88ef60cb995670703ef",
+ "mini": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": null,
+  "results": {
+   "message-all-epg-keys-available-p": {
+    "as_expected": null,
+    "detail": "(error \"Unsupported version: 2.4.9\")",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "message-all-recipients": {
+    "as_expected": null,
+    "detail": "(void-function ert-with-test-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "message-alter-repeat-address": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "message-default-buffer-type": {
+    "as_expected": null,
+    "detail": "(void-function ert-kill-all-test-buffers)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "message-mode-propertize": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "message-replace-header": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "message-strip-subject-trailing-was": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   }
+  },
+  "timed_out": false
+ },
+ "read_error": null,
+ "real": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": true,
+  "results": {
+   "message-all-epg-keys-available-p": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (epg-check-configuration (epg-find-configuration 'OpenPGP))) :form (epg-check-configuration ((program . \"/usr/bin/gpg2\") (curve . \"cv25519;ed25519;cv25519;ed25519;cv448;ed448;nistp256;nistp384;nistp521;brainpoolP256r1;brainpoolP384r1;brainpoolP512r1;secp256k1\") (compressname . \"Uncompressed;ZIP;ZLIB;BZIP2\") (compress 0 1 2 3) (digestname . \"SHA1;RIPEMD160;SHA256;SHA384;SHA512;SHA224\") (digest 2 3 8 9 10 11) (ciphername . \"IDEA;3DES;CAST5;BLOWFISH;AES;AES192;AES256;TWOFISH;CAMELLIA128;CAMELLIA192;CAMELLIA256\") (cipher 1 2 3 4 7 8 9 10 11 12 13) (pubkeyname . \"RSA;ELG;DSA;ECDH;ECDSA;EDDSA\") (pubkey 1 16 17 18 19 22) (version . \"2.4.9\")))))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "message-all-recipients": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "message-alter-repeat-address": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "message-default-buffer-type": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "message-mode-propertize": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "message-replace-header": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "message-strip-subject-trailing-was": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   }
+  },
+  "timed_out": false
+ },
+ "schema": 1,
+ "toplevel_deftests": 7
+}

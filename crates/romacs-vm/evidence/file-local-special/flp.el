@@ -1,0 +1,5 @@
+;;; flp.el --- -*- lexical-binding: t -*-
+(defun flp-get () (if (boundp 'flp-x) flp-x 'unbound))
+(defvar flp-x)
+(setq flp-1 (funcall (lambda (flp-x) (flp-get)) 42))
+(setq flp-2 (let ((flp-x 43)) (flp-get)))

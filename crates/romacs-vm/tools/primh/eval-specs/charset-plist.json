@@ -1,0 +1,22 @@
+{
+  "name": "charset-plist",
+  "arity": [
+    1,
+    1
+  ],
+  "effect": "reads",
+  "gnu_files": [
+    "charset.c",
+    "charset.h"
+  ],
+  "gnu_def": "charset.c:1295",
+  "rust": "src/prims/charset.rs:3",
+  "args": [
+    "no-generated-domain"
+  ],
+  "probes": [
+    "(charset-plist 'does-not-exist)",
+    "(charset-plist 42)",
+    "(let ((p (list :a 1))) (set-charset-plist 'ascii p) (eq p (charset-plist 'ascii)))"
+  ]
+}

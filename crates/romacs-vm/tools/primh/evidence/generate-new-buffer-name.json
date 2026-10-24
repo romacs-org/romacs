@@ -1,0 +1,693 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "generate-new-buffer-name",
+ "spec_sha256": "556c37a3a4e61adb41691efcf1ac484210c488770a0409ddab41269f377e023e",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "generate-new-buffer-name",
+    "subr",
+    1,
+    2
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "buffer.c": "bb93b33042953fab31294645204d46c48c3a3d7b8516f7b923c7d86b9766b91d",
+  "fns.c": "db81c235d7c63f312128ad84c11d55ae4665a2599099be1229dbaa329afdb3bf"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "generate-new-buffer-name/0000",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (generate-new-buffer-name nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "generate-new-buffer-name/0001",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (generate-new-buffer-name nil t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "generate-new-buffer-name/0002",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (generate-new-buffer-name nil 7)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "generate-new-buffer-name/0003",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (generate-new-buffer-name nil 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "generate-new-buffer-name/0004",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (generate-new-buffer-name nil (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "generate-new-buffer-name/0005",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (generate-new-buffer-name nil (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "generate-new-buffer-name/0006",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (generate-new-buffer-name nil (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "generate-new-buffer-name/0007",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (generate-new-buffer-name t nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp t))"
+  },
+  {
+   "id": "generate-new-buffer-name/0008",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (generate-new-buffer-name t t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp t))"
+  },
+  {
+   "id": "generate-new-buffer-name/0009",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (generate-new-buffer-name t 7)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp t))"
+  },
+  {
+   "id": "generate-new-buffer-name/0010",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (generate-new-buffer-name t 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp t))"
+  },
+  {
+   "id": "generate-new-buffer-name/0011",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (generate-new-buffer-name t (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp t))"
+  },
+  {
+   "id": "generate-new-buffer-name/0012",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (generate-new-buffer-name t (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp t))"
+  },
+  {
+   "id": "generate-new-buffer-name/0013",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (generate-new-buffer-name t (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp t))"
+  },
+  {
+   "id": "generate-new-buffer-name/0014",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (generate-new-buffer-name 7 nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "generate-new-buffer-name/0015",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (generate-new-buffer-name 7 t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "generate-new-buffer-name/0016",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (generate-new-buffer-name 7 7)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "generate-new-buffer-name/0017",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (generate-new-buffer-name 7 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "generate-new-buffer-name/0018",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (generate-new-buffer-name 7 (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "generate-new-buffer-name/0019",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (generate-new-buffer-name 7 (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "generate-new-buffer-name/0020",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (generate-new-buffer-name 7 (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "generate-new-buffer-name/0021",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (generate-new-buffer-name 'sym nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp sym))"
+  },
+  {
+   "id": "generate-new-buffer-name/0022",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (generate-new-buffer-name 'sym t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp sym))"
+  },
+  {
+   "id": "generate-new-buffer-name/0023",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (generate-new-buffer-name 'sym 7)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp sym))"
+  },
+  {
+   "id": "generate-new-buffer-name/0024",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (generate-new-buffer-name 'sym 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp sym))"
+  },
+  {
+   "id": "generate-new-buffer-name/0025",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (generate-new-buffer-name 'sym (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp sym))"
+  },
+  {
+   "id": "generate-new-buffer-name/0026",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (generate-new-buffer-name 'sym (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp sym))"
+  },
+  {
+   "id": "generate-new-buffer-name/0027",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (generate-new-buffer-name 'sym (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp sym))"
+  },
+  {
+   "id": "generate-new-buffer-name/0028",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (generate-new-buffer-name (copy-sequence \"\") nil)) (error (list 'sig e))))",
+   "expected": "(ok \"\")"
+  },
+  {
+   "id": "generate-new-buffer-name/0029",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (generate-new-buffer-name (copy-sequence \"\") t)) (error (list 'sig e))))",
+   "expected": "(ok \"\")"
+  },
+  {
+   "id": "generate-new-buffer-name/0030",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (generate-new-buffer-name (copy-sequence \"\") 7)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "generate-new-buffer-name/0031",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (generate-new-buffer-name (copy-sequence \"\") 'sym)) (error (list 'sig e))))",
+   "expected": "(ok \"\")"
+  },
+  {
+   "id": "generate-new-buffer-name/0032",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (generate-new-buffer-name (copy-sequence \"\") (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(ok \"\")"
+  },
+  {
+   "id": "generate-new-buffer-name/0033",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (generate-new-buffer-name (copy-sequence \"\") (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(ok \"\")"
+  },
+  {
+   "id": "generate-new-buffer-name/0034",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (generate-new-buffer-name (copy-sequence \"\") (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(ok \"\")"
+  },
+  {
+   "id": "generate-new-buffer-name/0035",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (generate-new-buffer-name (copy-sequence \"abc\") nil)) (error (list 'sig e))))",
+   "expected": "(ok \"abc\")"
+  },
+  {
+   "id": "generate-new-buffer-name/0036",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (generate-new-buffer-name (copy-sequence \"abc\") t)) (error (list 'sig e))))",
+   "expected": "(ok \"abc\")"
+  },
+  {
+   "id": "generate-new-buffer-name/0037",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (generate-new-buffer-name (copy-sequence \"abc\") 7)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "generate-new-buffer-name/0038",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (generate-new-buffer-name (copy-sequence \"abc\") 'sym)) (error (list 'sig e))))",
+   "expected": "(ok \"abc\")"
+  },
+  {
+   "id": "generate-new-buffer-name/0039",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (generate-new-buffer-name (copy-sequence \"abc\") (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(ok \"abc\")"
+  },
+  {
+   "id": "generate-new-buffer-name/0040",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (generate-new-buffer-name (copy-sequence \"abc\") (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(ok \"abc\")"
+  },
+  {
+   "id": "generate-new-buffer-name/0041",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (generate-new-buffer-name (copy-sequence \"abc\") (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(ok \"abc\")"
+  },
+  {
+   "id": "generate-new-buffer-name/0042",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (generate-new-buffer-name (copy-sequence \"λx\") nil)) (error (list 'sig e))))",
+   "expected": "(ok \"λx\")"
+  },
+  {
+   "id": "generate-new-buffer-name/0043",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (generate-new-buffer-name (copy-sequence \"λx\") t)) (error (list 'sig e))))",
+   "expected": "(ok \"λx\")"
+  },
+  {
+   "id": "generate-new-buffer-name/0044",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (generate-new-buffer-name (copy-sequence \"λx\") 7)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "generate-new-buffer-name/0045",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (generate-new-buffer-name (copy-sequence \"λx\") 'sym)) (error (list 'sig e))))",
+   "expected": "(ok \"λx\")"
+  },
+  {
+   "id": "generate-new-buffer-name/0046",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (generate-new-buffer-name (copy-sequence \"λx\") (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(ok \"λx\")"
+  },
+  {
+   "id": "generate-new-buffer-name/0047",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (generate-new-buffer-name (copy-sequence \"λx\") (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(ok \"λx\")"
+  },
+  {
+   "id": "generate-new-buffer-name/0048",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (generate-new-buffer-name (copy-sequence \"λx\") (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(ok \"λx\")"
+  },
+  {
+   "id": "generate-new-buffer-name/0049",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'generate-new-buffer-name '())) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr generate-new-buffer-name> 0))"
+  },
+  {
+   "id": "generate-new-buffer-name/0050",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'generate-new-buffer-name '(1 1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr generate-new-buffer-name> 3))"
+  },
+  {
+   "id": "generate-new-buffer-name/0051",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 nil)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (generate-new-buffer-name a0 a1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "generate-new-buffer-name/0052",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 7)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (generate-new-buffer-name a0 a1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "generate-new-buffer-name/0053",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 nil)) (let ((r (generate-new-buffer-name a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "generate-new-buffer-name/0054",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 'sym)) (let ((r (generate-new-buffer-name a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "generate-new-buffer-name/0055",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 (copy-sequence \"λx\"))) (let ((r (generate-new-buffer-name a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "generate-new-buffer-name/0056",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 7)) (let ((r (generate-new-buffer-name a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp t))"
+  },
+  {
+   "id": "generate-new-buffer-name/0057",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 (copy-sequence \"abc\"))) (let ((r (generate-new-buffer-name a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp t))"
+  },
+  {
+   "id": "generate-new-buffer-name/0058",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 7) (a1 t)) (let ((r (generate-new-buffer-name a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "generate-new-buffer-name/0059",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 7) (a1 (copy-sequence \"\"))) (let ((r (generate-new-buffer-name a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "generate-new-buffer-name/0060",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'sym) (a1 nil)) (let ((r (generate-new-buffer-name a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp sym))"
+  },
+  {
+   "id": "generate-new-buffer-name/0061",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'sym) (a1 'sym)) (let ((r (generate-new-buffer-name a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp sym))"
+  },
+  {
+   "id": "generate-new-buffer-name/0062",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'sym) (a1 (copy-sequence \"λx\"))) (let ((r (generate-new-buffer-name a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp sym))"
+  },
+  {
+   "id": "generate-new-buffer-name/0063",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\")) (a1 7)) (let ((r (generate-new-buffer-name a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "generate-new-buffer-name/0064",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\")) (a1 (copy-sequence \"abc\"))) (let ((r (generate-new-buffer-name a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (t nil))"
+  },
+  {
+   "id": "generate-new-buffer-name/0065",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 t)) (let ((r (generate-new-buffer-name a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (t nil))"
+  },
+  {
+   "id": "generate-new-buffer-name/0066",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 (copy-sequence \"\"))) (let ((r (generate-new-buffer-name a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (t nil))"
+  },
+  {
+   "id": "generate-new-buffer-name/0067",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 nil)) (let ((r (generate-new-buffer-name a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (t nil))"
+  },
+  {
+   "id": "generate-new-buffer-name/0068",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 'sym)) (let ((r (generate-new-buffer-name a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (t nil))"
+  },
+  {
+   "id": "generate-new-buffer-name/0069",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 (copy-sequence \"λx\"))) (let ((r (generate-new-buffer-name a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (t nil))"
+  },
+  {
+   "id": "generate-new-buffer-name/0070",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn  (generate-new-buffer-name \"gnbn-free\" nil))) (error (list 'sig e))))",
+   "expected": "(ok \"gnbn-free\")"
+  },
+  {
+   "id": "generate-new-buffer-name/0071",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (get-buffer-create \"gnbn-one\") (generate-new-buffer-name \"gnbn-one\" nil))) (error (list 'sig e))))",
+   "expected": "(ok \"gnbn-one<2>\")"
+  },
+  {
+   "id": "generate-new-buffer-name/0072",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (get-buffer-create \"gnbn-many\") (get-buffer-create \"gnbn-many<2>\") (get-buffer-create \"gnbn-many<3>\") (generate-new-buffer-name \"gnbn-many\" nil))) (error (list 'sig e))))",
+   "expected": "(ok \"gnbn-many<4>\")"
+  },
+  {
+   "id": "generate-new-buffer-name/0073",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (get-buffer-create \"gnbn-name\") (generate-new-buffer-name \"gnbn-name\" \"gnbn-name\"))) (error (list 'sig e))))",
+   "expected": "(ok \"gnbn-name\")"
+  },
+  {
+   "id": "generate-new-buffer-name/0074",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (get-buffer-create \"gnbn-candidate\") (get-buffer-create \"gnbn-candidate<2>\") (generate-new-buffer-name \"gnbn-candidate\" \"gnbn-candidate<2>\"))) (error (list 'sig e))))",
+   "expected": "(ok \"gnbn-candidate<2>\")"
+  },
+  {
+   "id": "generate-new-buffer-name/0075",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (get-buffer-create \"gnbn-symbol\") (get-buffer-create \"gnbn-symbol<2>\") (generate-new-buffer-name \"gnbn-symbol\" 'gnbn-symbol<2>))) (error (list 'sig e))))",
+   "expected": "(ok \"gnbn-symbol<2>\")"
+  },
+  {
+   "id": "generate-new-buffer-name/0076",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (get-buffer-create \"gnbn-later\") (generate-new-buffer-name \"gnbn-later\" \"gnbn-later<9>\"))) (error (list 'sig e))))",
+   "expected": "(ok \"gnbn-later<2>\")"
+  },
+  {
+   "id": "generate-new-buffer-name/0077",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (get-buffer-create \"gnbn-numeric\") (generate-new-buffer-name \"gnbn-numeric\" 7))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "generate-new-buffer-name/0078",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (get-buffer-create \"gnbn-nil\") (generate-new-buffer-name \"gnbn-nil\" nil))) (error (list 'sig e))))",
+   "expected": "(ok \"gnbn-nil<2>\")"
+  },
+  {
+   "id": "generate-new-buffer-name/0079",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (get-buffer-create \"gnbn-other-symbol\") (generate-new-buffer-name \"gnbn-other-symbol\" 'unrelated))) (error (list 'sig e))))",
+   "expected": "(ok \"gnbn-other-symbol<2>\")"
+  },
+  {
+   "id": "generate-new-buffer-name/0080",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (get-buffer-create \"gnbn<2>\") (generate-new-buffer-name \"gnbn<2>\" nil))) (error (list 'sig e))))",
+   "expected": "(ok \"gnbn<2><2>\")"
+  },
+  {
+   "id": "generate-new-buffer-name/0081",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (get-buffer-create \"λgnbn\") (get-buffer-create \"λgnbn<2>\") (generate-new-buffer-name \"λgnbn\" nil))) (error (list 'sig e))))",
+   "expected": "(ok \"λgnbn<3>\")"
+  },
+  {
+   "id": "generate-new-buffer-name/0082",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((name \" gnbn-range\")) (get-buffer-create name) (let ((out (generate-new-buffer-name name))) (<= (length out) (+ (length name) 7))))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "generate-new-buffer-name/0083",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((s (string-to-multibyte (string-make-unibyte \"gnbn-explicit-multibyte\")))) (get-buffer-create s) (multibyte-string-p (generate-new-buffer-name s)))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "generate-new-buffer-name/0084",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((name (copy-sequence \"gnbn-eq-free\"))) (eq name (generate-new-buffer-name name)))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "generate-new-buffer-name/0085",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((name (copy-sequence \"gnbn-eq-ignore\"))) (get-buffer-create name) (eq name (generate-new-buffer-name name name)))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "generate-new-buffer-name/0086",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((name (copy-sequence \"gnbn-eq-conflict\"))) (get-buffer-create name) (eq name (generate-new-buffer-name name)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "generate-new-buffer-name/0087",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (generate-new-buffer-name \"\")) (error (list 'sig e))))",
+   "expected": "(ok \"\")"
+  },
+  {
+   "id": "generate-new-buffer-name/0088",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (get-buffer-create (generate-new-buffer-name \"gnbn-generated\")) (generate-new-buffer-name \"gnbn-generated\"))) (error (list 'sig e))))",
+   "expected": "(ok \"gnbn-generated<2>\")",
+   "gnu_regime_variant": "(ok \"gnbn-generated<3>\")"
+  },
+  {
+   "id": "generate-new-buffer-name/0089",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (get-buffer-create \"gnbn-a\") (get-buffer-create \"gnbn-a<3>\") (generate-new-buffer-name \"gnbn-a\"))) (error (list 'sig e))))",
+   "expected": "(ok \"gnbn-a<2>\")"
+  },
+  {
+   "id": "generate-new-buffer-name/0090",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((name \" gnbn-hidden\")) (get-buffer-create name) (let ((out (generate-new-buffer-name name))) (list (eq name out) (get-buffer out) (equal (substring out 0 (length name)) name) (string-match \"\\\\`-[0-9]+\\\\'\" (substring out (length name))))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil t 0))"
+  },
+  {
+   "id": "generate-new-buffer-name/0091",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((name (copy-sequence \" gnbn-free-space\"))) (eq name (generate-new-buffer-name name)))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "generate-new-buffer-name/0092",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (get-buffer-create \"gnbn-symbol-name\") (generate-new-buffer-name \"gnbn-symbol-name\" (quote gnbn-symbol-name)))) (error (list 'sig e))))",
+   "expected": "(ok \"gnbn-symbol-name\")"
+  },
+  {
+   "id": "generate-new-buffer-name/0093",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((out (generate-new-buffer-name \"*scratch*\"))) (list out (null (get-buffer out))))) (error (list 'sig e))))",
+   "expected": "(ok (\"*scratch*<2>\" t))"
+  },
+  {
+   "id": "generate-new-buffer-name/0094",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (generate-new-buffer-name \"*scratch*\" \"*scratch*\")) (error (list 'sig e))))",
+   "expected": "(ok \"*scratch*\")"
+  },
+  {
+   "id": "generate-new-buffer-name/0095",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (get-buffer-create \"*scratch*<2>\") (generate-new-buffer-name \"*scratch*\"))) (error (list 'sig e))))",
+   "expected": "(ok \"*scratch*<3>\")"
+  },
+  {
+   "id": "generate-new-buffer-name/0096",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (fboundp (quote generate-new-buffer-name)) (functionp (quote generate-new-buffer-name)) (funcall (quote generate-new-buffer-name) \"gnbn-indirect\"))) (error (list 'sig e))))",
+   "expected": "(ok (t t \"gnbn-indirect\"))"
+  },
+  {
+   "id": "generate-new-buffer-name/0097",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((s (copy-sequence \"gnbn-properties\"))) (put-text-property 0 4 (quote face) (quote bold) s) (get-buffer-create s) (let ((out (generate-new-buffer-name s))) (list (substring-no-properties out) (get-text-property 0 (quote face) out) (get-text-property (length s) (quote face) out))))) (error (list 'sig e))))",
+   "expected": "(ok (\"gnbn-properties<2>\" bold nil))"
+  },
+  {
+   "id": "generate-new-buffer-name/0098",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((s (string-make-unibyte \"gnbn-ascii\"))) (get-buffer-create s) (let ((out (generate-new-buffer-name s))) (list out (multibyte-string-p out))))) (error (list 'sig e))))",
+   "expected": "(ok (\"gnbn-ascii<2>\" nil))"
+  },
+  {
+   "id": "generate-new-buffer-name/0099",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (get-buffer-create \" gnbn-ignore\") (generate-new-buffer-name \" gnbn-ignore\" (intern \" gnbn-ignore\")))) (error (list 'sig e))))",
+   "expected": "(ok \" gnbn-ignore\")"
+  },
+  {
+   "id": "generate-new-buffer-name/0100",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (generate-new-buffer-name \"gnbn-ignore-vector\" [1])) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp [1]))"
+  },
+  {
+   "id": "generate-new-buffer-name/0101",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (generate-new-buffer-name nil [1])) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "generate-new-buffer-name/0102",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((s (string 0 97))) (get-buffer-create s) (let ((out (generate-new-buffer-name s))) (list (length out) (aref out 0) (aref out 1) (aref out 2))))) (error (list 'sig e))))",
+   "expected": "(ok (5 0 97 60))"
+  },
+  {
+   "id": "generate-new-buffer-name/0103",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 'sym) (error (list 'sig e))))",
+   "expected": "(ok sym)"
+  },
+  {
+   "id": "generate-new-buffer-name/0104",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"\")) (error (list 'sig e))))",
+   "expected": "(ok \"\")"
+  },
+  {
+   "id": "generate-new-buffer-name/0105",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"abc\")) (error (list 'sig e))))",
+   "expected": "(ok \"abc\")"
+  },
+  {
+   "id": "generate-new-buffer-name/0106",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"λx\")) (error (list 'sig e))))",
+   "expected": "(ok \"λx\")"
+  },
+  {
+   "id": "generate-new-buffer-name/0107",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 7) (error (list 'sig e))))",
+   "expected": "(ok 7)"
+  },
+  {
+   "id": "generate-new-buffer-name/0108",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok nil) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "generate-new-buffer-name/0109",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok t) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  }
+ ]
+}

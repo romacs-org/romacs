@@ -1,0 +1,25 @@
+;; Oracle check for tests/defvaralias.rs expectations: each form evaluated in
+;; sequence in ONE GNU session, wrapped exactly as the Rust `show` helper.
+(setq lexical-binding t)
+(defun va-show (form)
+  (princ (format "%S\n" (condition-case e (list 'ok (eval form t)) (error (list 'sig e))))))
+(dolist (f '((progn (defvar va-base 5) (defvaralias 'va-alias 'va-base))
+             va-alias
+             (progn (setq va-alias 6) va-base)
+             (progn (setq va-base 7) (list va-alias (symbol-value 'va-alias) (boundp 'va-alias)))
+             (list (let ((va-alias 8)) (list va-base va-alias)) va-base)
+             (progn (makunbound 'va-alias) (list (boundp 'va-base) (boundp 'va-alias)))
+             va-alias
+             (list (special-variable-p 'va-alias) (special-variable-p 'va-base))
+             (progn (defvaralias 'va-c1 'va-c2) (defvaralias 'va-c2 'va-c3) (defvaralias 'va-c3 'va-c1))
+             (defvaralias :va-kw 'va-x)
+             (defvaralias 1 'va-x)
+             (defvar va-l 3)
+             (let ((va-l 4)) (defvaralias 'va-l 'va-lbase))
+             (symbol-value 'va-lbase)
+             (progn (defvar va-bl 1) (make-variable-buffer-local 'va-bl) (defvaralias 'va-bl 'va-y))
+             (progn (put 'va-d 'variable-documentation "Old") (defvaralias 'va-d 'va-db) (get 'va-d 'variable-documentation))
+             (progn (defvaralias 'va-n nil) (list va-n (condition-case e (setq va-n 1) (error e)) va-n))
+             (progn (defvar va-loc 1) (make-variable-buffer-local 'va-loc) (defvaralias 'va-la 'va-loc)
+                    (list (with-temp-buffer (setq va-la 5) (list va-loc (local-variable-if-set-p 'va-la))) va-loc va-la))))
+  (va-show f))

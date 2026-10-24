@@ -1,0 +1,44 @@
+{
+ "name": "set-frame-selected-window",
+ "arity": [
+  2,
+  3
+ ],
+ "effect": "global",
+ "gnu_files": [
+  "window.c"
+ ],
+ "gnu_def": "window.c:456",
+ "rust": "src/prims/window.rs:29",
+ "args": [
+  "none",
+  "none",
+  "none"
+ ],
+ "extra": {
+  "0": [
+   "1"
+  ],
+  "1": [
+   "nil",
+   "1"
+  ],
+  "2": [
+   "nil"
+  ]
+ },
+ "probes": [
+  "(eq (set-frame-selected-window nil (selected-window)) (selected-window))",
+  "(let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (list (eq (set-frame-selected-window nil b) b) (eq (selected-window) b) (eq (frame-selected-window) b) (eq (current-buffer) (window-buffer b))))",
+  "(let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (list (window-use-time b) (progn (set-frame-selected-window nil b) (- (window-use-time b) (window-use-time a)))))",
+  "(let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (list (window-use-time b) (progn (set-frame-selected-window nil b t) (window-use-time b)) (eq (selected-window) b)))",
+  "(let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (eq (set-frame-selected-window (selected-frame) b) b))",
+  "(let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (eq (set-frame-selected-window (window-frame b) b 'norecord) b))",
+  "(let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (condition-case e (set-frame-selected-window nil p) (error (list (car e) (car (cdr e)) (eq (car (cdr (cdr e))) p)))))",
+  "(let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (progn (set-window-new-pixel p h) (set-window-new-pixel a h) (delete-window-internal b) (condition-case e (set-frame-selected-window nil b) (error (list (car e) (car (cdr e)) (eq (car (cdr (cdr e))) b))))))",
+  "(condition-case e (set-frame-selected-window 1 1) (error e))",
+  "(condition-case e (set-frame-selected-window 'sym (selected-window)) (error e))",
+  "(condition-case e (set-frame-selected-window nil (selected-frame)) (error (list (car e) (car (cdr e)) (eq (car (cdr (cdr e))) (selected-frame)))))",
+  "(eq (set-frame-selected-window nil (minibuffer-window)) (minibuffer-window))"
+ ]
+}

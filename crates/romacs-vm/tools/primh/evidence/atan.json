@@ -1,0 +1,3854 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "atan",
+ "spec_sha256": "e935abb3b0c4950c4146ed338bb5959142cee1f47dd76f5427a9f5d95ca154c1",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "atan",
+    "subr",
+    1,
+    2
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "floatfns.c": "7fa0e8359a366506ff71876b54638928b2836d18d20ea983f68a876f59a9c8b7",
+  "bignum.c": "b1f9fbded50391389b232e384324c91d8a094654c661fd80e503504f916e5c65"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "atan/0000",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0 0)) (error (list 'sig e))))",
+   "expected": "(ok 0.0)"
+  },
+  {
+   "id": "atan/0001",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0 1)) (error (list 'sig e))))",
+   "expected": "(ok 0.0)"
+  },
+  {
+   "id": "atan/0002",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0 -1)) (error (list 'sig e))))",
+   "expected": "(ok 3.141592653589793)"
+  },
+  {
+   "id": "atan/0003",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0 2)) (error (list 'sig e))))",
+   "expected": "(ok 0.0)"
+  },
+  {
+   "id": "atan/0004",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0 -2)) (error (list 'sig e))))",
+   "expected": "(ok 3.141592653589793)"
+  },
+  {
+   "id": "atan/0005",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0 0.0)) (error (list 'sig e))))",
+   "expected": "(ok 0.0)"
+  },
+  {
+   "id": "atan/0006",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0 -0.0)) (error (list 'sig e))))",
+   "expected": "(ok 3.141592653589793)"
+  },
+  {
+   "id": "atan/0007",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0 0.5)) (error (list 'sig e))))",
+   "expected": "(ok 0.0)"
+  },
+  {
+   "id": "atan/0008",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0 1.25)) (error (list 'sig e))))",
+   "expected": "(ok 0.0)"
+  },
+  {
+   "id": "atan/0009",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0 -3.75)) (error (list 'sig e))))",
+   "expected": "(ok 3.141592653589793)"
+  },
+  {
+   "id": "atan/0010",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0 most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(ok 0.0)"
+  },
+  {
+   "id": "atan/0011",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0 most-negative-fixnum)) (error (list 'sig e))))",
+   "expected": "(ok 3.141592653589793)"
+  },
+  {
+   "id": "atan/0012",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0 1.0e+INF)) (error (list 'sig e))))",
+   "expected": "(ok 0.0)"
+  },
+  {
+   "id": "atan/0013",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0 -1.0e+INF)) (error (list 'sig e))))",
+   "expected": "(ok 3.141592653589793)"
+  },
+  {
+   "id": "atan/0014",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0 0.0e+NaN)) (error (list 'sig e))))",
+   "expected": "(ok 0.0e+NaN)"
+  },
+  {
+   "id": "atan/0015",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0 nil)) (error (list 'sig e))))",
+   "expected": "(ok 0.0)"
+  },
+  {
+   "id": "atan/0016",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0 t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp t))"
+  },
+  {
+   "id": "atan/0017",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0 'wrong)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp wrong))"
+  },
+  {
+   "id": "atan/0018",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0 \"bad\")) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp \"bad\"))"
+  },
+  {
+   "id": "atan/0019",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0 '(1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp (1)))"
+  },
+  {
+   "id": "atan/0020",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0 [1])) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp [1]))"
+  },
+  {
+   "id": "atan/0021",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 1 0)) (error (list 'sig e))))",
+   "expected": "(ok 1.5707963267948966)"
+  },
+  {
+   "id": "atan/0022",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 1 1)) (error (list 'sig e))))",
+   "expected": "(ok 0.7853981633974483)"
+  },
+  {
+   "id": "atan/0023",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 1 -1)) (error (list 'sig e))))",
+   "expected": "(ok 2.356194490192345)"
+  },
+  {
+   "id": "atan/0024",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 1 2)) (error (list 'sig e))))",
+   "expected": "(ok 0.4636476090008061)"
+  },
+  {
+   "id": "atan/0025",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 1 -2)) (error (list 'sig e))))",
+   "expected": "(ok 2.677945044588987)"
+  },
+  {
+   "id": "atan/0026",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 1 0.0)) (error (list 'sig e))))",
+   "expected": "(ok 1.5707963267948966)"
+  },
+  {
+   "id": "atan/0027",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 1 -0.0)) (error (list 'sig e))))",
+   "expected": "(ok 1.5707963267948966)"
+  },
+  {
+   "id": "atan/0028",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 1 0.5)) (error (list 'sig e))))",
+   "expected": "(ok 1.1071487177940904)"
+  },
+  {
+   "id": "atan/0029",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 1 1.25)) (error (list 'sig e))))",
+   "expected": "(ok 0.6747409422235526)"
+  },
+  {
+   "id": "atan/0030",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 1 -3.75)) (error (list 'sig e))))",
+   "expected": "(ok 2.8809902618424523)"
+  },
+  {
+   "id": "atan/0031",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 1 most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(ok 4.336808689942018e-19)"
+  },
+  {
+   "id": "atan/0032",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 1 most-negative-fixnum)) (error (list 'sig e))))",
+   "expected": "(ok 3.141592653589793)"
+  },
+  {
+   "id": "atan/0033",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 1 1.0e+INF)) (error (list 'sig e))))",
+   "expected": "(ok 0.0)"
+  },
+  {
+   "id": "atan/0034",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 1 -1.0e+INF)) (error (list 'sig e))))",
+   "expected": "(ok 3.141592653589793)"
+  },
+  {
+   "id": "atan/0035",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 1 0.0e+NaN)) (error (list 'sig e))))",
+   "expected": "(ok 0.0e+NaN)"
+  },
+  {
+   "id": "atan/0036",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 1 nil)) (error (list 'sig e))))",
+   "expected": "(ok 0.7853981633974483)"
+  },
+  {
+   "id": "atan/0037",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 1 t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp t))"
+  },
+  {
+   "id": "atan/0038",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 1 'wrong)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp wrong))"
+  },
+  {
+   "id": "atan/0039",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 1 \"bad\")) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp \"bad\"))"
+  },
+  {
+   "id": "atan/0040",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 1 '(1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp (1)))"
+  },
+  {
+   "id": "atan/0041",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 1 [1])) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp [1]))"
+  },
+  {
+   "id": "atan/0042",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -1 0)) (error (list 'sig e))))",
+   "expected": "(ok -1.5707963267948966)"
+  },
+  {
+   "id": "atan/0043",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -1 1)) (error (list 'sig e))))",
+   "expected": "(ok -0.7853981633974483)"
+  },
+  {
+   "id": "atan/0044",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -1 -1)) (error (list 'sig e))))",
+   "expected": "(ok -2.356194490192345)"
+  },
+  {
+   "id": "atan/0045",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -1 2)) (error (list 'sig e))))",
+   "expected": "(ok -0.4636476090008061)"
+  },
+  {
+   "id": "atan/0046",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -1 -2)) (error (list 'sig e))))",
+   "expected": "(ok -2.677945044588987)"
+  },
+  {
+   "id": "atan/0047",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -1 0.0)) (error (list 'sig e))))",
+   "expected": "(ok -1.5707963267948966)"
+  },
+  {
+   "id": "atan/0048",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -1 -0.0)) (error (list 'sig e))))",
+   "expected": "(ok -1.5707963267948966)"
+  },
+  {
+   "id": "atan/0049",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -1 0.5)) (error (list 'sig e))))",
+   "expected": "(ok -1.1071487177940904)"
+  },
+  {
+   "id": "atan/0050",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -1 1.25)) (error (list 'sig e))))",
+   "expected": "(ok -0.6747409422235526)"
+  },
+  {
+   "id": "atan/0051",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -1 -3.75)) (error (list 'sig e))))",
+   "expected": "(ok -2.8809902618424523)"
+  },
+  {
+   "id": "atan/0052",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -1 most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(ok -4.336808689942018e-19)"
+  },
+  {
+   "id": "atan/0053",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -1 most-negative-fixnum)) (error (list 'sig e))))",
+   "expected": "(ok -3.141592653589793)"
+  },
+  {
+   "id": "atan/0054",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -1 1.0e+INF)) (error (list 'sig e))))",
+   "expected": "(ok -0.0)"
+  },
+  {
+   "id": "atan/0055",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -1 -1.0e+INF)) (error (list 'sig e))))",
+   "expected": "(ok -3.141592653589793)"
+  },
+  {
+   "id": "atan/0056",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -1 0.0e+NaN)) (error (list 'sig e))))",
+   "expected": "(ok 0.0e+NaN)"
+  },
+  {
+   "id": "atan/0057",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -1 nil)) (error (list 'sig e))))",
+   "expected": "(ok -0.7853981633974483)"
+  },
+  {
+   "id": "atan/0058",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -1 t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp t))"
+  },
+  {
+   "id": "atan/0059",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -1 'wrong)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp wrong))"
+  },
+  {
+   "id": "atan/0060",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -1 \"bad\")) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp \"bad\"))"
+  },
+  {
+   "id": "atan/0061",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -1 '(1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp (1)))"
+  },
+  {
+   "id": "atan/0062",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -1 [1])) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp [1]))"
+  },
+  {
+   "id": "atan/0063",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 2 0)) (error (list 'sig e))))",
+   "expected": "(ok 1.5707963267948966)"
+  },
+  {
+   "id": "atan/0064",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 2 1)) (error (list 'sig e))))",
+   "expected": "(ok 1.1071487177940904)"
+  },
+  {
+   "id": "atan/0065",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 2 -1)) (error (list 'sig e))))",
+   "expected": "(ok 2.0344439357957027)"
+  },
+  {
+   "id": "atan/0066",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 2 2)) (error (list 'sig e))))",
+   "expected": "(ok 0.7853981633974483)"
+  },
+  {
+   "id": "atan/0067",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 2 -2)) (error (list 'sig e))))",
+   "expected": "(ok 2.356194490192345)"
+  },
+  {
+   "id": "atan/0068",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 2 0.0)) (error (list 'sig e))))",
+   "expected": "(ok 1.5707963267948966)"
+  },
+  {
+   "id": "atan/0069",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 2 -0.0)) (error (list 'sig e))))",
+   "expected": "(ok 1.5707963267948966)"
+  },
+  {
+   "id": "atan/0070",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 2 0.5)) (error (list 'sig e))))",
+   "expected": "(ok 1.3258176636680326)"
+  },
+  {
+   "id": "atan/0071",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 2 1.25)) (error (list 'sig e))))",
+   "expected": "(ok 1.0121970114513341)"
+  },
+  {
+   "id": "atan/0072",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 2 -3.75)) (error (list 'sig e))))",
+   "expected": "(ok 2.651635327336065)"
+  },
+  {
+   "id": "atan/0073",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 2 most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(ok 8.673617379884035e-19)"
+  },
+  {
+   "id": "atan/0074",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 2 most-negative-fixnum)) (error (list 'sig e))))",
+   "expected": "(ok 3.141592653589793)"
+  },
+  {
+   "id": "atan/0075",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 2 1.0e+INF)) (error (list 'sig e))))",
+   "expected": "(ok 0.0)"
+  },
+  {
+   "id": "atan/0076",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 2 -1.0e+INF)) (error (list 'sig e))))",
+   "expected": "(ok 3.141592653589793)"
+  },
+  {
+   "id": "atan/0077",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 2 0.0e+NaN)) (error (list 'sig e))))",
+   "expected": "(ok 0.0e+NaN)"
+  },
+  {
+   "id": "atan/0078",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 2 nil)) (error (list 'sig e))))",
+   "expected": "(ok 1.1071487177940904)"
+  },
+  {
+   "id": "atan/0079",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 2 t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp t))"
+  },
+  {
+   "id": "atan/0080",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 2 'wrong)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp wrong))"
+  },
+  {
+   "id": "atan/0081",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 2 \"bad\")) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp \"bad\"))"
+  },
+  {
+   "id": "atan/0082",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 2 '(1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp (1)))"
+  },
+  {
+   "id": "atan/0083",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 2 [1])) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp [1]))"
+  },
+  {
+   "id": "atan/0084",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -2 0)) (error (list 'sig e))))",
+   "expected": "(ok -1.5707963267948966)"
+  },
+  {
+   "id": "atan/0085",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -2 1)) (error (list 'sig e))))",
+   "expected": "(ok -1.1071487177940904)"
+  },
+  {
+   "id": "atan/0086",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -2 -1)) (error (list 'sig e))))",
+   "expected": "(ok -2.0344439357957027)"
+  },
+  {
+   "id": "atan/0087",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -2 2)) (error (list 'sig e))))",
+   "expected": "(ok -0.7853981633974483)"
+  },
+  {
+   "id": "atan/0088",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -2 -2)) (error (list 'sig e))))",
+   "expected": "(ok -2.356194490192345)"
+  },
+  {
+   "id": "atan/0089",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -2 0.0)) (error (list 'sig e))))",
+   "expected": "(ok -1.5707963267948966)"
+  },
+  {
+   "id": "atan/0090",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -2 -0.0)) (error (list 'sig e))))",
+   "expected": "(ok -1.5707963267948966)"
+  },
+  {
+   "id": "atan/0091",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -2 0.5)) (error (list 'sig e))))",
+   "expected": "(ok -1.3258176636680326)"
+  },
+  {
+   "id": "atan/0092",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -2 1.25)) (error (list 'sig e))))",
+   "expected": "(ok -1.0121970114513341)"
+  },
+  {
+   "id": "atan/0093",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -2 -3.75)) (error (list 'sig e))))",
+   "expected": "(ok -2.651635327336065)"
+  },
+  {
+   "id": "atan/0094",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -2 most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(ok -8.673617379884035e-19)"
+  },
+  {
+   "id": "atan/0095",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -2 most-negative-fixnum)) (error (list 'sig e))))",
+   "expected": "(ok -3.141592653589793)"
+  },
+  {
+   "id": "atan/0096",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -2 1.0e+INF)) (error (list 'sig e))))",
+   "expected": "(ok -0.0)"
+  },
+  {
+   "id": "atan/0097",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -2 -1.0e+INF)) (error (list 'sig e))))",
+   "expected": "(ok -3.141592653589793)"
+  },
+  {
+   "id": "atan/0098",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -2 0.0e+NaN)) (error (list 'sig e))))",
+   "expected": "(ok 0.0e+NaN)"
+  },
+  {
+   "id": "atan/0099",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -2 nil)) (error (list 'sig e))))",
+   "expected": "(ok -1.1071487177940904)"
+  },
+  {
+   "id": "atan/0100",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -2 t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp t))"
+  },
+  {
+   "id": "atan/0101",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -2 'wrong)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp wrong))"
+  },
+  {
+   "id": "atan/0102",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -2 \"bad\")) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp \"bad\"))"
+  },
+  {
+   "id": "atan/0103",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -2 '(1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp (1)))"
+  },
+  {
+   "id": "atan/0104",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -2 [1])) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp [1]))"
+  },
+  {
+   "id": "atan/0105",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0.0 0)) (error (list 'sig e))))",
+   "expected": "(ok 0.0)"
+  },
+  {
+   "id": "atan/0106",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0.0 1)) (error (list 'sig e))))",
+   "expected": "(ok 0.0)"
+  },
+  {
+   "id": "atan/0107",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0.0 -1)) (error (list 'sig e))))",
+   "expected": "(ok 3.141592653589793)"
+  },
+  {
+   "id": "atan/0108",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0.0 2)) (error (list 'sig e))))",
+   "expected": "(ok 0.0)"
+  },
+  {
+   "id": "atan/0109",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0.0 -2)) (error (list 'sig e))))",
+   "expected": "(ok 3.141592653589793)"
+  },
+  {
+   "id": "atan/0110",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0.0 0.0)) (error (list 'sig e))))",
+   "expected": "(ok 0.0)"
+  },
+  {
+   "id": "atan/0111",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0.0 -0.0)) (error (list 'sig e))))",
+   "expected": "(ok 3.141592653589793)"
+  },
+  {
+   "id": "atan/0112",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0.0 0.5)) (error (list 'sig e))))",
+   "expected": "(ok 0.0)"
+  },
+  {
+   "id": "atan/0113",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0.0 1.25)) (error (list 'sig e))))",
+   "expected": "(ok 0.0)"
+  },
+  {
+   "id": "atan/0114",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0.0 -3.75)) (error (list 'sig e))))",
+   "expected": "(ok 3.141592653589793)"
+  },
+  {
+   "id": "atan/0115",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0.0 most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(ok 0.0)"
+  },
+  {
+   "id": "atan/0116",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0.0 most-negative-fixnum)) (error (list 'sig e))))",
+   "expected": "(ok 3.141592653589793)"
+  },
+  {
+   "id": "atan/0117",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0.0 1.0e+INF)) (error (list 'sig e))))",
+   "expected": "(ok 0.0)"
+  },
+  {
+   "id": "atan/0118",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0.0 -1.0e+INF)) (error (list 'sig e))))",
+   "expected": "(ok 3.141592653589793)"
+  },
+  {
+   "id": "atan/0119",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0.0 0.0e+NaN)) (error (list 'sig e))))",
+   "expected": "(ok 0.0e+NaN)"
+  },
+  {
+   "id": "atan/0120",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0.0 nil)) (error (list 'sig e))))",
+   "expected": "(ok 0.0)"
+  },
+  {
+   "id": "atan/0121",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0.0 t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp t))"
+  },
+  {
+   "id": "atan/0122",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0.0 'wrong)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp wrong))"
+  },
+  {
+   "id": "atan/0123",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0.0 \"bad\")) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp \"bad\"))"
+  },
+  {
+   "id": "atan/0124",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0.0 '(1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp (1)))"
+  },
+  {
+   "id": "atan/0125",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0.0 [1])) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp [1]))"
+  },
+  {
+   "id": "atan/0126",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -0.0 0)) (error (list 'sig e))))",
+   "expected": "(ok -0.0)"
+  },
+  {
+   "id": "atan/0127",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -0.0 1)) (error (list 'sig e))))",
+   "expected": "(ok -0.0)"
+  },
+  {
+   "id": "atan/0128",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -0.0 -1)) (error (list 'sig e))))",
+   "expected": "(ok -3.141592653589793)"
+  },
+  {
+   "id": "atan/0129",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -0.0 2)) (error (list 'sig e))))",
+   "expected": "(ok -0.0)"
+  },
+  {
+   "id": "atan/0130",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -0.0 -2)) (error (list 'sig e))))",
+   "expected": "(ok -3.141592653589793)"
+  },
+  {
+   "id": "atan/0131",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -0.0 0.0)) (error (list 'sig e))))",
+   "expected": "(ok -0.0)"
+  },
+  {
+   "id": "atan/0132",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -0.0 -0.0)) (error (list 'sig e))))",
+   "expected": "(ok -3.141592653589793)"
+  },
+  {
+   "id": "atan/0133",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -0.0 0.5)) (error (list 'sig e))))",
+   "expected": "(ok -0.0)"
+  },
+  {
+   "id": "atan/0134",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -0.0 1.25)) (error (list 'sig e))))",
+   "expected": "(ok -0.0)"
+  },
+  {
+   "id": "atan/0135",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -0.0 -3.75)) (error (list 'sig e))))",
+   "expected": "(ok -3.141592653589793)"
+  },
+  {
+   "id": "atan/0136",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -0.0 most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(ok -0.0)"
+  },
+  {
+   "id": "atan/0137",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -0.0 most-negative-fixnum)) (error (list 'sig e))))",
+   "expected": "(ok -3.141592653589793)"
+  },
+  {
+   "id": "atan/0138",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -0.0 1.0e+INF)) (error (list 'sig e))))",
+   "expected": "(ok -0.0)"
+  },
+  {
+   "id": "atan/0139",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -0.0 -1.0e+INF)) (error (list 'sig e))))",
+   "expected": "(ok -3.141592653589793)"
+  },
+  {
+   "id": "atan/0140",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -0.0 0.0e+NaN)) (error (list 'sig e))))",
+   "expected": "(ok 0.0e+NaN)"
+  },
+  {
+   "id": "atan/0141",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -0.0 nil)) (error (list 'sig e))))",
+   "expected": "(ok -0.0)"
+  },
+  {
+   "id": "atan/0142",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -0.0 t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp t))"
+  },
+  {
+   "id": "atan/0143",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -0.0 'wrong)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp wrong))"
+  },
+  {
+   "id": "atan/0144",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -0.0 \"bad\")) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp \"bad\"))"
+  },
+  {
+   "id": "atan/0145",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -0.0 '(1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp (1)))"
+  },
+  {
+   "id": "atan/0146",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -0.0 [1])) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp [1]))"
+  },
+  {
+   "id": "atan/0147",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0.5 0)) (error (list 'sig e))))",
+   "expected": "(ok 1.5707963267948966)"
+  },
+  {
+   "id": "atan/0148",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0.5 1)) (error (list 'sig e))))",
+   "expected": "(ok 0.4636476090008061)"
+  },
+  {
+   "id": "atan/0149",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0.5 -1)) (error (list 'sig e))))",
+   "expected": "(ok 2.677945044588987)"
+  },
+  {
+   "id": "atan/0150",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0.5 2)) (error (list 'sig e))))",
+   "expected": "(ok 0.24497866312686414)"
+  },
+  {
+   "id": "atan/0151",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0.5 -2)) (error (list 'sig e))))",
+   "expected": "(ok 2.896613990462929)"
+  },
+  {
+   "id": "atan/0152",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0.5 0.0)) (error (list 'sig e))))",
+   "expected": "(ok 1.5707963267948966)"
+  },
+  {
+   "id": "atan/0153",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0.5 -0.0)) (error (list 'sig e))))",
+   "expected": "(ok 1.5707963267948966)"
+  },
+  {
+   "id": "atan/0154",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0.5 0.5)) (error (list 'sig e))))",
+   "expected": "(ok 0.7853981633974483)"
+  },
+  {
+   "id": "atan/0155",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0.5 1.25)) (error (list 'sig e))))",
+   "expected": "(ok 0.3805063771123649)"
+  },
+  {
+   "id": "atan/0156",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0.5 -3.75)) (error (list 'sig e))))",
+   "expected": "(ok 3.0090411212931194)"
+  },
+  {
+   "id": "atan/0157",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0.5 most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(ok 2.168404344971009e-19)"
+  },
+  {
+   "id": "atan/0158",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0.5 most-negative-fixnum)) (error (list 'sig e))))",
+   "expected": "(ok 3.141592653589793)"
+  },
+  {
+   "id": "atan/0159",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0.5 1.0e+INF)) (error (list 'sig e))))",
+   "expected": "(ok 0.0)"
+  },
+  {
+   "id": "atan/0160",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0.5 -1.0e+INF)) (error (list 'sig e))))",
+   "expected": "(ok 3.141592653589793)"
+  },
+  {
+   "id": "atan/0161",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0.5 0.0e+NaN)) (error (list 'sig e))))",
+   "expected": "(ok 0.0e+NaN)"
+  },
+  {
+   "id": "atan/0162",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0.5 nil)) (error (list 'sig e))))",
+   "expected": "(ok 0.4636476090008061)"
+  },
+  {
+   "id": "atan/0163",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0.5 t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp t))"
+  },
+  {
+   "id": "atan/0164",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0.5 'wrong)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp wrong))"
+  },
+  {
+   "id": "atan/0165",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0.5 \"bad\")) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp \"bad\"))"
+  },
+  {
+   "id": "atan/0166",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0.5 '(1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp (1)))"
+  },
+  {
+   "id": "atan/0167",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0.5 [1])) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp [1]))"
+  },
+  {
+   "id": "atan/0168",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 1.25 0)) (error (list 'sig e))))",
+   "expected": "(ok 1.5707963267948966)"
+  },
+  {
+   "id": "atan/0169",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 1.25 1)) (error (list 'sig e))))",
+   "expected": "(ok 0.8960553845713439)"
+  },
+  {
+   "id": "atan/0170",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 1.25 -1)) (error (list 'sig e))))",
+   "expected": "(ok 2.2455372690184494)"
+  },
+  {
+   "id": "atan/0171",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 1.25 2)) (error (list 'sig e))))",
+   "expected": "(ok 0.5585993153435624)"
+  },
+  {
+   "id": "atan/0172",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 1.25 -2)) (error (list 'sig e))))",
+   "expected": "(ok 2.5829933382462307)"
+  },
+  {
+   "id": "atan/0173",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 1.25 0.0)) (error (list 'sig e))))",
+   "expected": "(ok 1.5707963267948966)"
+  },
+  {
+   "id": "atan/0174",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 1.25 -0.0)) (error (list 'sig e))))",
+   "expected": "(ok 1.5707963267948966)"
+  },
+  {
+   "id": "atan/0175",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 1.25 0.5)) (error (list 'sig e))))",
+   "expected": "(ok 1.1902899496825317)"
+  },
+  {
+   "id": "atan/0176",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 1.25 1.25)) (error (list 'sig e))))",
+   "expected": "(ok 0.7853981633974483)"
+  },
+  {
+   "id": "atan/0177",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 1.25 -3.75)) (error (list 'sig e))))",
+   "expected": "(ok 2.819842099193151)"
+  },
+  {
+   "id": "atan/0178",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 1.25 most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(ok 5.421010862427522e-19)"
+  },
+  {
+   "id": "atan/0179",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 1.25 most-negative-fixnum)) (error (list 'sig e))))",
+   "expected": "(ok 3.141592653589793)"
+  },
+  {
+   "id": "atan/0180",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 1.25 1.0e+INF)) (error (list 'sig e))))",
+   "expected": "(ok 0.0)"
+  },
+  {
+   "id": "atan/0181",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 1.25 -1.0e+INF)) (error (list 'sig e))))",
+   "expected": "(ok 3.141592653589793)"
+  },
+  {
+   "id": "atan/0182",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 1.25 0.0e+NaN)) (error (list 'sig e))))",
+   "expected": "(ok 0.0e+NaN)"
+  },
+  {
+   "id": "atan/0183",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 1.25 nil)) (error (list 'sig e))))",
+   "expected": "(ok 0.8960553845713439)"
+  },
+  {
+   "id": "atan/0184",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 1.25 t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp t))"
+  },
+  {
+   "id": "atan/0185",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 1.25 'wrong)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp wrong))"
+  },
+  {
+   "id": "atan/0186",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 1.25 \"bad\")) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp \"bad\"))"
+  },
+  {
+   "id": "atan/0187",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 1.25 '(1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp (1)))"
+  },
+  {
+   "id": "atan/0188",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 1.25 [1])) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp [1]))"
+  },
+  {
+   "id": "atan/0189",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -3.75 0)) (error (list 'sig e))))",
+   "expected": "(ok -1.5707963267948966)"
+  },
+  {
+   "id": "atan/0190",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -3.75 1)) (error (list 'sig e))))",
+   "expected": "(ok -1.3101939350475555)"
+  },
+  {
+   "id": "atan/0191",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -3.75 -1)) (error (list 'sig e))))",
+   "expected": "(ok -1.8313987185422376)"
+  },
+  {
+   "id": "atan/0192",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -3.75 2)) (error (list 'sig e))))",
+   "expected": "(ok -1.0808390005411683)"
+  },
+  {
+   "id": "atan/0193",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -3.75 -2)) (error (list 'sig e))))",
+   "expected": "(ok -2.060753653048625)"
+  },
+  {
+   "id": "atan/0194",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -3.75 0.0)) (error (list 'sig e))))",
+   "expected": "(ok -1.5707963267948966)"
+  },
+  {
+   "id": "atan/0195",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -3.75 -0.0)) (error (list 'sig e))))",
+   "expected": "(ok -1.5707963267948966)"
+  },
+  {
+   "id": "atan/0196",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -3.75 0.5)) (error (list 'sig e))))",
+   "expected": "(ok -1.4382447944982226)"
+  },
+  {
+   "id": "atan/0197",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -3.75 1.25)) (error (list 'sig e))))",
+   "expected": "(ok -1.2490457723982544)"
+  },
+  {
+   "id": "atan/0198",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -3.75 -3.75)) (error (list 'sig e))))",
+   "expected": "(ok -2.356194490192345)"
+  },
+  {
+   "id": "atan/0199",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -3.75 most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(ok -1.6263032587282567e-18)"
+  },
+  {
+   "id": "atan/0200",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -3.75 most-negative-fixnum)) (error (list 'sig e))))",
+   "expected": "(ok -3.141592653589793)"
+  },
+  {
+   "id": "atan/0201",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -3.75 1.0e+INF)) (error (list 'sig e))))",
+   "expected": "(ok -0.0)"
+  },
+  {
+   "id": "atan/0202",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -3.75 -1.0e+INF)) (error (list 'sig e))))",
+   "expected": "(ok -3.141592653589793)"
+  },
+  {
+   "id": "atan/0203",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -3.75 0.0e+NaN)) (error (list 'sig e))))",
+   "expected": "(ok 0.0e+NaN)"
+  },
+  {
+   "id": "atan/0204",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -3.75 nil)) (error (list 'sig e))))",
+   "expected": "(ok -1.3101939350475555)"
+  },
+  {
+   "id": "atan/0205",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -3.75 t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp t))"
+  },
+  {
+   "id": "atan/0206",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -3.75 'wrong)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp wrong))"
+  },
+  {
+   "id": "atan/0207",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -3.75 \"bad\")) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp \"bad\"))"
+  },
+  {
+   "id": "atan/0208",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -3.75 '(1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp (1)))"
+  },
+  {
+   "id": "atan/0209",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -3.75 [1])) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp [1]))"
+  },
+  {
+   "id": "atan/0210",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan most-positive-fixnum 0)) (error (list 'sig e))))",
+   "expected": "(ok 1.5707963267948966)"
+  },
+  {
+   "id": "atan/0211",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan most-positive-fixnum 1)) (error (list 'sig e))))",
+   "expected": "(ok 1.5707963267948966)"
+  },
+  {
+   "id": "atan/0212",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan most-positive-fixnum -1)) (error (list 'sig e))))",
+   "expected": "(ok 1.5707963267948966)"
+  },
+  {
+   "id": "atan/0213",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan most-positive-fixnum 2)) (error (list 'sig e))))",
+   "expected": "(ok 1.5707963267948966)"
+  },
+  {
+   "id": "atan/0214",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan most-positive-fixnum -2)) (error (list 'sig e))))",
+   "expected": "(ok 1.5707963267948966)"
+  },
+  {
+   "id": "atan/0215",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan most-positive-fixnum 0.0)) (error (list 'sig e))))",
+   "expected": "(ok 1.5707963267948966)"
+  },
+  {
+   "id": "atan/0216",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan most-positive-fixnum -0.0)) (error (list 'sig e))))",
+   "expected": "(ok 1.5707963267948966)"
+  },
+  {
+   "id": "atan/0217",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan most-positive-fixnum 0.5)) (error (list 'sig e))))",
+   "expected": "(ok 1.5707963267948966)"
+  },
+  {
+   "id": "atan/0218",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan most-positive-fixnum 1.25)) (error (list 'sig e))))",
+   "expected": "(ok 1.5707963267948966)"
+  },
+  {
+   "id": "atan/0219",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan most-positive-fixnum -3.75)) (error (list 'sig e))))",
+   "expected": "(ok 1.5707963267948966)"
+  },
+  {
+   "id": "atan/0220",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan most-positive-fixnum most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(ok 0.7853981633974483)"
+  },
+  {
+   "id": "atan/0221",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan most-positive-fixnum most-negative-fixnum)) (error (list 'sig e))))",
+   "expected": "(ok 2.356194490192345)"
+  },
+  {
+   "id": "atan/0222",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan most-positive-fixnum 1.0e+INF)) (error (list 'sig e))))",
+   "expected": "(ok 0.0)"
+  },
+  {
+   "id": "atan/0223",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan most-positive-fixnum -1.0e+INF)) (error (list 'sig e))))",
+   "expected": "(ok 3.141592653589793)"
+  },
+  {
+   "id": "atan/0224",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan most-positive-fixnum 0.0e+NaN)) (error (list 'sig e))))",
+   "expected": "(ok 0.0e+NaN)"
+  },
+  {
+   "id": "atan/0225",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan most-positive-fixnum nil)) (error (list 'sig e))))",
+   "expected": "(ok 1.5707963267948966)"
+  },
+  {
+   "id": "atan/0226",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan most-positive-fixnum t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp t))"
+  },
+  {
+   "id": "atan/0227",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan most-positive-fixnum 'wrong)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp wrong))"
+  },
+  {
+   "id": "atan/0228",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan most-positive-fixnum \"bad\")) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp \"bad\"))"
+  },
+  {
+   "id": "atan/0229",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan most-positive-fixnum '(1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp (1)))"
+  },
+  {
+   "id": "atan/0230",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan most-positive-fixnum [1])) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp [1]))"
+  },
+  {
+   "id": "atan/0231",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan most-negative-fixnum 0)) (error (list 'sig e))))",
+   "expected": "(ok -1.5707963267948966)"
+  },
+  {
+   "id": "atan/0232",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan most-negative-fixnum 1)) (error (list 'sig e))))",
+   "expected": "(ok -1.5707963267948966)"
+  },
+  {
+   "id": "atan/0233",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan most-negative-fixnum -1)) (error (list 'sig e))))",
+   "expected": "(ok -1.5707963267948966)"
+  },
+  {
+   "id": "atan/0234",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan most-negative-fixnum 2)) (error (list 'sig e))))",
+   "expected": "(ok -1.5707963267948966)"
+  },
+  {
+   "id": "atan/0235",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan most-negative-fixnum -2)) (error (list 'sig e))))",
+   "expected": "(ok -1.5707963267948966)"
+  },
+  {
+   "id": "atan/0236",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan most-negative-fixnum 0.0)) (error (list 'sig e))))",
+   "expected": "(ok -1.5707963267948966)"
+  },
+  {
+   "id": "atan/0237",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan most-negative-fixnum -0.0)) (error (list 'sig e))))",
+   "expected": "(ok -1.5707963267948966)"
+  },
+  {
+   "id": "atan/0238",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan most-negative-fixnum 0.5)) (error (list 'sig e))))",
+   "expected": "(ok -1.5707963267948966)"
+  },
+  {
+   "id": "atan/0239",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan most-negative-fixnum 1.25)) (error (list 'sig e))))",
+   "expected": "(ok -1.5707963267948966)"
+  },
+  {
+   "id": "atan/0240",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan most-negative-fixnum -3.75)) (error (list 'sig e))))",
+   "expected": "(ok -1.5707963267948966)"
+  },
+  {
+   "id": "atan/0241",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan most-negative-fixnum most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(ok -0.7853981633974483)"
+  },
+  {
+   "id": "atan/0242",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan most-negative-fixnum most-negative-fixnum)) (error (list 'sig e))))",
+   "expected": "(ok -2.356194490192345)"
+  },
+  {
+   "id": "atan/0243",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan most-negative-fixnum 1.0e+INF)) (error (list 'sig e))))",
+   "expected": "(ok -0.0)"
+  },
+  {
+   "id": "atan/0244",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan most-negative-fixnum -1.0e+INF)) (error (list 'sig e))))",
+   "expected": "(ok -3.141592653589793)"
+  },
+  {
+   "id": "atan/0245",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan most-negative-fixnum 0.0e+NaN)) (error (list 'sig e))))",
+   "expected": "(ok 0.0e+NaN)"
+  },
+  {
+   "id": "atan/0246",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan most-negative-fixnum nil)) (error (list 'sig e))))",
+   "expected": "(ok -1.5707963267948966)"
+  },
+  {
+   "id": "atan/0247",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan most-negative-fixnum t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp t))"
+  },
+  {
+   "id": "atan/0248",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan most-negative-fixnum 'wrong)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp wrong))"
+  },
+  {
+   "id": "atan/0249",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan most-negative-fixnum \"bad\")) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp \"bad\"))"
+  },
+  {
+   "id": "atan/0250",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan most-negative-fixnum '(1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp (1)))"
+  },
+  {
+   "id": "atan/0251",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan most-negative-fixnum [1])) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp [1]))"
+  },
+  {
+   "id": "atan/0252",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 1.0e+INF 0)) (error (list 'sig e))))",
+   "expected": "(ok 1.5707963267948966)"
+  },
+  {
+   "id": "atan/0253",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 1.0e+INF 1)) (error (list 'sig e))))",
+   "expected": "(ok 1.5707963267948966)"
+  },
+  {
+   "id": "atan/0254",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 1.0e+INF -1)) (error (list 'sig e))))",
+   "expected": "(ok 1.5707963267948966)"
+  },
+  {
+   "id": "atan/0255",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 1.0e+INF 2)) (error (list 'sig e))))",
+   "expected": "(ok 1.5707963267948966)"
+  },
+  {
+   "id": "atan/0256",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 1.0e+INF -2)) (error (list 'sig e))))",
+   "expected": "(ok 1.5707963267948966)"
+  },
+  {
+   "id": "atan/0257",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 1.0e+INF 0.0)) (error (list 'sig e))))",
+   "expected": "(ok 1.5707963267948966)"
+  },
+  {
+   "id": "atan/0258",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 1.0e+INF -0.0)) (error (list 'sig e))))",
+   "expected": "(ok 1.5707963267948966)"
+  },
+  {
+   "id": "atan/0259",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 1.0e+INF 0.5)) (error (list 'sig e))))",
+   "expected": "(ok 1.5707963267948966)"
+  },
+  {
+   "id": "atan/0260",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 1.0e+INF 1.25)) (error (list 'sig e))))",
+   "expected": "(ok 1.5707963267948966)"
+  },
+  {
+   "id": "atan/0261",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 1.0e+INF -3.75)) (error (list 'sig e))))",
+   "expected": "(ok 1.5707963267948966)"
+  },
+  {
+   "id": "atan/0262",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 1.0e+INF most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(ok 1.5707963267948966)"
+  },
+  {
+   "id": "atan/0263",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 1.0e+INF most-negative-fixnum)) (error (list 'sig e))))",
+   "expected": "(ok 1.5707963267948966)"
+  },
+  {
+   "id": "atan/0264",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 1.0e+INF 1.0e+INF)) (error (list 'sig e))))",
+   "expected": "(ok 0.7853981633974483)"
+  },
+  {
+   "id": "atan/0265",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 1.0e+INF -1.0e+INF)) (error (list 'sig e))))",
+   "expected": "(ok 2.356194490192345)"
+  },
+  {
+   "id": "atan/0266",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 1.0e+INF 0.0e+NaN)) (error (list 'sig e))))",
+   "expected": "(ok 0.0e+NaN)"
+  },
+  {
+   "id": "atan/0267",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 1.0e+INF nil)) (error (list 'sig e))))",
+   "expected": "(ok 1.5707963267948966)"
+  },
+  {
+   "id": "atan/0268",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 1.0e+INF t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp t))"
+  },
+  {
+   "id": "atan/0269",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 1.0e+INF 'wrong)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp wrong))"
+  },
+  {
+   "id": "atan/0270",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 1.0e+INF \"bad\")) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp \"bad\"))"
+  },
+  {
+   "id": "atan/0271",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 1.0e+INF '(1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp (1)))"
+  },
+  {
+   "id": "atan/0272",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 1.0e+INF [1])) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp [1]))"
+  },
+  {
+   "id": "atan/0273",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -1.0e+INF 0)) (error (list 'sig e))))",
+   "expected": "(ok -1.5707963267948966)"
+  },
+  {
+   "id": "atan/0274",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -1.0e+INF 1)) (error (list 'sig e))))",
+   "expected": "(ok -1.5707963267948966)"
+  },
+  {
+   "id": "atan/0275",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -1.0e+INF -1)) (error (list 'sig e))))",
+   "expected": "(ok -1.5707963267948966)"
+  },
+  {
+   "id": "atan/0276",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -1.0e+INF 2)) (error (list 'sig e))))",
+   "expected": "(ok -1.5707963267948966)"
+  },
+  {
+   "id": "atan/0277",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -1.0e+INF -2)) (error (list 'sig e))))",
+   "expected": "(ok -1.5707963267948966)"
+  },
+  {
+   "id": "atan/0278",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -1.0e+INF 0.0)) (error (list 'sig e))))",
+   "expected": "(ok -1.5707963267948966)"
+  },
+  {
+   "id": "atan/0279",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -1.0e+INF -0.0)) (error (list 'sig e))))",
+   "expected": "(ok -1.5707963267948966)"
+  },
+  {
+   "id": "atan/0280",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -1.0e+INF 0.5)) (error (list 'sig e))))",
+   "expected": "(ok -1.5707963267948966)"
+  },
+  {
+   "id": "atan/0281",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -1.0e+INF 1.25)) (error (list 'sig e))))",
+   "expected": "(ok -1.5707963267948966)"
+  },
+  {
+   "id": "atan/0282",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -1.0e+INF -3.75)) (error (list 'sig e))))",
+   "expected": "(ok -1.5707963267948966)"
+  },
+  {
+   "id": "atan/0283",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -1.0e+INF most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(ok -1.5707963267948966)"
+  },
+  {
+   "id": "atan/0284",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -1.0e+INF most-negative-fixnum)) (error (list 'sig e))))",
+   "expected": "(ok -1.5707963267948966)"
+  },
+  {
+   "id": "atan/0285",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -1.0e+INF 1.0e+INF)) (error (list 'sig e))))",
+   "expected": "(ok -0.7853981633974483)"
+  },
+  {
+   "id": "atan/0286",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -1.0e+INF -1.0e+INF)) (error (list 'sig e))))",
+   "expected": "(ok -2.356194490192345)"
+  },
+  {
+   "id": "atan/0287",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -1.0e+INF 0.0e+NaN)) (error (list 'sig e))))",
+   "expected": "(ok 0.0e+NaN)"
+  },
+  {
+   "id": "atan/0288",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -1.0e+INF nil)) (error (list 'sig e))))",
+   "expected": "(ok -1.5707963267948966)"
+  },
+  {
+   "id": "atan/0289",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -1.0e+INF t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp t))"
+  },
+  {
+   "id": "atan/0290",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -1.0e+INF 'wrong)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp wrong))"
+  },
+  {
+   "id": "atan/0291",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -1.0e+INF \"bad\")) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp \"bad\"))"
+  },
+  {
+   "id": "atan/0292",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -1.0e+INF '(1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp (1)))"
+  },
+  {
+   "id": "atan/0293",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -1.0e+INF [1])) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp [1]))"
+  },
+  {
+   "id": "atan/0294",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0.0e+NaN 0)) (error (list 'sig e))))",
+   "expected": "(ok 0.0e+NaN)"
+  },
+  {
+   "id": "atan/0295",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0.0e+NaN 1)) (error (list 'sig e))))",
+   "expected": "(ok 0.0e+NaN)"
+  },
+  {
+   "id": "atan/0296",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0.0e+NaN -1)) (error (list 'sig e))))",
+   "expected": "(ok 0.0e+NaN)"
+  },
+  {
+   "id": "atan/0297",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0.0e+NaN 2)) (error (list 'sig e))))",
+   "expected": "(ok 0.0e+NaN)"
+  },
+  {
+   "id": "atan/0298",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0.0e+NaN -2)) (error (list 'sig e))))",
+   "expected": "(ok 0.0e+NaN)"
+  },
+  {
+   "id": "atan/0299",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0.0e+NaN 0.0)) (error (list 'sig e))))",
+   "expected": "(ok 0.0e+NaN)"
+  },
+  {
+   "id": "atan/0300",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0.0e+NaN -0.0)) (error (list 'sig e))))",
+   "expected": "(ok 0.0e+NaN)"
+  },
+  {
+   "id": "atan/0301",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0.0e+NaN 0.5)) (error (list 'sig e))))",
+   "expected": "(ok 0.0e+NaN)"
+  },
+  {
+   "id": "atan/0302",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0.0e+NaN 1.25)) (error (list 'sig e))))",
+   "expected": "(ok 0.0e+NaN)"
+  },
+  {
+   "id": "atan/0303",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0.0e+NaN -3.75)) (error (list 'sig e))))",
+   "expected": "(ok 0.0e+NaN)"
+  },
+  {
+   "id": "atan/0304",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0.0e+NaN most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(ok 0.0e+NaN)"
+  },
+  {
+   "id": "atan/0305",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0.0e+NaN most-negative-fixnum)) (error (list 'sig e))))",
+   "expected": "(ok 0.0e+NaN)"
+  },
+  {
+   "id": "atan/0306",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0.0e+NaN 1.0e+INF)) (error (list 'sig e))))",
+   "expected": "(ok 0.0e+NaN)"
+  },
+  {
+   "id": "atan/0307",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0.0e+NaN -1.0e+INF)) (error (list 'sig e))))",
+   "expected": "(ok 0.0e+NaN)"
+  },
+  {
+   "id": "atan/0308",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0.0e+NaN 0.0e+NaN)) (error (list 'sig e))))",
+   "expected": "(ok 0.0e+NaN)"
+  },
+  {
+   "id": "atan/0309",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0.0e+NaN nil)) (error (list 'sig e))))",
+   "expected": "(ok 0.0e+NaN)"
+  },
+  {
+   "id": "atan/0310",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0.0e+NaN t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp t))"
+  },
+  {
+   "id": "atan/0311",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0.0e+NaN 'wrong)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp wrong))"
+  },
+  {
+   "id": "atan/0312",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0.0e+NaN \"bad\")) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp \"bad\"))"
+  },
+  {
+   "id": "atan/0313",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0.0e+NaN '(1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp (1)))"
+  },
+  {
+   "id": "atan/0314",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0.0e+NaN [1])) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp [1]))"
+  },
+  {
+   "id": "atan/0315",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan nil 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp nil))"
+  },
+  {
+   "id": "atan/0316",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan nil 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp nil))"
+  },
+  {
+   "id": "atan/0317",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan nil -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp nil))"
+  },
+  {
+   "id": "atan/0318",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan nil 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp nil))"
+  },
+  {
+   "id": "atan/0319",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan nil -2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp nil))"
+  },
+  {
+   "id": "atan/0320",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan nil 0.0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp nil))"
+  },
+  {
+   "id": "atan/0321",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan nil -0.0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp nil))"
+  },
+  {
+   "id": "atan/0322",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan nil 0.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp nil))"
+  },
+  {
+   "id": "atan/0323",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan nil 1.25)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp nil))"
+  },
+  {
+   "id": "atan/0324",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan nil -3.75)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp nil))"
+  },
+  {
+   "id": "atan/0325",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan nil most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp nil))"
+  },
+  {
+   "id": "atan/0326",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan nil most-negative-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp nil))"
+  },
+  {
+   "id": "atan/0327",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan nil 1.0e+INF)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp nil))"
+  },
+  {
+   "id": "atan/0328",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan nil -1.0e+INF)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp nil))"
+  },
+  {
+   "id": "atan/0329",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan nil 0.0e+NaN)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp nil))"
+  },
+  {
+   "id": "atan/0330",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp nil))"
+  },
+  {
+   "id": "atan/0331",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan nil t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp nil))"
+  },
+  {
+   "id": "atan/0332",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan nil 'wrong)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp nil))"
+  },
+  {
+   "id": "atan/0333",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan nil \"bad\")) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp nil))"
+  },
+  {
+   "id": "atan/0334",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan nil '(1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp nil))"
+  },
+  {
+   "id": "atan/0335",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan nil [1])) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp nil))"
+  },
+  {
+   "id": "atan/0336",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan t 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp t))"
+  },
+  {
+   "id": "atan/0337",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan t 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp t))"
+  },
+  {
+   "id": "atan/0338",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan t -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp t))"
+  },
+  {
+   "id": "atan/0339",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan t 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp t))"
+  },
+  {
+   "id": "atan/0340",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan t -2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp t))"
+  },
+  {
+   "id": "atan/0341",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan t 0.0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp t))"
+  },
+  {
+   "id": "atan/0342",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan t -0.0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp t))"
+  },
+  {
+   "id": "atan/0343",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan t 0.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp t))"
+  },
+  {
+   "id": "atan/0344",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan t 1.25)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp t))"
+  },
+  {
+   "id": "atan/0345",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan t -3.75)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp t))"
+  },
+  {
+   "id": "atan/0346",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan t most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp t))"
+  },
+  {
+   "id": "atan/0347",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan t most-negative-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp t))"
+  },
+  {
+   "id": "atan/0348",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan t 1.0e+INF)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp t))"
+  },
+  {
+   "id": "atan/0349",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan t -1.0e+INF)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp t))"
+  },
+  {
+   "id": "atan/0350",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan t 0.0e+NaN)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp t))"
+  },
+  {
+   "id": "atan/0351",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan t nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp t))"
+  },
+  {
+   "id": "atan/0352",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan t t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp t))"
+  },
+  {
+   "id": "atan/0353",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan t 'wrong)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp t))"
+  },
+  {
+   "id": "atan/0354",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan t \"bad\")) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp t))"
+  },
+  {
+   "id": "atan/0355",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan t '(1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp t))"
+  },
+  {
+   "id": "atan/0356",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan t [1])) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp t))"
+  },
+  {
+   "id": "atan/0357",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 'wrong 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp wrong))"
+  },
+  {
+   "id": "atan/0358",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 'wrong 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp wrong))"
+  },
+  {
+   "id": "atan/0359",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 'wrong -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp wrong))"
+  },
+  {
+   "id": "atan/0360",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 'wrong 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp wrong))"
+  },
+  {
+   "id": "atan/0361",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 'wrong -2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp wrong))"
+  },
+  {
+   "id": "atan/0362",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 'wrong 0.0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp wrong))"
+  },
+  {
+   "id": "atan/0363",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 'wrong -0.0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp wrong))"
+  },
+  {
+   "id": "atan/0364",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 'wrong 0.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp wrong))"
+  },
+  {
+   "id": "atan/0365",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 'wrong 1.25)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp wrong))"
+  },
+  {
+   "id": "atan/0366",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 'wrong -3.75)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp wrong))"
+  },
+  {
+   "id": "atan/0367",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 'wrong most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp wrong))"
+  },
+  {
+   "id": "atan/0368",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 'wrong most-negative-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp wrong))"
+  },
+  {
+   "id": "atan/0369",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 'wrong 1.0e+INF)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp wrong))"
+  },
+  {
+   "id": "atan/0370",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 'wrong -1.0e+INF)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp wrong))"
+  },
+  {
+   "id": "atan/0371",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 'wrong 0.0e+NaN)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp wrong))"
+  },
+  {
+   "id": "atan/0372",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 'wrong nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp wrong))"
+  },
+  {
+   "id": "atan/0373",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 'wrong t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp wrong))"
+  },
+  {
+   "id": "atan/0374",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 'wrong 'wrong)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp wrong))"
+  },
+  {
+   "id": "atan/0375",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 'wrong \"bad\")) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp wrong))"
+  },
+  {
+   "id": "atan/0376",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 'wrong '(1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp wrong))"
+  },
+  {
+   "id": "atan/0377",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 'wrong [1])) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp wrong))"
+  },
+  {
+   "id": "atan/0378",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan \"bad\" 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp \"bad\"))"
+  },
+  {
+   "id": "atan/0379",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan \"bad\" 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp \"bad\"))"
+  },
+  {
+   "id": "atan/0380",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan \"bad\" -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp \"bad\"))"
+  },
+  {
+   "id": "atan/0381",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan \"bad\" 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp \"bad\"))"
+  },
+  {
+   "id": "atan/0382",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan \"bad\" -2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp \"bad\"))"
+  },
+  {
+   "id": "atan/0383",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan \"bad\" 0.0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp \"bad\"))"
+  },
+  {
+   "id": "atan/0384",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan \"bad\" -0.0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp \"bad\"))"
+  },
+  {
+   "id": "atan/0385",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan \"bad\" 0.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp \"bad\"))"
+  },
+  {
+   "id": "atan/0386",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan \"bad\" 1.25)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp \"bad\"))"
+  },
+  {
+   "id": "atan/0387",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan \"bad\" -3.75)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp \"bad\"))"
+  },
+  {
+   "id": "atan/0388",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan \"bad\" most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp \"bad\"))"
+  },
+  {
+   "id": "atan/0389",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan \"bad\" most-negative-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp \"bad\"))"
+  },
+  {
+   "id": "atan/0390",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan \"bad\" 1.0e+INF)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp \"bad\"))"
+  },
+  {
+   "id": "atan/0391",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan \"bad\" -1.0e+INF)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp \"bad\"))"
+  },
+  {
+   "id": "atan/0392",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan \"bad\" 0.0e+NaN)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp \"bad\"))"
+  },
+  {
+   "id": "atan/0393",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan \"bad\" nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp \"bad\"))"
+  },
+  {
+   "id": "atan/0394",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan \"bad\" t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp \"bad\"))"
+  },
+  {
+   "id": "atan/0395",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan \"bad\" 'wrong)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp \"bad\"))"
+  },
+  {
+   "id": "atan/0396",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan \"bad\" \"bad\")) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp \"bad\"))"
+  },
+  {
+   "id": "atan/0397",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan \"bad\" '(1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp \"bad\"))"
+  },
+  {
+   "id": "atan/0398",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan \"bad\" [1])) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp \"bad\"))"
+  },
+  {
+   "id": "atan/0399",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan '(1) 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp (1)))"
+  },
+  {
+   "id": "atan/0400",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan '(1) 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp (1)))"
+  },
+  {
+   "id": "atan/0401",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan '(1) -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp (1)))"
+  },
+  {
+   "id": "atan/0402",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan '(1) 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp (1)))"
+  },
+  {
+   "id": "atan/0403",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan '(1) -2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp (1)))"
+  },
+  {
+   "id": "atan/0404",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan '(1) 0.0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp (1)))"
+  },
+  {
+   "id": "atan/0405",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan '(1) -0.0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp (1)))"
+  },
+  {
+   "id": "atan/0406",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan '(1) 0.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp (1)))"
+  },
+  {
+   "id": "atan/0407",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan '(1) 1.25)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp (1)))"
+  },
+  {
+   "id": "atan/0408",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan '(1) -3.75)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp (1)))"
+  },
+  {
+   "id": "atan/0409",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan '(1) most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp (1)))"
+  },
+  {
+   "id": "atan/0410",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan '(1) most-negative-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp (1)))"
+  },
+  {
+   "id": "atan/0411",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan '(1) 1.0e+INF)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp (1)))"
+  },
+  {
+   "id": "atan/0412",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan '(1) -1.0e+INF)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp (1)))"
+  },
+  {
+   "id": "atan/0413",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan '(1) 0.0e+NaN)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp (1)))"
+  },
+  {
+   "id": "atan/0414",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan '(1) nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp (1)))"
+  },
+  {
+   "id": "atan/0415",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan '(1) t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp (1)))"
+  },
+  {
+   "id": "atan/0416",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan '(1) 'wrong)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp (1)))"
+  },
+  {
+   "id": "atan/0417",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan '(1) \"bad\")) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp (1)))"
+  },
+  {
+   "id": "atan/0418",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan '(1) '(1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp (1)))"
+  },
+  {
+   "id": "atan/0419",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan '(1) [1])) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp (1)))"
+  },
+  {
+   "id": "atan/0420",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan [1] 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp [1]))"
+  },
+  {
+   "id": "atan/0421",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan [1] 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp [1]))"
+  },
+  {
+   "id": "atan/0422",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan [1] -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp [1]))"
+  },
+  {
+   "id": "atan/0423",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan [1] 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp [1]))"
+  },
+  {
+   "id": "atan/0424",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan [1] -2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp [1]))"
+  },
+  {
+   "id": "atan/0425",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan [1] 0.0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp [1]))"
+  },
+  {
+   "id": "atan/0426",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan [1] -0.0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp [1]))"
+  },
+  {
+   "id": "atan/0427",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan [1] 0.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp [1]))"
+  },
+  {
+   "id": "atan/0428",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan [1] 1.25)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp [1]))"
+  },
+  {
+   "id": "atan/0429",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan [1] -3.75)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp [1]))"
+  },
+  {
+   "id": "atan/0430",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan [1] most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp [1]))"
+  },
+  {
+   "id": "atan/0431",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan [1] most-negative-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp [1]))"
+  },
+  {
+   "id": "atan/0432",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan [1] 1.0e+INF)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp [1]))"
+  },
+  {
+   "id": "atan/0433",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan [1] -1.0e+INF)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp [1]))"
+  },
+  {
+   "id": "atan/0434",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan [1] 0.0e+NaN)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp [1]))"
+  },
+  {
+   "id": "atan/0435",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan [1] nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp [1]))"
+  },
+  {
+   "id": "atan/0436",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan [1] t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp [1]))"
+  },
+  {
+   "id": "atan/0437",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan [1] 'wrong)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp [1]))"
+  },
+  {
+   "id": "atan/0438",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan [1] \"bad\")) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp [1]))"
+  },
+  {
+   "id": "atan/0439",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan [1] '(1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp [1]))"
+  },
+  {
+   "id": "atan/0440",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan [1] [1])) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp [1]))"
+  },
+  {
+   "id": "atan/0441",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'atan '())) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr atan> 0))"
+  },
+  {
+   "id": "atan/0442",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'atan '(1 1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr atan> 3))"
+  },
+  {
+   "id": "atan/0443",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0) (a1 0)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (atan a0 a1))) (error (list 'sig e))))",
+   "expected": "(ok 0.0)"
+  },
+  {
+   "id": "atan/0444",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 t)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (atan a0 a1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp t))"
+  },
+  {
+   "id": "atan/0445",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 2) (a1 most-negative-fixnum)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (atan a0 a1))) (error (list 'sig e))))",
+   "expected": "(ok 3.141592653589793)"
+  },
+  {
+   "id": "atan/0446",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0.0) (a1 -0.0)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (atan a0 a1))) (error (list 'sig e))))",
+   "expected": "(ok 3.141592653589793)"
+  },
+  {
+   "id": "atan/0447",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0.5) (a1 1)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (atan a0 a1))) (error (list 'sig e))))",
+   "expected": "(ok 0.4636476090008061)"
+  },
+  {
+   "id": "atan/0448",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.25) (a1 'wrong)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (atan a0 a1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp wrong))"
+  },
+  {
+   "id": "atan/0449",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-positive-fixnum) (a1 1.0e+INF)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (atan a0 a1))) (error (list 'sig e))))",
+   "expected": "(ok 0.0)"
+  },
+  {
+   "id": "atan/0450",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.0e+INF) (a1 0.5)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (atan a0 a1))) (error (list 'sig e))))",
+   "expected": "(ok 1.5707963267948966)"
+  },
+  {
+   "id": "atan/0451",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0.0e+NaN) (a1 -1)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (atan a0 a1))) (error (list 'sig e))))",
+   "expected": "(ok 0.0e+NaN)"
+  },
+  {
+   "id": "atan/0452",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 \"bad\")) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (atan a0 a1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp nil))"
+  },
+  {
+   "id": "atan/0453",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'wrong) (a1 -1.0e+INF)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (atan a0 a1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp wrong))"
+  },
+  {
+   "id": "atan/0454",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 '(1)) (a1 1.25)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (atan a0 a1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp (1)))"
+  },
+  {
+   "id": "atan/0455",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0) (a1 0)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0456",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0) (a1 2)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0457",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0) (a1 -0.0)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0458",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0) (a1 -3.75)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0459",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0) (a1 1.0e+INF)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0460",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0) (a1 nil)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0461",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0) (a1 \"bad\")) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp \"bad\"))"
+  },
+  {
+   "id": "atan/0462",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 0)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0463",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 2)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0464",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 -0.0)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0465",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 -3.75)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0466",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 1.0e+INF)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0467",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 nil)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0468",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 \"bad\")) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp \"bad\"))"
+  },
+  {
+   "id": "atan/0469",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1) (a1 0)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0470",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1) (a1 2)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0471",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1) (a1 -0.0)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0472",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1) (a1 -3.75)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0473",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1) (a1 1.0e+INF)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0474",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1) (a1 nil)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0475",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1) (a1 \"bad\")) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp \"bad\"))"
+  },
+  {
+   "id": "atan/0476",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 2) (a1 0)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0477",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 2) (a1 2)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0478",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 2) (a1 -0.0)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0479",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 2) (a1 -3.75)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0480",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 2) (a1 1.0e+INF)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0481",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 2) (a1 nil)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0482",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 2) (a1 \"bad\")) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp \"bad\"))"
+  },
+  {
+   "id": "atan/0483",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -2) (a1 0)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0484",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -2) (a1 2)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0485",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -2) (a1 -0.0)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0486",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -2) (a1 -3.75)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0487",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -2) (a1 1.0e+INF)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0488",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -2) (a1 nil)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0489",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -2) (a1 \"bad\")) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp \"bad\"))"
+  },
+  {
+   "id": "atan/0490",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0.0) (a1 0)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0491",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0.0) (a1 2)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0492",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0.0) (a1 -0.0)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0493",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0.0) (a1 -3.75)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0494",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0.0) (a1 1.0e+INF)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0495",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0.0) (a1 nil)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0496",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0.0) (a1 \"bad\")) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp \"bad\"))"
+  },
+  {
+   "id": "atan/0497",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -0.0) (a1 0)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0498",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -0.0) (a1 2)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0499",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -0.0) (a1 -0.0)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0500",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -0.0) (a1 -3.75)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0501",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -0.0) (a1 1.0e+INF)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0502",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -0.0) (a1 nil)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0503",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -0.0) (a1 \"bad\")) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp \"bad\"))"
+  },
+  {
+   "id": "atan/0504",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0.5) (a1 0)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0505",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0.5) (a1 2)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0506",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0.5) (a1 -0.0)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0507",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0.5) (a1 -3.75)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0508",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0.5) (a1 1.0e+INF)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0509",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0.5) (a1 nil)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0510",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0.5) (a1 \"bad\")) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp \"bad\"))"
+  },
+  {
+   "id": "atan/0511",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.25) (a1 0)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0512",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.25) (a1 2)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0513",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.25) (a1 -0.0)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0514",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.25) (a1 -3.75)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0515",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.25) (a1 1.0e+INF)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0516",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.25) (a1 nil)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0517",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.25) (a1 \"bad\")) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp \"bad\"))"
+  },
+  {
+   "id": "atan/0518",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -3.75) (a1 0)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0519",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -3.75) (a1 2)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0520",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -3.75) (a1 -0.0)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0521",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -3.75) (a1 -3.75)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0522",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -3.75) (a1 1.0e+INF)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0523",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -3.75) (a1 nil)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0524",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -3.75) (a1 \"bad\")) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp \"bad\"))"
+  },
+  {
+   "id": "atan/0525",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-positive-fixnum) (a1 0)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0526",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-positive-fixnum) (a1 2)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0527",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-positive-fixnum) (a1 -0.0)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0528",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-positive-fixnum) (a1 -3.75)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0529",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-positive-fixnum) (a1 1.0e+INF)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0530",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-positive-fixnum) (a1 nil)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0531",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-positive-fixnum) (a1 \"bad\")) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp \"bad\"))"
+  },
+  {
+   "id": "atan/0532",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-negative-fixnum) (a1 0)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0533",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-negative-fixnum) (a1 2)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0534",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-negative-fixnum) (a1 -0.0)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0535",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-negative-fixnum) (a1 -3.75)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0536",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-negative-fixnum) (a1 1.0e+INF)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0537",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-negative-fixnum) (a1 nil)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0538",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-negative-fixnum) (a1 \"bad\")) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp \"bad\"))"
+  },
+  {
+   "id": "atan/0539",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.0e+INF) (a1 0)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0540",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.0e+INF) (a1 2)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0541",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.0e+INF) (a1 -0.0)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0542",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.0e+INF) (a1 -3.75)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0543",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.0e+INF) (a1 1.0e+INF)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0544",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.0e+INF) (a1 nil)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0545",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.0e+INF) (a1 \"bad\")) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp \"bad\"))"
+  },
+  {
+   "id": "atan/0546",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1.0e+INF) (a1 0)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0547",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1.0e+INF) (a1 2)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0548",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1.0e+INF) (a1 -0.0)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0549",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1.0e+INF) (a1 -3.75)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0550",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1.0e+INF) (a1 1.0e+INF)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0551",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1.0e+INF) (a1 nil)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0552",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1.0e+INF) (a1 \"bad\")) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp \"bad\"))"
+  },
+  {
+   "id": "atan/0553",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0.0e+NaN) (a1 0)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0554",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0.0e+NaN) (a1 2)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0555",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0.0e+NaN) (a1 -0.0)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0556",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0.0e+NaN) (a1 -3.75)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0557",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0.0e+NaN) (a1 1.0e+INF)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0558",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0.0e+NaN) (a1 nil)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "atan/0559",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0.0e+NaN) (a1 \"bad\")) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp \"bad\"))"
+  },
+  {
+   "id": "atan/0560",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 0)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp nil))"
+  },
+  {
+   "id": "atan/0561",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 2)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp nil))"
+  },
+  {
+   "id": "atan/0562",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 -0.0)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp nil))"
+  },
+  {
+   "id": "atan/0563",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 -3.75)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp nil))"
+  },
+  {
+   "id": "atan/0564",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 1.0e+INF)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp nil))"
+  },
+  {
+   "id": "atan/0565",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 nil)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp nil))"
+  },
+  {
+   "id": "atan/0566",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 \"bad\")) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp nil))"
+  },
+  {
+   "id": "atan/0567",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 0)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp t))"
+  },
+  {
+   "id": "atan/0568",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 2)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp t))"
+  },
+  {
+   "id": "atan/0569",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 -0.0)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp t))"
+  },
+  {
+   "id": "atan/0570",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 -3.75)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp t))"
+  },
+  {
+   "id": "atan/0571",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 1.0e+INF)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp t))"
+  },
+  {
+   "id": "atan/0572",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 nil)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp t))"
+  },
+  {
+   "id": "atan/0573",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 \"bad\")) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp t))"
+  },
+  {
+   "id": "atan/0574",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'wrong) (a1 0)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp wrong))"
+  },
+  {
+   "id": "atan/0575",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'wrong) (a1 2)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp wrong))"
+  },
+  {
+   "id": "atan/0576",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'wrong) (a1 -0.0)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp wrong))"
+  },
+  {
+   "id": "atan/0577",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'wrong) (a1 -3.75)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp wrong))"
+  },
+  {
+   "id": "atan/0578",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'wrong) (a1 1.0e+INF)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp wrong))"
+  },
+  {
+   "id": "atan/0579",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'wrong) (a1 nil)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp wrong))"
+  },
+  {
+   "id": "atan/0580",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'wrong) (a1 \"bad\")) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp wrong))"
+  },
+  {
+   "id": "atan/0581",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 \"bad\") (a1 0)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp \"bad\"))"
+  },
+  {
+   "id": "atan/0582",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 \"bad\") (a1 2)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp \"bad\"))"
+  },
+  {
+   "id": "atan/0583",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 \"bad\") (a1 -0.0)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp \"bad\"))"
+  },
+  {
+   "id": "atan/0584",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 \"bad\") (a1 -3.75)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp \"bad\"))"
+  },
+  {
+   "id": "atan/0585",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 \"bad\") (a1 1.0e+INF)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp \"bad\"))"
+  },
+  {
+   "id": "atan/0586",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 \"bad\") (a1 nil)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp \"bad\"))"
+  },
+  {
+   "id": "atan/0587",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 \"bad\") (a1 \"bad\")) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp \"bad\"))"
+  },
+  {
+   "id": "atan/0588",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 '(1)) (a1 0)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp (1)))"
+  },
+  {
+   "id": "atan/0589",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 '(1)) (a1 2)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp (1)))"
+  },
+  {
+   "id": "atan/0590",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 '(1)) (a1 -0.0)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp (1)))"
+  },
+  {
+   "id": "atan/0591",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 '(1)) (a1 -3.75)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp (1)))"
+  },
+  {
+   "id": "atan/0592",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 '(1)) (a1 1.0e+INF)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp (1)))"
+  },
+  {
+   "id": "atan/0593",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 '(1)) (a1 nil)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp (1)))"
+  },
+  {
+   "id": "atan/0594",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 '(1)) (a1 \"bad\")) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp (1)))"
+  },
+  {
+   "id": "atan/0595",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 [1]) (a1 0)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp [1]))"
+  },
+  {
+   "id": "atan/0596",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 [1]) (a1 2)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp [1]))"
+  },
+  {
+   "id": "atan/0597",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 [1]) (a1 -0.0)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp [1]))"
+  },
+  {
+   "id": "atan/0598",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 [1]) (a1 -3.75)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp [1]))"
+  },
+  {
+   "id": "atan/0599",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 [1]) (a1 1.0e+INF)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp [1]))"
+  },
+  {
+   "id": "atan/0600",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 [1]) (a1 nil)) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp [1]))"
+  },
+  {
+   "id": "atan/0601",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 [1]) (a1 \"bad\")) (let ((r (atan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument numberp [1]))"
+  },
+  {
+   "id": "atan/0602",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0)) (error (list 'sig e))))",
+   "expected": "(ok 0.0)"
+  },
+  {
+   "id": "atan/0603",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 1)) (error (list 'sig e))))",
+   "expected": "(ok 0.7853981633974483)"
+  },
+  {
+   "id": "atan/0604",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -1)) (error (list 'sig e))))",
+   "expected": "(ok -0.7853981633974483)"
+  },
+  {
+   "id": "atan/0605",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -0.0)) (error (list 'sig e))))",
+   "expected": "(ok -0.0)"
+  },
+  {
+   "id": "atan/0606",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 1 nil)) (error (list 'sig e))))",
+   "expected": "(ok 0.7853981633974483)"
+  },
+  {
+   "id": "atan/0607",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 1 -1)) (error (list 'sig e))))",
+   "expected": "(ok 2.356194490192345)"
+  },
+  {
+   "id": "atan/0608",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -1 -1)) (error (list 'sig e))))",
+   "expected": "(ok -2.356194490192345)"
+  },
+  {
+   "id": "atan/0609",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 0.0 -0.0)) (error (list 'sig e))))",
+   "expected": "(ok 3.141592653589793)"
+  },
+  {
+   "id": "atan/0610",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan -0.0 -0.0)) (error (list 'sig e))))",
+   "expected": "(ok -3.141592653589793)"
+  },
+  {
+   "id": "atan/0611",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan (car (read-from-string \"#x200000000000000001\")))) (error (list 'sig e))))",
+   "expected": "(ok 1.5707963267948966)"
+  },
+  {
+   "id": "atan/0612",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 1 (car (read-from-string \"#x200000000000000001\")))) (error (list 'sig e))))",
+   "expected": "(ok 1.6940658945086007e-21)"
+  },
+  {
+   "id": "atan/0613",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (fboundp 'atan) (functionp #'atan) (funcall #'atan 0))) (error (list 'sig e))))",
+   "expected": "(ok (t t 0.0))"
+  },
+  {
+   "id": "atan/0614",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 1 (car (read-from-string \"#x3fffffffffffffffff\")))) (error (list 'sig e))))",
+   "expected": "(ok 8.470329472543003e-22)"
+  },
+  {
+   "id": "atan/0615",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (atan 1 (car (read-from-string \"#xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\")))) (error (list 'sig e))))",
+   "expected": "(ok 0.0)"
+  },
+  {
+   "id": "atan/0616",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"bad\") (error (list 'sig e))))",
+   "expected": "(ok \"bad\")"
+  },
+  {
+   "id": "atan/0617",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok '(1)) (error (list 'sig e))))",
+   "expected": "(ok (1))"
+  },
+  {
+   "id": "atan/0618",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 'wrong) (error (list 'sig e))))",
+   "expected": "(ok wrong)"
+  },
+  {
+   "id": "atan/0619",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok -0.0) (error (list 'sig e))))",
+   "expected": "(ok -0.0)"
+  },
+  {
+   "id": "atan/0620",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok -1) (error (list 'sig e))))",
+   "expected": "(ok -1)"
+  },
+  {
+   "id": "atan/0621",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok -1.0e+INF) (error (list 'sig e))))",
+   "expected": "(ok -1.0e+INF)"
+  },
+  {
+   "id": "atan/0622",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok -2) (error (list 'sig e))))",
+   "expected": "(ok -2)"
+  },
+  {
+   "id": "atan/0623",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok -3.75) (error (list 'sig e))))",
+   "expected": "(ok -3.75)"
+  },
+  {
+   "id": "atan/0624",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 0) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "atan/0625",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 0.0) (error (list 'sig e))))",
+   "expected": "(ok 0.0)"
+  },
+  {
+   "id": "atan/0626",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 0.0e+NaN) (error (list 'sig e))))",
+   "expected": "(ok 0.0e+NaN)"
+  },
+  {
+   "id": "atan/0627",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 0.5) (error (list 'sig e))))",
+   "expected": "(ok 0.5)"
+  },
+  {
+   "id": "atan/0628",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1) (error (list 'sig e))))",
+   "expected": "(ok 1)"
+  },
+  {
+   "id": "atan/0629",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1.0e+INF) (error (list 'sig e))))",
+   "expected": "(ok 1.0e+INF)"
+  },
+  {
+   "id": "atan/0630",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1.25) (error (list 'sig e))))",
+   "expected": "(ok 1.25)"
+  },
+  {
+   "id": "atan/0631",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 2) (error (list 'sig e))))",
+   "expected": "(ok 2)"
+  },
+  {
+   "id": "atan/0632",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok [1]) (error (list 'sig e))))",
+   "expected": "(ok [1])"
+  },
+  {
+   "id": "atan/0633",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok most-negative-fixnum) (error (list 'sig e))))",
+   "expected": "(ok -2305843009213693952)"
+  },
+  {
+   "id": "atan/0634",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok most-positive-fixnum) (error (list 'sig e))))",
+   "expected": "(ok 2305843009213693951)"
+  },
+  {
+   "id": "atan/0635",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok nil) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "atan/0636",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok t) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  }
+ ]
+}

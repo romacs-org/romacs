@@ -1,0 +1,5 @@
+(setq b (get-buffer-create " probe"))
+(save-current-buffer (set-buffer b) (insert "x\n\n") (re-search-backward "[^\n]" nil t))
+(kill-buffer b)
+(match-data t)
+(match-data)

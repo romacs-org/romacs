@@ -1,0 +1,69 @@
+{
+ "name": "bare-symbol-p",
+ "arity": [
+  1,
+  1
+ ],
+ "effect": "pure",
+ "gnu_files": [
+  "data.c"
+ ],
+ "gnu_def": "data.c:352",
+ "rust": "src/prims/bare_symbol_p.rs:5",
+ "args": [
+  "data-predicate-curated"
+ ],
+ "extra": {
+  "0": [
+   "nil",
+   "t",
+   "'x",
+   ":key",
+   "0",
+   "1",
+   "-1",
+   "4194303",
+   "4194304",
+   "1152921504606846975",
+   "1152921504606846976",
+   "2305843009213693951",
+   "-2305843009213693952",
+   "#x2000000000000000",
+   "#x-2000000000000001",
+   "#xffffffffffffffffffffffffffffffff",
+   "#x-ffffffffffffffffffffffffffffffff",
+   "0.0",
+   "-0.0",
+   "1.5",
+   "-1.5",
+   "1.0e+INF",
+   "-1.0e+INF",
+   "0.0e+NaN",
+   "\"\"",
+   "\"x\"",
+   "\"\u03bb\"",
+   "'(1 . 2)",
+   "[1]"
+  ]
+ },
+ "probes": [
+  "(bare-symbol-p (make-marker))",
+  "(bare-symbol-p (set-marker (make-marker) 1))",
+  "(bare-symbol-p (current-buffer))",
+  "(bare-symbol-p (symbol-function 'car))",
+  "(bare-symbol-p (lambda (x) x))",
+  "(bare-symbol-p (make-symbol \"x\"))",
+  "(bare-symbol-p (make-hash-table))",
+  "(bare-symbol-p (make-char-table 'data-predicate))",
+  "(bare-symbol-p (standard-syntax-table))",
+  "(bare-symbol-p (obarray-make 3))",
+  "(bare-symbol-p (make-overlay 1 1))",
+  "(bare-symbol-p (selected-window))",
+  "(bare-symbol-p (selected-frame))",
+  "(bare-symbol-p (frame-terminal))",
+  "(bare-symbol-p (unibyte-string 255))",
+  "(funcall #'bare-symbol-p 0)",
+  "(funcall #'bare-symbol-p (symbol-function 'car))",
+  "(bare-symbol-p (position-symbol 'x 3))"
+ ]
+}

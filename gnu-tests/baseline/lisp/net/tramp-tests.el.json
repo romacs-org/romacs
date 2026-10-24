@@ -1,0 +1,2731 @@
+{
+ "blob": "e27124b66a2c7524553dbc7f1f75bfebd08ac7dd",
+ "compiled": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": true,
+  "results": {
+   "tramp-test00-availability": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "tramp-test01-file-name-syntax": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "tramp-test01-file-name-syntax-separate": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test01-file-name-syntax-simplified": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test02-file-name-dissect": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "tramp-test02-file-name-dissect-separate": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test02-file-name-dissect-simplified": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test03-file-error": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "tramp-test03-file-name-defaults": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test03-file-name-host-rules": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "tramp-test04-substitute-in-file-name": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "tramp-test05-expand-file-name": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "tramp-test05-expand-file-name-relative": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "tramp-test05-expand-file-name-tilde": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "tramp-test05-expand-file-name-top": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "tramp-test06-directory-file-name": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "tramp-test07-abbreviate-file-name": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "tramp-test07-file-exists-p": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": []
+   },
+   "tramp-test08-file-local-copy": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": []
+   },
+   "tramp-test09-insert-file-contents": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": []
+   },
+   "tramp-test10-write-region": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": []
+   },
+   "tramp-test10-write-region-file-precious-flag": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test10-write-region-other-file-name-handler": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test11-copy-file": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": []
+   },
+   "tramp-test12-rename-file": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": []
+   },
+   "tramp-test13-make-directory": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": []
+   },
+   "tramp-test14-delete-directory": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": []
+   },
+   "tramp-test15-copy-directory": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": []
+   },
+   "tramp-test16-directory-files": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": []
+   },
+   "tramp-test16-file-expand-wildcards": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test17-dired-with-wildcards": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test17-insert-directory": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": []
+   },
+   "tramp-test17-insert-directory-one-file": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test18-file-attributes": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": []
+   },
+   "tramp-test18-file-attributes-with-ls": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test18-file-attributes-with-perl": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test18-file-attributes-with-stat": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test18-file-attributes-without-file-attributes": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test19-directory-files-and-attributes": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": []
+   },
+   "tramp-test19-directory-files-and-attributes-with-ls": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test19-directory-files-and-attributes-with-perl": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test19-directory-files-and-attributes-with-stat": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test19-directory-files-and-attributes-without-file-attributes": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test20-file-modes": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": []
+   },
+   "tramp-test20-file-modes-without-file-attributes": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test21-file-links": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": []
+   },
+   "tramp-test21-file-links-without-file-attributes": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test22-file-times": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": []
+   },
+   "tramp-test23-visited-file-modtime": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": []
+   },
+   "tramp-test24-file-acl": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": []
+   },
+   "tramp-test25-file-selinux": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (not (equal (file-selinux-context ert-remote-temporary-file-directory) '(nil nil nil nil)))) :form (not t) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "tramp-test26-file-name-completion": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": []
+   },
+   "tramp-test26-file-name-completion-boundaries": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "tramp-test26-file-name-completion-with-ls": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test26-file-name-completion-with-perl": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test26-interactive-file-name-completion": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test27-load": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": []
+   },
+   "tramp-test28-process-file": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test29-start-file-process": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test",
+     ":tramp-asynchronous-processes"
+    ]
+   },
+   "tramp-test29-start-file-process-direct-async": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test",
+     ":tramp-asynchronous-processes"
+    ]
+   },
+   "tramp-test30-make-process": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test",
+     ":tramp-asynchronous-processes"
+    ]
+   },
+   "tramp-test30-make-process-direct-async": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test",
+     ":tramp-asynchronous-processes"
+    ]
+   },
+   "tramp-test31-interrupt-process": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test",
+     ":tramp-asynchronous-processes",
+     ":unstable"
+    ]
+   },
+   "tramp-test31-list-system-processes": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test31-memory-info": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test31-process-attributes": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test",
+     ":tramp-asynchronous-processes"
+    ]
+   },
+   "tramp-test31-signal-process": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test",
+     ":tramp-asynchronous-processes",
+     ":unstable"
+    ]
+   },
+   "tramp-test32-shell-command": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test32-shell-command-direct-async": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test",
+     ":tramp-asynchronous-processes"
+    ]
+   },
+   "tramp-test32-shell-command-dont-erase-buffer": {
+    "as_expected": false,
+    "detail": "(ert-test-failed ((should (= 1 (point))) :form (= 1 5) :value nil))",
+    "expected": ":passed",
+    "outcome": "failed",
+    "tags": [
+     ":expensive-test",
+     ":unstable"
+    ]
+   },
+   "tramp-test33-environment-variables": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test33-environment-variables-and-port-numbers": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test33-environment-variables-direct-async": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test",
+     ":tramp-asynchronous-processes"
+    ]
+   },
+   "tramp-test34-connection-local-variables": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test34-explicit-shell-file-name": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test",
+     ":tramp-asynchronous-processes"
+    ]
+   },
+   "tramp-test35-exec-path": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "tramp-test35-exec-path-direct-async": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test",
+     ":tramp-asynchronous-processes"
+    ]
+   },
+   "tramp-test35-remote-path": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test35-remote-path-direct-async": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test",
+     ":tramp-asynchronous-processes"
+    ]
+   },
+   "tramp-test36-vc-registered": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test37-make-auto-save-file-name": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": []
+   },
+   "tramp-test38-find-backup-file-name": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": []
+   },
+   "tramp-test39-detect-external-change": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test39-make-lock-file-name": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test40-make-nearby-temp-file": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "tramp-test41-special-characters": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": []
+   },
+   "tramp-test41-special-characters-direct-async": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test",
+     ":tramp-asynchronous-processes"
+    ]
+   },
+   "tramp-test41-special-characters-with-ls": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test41-special-characters-with-perl": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test41-special-characters-with-stat": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test41-special-characters-without-file-attributes": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test42-utf8": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test42-utf8-direct-async": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test",
+     ":tramp-asynchronous-processes"
+    ]
+   },
+   "tramp-test42-utf8-with-ls": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test42-utf8-with-perl": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test42-utf8-with-stat": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test42-utf8-without-file-attributes": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test43-file-system-info": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test44-file-user-group-ids": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test45-home-directory": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test46-asynchronous-requests": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test",
+     ":tramp-asynchronous-processes"
+    ]
+   },
+   "tramp-test46-force-remote-file-error": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (eq (ert--stats-selector ert--current-run-stats) (ert-test-name (ert--stats-current-test ert--current-run-stats)))) :form (signal wrong-type-argument (ert--stats nil))))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": [
+     ":expensive-test",
+     ":tramp-asynchronous-processes",
+     ":unstable"
+    ]
+   },
+   "tramp-test47-file-notifications": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":unstable"
+    ]
+   },
+   "tramp-test48-read-fingerprint": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test48-read-otp-password": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test48-read-password": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test48-read-security-key": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test49-session-timeout": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test50-external-backend-function": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test51-auto-load": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "tramp-test51-delay-load": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "tramp-test51-recursive-load": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test51-remote-load-path": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "tramp-test52-without-remote-files": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "tramp-test53-unload": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   }
+  },
+  "timed_out": false
+ },
+ "file": "lisp/net/tramp-tests.el",
+ "gnu": {
+  "emacs": "<recording-path-redacted>/emacs-32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+  "version": "32.0.50"
+ },
+ "harness_sha256": "78c20850429a08af22faadf73b5d164c560230e83d7eb88ef60cb995670703ef",
+ "mini": {
+  "complete": false,
+  "exit": 255,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": null,
+  "results": {
+   "tramp-test00-availability": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "tramp-test01-file-name-syntax": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "tramp-test01-file-name-syntax-separate": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "tramp-test01-file-name-syntax-simplified": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "tramp-test02-file-name-dissect": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "tramp-test02-file-name-dissect-separate": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "tramp-test02-file-name-dissect-simplified": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "tramp-test03-file-error": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "tramp-test03-file-name-defaults": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "tramp-test03-file-name-host-rules": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "tramp-test04-substitute-in-file-name": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "tramp-test05-expand-file-name": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "tramp-test05-expand-file-name-relative": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "tramp-test05-expand-file-name-tilde": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "tramp-test05-expand-file-name-top": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "tramp-test06-directory-file-name": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "tramp-test07-abbreviate-file-name": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "tramp-test07-file-exists-p": {
+    "as_expected": null,
+    "detail": "(void-function ert-select-tests)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-test08-file-local-copy": {
+    "as_expected": null,
+    "detail": "(void-function ert-select-tests)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-test09-insert-file-contents": {
+    "as_expected": null,
+    "detail": "(void-function ert-select-tests)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-test10-write-region": {
+    "as_expected": null,
+    "detail": "(void-function ert-select-tests)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-test10-write-region-file-precious-flag": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "tramp-test10-write-region-other-file-name-handler": {
+    "as_expected": null,
+    "detail": "(file-missing \"/mock:<recording-host-redacted>:<recording-directory-redacted>/foo.tar.gz\")",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-test11-copy-file": {
+    "as_expected": null,
+    "detail": "(void-function ert-select-tests)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-test12-rename-file": {
+    "as_expected": null,
+    "detail": "(void-function ert-select-tests)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-test13-make-directory": {
+    "as_expected": null,
+    "detail": "(void-function ert-select-tests)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-test14-delete-directory": {
+    "as_expected": null,
+    "detail": "(void-function ert-select-tests)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-test15-copy-directory": {
+    "as_expected": null,
+    "detail": "(void-function ert-select-tests)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-test16-directory-files": {
+    "as_expected": null,
+    "detail": "(void-function ert-select-tests)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-test16-file-expand-wildcards": {
+    "as_expected": null,
+    "detail": "(void-function ert-select-tests)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-test17-dired-with-wildcards": {
+    "as_expected": null,
+    "detail": "(void-function ert-select-tests)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-test17-insert-directory": {
+    "as_expected": null,
+    "detail": "(void-function ert-select-tests)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-test17-insert-directory-one-file": {
+    "as_expected": null,
+    "detail": "(void-function ert-select-tests)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-test18-file-attributes": {
+    "as_expected": null,
+    "detail": "(void-function ert-select-tests)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-test18-file-attributes-with-ls": {
+    "as_expected": null,
+    "detail": "(void-function ert-test-documentation)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-test18-file-attributes-with-perl": {
+    "as_expected": null,
+    "detail": "(void-function ert-test-documentation)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-test18-file-attributes-with-stat": {
+    "as_expected": null,
+    "detail": "(void-function ert-test-documentation)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-test18-file-attributes-without-file-attributes": {
+    "as_expected": null,
+    "detail": "(void-function ert-test-documentation)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-test19-directory-files-and-attributes": {
+    "as_expected": null,
+    "detail": "(void-function ert-select-tests)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-test19-directory-files-and-attributes-with-ls": {
+    "as_expected": null,
+    "detail": "(void-function ert-test-documentation)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-test19-directory-files-and-attributes-with-perl": {
+    "as_expected": null,
+    "detail": "(void-function ert-test-documentation)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-test19-directory-files-and-attributes-with-stat": {
+    "as_expected": null,
+    "detail": "(void-function ert-test-documentation)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-test19-directory-files-and-attributes-without-file-attributes": {
+    "as_expected": null,
+    "detail": "(void-function ert-test-documentation)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-test20-file-modes": {
+    "as_expected": null,
+    "detail": "(void-function ert-select-tests)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-test20-file-modes-without-file-attributes": {
+    "as_expected": null,
+    "detail": "(void-function ert-test-documentation)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-test21-file-links": {
+    "as_expected": null,
+    "detail": "(void-function ert-select-tests)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-test21-file-links-without-file-attributes": {
+    "as_expected": null,
+    "detail": "(void-function ert-test-documentation)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-test22-file-times": {
+    "as_expected": null,
+    "detail": "(void-function ert-select-tests)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-test23-visited-file-modtime": {
+    "as_expected": null,
+    "detail": "(void-function ert-select-tests)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-test24-file-acl": {
+    "as_expected": null,
+    "detail": "(void-function ert-select-tests)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-test25-file-selinux": {
+    "as_expected": null,
+    "detail": "((skip-unless (not (equal (file-selinux-context ert-remote-temporary-file-directory) '(nil nil nil nil)))))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "tramp-test26-file-name-completion": {
+    "as_expected": null,
+    "detail": "(void-function ert-select-tests)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-test26-file-name-completion-boundaries": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "tramp-test26-file-name-completion-with-ls": {
+    "as_expected": null,
+    "detail": "(void-function ert-test-documentation)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-test26-file-name-completion-with-perl": {
+    "as_expected": null,
+    "detail": "(void-function ert-test-documentation)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-test26-interactive-file-name-completion": {
+    "as_expected": null,
+    "detail": "(void-function ert-select-tests)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-test27-load": {
+    "as_expected": null,
+    "detail": "(void-function ert-select-tests)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-test28-process-file": {
+    "as_expected": null,
+    "detail": "(void-function ert-select-tests)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-test29-start-file-process": {
+    "as_expected": null,
+    "detail": "(void-function ert-select-tests)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-test29-start-file-process-direct-async": {
+    "as_expected": null,
+    "detail": "(void-function ert-get-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-test30-make-process": {
+    "as_expected": null,
+    "detail": "(void-function ert-select-tests)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-test30-make-process-direct-async": {
+    "as_expected": null,
+    "detail": "(void-function ert-get-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-test31-interrupt-process": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "tramp-test31-list-system-processes": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "tramp-test31-memory-info": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "tramp-test31-process-attributes": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "tramp-test31-signal-process": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "tramp-test32-shell-command": {
+    "as_expected": null,
+    "detail": "(void-function ert-select-tests)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-test32-shell-command-direct-async": {
+    "as_expected": null,
+    "detail": "(void-function ert-get-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-test32-shell-command-dont-erase-buffer": {
+    "as_expected": null,
+    "detail": "((should (= 1 (point)) :value nil))",
+    "expected": ":passed",
+    "outcome": "failed",
+    "tags": null
+   },
+   "tramp-test33-environment-variables": {
+    "as_expected": null,
+    "detail": "(void-function ert-select-tests)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-test33-environment-variables-and-port-numbers": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "tramp-test33-environment-variables-direct-async": {
+    "as_expected": null,
+    "detail": "(void-function ert-get-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-test34-connection-local-variables": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "tramp-test34-explicit-shell-file-name": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "tramp-test35-exec-path": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "tramp-test35-exec-path-direct-async": {
+    "as_expected": null,
+    "detail": "(void-function ert-get-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-test35-remote-path": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "tramp-test35-remote-path-direct-async": {
+    "as_expected": null,
+    "detail": "(void-function ert-get-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-test36-vc-registered": {
+    "as_expected": null,
+    "detail": "(void-function ert-select-tests)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-test37-make-auto-save-file-name": {
+    "as_expected": null,
+    "detail": "(void-function ert-select-tests)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-test38-find-backup-file-name": {
+    "as_expected": null,
+    "detail": "(void-function ert-select-tests)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-test39-detect-external-change": {
+    "as_expected": null,
+    "detail": "(void-function ert-select-tests)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-test39-make-lock-file-name": {
+    "as_expected": null,
+    "detail": "(void-function ert-select-tests)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-test40-make-nearby-temp-file": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "tramp-test41-special-characters": {
+    "as_expected": null,
+    "detail": "(void-function ert-select-tests)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-test41-special-characters-direct-async": {
+    "as_expected": null,
+    "detail": "(void-function ert-get-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-test41-special-characters-with-ls": {
+    "as_expected": null,
+    "detail": "(void-function ert-test-documentation)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-test41-special-characters-with-perl": {
+    "as_expected": null,
+    "detail": "(void-function ert-test-documentation)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-test41-special-characters-with-stat": {
+    "as_expected": null,
+    "detail": "(void-function ert-test-documentation)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-test41-special-characters-without-file-attributes": {
+    "as_expected": null,
+    "detail": "(void-function ert-test-documentation)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-test42-utf8": {
+    "as_expected": null,
+    "detail": "(void-function ert-select-tests)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-test42-utf8-direct-async": {
+    "as_expected": null,
+    "detail": "(void-function ert-get-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-test42-utf8-with-ls": {
+    "as_expected": null,
+    "detail": "(void-function ert-test-documentation)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-test42-utf8-with-perl": {
+    "as_expected": null,
+    "detail": "(void-function ert-test-documentation)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-test42-utf8-with-stat": {
+    "as_expected": null,
+    "detail": "(void-function ert-test-documentation)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-test42-utf8-without-file-attributes": {
+    "as_expected": null,
+    "detail": "(void-function ert-test-documentation)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-test43-file-system-info": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "tramp-test44-file-user-group-ids": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "tramp-test45-home-directory": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "tramp-test46-asynchronous-requests": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "tramp-test46-force-remote-file-error": {
+    "as_expected": null,
+    "detail": "(void-function ert--stats-selector)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-test47-file-notifications": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "tramp-test48-read-fingerprint": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "tramp-test48-read-otp-password": {
+    "as_expected": null,
+    "detail": "(user-error \"Host name `foo' does not match `\\\\(?:\\\\`\\\\(?:127\\\\.0\\\\.0\\\\.1\\\\|::1\\\\|<recording-host-redacted>\\\\|ip\\\\(?:6-lo\\\\(?:calhost\\\\|opback\\\\)\\\\|v6-lo\\\\(?:calhost\\\\|opback\\\\)\\\\)\\\\|localhost[46]?\\\\)\\\\'\\\\)'\")",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-test48-read-password": {
+    "as_expected": null,
+    "detail": "(user-error \"Host name `foo' does not match `\\\\(?:\\\\`\\\\(?:127\\\\.0\\\\.0\\\\.1\\\\|::1\\\\|<recording-host-redacted>\\\\|ip\\\\(?:6-lo\\\\(?:calhost\\\\|opback\\\\)\\\\|v6-lo\\\\(?:calhost\\\\|opback\\\\)\\\\)\\\\|localhost[46]?\\\\)\\\\'\\\\)'\")",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "tramp-test48-read-security-key": {
+    "as_expected": null,
+    "detail": "(user-error \"Host name `foo' does not match `\\\\(?:\\\\`\\\\(?:127\\\\.0\\\\.0\\\\.1\\\\|::1\\\\|<recording-host-redacted>\\\\|ip\\\\(?:6-lo\\\\(?:calhost\\\\|opback\\\\)\\\\|v6-lo\\\\(?:calhost\\\\|opback\\\\)\\\\)\\\\|localhost[46]?\\\\)\\\\'\\\\)'\")",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   }
+  },
+  "timed_out": false
+ },
+ "read_error": null,
+ "real": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": true,
+  "results": {
+   "tramp-test00-availability": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "tramp-test01-file-name-syntax": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "tramp-test01-file-name-syntax-separate": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test01-file-name-syntax-simplified": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test02-file-name-dissect": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "tramp-test02-file-name-dissect-separate": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test02-file-name-dissect-simplified": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test03-file-error": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "tramp-test03-file-name-defaults": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test03-file-name-host-rules": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "tramp-test04-substitute-in-file-name": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "tramp-test05-expand-file-name": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "tramp-test05-expand-file-name-relative": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "tramp-test05-expand-file-name-tilde": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "tramp-test05-expand-file-name-top": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "tramp-test06-directory-file-name": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "tramp-test07-abbreviate-file-name": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "tramp-test07-file-exists-p": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": []
+   },
+   "tramp-test08-file-local-copy": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": []
+   },
+   "tramp-test09-insert-file-contents": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": []
+   },
+   "tramp-test10-write-region": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": []
+   },
+   "tramp-test10-write-region-file-precious-flag": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test10-write-region-other-file-name-handler": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test11-copy-file": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": []
+   },
+   "tramp-test12-rename-file": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": []
+   },
+   "tramp-test13-make-directory": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": []
+   },
+   "tramp-test14-delete-directory": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": []
+   },
+   "tramp-test15-copy-directory": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": []
+   },
+   "tramp-test16-directory-files": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": []
+   },
+   "tramp-test16-file-expand-wildcards": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test17-dired-with-wildcards": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test17-insert-directory": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": []
+   },
+   "tramp-test17-insert-directory-one-file": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test18-file-attributes": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": []
+   },
+   "tramp-test18-file-attributes-with-ls": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test18-file-attributes-with-perl": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test18-file-attributes-with-stat": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test18-file-attributes-without-file-attributes": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test19-directory-files-and-attributes": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": []
+   },
+   "tramp-test19-directory-files-and-attributes-with-ls": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test19-directory-files-and-attributes-with-perl": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test19-directory-files-and-attributes-with-stat": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test19-directory-files-and-attributes-without-file-attributes": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test20-file-modes": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": []
+   },
+   "tramp-test20-file-modes-without-file-attributes": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test21-file-links": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": []
+   },
+   "tramp-test21-file-links-without-file-attributes": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test22-file-times": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": []
+   },
+   "tramp-test23-visited-file-modtime": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": []
+   },
+   "tramp-test24-file-acl": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": []
+   },
+   "tramp-test25-file-selinux": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (not (equal (file-selinux-context ert-remote-temporary-file-directory) '(nil nil nil nil)))) :form (not t) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "tramp-test26-file-name-completion": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": []
+   },
+   "tramp-test26-file-name-completion-boundaries": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "tramp-test26-file-name-completion-with-ls": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test26-file-name-completion-with-perl": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test26-interactive-file-name-completion": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test27-load": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": []
+   },
+   "tramp-test28-process-file": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test29-start-file-process": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test",
+     ":tramp-asynchronous-processes"
+    ]
+   },
+   "tramp-test29-start-file-process-direct-async": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test",
+     ":tramp-asynchronous-processes"
+    ]
+   },
+   "tramp-test30-make-process": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test",
+     ":tramp-asynchronous-processes"
+    ]
+   },
+   "tramp-test30-make-process-direct-async": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test",
+     ":tramp-asynchronous-processes"
+    ]
+   },
+   "tramp-test31-interrupt-process": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test",
+     ":tramp-asynchronous-processes",
+     ":unstable"
+    ]
+   },
+   "tramp-test31-list-system-processes": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test31-memory-info": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test31-process-attributes": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test",
+     ":tramp-asynchronous-processes"
+    ]
+   },
+   "tramp-test31-signal-process": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test",
+     ":tramp-asynchronous-processes",
+     ":unstable"
+    ]
+   },
+   "tramp-test32-shell-command": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test32-shell-command-direct-async": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test",
+     ":tramp-asynchronous-processes"
+    ]
+   },
+   "tramp-test32-shell-command-dont-erase-buffer": {
+    "as_expected": false,
+    "detail": "(ert-test-failed ((should (= 1 (point))) :form (= 1 5) :value nil))",
+    "expected": ":passed",
+    "outcome": "failed",
+    "tags": [
+     ":expensive-test",
+     ":unstable"
+    ]
+   },
+   "tramp-test33-environment-variables": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test33-environment-variables-and-port-numbers": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test33-environment-variables-direct-async": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test",
+     ":tramp-asynchronous-processes"
+    ]
+   },
+   "tramp-test34-connection-local-variables": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test34-explicit-shell-file-name": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test",
+     ":tramp-asynchronous-processes"
+    ]
+   },
+   "tramp-test35-exec-path": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "tramp-test35-exec-path-direct-async": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test",
+     ":tramp-asynchronous-processes"
+    ]
+   },
+   "tramp-test35-remote-path": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test35-remote-path-direct-async": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test",
+     ":tramp-asynchronous-processes"
+    ]
+   },
+   "tramp-test36-vc-registered": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test37-make-auto-save-file-name": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": []
+   },
+   "tramp-test38-find-backup-file-name": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": []
+   },
+   "tramp-test39-detect-external-change": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test39-make-lock-file-name": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test40-make-nearby-temp-file": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "tramp-test41-special-characters": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": []
+   },
+   "tramp-test41-special-characters-direct-async": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test",
+     ":tramp-asynchronous-processes"
+    ]
+   },
+   "tramp-test41-special-characters-with-ls": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test41-special-characters-with-perl": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test41-special-characters-with-stat": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test41-special-characters-without-file-attributes": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test42-utf8": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test42-utf8-direct-async": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test",
+     ":tramp-asynchronous-processes"
+    ]
+   },
+   "tramp-test42-utf8-with-ls": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test42-utf8-with-perl": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test42-utf8-with-stat": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test42-utf8-without-file-attributes": {
+    "as_expected": false,
+    "detail": "(wrong-type-argument ert--stats nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test43-file-system-info": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test44-file-user-group-ids": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test45-home-directory": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test46-asynchronous-requests": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test",
+     ":tramp-asynchronous-processes"
+    ]
+   },
+   "tramp-test46-force-remote-file-error": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (eq (ert--stats-selector ert--current-run-stats) (ert-test-name (ert--stats-current-test ert--current-run-stats)))) :form (signal wrong-type-argument (ert--stats nil))))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": [
+     ":expensive-test",
+     ":tramp-asynchronous-processes",
+     ":unstable"
+    ]
+   },
+   "tramp-test47-file-notifications": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":unstable"
+    ]
+   },
+   "tramp-test48-read-fingerprint": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test48-read-otp-password": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test48-read-password": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test48-read-security-key": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test49-session-timeout": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test50-external-backend-function": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test51-auto-load": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "tramp-test51-delay-load": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "tramp-test51-recursive-load": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   },
+   "tramp-test51-remote-load-path": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "tramp-test52-without-remote-files": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "tramp-test53-unload": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":expensive-test"
+    ]
+   }
+  },
+  "timed_out": false
+ },
+ "schema": 1,
+ "toplevel_deftests": 87
+}

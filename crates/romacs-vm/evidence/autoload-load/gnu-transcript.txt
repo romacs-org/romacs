@@ -1,0 +1,30 @@
+fn-call => ((al-fn 1) t nil)
+fn-funcall => (al-fn 2)
+fn-apply => (al-fn 3)
+mac-eval => (al-mac-expanded foo)
+mac-macroexpand => '(al-mac-expanded bar)
+mac-only-on-function => ((autoload "al-fn") (autoload "al-fn"))
+do-load-nonautoload => 42
+do-load-nil-name => nil
+do-load-name => #[(x) ((list 'al-fn x)) nil]
+do-load-bad-name => (signal (wrong-type-argument symbolp 42))
+failed-load => (signal (error "al-bad deliberately fails"))
+after-failed => ((autoload "al-bad" nil nil nil) t original original nil)
+nodef => (signal (error "Autoloading file DIR/al-nodef.el failed to define function al-nodef"))
+nodef-after => ((autoload "al-nodef" nil nil nil) t)
+missing => (signal (file-missing "Cannot open load file" "No such file or directory" "al-no-such-file"))
+missing-after => (autoload "al-no-such-file" nil nil nil)
+nested => (outer (caught "al-bad deliberately fails"))
+nested-after => (autoload nil)
+match-data => (2 3)
+require-fail => (signal (error "al-req deliberately fails"))
+require-after => (original nil)
+funcall-raw-autoload => (signal (wrong-type-argument symbolp (autoload "al-fn")))
+t2-assoc-testfn => ((2 . b) nil)
+nested-ok-inner => (error original inner-redefined nil autoload)
+alias => ((expanded foo) (expanded foo) macro)
+stale => (error file-missing file-missing)
+redirect => (redirected foo)
+alias-cache => (7 7) ((changed 7) (changed 8)) 9 (later 9)
+GNU Emacs 32.0.50
+20a94ee7abc04960e3296deead030a37866d1d1e1522f3efd818838af7fffbe4  /usr/bin/emacs

@@ -1,0 +1,49 @@
+{
+ "name": "string-distance",
+ "arity": [
+  2,
+  3
+ ],
+ "effect": "pure",
+ "gnu_files": [
+  "fns.c"
+ ],
+ "gnu_def": "fns.c:272",
+ "rust": "src/prims/fns_distance.rs:4",
+ "args": [
+  "string",
+  "string",
+  "symbol"
+ ],
+ "extra": {
+  "0": [
+   "nil",
+   "7",
+   "'foo",
+   "(unibyte-string 255 128 97)",
+   "(string-to-multibyte (unibyte-string 255 97))"
+  ],
+  "1": [
+   "7",
+   "(unibyte-string 255 128 97)",
+   "(string-to-multibyte (unibyte-string 255 97))"
+  ],
+  "2": [
+   "1"
+  ]
+ },
+ "probes": [
+  "(string-distance \"kitten\" \"sitting\")",
+  "(string-distance \"λ雪\" \"λ😀\")",
+  "(string-distance \"\" \"λ雪\")",
+  "(string-distance \"\" \"λ雪\" t)",
+  "(string-distance (unibyte-string 255) (string-to-multibyte (unibyte-string 255)))",
+  "(string-distance (unibyte-string 255) (unibyte-string 128))",
+  "(condition-case e (string-distance 'wrong 'also-wrong) (error e))",
+  "(condition-case e (string-distance \"ok\" 'wrong) (error e))",
+  "(funcall #'string-distance \"ABC\" \"abc\")",
+  "(string-distance (propertize \"abc\" 'face 'bold) \"abc\")",
+  "(string-distance (string 4194303 2097152 55296) (string 4194303 2097153 55296))",
+  "(string-distance (string 4194303) (string 4194303) t)"
+ ]
+}

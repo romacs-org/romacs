@@ -1,0 +1,241 @@
+{
+ "name": "corpus-00",
+ "frame": {
+  "width": 480,
+  "height": 168,
+  "bg": "#ffffff",
+  "fg": "#000000"
+ },
+ "font": {
+  "family": "Liberation Mono",
+  "pixel_size": 20,
+  "regular": "/usr/share/fonts/liberation/LiberationMono-Regular.ttf",
+  "bold": "/usr/share/fonts/liberation/LiberationMono-Bold.ttf",
+  "italic": "/usr/share/fonts/liberation/LiberationMono-Italic.ttf"
+ },
+ "cursor_color": "#00a000",
+ "buffer": [
+  {
+   "text": "Χάος"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "a&b",
+   "fg": "#b8860b"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "(car)",
+   "fg": "#ff8c00",
+   "bold": true,
+   "bg": "#e0e0ff"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "Quick",
+   "fg": "#b8860b"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "brown",
+   "italic": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "θάλασσα",
+   "fg": "#a020f0"
+  },
+  {
+   "text": "\n"
+  },
+  {
+   "text": "βιβλίο"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "a&b",
+   "bold": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "x=42;",
+   "italic": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "θάλασσα",
+   "fg": "#2e8b57"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "φως"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "q?"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "#if",
+   "fg": "#ff0000"
+  },
+  {
+   "text": "\n"
+  },
+  {
+   "text": "ήλιος",
+   "fg": "#b8860b"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "Χάος",
+   "bold": true,
+   "bg": "#e0e0ff"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "ΔΕΛΤΑ"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "δέντρο",
+   "fg": "#b8860b",
+   "bold": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "window",
+   "underline": true
+  },
+  {
+   "text": "\n"
+  }
+ ],
+ "point": 91,
+ "expect": {
+  "origin": [
+   0,
+   0
+  ],
+  "rows": [
+   {
+    "text": "Χάος a&b (car) Quick brown θάλασσα",
+    "runs": [
+     {
+      "start": 5,
+      "end": 8,
+      "fg": "#b8860b"
+     },
+     {
+      "start": 9,
+      "end": 14,
+      "fg": "#ff8c00",
+      "bold": true,
+      "bg": "#e0e0ff"
+     },
+     {
+      "start": 15,
+      "end": 20,
+      "fg": "#b8860b"
+     },
+     {
+      "start": 21,
+      "end": 26,
+      "italic": true
+     },
+     {
+      "start": 27,
+      "end": 34,
+      "fg": "#a020f0"
+     }
+    ]
+   },
+   {
+    "text": "βιβλίο a&b x=42; θάλασσα φως q? #if",
+    "runs": [
+     {
+      "start": 7,
+      "end": 10,
+      "bold": true
+     },
+     {
+      "start": 11,
+      "end": 16,
+      "italic": true
+     },
+     {
+      "start": 17,
+      "end": 24,
+      "fg": "#2e8b57"
+     },
+     {
+      "start": 32,
+      "end": 35,
+      "fg": "#ff0000"
+     }
+    ]
+   },
+   {
+    "text": "ήλιος Χάος ΔΕΛΤΑ δέντρο window",
+    "runs": [
+     {
+      "start": 0,
+      "end": 5,
+      "fg": "#b8860b"
+     },
+     {
+      "start": 6,
+      "end": 10,
+      "bold": true,
+      "bg": "#e0e0ff"
+     },
+     {
+      "start": 17,
+      "end": 23,
+      "fg": "#b8860b",
+      "bold": true
+     },
+     {
+      "start": 24,
+      "end": 30,
+      "underline": true
+     }
+    ]
+   }
+  ],
+  "cursor": {
+   "row": 2,
+   "col": 19
+  }
+ }
+}

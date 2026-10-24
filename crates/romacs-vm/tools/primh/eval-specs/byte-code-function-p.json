@@ -1,0 +1,17 @@
+{
+  "name": "byte-code-function-p",
+  "arity": [1, 1],
+  "effect": "pure",
+  "gnu_files": ["data.c"],
+  "gnu_def": "data.c:531",
+  "rust": "src/prims/symbol.rs:44",
+  "args": ["any"],
+  "probes": [
+    "(list (fboundp 'byte-code-function-p) (functionp 'byte-code-function-p) (funcall 'byte-code-function-p nil))",
+    "(byte-code-function-p (symbol-function 'car))",
+    "(byte-code-function-p '(lambda (x) x))",
+    "(byte-code-function-p (eval '(lambda (x) x) t))",
+    "(byte-code-function-p [0 \"code\" [] 1])",
+    "(byte-code-function-p (car (read-from-string \"#[0 \\\"\\\\300\\\\207\\\" [42] 1]\")))"
+  ]
+}

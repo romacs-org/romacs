@@ -1,0 +1,108 @@
+{
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+  "gnu_defuns": [
+    "buffer.c:3847",
+    "buffer.c:3881",
+    "buffer.c:4014"
+  ],
+  "cases": [
+    {
+      "source": "(with-temp-buffer (insert \"abc\") (set-buffer-multibyte nil) (narrow-to-region 2 3) (previous-overlay-change 3))",
+      "expected": "2"
+    },
+    {
+      "source": "(let ((o (make-overlay 1 1))) (eq (overlay-buffer o) (current-buffer)))",
+      "expected": "t"
+    },
+    {
+      "source": "(let ((o (make-overlay 1 1))) (delete-overlay o) (overlay-buffer o))",
+      "expected": "nil"
+    },
+    {
+      "source": "(with-temp-buffer (insert \"abc\") (let ((o (make-overlay 1 2))) (overlay-put o 'tag 7) (list (delete-all-overlays) (overlay-buffer o) (overlay-start o) (overlay-get o 'tag) (overlays-in 1 4))))",
+      "expected": "(nil nil nil 7 nil)"
+    },
+    {
+      "source": "(with-temp-buffer (insert \"abc\") (let ((a (make-overlay 1 2)) (b (make-overlay 4 4))) (narrow-to-region 2 3) (delete-all-overlays nil) (list (overlay-buffer a) (overlay-buffer b))))",
+      "expected": "(nil nil)"
+    },
+    {
+      "source": "(let ((b (get-buffer-create \"overlay-other\")) (o (make-overlay 1 1))) (unwind-protect (let ((p (make-overlay 1 1 b))) (list (delete-all-overlays b) (overlay-buffer p) (eq (overlay-buffer o) (current-buffer)))) (kill-buffer b)))",
+      "expected": "(nil nil t)"
+    },
+    {
+      "source": "(with-temp-buffer (insert \"aé文def\") (make-overlay 2 5) (make-overlay 3 3) (list (previous-overlay-change 1) (previous-overlay-change 2) (previous-overlay-change 3) (previous-overlay-change 4) (previous-overlay-change 5) (previous-overlay-change 7)))",
+      "expected": "(1 1 2 3 3 5)"
+    },
+    {
+      "source": "(with-temp-buffer (insert \"abcdef\") (make-overlay 1 3) (make-overlay 4 6) (narrow-to-region 3 5) (list (previous-overlay-change 0) (previous-overlay-change 3) (previous-overlay-change 4) (previous-overlay-change 7) (previous-overlay-change 100)))",
+      "expected": "(3 3 3 6 6)"
+    },
+    {
+      "source": "(with-temp-buffer (insert \"abc\") (let ((m (copy-marker 3))) (make-overlay 1 2) (previous-overlay-change m)))",
+      "expected": "2"
+    },
+    {
+      "source": "(with-temp-buffer (insert \"abc\") (list (previous-overlay-change -1) (previous-overlay-change 99)))",
+      "expected": "(1 1)"
+    },
+    {
+      "source": "(let ((b (get-buffer-create \"overlay-killed\"))) (let ((o (make-overlay 1 1 b))) (kill-buffer b) (list (overlay-buffer o) (delete-all-overlays b))))",
+      "expected": "(nil nil)"
+    },
+    {
+      "source": "(condition-case e (overlay-buffer nil) (error (car e)))",
+      "expected": "wrong-type-argument"
+    },
+    {
+      "source": "(condition-case e (overlay-buffer 1) (error (car e)))",
+      "expected": "wrong-type-argument"
+    },
+    {
+      "source": "(condition-case e (delete-all-overlays \"no-such-buffer\") (error (car e)))",
+      "expected": "wrong-type-argument"
+    },
+    {
+      "source": "(condition-case e (delete-all-overlays 1) (error (car e)))",
+      "expected": "wrong-type-argument"
+    },
+    {
+      "source": "(condition-case e (previous-overlay-change nil) (error (car e)))",
+      "expected": "wrong-type-argument"
+    },
+    {
+      "source": "(condition-case e (previous-overlay-change 1.5) (error (car e)))",
+      "expected": "wrong-type-argument"
+    },
+    {
+      "source": "(condition-case e (previous-overlay-change (make-marker)) (error (car e)))",
+      "expected": "error"
+    },
+    {
+      "source": "(condition-case e (apply #'overlay-buffer '()) (error (car e)))",
+      "expected": "wrong-number-of-arguments"
+    },
+    {
+      "source": "(condition-case e (apply #'overlay-buffer '(1 2)) (error (car e)))",
+      "expected": "wrong-number-of-arguments"
+    },
+    {
+      "source": "(condition-case e (apply #'previous-overlay-change '()) (error (car e)))",
+      "expected": "wrong-number-of-arguments"
+    },
+    {
+      "source": "(condition-case e (apply #'previous-overlay-change '(1 2)) (error (car e)))",
+      "expected": "wrong-number-of-arguments"
+    },
+    {
+      "source": "(condition-case e (apply #'delete-all-overlays '()) (error (car e)))",
+      "expected": "nil"
+    },
+    {
+      "source": "(condition-case e (apply #'delete-all-overlays '(1 2)) (error (car e)))",
+      "expected": "wrong-number-of-arguments"
+    }
+  ],
+  "buffer_c_sha256": "bb93b33042953fab31294645204d46c48c3a3d7b8516f7b923c7d86b9766b91d"
+}

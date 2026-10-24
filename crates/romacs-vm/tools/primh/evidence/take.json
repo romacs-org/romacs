@@ -1,0 +1,3138 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "take",
+ "spec_sha256": "8c2b8361c5d1ee2b975f69af3fe659dfd1c0c4a2e1a4924f9c30471c0c37723a",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "take",
+    "subr",
+    2,
+    2
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "fns.c": "db81c235d7c63f312128ad84c11d55ae4665a2599099be1229dbaa329afdb3bf"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "take/0000",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp nil))"
+  },
+  {
+   "id": "take/0001",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take nil t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp nil))"
+  },
+  {
+   "id": "take/0002",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take nil 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp nil))"
+  },
+  {
+   "id": "take/0003",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take nil 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp nil))"
+  },
+  {
+   "id": "take/0004",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take nil 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp nil))"
+  },
+  {
+   "id": "take/0005",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take nil -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp nil))"
+  },
+  {
+   "id": "take/0006",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take nil most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp nil))"
+  },
+  {
+   "id": "take/0007",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take nil 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp nil))"
+  },
+  {
+   "id": "take/0008",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take nil 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp nil))"
+  },
+  {
+   "id": "take/0009",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take nil :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp nil))"
+  },
+  {
+   "id": "take/0010",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take nil (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp nil))"
+  },
+  {
+   "id": "take/0011",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take nil (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp nil))"
+  },
+  {
+   "id": "take/0012",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take nil (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp nil))"
+  },
+  {
+   "id": "take/0013",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take nil (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp nil))"
+  },
+  {
+   "id": "take/0014",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take nil (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp nil))"
+  },
+  {
+   "id": "take/0015",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take nil (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp nil))"
+  },
+  {
+   "id": "take/0016",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take nil (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp nil))"
+  },
+  {
+   "id": "take/0017",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take nil (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp nil))"
+  },
+  {
+   "id": "take/0018",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take nil (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp nil))"
+  },
+  {
+   "id": "take/0019",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take t nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp t))"
+  },
+  {
+   "id": "take/0020",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take t t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp t))"
+  },
+  {
+   "id": "take/0021",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take t 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp t))"
+  },
+  {
+   "id": "take/0022",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take t 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp t))"
+  },
+  {
+   "id": "take/0023",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take t 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp t))"
+  },
+  {
+   "id": "take/0024",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take t -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp t))"
+  },
+  {
+   "id": "take/0025",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take t most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp t))"
+  },
+  {
+   "id": "take/0026",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take t 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp t))"
+  },
+  {
+   "id": "take/0027",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take t 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp t))"
+  },
+  {
+   "id": "take/0028",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take t :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp t))"
+  },
+  {
+   "id": "take/0029",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take t (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp t))"
+  },
+  {
+   "id": "take/0030",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take t (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp t))"
+  },
+  {
+   "id": "take/0031",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take t (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp t))"
+  },
+  {
+   "id": "take/0032",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take t (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp t))"
+  },
+  {
+   "id": "take/0033",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take t (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp t))"
+  },
+  {
+   "id": "take/0034",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take t (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp t))"
+  },
+  {
+   "id": "take/0035",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take t (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp t))"
+  },
+  {
+   "id": "take/0036",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take t (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp t))"
+  },
+  {
+   "id": "take/0037",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take t (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp t))"
+  },
+  {
+   "id": "take/0038",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 0 nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "take/0039",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 0 t)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "take/0040",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 0 0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "take/0041",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 0 1)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "take/0042",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 0 2)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "take/0043",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 0 -1)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "take/0044",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 0 most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "take/0045",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 0 1.5)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "take/0046",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 0 'sym)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "take/0047",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 0 :kw)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "take/0048",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 0 (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "take/0049",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 0 (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "take/0050",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 0 (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "take/0051",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 0 (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "take/0052",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 0 (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "take/0053",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 0 (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "take/0054",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 0 (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "take/0055",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 0 (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "take/0056",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 0 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "take/0057",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 1 nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "take/0058",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 1 t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp t))"
+  },
+  {
+   "id": "take/0059",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 1 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 0))"
+  },
+  {
+   "id": "take/0060",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 1 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "take/0061",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 1 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "take/0062",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 1 -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp -1))"
+  },
+  {
+   "id": "take/0063",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 1 most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "take/0064",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 1 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1.5))"
+  },
+  {
+   "id": "take/0065",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 1 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp sym))"
+  },
+  {
+   "id": "take/0066",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 1 :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "take/0067",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 1 (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"\"))"
+  },
+  {
+   "id": "take/0068",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 1 (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"abc\"))"
+  },
+  {
+   "id": "take/0069",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 1 (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "take/0070",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 1 (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok (1))"
+  },
+  {
+   "id": "take/0071",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 1 (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok (a))"
+  },
+  {
+   "id": "take/0072",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 1 (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(ok (1))"
+  },
+  {
+   "id": "take/0073",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 1 (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(ok (1))"
+  },
+  {
+   "id": "take/0074",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 1 (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp [1 2]))"
+  },
+  {
+   "id": "take/0075",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(ok (1))"
+  },
+  {
+   "id": "take/0076",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 2 nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "take/0077",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 2 t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp t))"
+  },
+  {
+   "id": "take/0078",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 2 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 0))"
+  },
+  {
+   "id": "take/0079",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 2 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "take/0080",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 2 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "take/0081",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 2 -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp -1))"
+  },
+  {
+   "id": "take/0082",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 2 most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "take/0083",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 2 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1.5))"
+  },
+  {
+   "id": "take/0084",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 2 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp sym))"
+  },
+  {
+   "id": "take/0085",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 2 :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "take/0086",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 2 (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"\"))"
+  },
+  {
+   "id": "take/0087",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 2 (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"abc\"))"
+  },
+  {
+   "id": "take/0088",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 2 (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "take/0089",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 2 (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok (1 2))"
+  },
+  {
+   "id": "take/0090",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 2 (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok (a (b)))"
+  },
+  {
+   "id": "take/0091",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 2 (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "take/0092",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 2 (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(ok (1 2))"
+  },
+  {
+   "id": "take/0093",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 2 (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp [1 2]))"
+  },
+  {
+   "id": "take/0094",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 2 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(ok (1 2))"
+  },
+  {
+   "id": "take/0095",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take -1 nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "take/0096",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take -1 t)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "take/0097",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take -1 0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "take/0098",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take -1 1)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "take/0099",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take -1 2)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "take/0100",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take -1 -1)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "take/0101",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take -1 most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "take/0102",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take -1 1.5)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "take/0103",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take -1 'sym)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "take/0104",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take -1 :kw)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "take/0105",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take -1 (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "take/0106",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take -1 (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "take/0107",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take -1 (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "take/0108",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take -1 (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "take/0109",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take -1 (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "take/0110",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take -1 (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "take/0111",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take -1 (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "take/0112",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take -1 (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "take/0113",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take -1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "take/0114",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take most-positive-fixnum nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "take/0115",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take most-positive-fixnum t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp t))"
+  },
+  {
+   "id": "take/0116",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take most-positive-fixnum 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 0))"
+  },
+  {
+   "id": "take/0117",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take most-positive-fixnum 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "take/0118",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take most-positive-fixnum 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "take/0119",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take most-positive-fixnum -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp -1))"
+  },
+  {
+   "id": "take/0120",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take most-positive-fixnum most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "take/0121",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take most-positive-fixnum 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1.5))"
+  },
+  {
+   "id": "take/0122",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take most-positive-fixnum 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp sym))"
+  },
+  {
+   "id": "take/0123",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take most-positive-fixnum :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "take/0124",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take most-positive-fixnum (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"\"))"
+  },
+  {
+   "id": "take/0125",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take most-positive-fixnum (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"abc\"))"
+  },
+  {
+   "id": "take/0126",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take most-positive-fixnum (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "take/0127",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take most-positive-fixnum (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok (1 2 3))"
+  },
+  {
+   "id": "take/0128",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take most-positive-fixnum (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok (a (b)))"
+  },
+  {
+   "id": "take/0129",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take most-positive-fixnum (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "take/0130",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take most-positive-fixnum (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 3))"
+  },
+  {
+   "id": "take/0131",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take most-positive-fixnum (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp [1 2]))"
+  },
+  {
+   "id": "take/0132",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take most-positive-fixnum (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "GNU-TIMEOUT"
+  },
+  {
+   "id": "take/0133",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 1.5 nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp 1.5))"
+  },
+  {
+   "id": "take/0134",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 1.5 t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp 1.5))"
+  },
+  {
+   "id": "take/0135",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 1.5 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp 1.5))"
+  },
+  {
+   "id": "take/0136",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 1.5 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp 1.5))"
+  },
+  {
+   "id": "take/0137",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 1.5 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp 1.5))"
+  },
+  {
+   "id": "take/0138",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 1.5 -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp 1.5))"
+  },
+  {
+   "id": "take/0139",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 1.5 most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp 1.5))"
+  },
+  {
+   "id": "take/0140",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 1.5 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp 1.5))"
+  },
+  {
+   "id": "take/0141",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 1.5 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp 1.5))"
+  },
+  {
+   "id": "take/0142",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 1.5 :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp 1.5))"
+  },
+  {
+   "id": "take/0143",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 1.5 (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp 1.5))"
+  },
+  {
+   "id": "take/0144",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 1.5 (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp 1.5))"
+  },
+  {
+   "id": "take/0145",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 1.5 (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp 1.5))"
+  },
+  {
+   "id": "take/0146",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 1.5 (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp 1.5))"
+  },
+  {
+   "id": "take/0147",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 1.5 (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp 1.5))"
+  },
+  {
+   "id": "take/0148",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 1.5 (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp 1.5))"
+  },
+  {
+   "id": "take/0149",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 1.5 (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp 1.5))"
+  },
+  {
+   "id": "take/0150",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 1.5 (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp 1.5))"
+  },
+  {
+   "id": "take/0151",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 1.5 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp 1.5))"
+  },
+  {
+   "id": "take/0152",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 'sym nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp sym))"
+  },
+  {
+   "id": "take/0153",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 'sym t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp sym))"
+  },
+  {
+   "id": "take/0154",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 'sym 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp sym))"
+  },
+  {
+   "id": "take/0155",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 'sym 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp sym))"
+  },
+  {
+   "id": "take/0156",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 'sym 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp sym))"
+  },
+  {
+   "id": "take/0157",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 'sym -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp sym))"
+  },
+  {
+   "id": "take/0158",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 'sym most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp sym))"
+  },
+  {
+   "id": "take/0159",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 'sym 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp sym))"
+  },
+  {
+   "id": "take/0160",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 'sym 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp sym))"
+  },
+  {
+   "id": "take/0161",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 'sym :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp sym))"
+  },
+  {
+   "id": "take/0162",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 'sym (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp sym))"
+  },
+  {
+   "id": "take/0163",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 'sym (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp sym))"
+  },
+  {
+   "id": "take/0164",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 'sym (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp sym))"
+  },
+  {
+   "id": "take/0165",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 'sym (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp sym))"
+  },
+  {
+   "id": "take/0166",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 'sym (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp sym))"
+  },
+  {
+   "id": "take/0167",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 'sym (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp sym))"
+  },
+  {
+   "id": "take/0168",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 'sym (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp sym))"
+  },
+  {
+   "id": "take/0169",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 'sym (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp sym))"
+  },
+  {
+   "id": "take/0170",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take 'sym (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp sym))"
+  },
+  {
+   "id": "take/0171",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take :kw nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp :kw))"
+  },
+  {
+   "id": "take/0172",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take :kw t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp :kw))"
+  },
+  {
+   "id": "take/0173",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take :kw 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp :kw))"
+  },
+  {
+   "id": "take/0174",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take :kw 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp :kw))"
+  },
+  {
+   "id": "take/0175",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take :kw 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp :kw))"
+  },
+  {
+   "id": "take/0176",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take :kw -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp :kw))"
+  },
+  {
+   "id": "take/0177",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take :kw most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp :kw))"
+  },
+  {
+   "id": "take/0178",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take :kw 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp :kw))"
+  },
+  {
+   "id": "take/0179",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take :kw 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp :kw))"
+  },
+  {
+   "id": "take/0180",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take :kw :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp :kw))"
+  },
+  {
+   "id": "take/0181",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take :kw (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp :kw))"
+  },
+  {
+   "id": "take/0182",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take :kw (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp :kw))"
+  },
+  {
+   "id": "take/0183",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take :kw (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp :kw))"
+  },
+  {
+   "id": "take/0184",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take :kw (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp :kw))"
+  },
+  {
+   "id": "take/0185",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take :kw (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp :kw))"
+  },
+  {
+   "id": "take/0186",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take :kw (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp :kw))"
+  },
+  {
+   "id": "take/0187",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take :kw (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp :kw))"
+  },
+  {
+   "id": "take/0188",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take :kw (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp :kw))"
+  },
+  {
+   "id": "take/0189",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take :kw (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp :kw))"
+  },
+  {
+   "id": "take/0190",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (copy-sequence \"\") nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"\"))"
+  },
+  {
+   "id": "take/0191",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (copy-sequence \"\") t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"\"))"
+  },
+  {
+   "id": "take/0192",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (copy-sequence \"\") 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"\"))"
+  },
+  {
+   "id": "take/0193",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (copy-sequence \"\") 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"\"))"
+  },
+  {
+   "id": "take/0194",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (copy-sequence \"\") 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"\"))"
+  },
+  {
+   "id": "take/0195",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (copy-sequence \"\") -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"\"))"
+  },
+  {
+   "id": "take/0196",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (copy-sequence \"\") most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"\"))"
+  },
+  {
+   "id": "take/0197",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (copy-sequence \"\") 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"\"))"
+  },
+  {
+   "id": "take/0198",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (copy-sequence \"\") 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"\"))"
+  },
+  {
+   "id": "take/0199",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (copy-sequence \"\") :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"\"))"
+  },
+  {
+   "id": "take/0200",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (copy-sequence \"\") (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"\"))"
+  },
+  {
+   "id": "take/0201",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (copy-sequence \"\") (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"\"))"
+  },
+  {
+   "id": "take/0202",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (copy-sequence \"\") (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"\"))"
+  },
+  {
+   "id": "take/0203",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (copy-sequence \"\") (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"\"))"
+  },
+  {
+   "id": "take/0204",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (copy-sequence \"\") (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"\"))"
+  },
+  {
+   "id": "take/0205",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (copy-sequence \"\") (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"\"))"
+  },
+  {
+   "id": "take/0206",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (copy-sequence \"\") (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"\"))"
+  },
+  {
+   "id": "take/0207",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (copy-sequence \"\") (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"\"))"
+  },
+  {
+   "id": "take/0208",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (copy-sequence \"\") (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"\"))"
+  },
+  {
+   "id": "take/0209",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (copy-sequence \"abc\") nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"abc\"))"
+  },
+  {
+   "id": "take/0210",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (copy-sequence \"abc\") t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"abc\"))"
+  },
+  {
+   "id": "take/0211",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (copy-sequence \"abc\") 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"abc\"))"
+  },
+  {
+   "id": "take/0212",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (copy-sequence \"abc\") 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"abc\"))"
+  },
+  {
+   "id": "take/0213",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (copy-sequence \"abc\") 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"abc\"))"
+  },
+  {
+   "id": "take/0214",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (copy-sequence \"abc\") -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"abc\"))"
+  },
+  {
+   "id": "take/0215",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (copy-sequence \"abc\") most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"abc\"))"
+  },
+  {
+   "id": "take/0216",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (copy-sequence \"abc\") 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"abc\"))"
+  },
+  {
+   "id": "take/0217",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (copy-sequence \"abc\") 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"abc\"))"
+  },
+  {
+   "id": "take/0218",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (copy-sequence \"abc\") :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"abc\"))"
+  },
+  {
+   "id": "take/0219",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (copy-sequence \"abc\") (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"abc\"))"
+  },
+  {
+   "id": "take/0220",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (copy-sequence \"abc\") (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"abc\"))"
+  },
+  {
+   "id": "take/0221",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (copy-sequence \"abc\") (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"abc\"))"
+  },
+  {
+   "id": "take/0222",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (copy-sequence \"abc\") (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"abc\"))"
+  },
+  {
+   "id": "take/0223",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (copy-sequence \"abc\") (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"abc\"))"
+  },
+  {
+   "id": "take/0224",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (copy-sequence \"abc\") (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"abc\"))"
+  },
+  {
+   "id": "take/0225",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (copy-sequence \"abc\") (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"abc\"))"
+  },
+  {
+   "id": "take/0226",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (copy-sequence \"abc\") (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"abc\"))"
+  },
+  {
+   "id": "take/0227",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (copy-sequence \"abc\") (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"abc\"))"
+  },
+  {
+   "id": "take/0228",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (copy-sequence \"λx\") nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"λx\"))"
+  },
+  {
+   "id": "take/0229",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (copy-sequence \"λx\") t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"λx\"))"
+  },
+  {
+   "id": "take/0230",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (copy-sequence \"λx\") 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"λx\"))"
+  },
+  {
+   "id": "take/0231",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (copy-sequence \"λx\") 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"λx\"))"
+  },
+  {
+   "id": "take/0232",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (copy-sequence \"λx\") 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"λx\"))"
+  },
+  {
+   "id": "take/0233",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (copy-sequence \"λx\") -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"λx\"))"
+  },
+  {
+   "id": "take/0234",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (copy-sequence \"λx\") most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"λx\"))"
+  },
+  {
+   "id": "take/0235",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (copy-sequence \"λx\") 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"λx\"))"
+  },
+  {
+   "id": "take/0236",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (copy-sequence \"λx\") 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"λx\"))"
+  },
+  {
+   "id": "take/0237",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (copy-sequence \"λx\") :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"λx\"))"
+  },
+  {
+   "id": "take/0238",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (copy-sequence \"λx\") (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"λx\"))"
+  },
+  {
+   "id": "take/0239",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (copy-sequence \"λx\") (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"λx\"))"
+  },
+  {
+   "id": "take/0240",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (copy-sequence \"λx\") (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"λx\"))"
+  },
+  {
+   "id": "take/0241",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (copy-sequence \"λx\") (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"λx\"))"
+  },
+  {
+   "id": "take/0242",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (copy-sequence \"λx\") (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"λx\"))"
+  },
+  {
+   "id": "take/0243",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (copy-sequence \"λx\") (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"λx\"))"
+  },
+  {
+   "id": "take/0244",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (copy-sequence \"λx\") (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"λx\"))"
+  },
+  {
+   "id": "take/0245",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (copy-sequence \"λx\") (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"λx\"))"
+  },
+  {
+   "id": "take/0246",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (copy-sequence \"λx\") (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"λx\"))"
+  },
+  {
+   "id": "take/0247",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (list 1 2 3) nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 3)))"
+  },
+  {
+   "id": "take/0248",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (list 1 2 3) t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 3)))"
+  },
+  {
+   "id": "take/0249",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (list 1 2 3) 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 3)))"
+  },
+  {
+   "id": "take/0250",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (list 1 2 3) 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 3)))"
+  },
+  {
+   "id": "take/0251",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (list 1 2 3) 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 3)))"
+  },
+  {
+   "id": "take/0252",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (list 1 2 3) -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 3)))"
+  },
+  {
+   "id": "take/0253",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (list 1 2 3) most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 3)))"
+  },
+  {
+   "id": "take/0254",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (list 1 2 3) 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 3)))"
+  },
+  {
+   "id": "take/0255",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (list 1 2 3) 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 3)))"
+  },
+  {
+   "id": "take/0256",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (list 1 2 3) :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 3)))"
+  },
+  {
+   "id": "take/0257",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (list 1 2 3) (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 3)))"
+  },
+  {
+   "id": "take/0258",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (list 1 2 3) (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 3)))"
+  },
+  {
+   "id": "take/0259",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (list 1 2 3) (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 3)))"
+  },
+  {
+   "id": "take/0260",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (list 1 2 3) (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 3)))"
+  },
+  {
+   "id": "take/0261",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (list 1 2 3) (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 3)))"
+  },
+  {
+   "id": "take/0262",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (list 1 2 3) (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 3)))"
+  },
+  {
+   "id": "take/0263",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (list 1 2 3) (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 3)))"
+  },
+  {
+   "id": "take/0264",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (list 1 2 3) (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 3)))"
+  },
+  {
+   "id": "take/0265",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (list 1 2 3) (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 3)))"
+  },
+  {
+   "id": "take/0266",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (list 'a (list 'b)) nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (a (b))))"
+  },
+  {
+   "id": "take/0267",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (list 'a (list 'b)) t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (a (b))))"
+  },
+  {
+   "id": "take/0268",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (list 'a (list 'b)) 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (a (b))))"
+  },
+  {
+   "id": "take/0269",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (list 'a (list 'b)) 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (a (b))))"
+  },
+  {
+   "id": "take/0270",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (list 'a (list 'b)) 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (a (b))))"
+  },
+  {
+   "id": "take/0271",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (list 'a (list 'b)) -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (a (b))))"
+  },
+  {
+   "id": "take/0272",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (list 'a (list 'b)) most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (a (b))))"
+  },
+  {
+   "id": "take/0273",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (list 'a (list 'b)) 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (a (b))))"
+  },
+  {
+   "id": "take/0274",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (list 'a (list 'b)) 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (a (b))))"
+  },
+  {
+   "id": "take/0275",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (list 'a (list 'b)) :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (a (b))))"
+  },
+  {
+   "id": "take/0276",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (list 'a (list 'b)) (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (a (b))))"
+  },
+  {
+   "id": "take/0277",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (list 'a (list 'b)) (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (a (b))))"
+  },
+  {
+   "id": "take/0278",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (list 'a (list 'b)) (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (a (b))))"
+  },
+  {
+   "id": "take/0279",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (list 'a (list 'b)) (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (a (b))))"
+  },
+  {
+   "id": "take/0280",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (list 'a (list 'b)) (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (a (b))))"
+  },
+  {
+   "id": "take/0281",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (list 'a (list 'b)) (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (a (b))))"
+  },
+  {
+   "id": "take/0282",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (list 'a (list 'b)) (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (a (b))))"
+  },
+  {
+   "id": "take/0283",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (list 'a (list 'b)) (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (a (b))))"
+  },
+  {
+   "id": "take/0284",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (list 'a (list 'b)) (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (a (b))))"
+  },
+  {
+   "id": "take/0285",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (cons 1 2) nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 . 2)))"
+  },
+  {
+   "id": "take/0286",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (cons 1 2) t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 . 2)))"
+  },
+  {
+   "id": "take/0287",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (cons 1 2) 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 . 2)))"
+  },
+  {
+   "id": "take/0288",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (cons 1 2) 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 . 2)))"
+  },
+  {
+   "id": "take/0289",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (cons 1 2) 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 . 2)))"
+  },
+  {
+   "id": "take/0290",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (cons 1 2) -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 . 2)))"
+  },
+  {
+   "id": "take/0291",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (cons 1 2) most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 . 2)))"
+  },
+  {
+   "id": "take/0292",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (cons 1 2) 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 . 2)))"
+  },
+  {
+   "id": "take/0293",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (cons 1 2) 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 . 2)))"
+  },
+  {
+   "id": "take/0294",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (cons 1 2) :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 . 2)))"
+  },
+  {
+   "id": "take/0295",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (cons 1 2) (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 . 2)))"
+  },
+  {
+   "id": "take/0296",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (cons 1 2) (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 . 2)))"
+  },
+  {
+   "id": "take/0297",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (cons 1 2) (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 . 2)))"
+  },
+  {
+   "id": "take/0298",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (cons 1 2) (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 . 2)))"
+  },
+  {
+   "id": "take/0299",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (cons 1 2) (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 . 2)))"
+  },
+  {
+   "id": "take/0300",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (cons 1 2) (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 . 2)))"
+  },
+  {
+   "id": "take/0301",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (cons 1 2) (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 . 2)))"
+  },
+  {
+   "id": "take/0302",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (cons 1 2) (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 . 2)))"
+  },
+  {
+   "id": "take/0303",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (cons 1 2) (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 . 2)))"
+  },
+  {
+   "id": "take/0304",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (cons 1 (cons 2 3)) nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 . 3)))"
+  },
+  {
+   "id": "take/0305",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (cons 1 (cons 2 3)) t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 . 3)))"
+  },
+  {
+   "id": "take/0306",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (cons 1 (cons 2 3)) 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 . 3)))"
+  },
+  {
+   "id": "take/0307",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (cons 1 (cons 2 3)) 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 . 3)))"
+  },
+  {
+   "id": "take/0308",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (cons 1 (cons 2 3)) 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 . 3)))"
+  },
+  {
+   "id": "take/0309",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (cons 1 (cons 2 3)) -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 . 3)))"
+  },
+  {
+   "id": "take/0310",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (cons 1 (cons 2 3)) most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 . 3)))"
+  },
+  {
+   "id": "take/0311",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (cons 1 (cons 2 3)) 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 . 3)))"
+  },
+  {
+   "id": "take/0312",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (cons 1 (cons 2 3)) 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 . 3)))"
+  },
+  {
+   "id": "take/0313",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (cons 1 (cons 2 3)) :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 . 3)))"
+  },
+  {
+   "id": "take/0314",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (cons 1 (cons 2 3)) (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 . 3)))"
+  },
+  {
+   "id": "take/0315",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (cons 1 (cons 2 3)) (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 . 3)))"
+  },
+  {
+   "id": "take/0316",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (cons 1 (cons 2 3)) (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 . 3)))"
+  },
+  {
+   "id": "take/0317",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (cons 1 (cons 2 3)) (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 . 3)))"
+  },
+  {
+   "id": "take/0318",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (cons 1 (cons 2 3)) (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 . 3)))"
+  },
+  {
+   "id": "take/0319",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (cons 1 (cons 2 3)) (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 . 3)))"
+  },
+  {
+   "id": "take/0320",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (cons 1 (cons 2 3)) (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 . 3)))"
+  },
+  {
+   "id": "take/0321",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (cons 1 (cons 2 3)) (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 . 3)))"
+  },
+  {
+   "id": "take/0322",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (cons 1 (cons 2 3)) (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 . 3)))"
+  },
+  {
+   "id": "take/0323",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (vector 1 2) nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp [1 2]))"
+  },
+  {
+   "id": "take/0324",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (vector 1 2) t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp [1 2]))"
+  },
+  {
+   "id": "take/0325",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (vector 1 2) 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp [1 2]))"
+  },
+  {
+   "id": "take/0326",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (vector 1 2) 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp [1 2]))"
+  },
+  {
+   "id": "take/0327",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (vector 1 2) 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp [1 2]))"
+  },
+  {
+   "id": "take/0328",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (vector 1 2) -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp [1 2]))"
+  },
+  {
+   "id": "take/0329",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (vector 1 2) most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp [1 2]))"
+  },
+  {
+   "id": "take/0330",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (vector 1 2) 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp [1 2]))"
+  },
+  {
+   "id": "take/0331",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (vector 1 2) 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp [1 2]))"
+  },
+  {
+   "id": "take/0332",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (vector 1 2) :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp [1 2]))"
+  },
+  {
+   "id": "take/0333",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (vector 1 2) (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp [1 2]))"
+  },
+  {
+   "id": "take/0334",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (vector 1 2) (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp [1 2]))"
+  },
+  {
+   "id": "take/0335",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (vector 1 2) (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp [1 2]))"
+  },
+  {
+   "id": "take/0336",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (vector 1 2) (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp [1 2]))"
+  },
+  {
+   "id": "take/0337",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (vector 1 2) (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp [1 2]))"
+  },
+  {
+   "id": "take/0338",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (vector 1 2) (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp [1 2]))"
+  },
+  {
+   "id": "take/0339",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (vector 1 2) (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp [1 2]))"
+  },
+  {
+   "id": "take/0340",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (vector 1 2) (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp [1 2]))"
+  },
+  {
+   "id": "take/0341",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (vector 1 2) (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp [1 2]))"
+  },
+  {
+   "id": "take/0342",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (let ((x (list 1 2))) (setcdr (cdr x) x) x) nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "take/0343",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (let ((x (list 1 2))) (setcdr (cdr x) x) x) t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "take/0344",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (let ((x (list 1 2))) (setcdr (cdr x) x) x) 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "take/0345",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (let ((x (list 1 2))) (setcdr (cdr x) x) x) 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "take/0346",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (let ((x (list 1 2))) (setcdr (cdr x) x) x) 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "take/0347",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (let ((x (list 1 2))) (setcdr (cdr x) x) x) -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "take/0348",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (let ((x (list 1 2))) (setcdr (cdr x) x) x) most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "take/0349",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (let ((x (list 1 2))) (setcdr (cdr x) x) x) 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "take/0350",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (let ((x (list 1 2))) (setcdr (cdr x) x) x) 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "take/0351",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (let ((x (list 1 2))) (setcdr (cdr x) x) x) :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "take/0352",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (let ((x (list 1 2))) (setcdr (cdr x) x) x) (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "take/0353",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (let ((x (list 1 2))) (setcdr (cdr x) x) x) (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "take/0354",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (let ((x (list 1 2))) (setcdr (cdr x) x) x) (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "take/0355",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (let ((x (list 1 2))) (setcdr (cdr x) x) x) (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "take/0356",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (let ((x (list 1 2))) (setcdr (cdr x) x) x) (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "take/0357",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (let ((x (list 1 2))) (setcdr (cdr x) x) x) (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "take/0358",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (let ((x (list 1 2))) (setcdr (cdr x) x) x) (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "take/0359",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (let ((x (list 1 2))) (setcdr (cdr x) x) x) (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "take/0360",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (take (let ((x (list 1 2))) (setcdr (cdr x) x) x) (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "take/0361",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'take '(1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr take> 1))"
+  },
+  {
+   "id": "take/0362",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'take '(1 1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr take> 3))"
+  },
+  {
+   "id": "take/0363",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 nil)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (take a0 a1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp nil))"
+  },
+  {
+   "id": "take/0364",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (take a0 a1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp t))"
+  },
+  {
+   "id": "take/0365",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 (vector 1 2))) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (take a0 a1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp [1 2]))"
+  },
+  {
+   "id": "take/0366",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1) (a1 (cons 1 (cons 2 3)))) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (take a0 a1))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "take/0367",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.5) (a1 (cons 1 2))) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (take a0 a1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp 1.5))"
+  },
+  {
+   "id": "take/0368",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :kw) (a1 (list 'a (list 'b)))) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (take a0 a1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp :kw))"
+  },
+  {
+   "id": "take/0369",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 (list 1 2 3))) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (take a0 a1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"abc\"))"
+  },
+  {
+   "id": "take/0370",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 1 2 3)) (a1 (copy-sequence \"λx\"))) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (take a0 a1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 3)))"
+  },
+  {
+   "id": "take/0371",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 2)) (a1 (copy-sequence \"abc\"))) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (take a0 a1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 . 2)))"
+  },
+  {
+   "id": "take/0372",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (vector 1 2)) (a1 (copy-sequence \"\"))) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (take a0 a1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp [1 2]))"
+  },
+  {
+   "id": "take/0373",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 nil)) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp nil))"
+  },
+  {
+   "id": "take/0374",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 1)) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp nil))"
+  },
+  {
+   "id": "take/0375",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 most-positive-fixnum)) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp nil))"
+  },
+  {
+   "id": "take/0376",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 :kw)) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp nil))"
+  },
+  {
+   "id": "take/0377",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 (copy-sequence \"λx\"))) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp nil))"
+  },
+  {
+   "id": "take/0378",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 (cons 1 2))) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp nil))"
+  },
+  {
+   "id": "take/0379",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp nil))"
+  },
+  {
+   "id": "take/0380",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 0)) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp t))"
+  },
+  {
+   "id": "take/0381",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 -1)) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp t))"
+  },
+  {
+   "id": "take/0382",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 'sym)) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp t))"
+  },
+  {
+   "id": "take/0383",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 (copy-sequence \"abc\"))) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp t))"
+  },
+  {
+   "id": "take/0384",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 (list 'a (list 'b)))) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp t))"
+  },
+  {
+   "id": "take/0385",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 (vector 1 2))) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp t))"
+  },
+  {
+   "id": "take/0386",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0) (a1 t)) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "take/0387",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0) (a1 2)) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "take/0388",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0) (a1 1.5)) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "take/0389",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0) (a1 (copy-sequence \"\"))) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "take/0390",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0) (a1 (list 1 2 3))) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "take/0391",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0) (a1 (cons 1 (cons 2 3)))) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "take/0392",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 nil)) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "take/0393",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 1)) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "take/0394",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 most-positive-fixnum)) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "take/0395",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 :kw)) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "take/0396",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 (copy-sequence \"λx\"))) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "take/0397",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 (cons 1 2))) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "take/0398",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "take/0399",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 2) (a1 0)) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 0))"
+  },
+  {
+   "id": "take/0400",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 2) (a1 -1)) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp -1))"
+  },
+  {
+   "id": "take/0401",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 2) (a1 'sym)) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp sym))"
+  },
+  {
+   "id": "take/0402",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 2) (a1 (copy-sequence \"abc\"))) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"abc\"))"
+  },
+  {
+   "id": "take/0403",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 2) (a1 (list 'a (list 'b)))) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "take/0404",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 2) (a1 (vector 1 2))) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp [1 2]))"
+  },
+  {
+   "id": "take/0405",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1) (a1 t)) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "take/0406",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1) (a1 2)) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "take/0407",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1) (a1 1.5)) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "take/0408",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1) (a1 (copy-sequence \"\"))) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "take/0409",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1) (a1 (list 1 2 3))) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "take/0410",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1) (a1 (cons 1 (cons 2 3)))) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "take/0411",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-positive-fixnum) (a1 nil)) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "take/0412",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-positive-fixnum) (a1 1)) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "take/0413",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-positive-fixnum) (a1 most-positive-fixnum)) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2305843009213693951))"
+  },
+  {
+   "id": "take/0414",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-positive-fixnum) (a1 :kw)) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp :kw))"
+  },
+  {
+   "id": "take/0415",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-positive-fixnum) (a1 (copy-sequence \"λx\"))) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"λx\"))"
+  },
+  {
+   "id": "take/0416",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-positive-fixnum) (a1 (cons 1 2))) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "take/0417",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-positive-fixnum) (a1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "GNU-TIMEOUT"
+  },
+  {
+   "id": "take/0418",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.5) (a1 0)) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp 1.5))"
+  },
+  {
+   "id": "take/0419",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.5) (a1 -1)) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp 1.5))"
+  },
+  {
+   "id": "take/0420",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.5) (a1 'sym)) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp 1.5))"
+  },
+  {
+   "id": "take/0421",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.5) (a1 (copy-sequence \"abc\"))) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp 1.5))"
+  },
+  {
+   "id": "take/0422",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.5) (a1 (list 'a (list 'b)))) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp 1.5))"
+  },
+  {
+   "id": "take/0423",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.5) (a1 (vector 1 2))) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp 1.5))"
+  },
+  {
+   "id": "take/0424",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'sym) (a1 t)) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp sym))"
+  },
+  {
+   "id": "take/0425",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'sym) (a1 2)) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp sym))"
+  },
+  {
+   "id": "take/0426",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'sym) (a1 1.5)) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp sym))"
+  },
+  {
+   "id": "take/0427",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'sym) (a1 (copy-sequence \"\"))) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp sym))"
+  },
+  {
+   "id": "take/0428",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'sym) (a1 (list 1 2 3))) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp sym))"
+  },
+  {
+   "id": "take/0429",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'sym) (a1 (cons 1 (cons 2 3)))) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp sym))"
+  },
+  {
+   "id": "take/0430",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :kw) (a1 nil)) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp :kw))"
+  },
+  {
+   "id": "take/0431",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :kw) (a1 1)) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp :kw))"
+  },
+  {
+   "id": "take/0432",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :kw) (a1 most-positive-fixnum)) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp :kw))"
+  },
+  {
+   "id": "take/0433",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :kw) (a1 :kw)) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp :kw))"
+  },
+  {
+   "id": "take/0434",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :kw) (a1 (copy-sequence \"λx\"))) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp :kw))"
+  },
+  {
+   "id": "take/0435",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :kw) (a1 (cons 1 2))) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp :kw))"
+  },
+  {
+   "id": "take/0436",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :kw) (a1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp :kw))"
+  },
+  {
+   "id": "take/0437",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\")) (a1 0)) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"\"))"
+  },
+  {
+   "id": "take/0438",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\")) (a1 -1)) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"\"))"
+  },
+  {
+   "id": "take/0439",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\")) (a1 'sym)) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"\"))"
+  },
+  {
+   "id": "take/0440",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\")) (a1 (copy-sequence \"abc\"))) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"\"))"
+  },
+  {
+   "id": "take/0441",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\")) (a1 (list 'a (list 'b)))) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"\"))"
+  },
+  {
+   "id": "take/0442",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\")) (a1 (vector 1 2))) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"\"))"
+  },
+  {
+   "id": "take/0443",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 t)) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"abc\"))"
+  },
+  {
+   "id": "take/0444",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 2)) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"abc\"))"
+  },
+  {
+   "id": "take/0445",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 1.5)) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"abc\"))"
+  },
+  {
+   "id": "take/0446",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 (copy-sequence \"\"))) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"abc\"))"
+  },
+  {
+   "id": "take/0447",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 (list 1 2 3))) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"abc\"))"
+  },
+  {
+   "id": "take/0448",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 (cons 1 (cons 2 3)))) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"abc\"))"
+  },
+  {
+   "id": "take/0449",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 nil)) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"λx\"))"
+  },
+  {
+   "id": "take/0450",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 1)) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"λx\"))"
+  },
+  {
+   "id": "take/0451",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 most-positive-fixnum)) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"λx\"))"
+  },
+  {
+   "id": "take/0452",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 :kw)) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"λx\"))"
+  },
+  {
+   "id": "take/0453",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 (copy-sequence \"λx\"))) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"λx\"))"
+  },
+  {
+   "id": "take/0454",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 (cons 1 2))) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"λx\"))"
+  },
+  {
+   "id": "take/0455",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp \"λx\"))"
+  },
+  {
+   "id": "take/0456",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 1 2 3)) (a1 0)) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 3)))"
+  },
+  {
+   "id": "take/0457",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 1 2 3)) (a1 -1)) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 3)))"
+  },
+  {
+   "id": "take/0458",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 1 2 3)) (a1 'sym)) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 3)))"
+  },
+  {
+   "id": "take/0459",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 1 2 3)) (a1 (copy-sequence \"abc\"))) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 3)))"
+  },
+  {
+   "id": "take/0460",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 1 2 3)) (a1 (list 'a (list 'b)))) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 3)))"
+  },
+  {
+   "id": "take/0461",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 1 2 3)) (a1 (vector 1 2))) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 3)))"
+  },
+  {
+   "id": "take/0462",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 'a (list 'b))) (a1 t)) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (a (b))))"
+  },
+  {
+   "id": "take/0463",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 'a (list 'b))) (a1 2)) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (a (b))))"
+  },
+  {
+   "id": "take/0464",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 'a (list 'b))) (a1 1.5)) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (a (b))))"
+  },
+  {
+   "id": "take/0465",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 'a (list 'b))) (a1 (copy-sequence \"\"))) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (a (b))))"
+  },
+  {
+   "id": "take/0466",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 'a (list 'b))) (a1 (list 1 2 3))) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (a (b))))"
+  },
+  {
+   "id": "take/0467",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 'a (list 'b))) (a1 (cons 1 (cons 2 3)))) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (a (b))))"
+  },
+  {
+   "id": "take/0468",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 2)) (a1 nil)) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 . 2)))"
+  },
+  {
+   "id": "take/0469",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 2)) (a1 1)) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 . 2)))"
+  },
+  {
+   "id": "take/0470",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 2)) (a1 most-positive-fixnum)) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 . 2)))"
+  },
+  {
+   "id": "take/0471",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 2)) (a1 :kw)) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 . 2)))"
+  },
+  {
+   "id": "take/0472",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 2)) (a1 (copy-sequence \"λx\"))) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 . 2)))"
+  },
+  {
+   "id": "take/0473",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 2)) (a1 (cons 1 2))) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 . 2)))"
+  },
+  {
+   "id": "take/0474",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 2)) (a1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 . 2)))"
+  },
+  {
+   "id": "take/0475",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 (cons 2 3))) (a1 0)) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 . 3)))"
+  },
+  {
+   "id": "take/0476",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 (cons 2 3))) (a1 -1)) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 . 3)))"
+  },
+  {
+   "id": "take/0477",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 (cons 2 3))) (a1 'sym)) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 . 3)))"
+  },
+  {
+   "id": "take/0478",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 (cons 2 3))) (a1 (copy-sequence \"abc\"))) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 . 3)))"
+  },
+  {
+   "id": "take/0479",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 (cons 2 3))) (a1 (list 'a (list 'b)))) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 . 3)))"
+  },
+  {
+   "id": "take/0480",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 (cons 2 3))) (a1 (vector 1 2))) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 . 3)))"
+  },
+  {
+   "id": "take/0481",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (vector 1 2)) (a1 t)) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp [1 2]))"
+  },
+  {
+   "id": "take/0482",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (vector 1 2)) (a1 2)) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp [1 2]))"
+  },
+  {
+   "id": "take/0483",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (vector 1 2)) (a1 1.5)) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp [1 2]))"
+  },
+  {
+   "id": "take/0484",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (vector 1 2)) (a1 (copy-sequence \"\"))) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp [1 2]))"
+  },
+  {
+   "id": "take/0485",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (vector 1 2)) (a1 (list 1 2 3))) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp [1 2]))"
+  },
+  {
+   "id": "take/0486",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (vector 1 2)) (a1 (cons 1 (cons 2 3)))) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp [1 2]))"
+  },
+  {
+   "id": "take/0487",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (a1 nil)) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "take/0488",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (a1 1)) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "take/0489",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (a1 most-positive-fixnum)) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "take/0490",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (a1 :kw)) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "take/0491",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (a1 (copy-sequence \"λx\"))) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "take/0492",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (a1 (cons 1 2))) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "take/0493",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (a1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (take a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integerp (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "take/0494",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 'sym) (error (list 'sig e))))",
+   "expected": "(ok sym)"
+  },
+  {
+   "id": "take/0495",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (cons 1 (cons 2 3))) (error (list 'sig e))))",
+   "expected": "(ok (1 2 . 3))"
+  },
+  {
+   "id": "take/0496",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (cons 1 2)) (error (list 'sig e))))",
+   "expected": "(ok (1 . 2))"
+  },
+  {
+   "id": "take/0497",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"\")) (error (list 'sig e))))",
+   "expected": "(ok \"\")"
+  },
+  {
+   "id": "take/0498",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"abc\")) (error (list 'sig e))))",
+   "expected": "(ok \"abc\")"
+  },
+  {
+   "id": "take/0499",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"λx\")) (error (list 'sig e))))",
+   "expected": "(ok \"λx\")"
+  },
+  {
+   "id": "take/0500",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (error (list 'sig e))))",
+   "expected": "(ok (1 2 1 2 . #2))"
+  },
+  {
+   "id": "take/0501",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list 'a (list 'b))) (error (list 'sig e))))",
+   "expected": "(ok (a (b)))"
+  },
+  {
+   "id": "take/0502",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list 1 2 3)) (error (list 'sig e))))",
+   "expected": "(ok (1 2 3))"
+  },
+  {
+   "id": "take/0503",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vector 1 2)) (error (list 'sig e))))",
+   "expected": "(ok [1 2])"
+  },
+  {
+   "id": "take/0504",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok -1) (error (list 'sig e))))",
+   "expected": "(ok -1)"
+  },
+  {
+   "id": "take/0505",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 0) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "take/0506",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1) (error (list 'sig e))))",
+   "expected": "(ok 1)"
+  },
+  {
+   "id": "take/0507",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1.5) (error (list 'sig e))))",
+   "expected": "(ok 1.5)"
+  },
+  {
+   "id": "take/0508",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 2) (error (list 'sig e))))",
+   "expected": "(ok 2)"
+  },
+  {
+   "id": "take/0509",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok :kw) (error (list 'sig e))))",
+   "expected": "(ok :kw)"
+  },
+  {
+   "id": "take/0510",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok most-positive-fixnum) (error (list 'sig e))))",
+   "expected": "(ok 2305843009213693951)"
+  },
+  {
+   "id": "take/0511",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok nil) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "take/0512",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok t) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  }
+ ],
+ "pinned": {
+  "take/0342": "PRINTER",
+  "take/0343": "PRINTER",
+  "take/0344": "PRINTER",
+  "take/0345": "PRINTER",
+  "take/0346": "PRINTER",
+  "take/0347": "PRINTER",
+  "take/0348": "PRINTER",
+  "take/0349": "PRINTER",
+  "take/0350": "PRINTER",
+  "take/0351": "PRINTER",
+  "take/0352": "PRINTER",
+  "take/0353": "PRINTER",
+  "take/0354": "PRINTER",
+  "take/0355": "PRINTER",
+  "take/0356": "PRINTER",
+  "take/0357": "PRINTER",
+  "take/0358": "PRINTER",
+  "take/0359": "PRINTER",
+  "take/0360": "PRINTER",
+  "take/0487": "PRINTER",
+  "take/0488": "PRINTER",
+  "take/0489": "PRINTER",
+  "take/0490": "PRINTER",
+  "take/0491": "PRINTER",
+  "take/0492": "PRINTER",
+  "take/0493": "PRINTER",
+  "take/0500": "PRINTER"
+ }
+}

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+  <!-- Document body -->
+  <path d="M6 2.5h5l4 4V17a.5.5 0 0 1-.5.5h-8.5a.5.5 0 0 1-.5-.5V3a.5.5 0 0 1 .5-.5Z"/>
+  <!-- Folded corner -->
+  <path d="M11 2.5v4h4"/>
+  <!-- Plus symbol -->
+  <line x1="10" y1="10" x2="10" y2="14"/>
+  <line x1="8" y1="12" x2="12" y2="12"/>
+</svg>

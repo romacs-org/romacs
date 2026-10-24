@@ -1,0 +1,26 @@
+[package]
+name = "romacs-terminfo"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Owned terminal capability snapshots and numeric expansion"
+links = "romacs_terminfo"
+
+[dependencies]
+regex.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+rustix = { workspace = true, features = ["termios"] }
+
+[build-dependencies]
+pkg-config.workspace = true
+
+[dev-dependencies]
+romacs-infra.workspace = true
+tempfile.workspace = true
+rustix = { workspace = true, features = ["pty", "termios"] }
+
+[lints]
+workspace = true

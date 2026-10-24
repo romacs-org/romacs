@@ -1,0 +1,92 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "set-charset-plist",
+ "spec_sha256": "df4375fba84885d2470e08edfd51699bd76c5383aaa5643b16f01b6afd3f89c2",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "set-charset-plist",
+    "subr",
+    2,
+    2
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "charset.c": "8cda94ae199a7bbab47fd2f662282e7ddf23bc799fec084dbe30d50362111103",
+  "charset.h": "6a7e1d2974e0a045373583daa660137d535439f48a4c87e70cf9fa960ac25877"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "set-charset-plist/0000",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'set-charset-plist '(1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr set-charset-plist> 1))"
+  },
+  {
+   "id": "set-charset-plist/0001",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'set-charset-plist '(1 1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr set-charset-plist> 3))"
+  },
+  {
+   "id": "set-charset-plist/0002",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-charset-plist 'does-not-exist nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument charsetp does-not-exist))"
+  },
+  {
+   "id": "set-charset-plist/0003",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-charset-plist 42 nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument charsetp 42))"
+  },
+  {
+   "id": "set-charset-plist/0004",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-charset-plist nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument charsetp nil))"
+  },
+  {
+   "id": "set-charset-plist/0005",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (set-charset-plist 'ascii 42) (charset-plist 'ascii))) (error (list 'sig e))))",
+   "expected": "(ok (42 42))"
+  },
+  {
+   "id": "set-charset-plist/0006",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((p (list :a 1))) (list (eq p (set-charset-plist 'ascii p)) (eq p (charset-plist 'ascii))))) (error (list 'sig e))))",
+   "expected": "(ok (t t))"
+  },
+  {
+   "id": "set-charset-plist/0007",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((p (list :a 1))) (set-charset-plist 'ascii p) (setcar p :changed) (charset-plist 'ascii))) (error (list 'sig e))))",
+   "expected": "(ok (:changed 1))"
+  },
+  {
+   "id": "set-charset-plist/0008",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (set-charset-plist 'ascii '(odd)) (charset-plist 'ascii))) (error (list 'sig e))))",
+   "expected": "(ok ((odd) (odd)))"
+  },
+  {
+   "id": "set-charset-plist/0009",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (funcall 'set-charset-plist 'ascii nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  }
+ ]
+}

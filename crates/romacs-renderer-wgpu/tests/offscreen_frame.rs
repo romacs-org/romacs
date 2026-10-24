@@ -1,0 +1,2607 @@
+//! Offscreen frame render harness for the frame scheduling plan's retained
+//! geometry / shader cursor stages.
+//!
+//! Renders a real `FrameGlyphBuffer` through `WgpuRenderer::render_frame_glyphs`
+//! into an offscreen texture and reads pixels back, with no window-system
+//! surface. Used to assert the plan's core retained-scene invariant: a
+//! cursor-only frame changes only cursor pixels, leaving the static scene
+//! bit-identical.
+//!
+//! Skips (passes) cleanly where no GPU adapter is available.
+
+use romacs_display_protocol::face::BoxVerticalEdges;
+#[path = "offscreen_frame/fade_edges_test.rs"]
+mod fade_edges_test;
+#[path = "offscreen_frame/menu_test.rs"]
+mod menu_test;
+#[path = "offscreen_frame/opacity_test.rs"]
+mod opacity_test;
+#[path = "offscreen_frame/scroll_texture_test.rs"]
+mod scroll_texture_test;
+use romacs_display_protocol::frame_chrome::PresentationId;
+use romacs_display_protocol::frame_glyphs::{
+    CursorStyle, DisplaySlotId, FrameGlyph, FrameGlyphBuffer, GlyphRowRole, PhysCursor,
+};
+use romacs_display_protocol::image::EncodedBytes;
+use romacs_display_protocol::types::{
+    AnimatedCursor, Color, DisplayFrameId, DisplayWindowId, FaceId,
+};
+use romacs_display_protocol::{
+    BoxType, DeviceScale, Face, FaceAttributes, FrameRect, GeometrySize, ImageColorContext,
+    ImageFrameIndex, ImageId, ImageLoadAttempt, ImageLoadToken, ImageMaskPolicy, ImageRealization,
+    ImageRotation, ImageSequenceId, ImageSizeSpec, ImageSourceRect, LogicalPixels,
+    PointerAppearanceId, PointerAppearancePhase, PointerAppearanceSelection, PointerDrawMode,
+    PointerImageRelief, PointerReliefCornerErase, PointerReliefEdges, PointerReliefMargins,
+    PresentMapping, PresentationExtent, PresentedPaintSpan, PresentedPointerAppearance,
+    PresentedPointerRegion, PresentedPrimitiveKind, SurfaceState,
+};
+use romacs_renderer_wgpu::types::SubpixelRequest;
+use romacs_renderer_wgpu::{FilledRows, WgpuGlyphAtlas, WgpuRenderer};
+
+const W: u32 = 96;
+const H: u32 = 64;
+
+fn test_image_load(image: u32) -> ImageLoadToken {
+    ImageLoadToken::new(
+        ImageId::new(image),
+        ImageLoadAttempt::new(1).expect("non-zero test image load attempt"),
+    )
+}
+
+struct Harness {
+    renderer: WgpuRenderer,
+    atlas: WgpuGlyphAtlas,
+    target: wgpu::Texture,
+    view: wgpu::TextureView,
+}
+
+fn try_harness() -> Option<Harness> {
+    let renderer = WgpuRenderer::new(None, W, H).ok()?;
+    let mut atlas = WgpuGlyphAtlas::new(renderer.device());
+    let initial_frame = FrameGlyphBuffer::default();
+    atlas.set_current_frame_fonts(initial_frame.font_bindings());
+    let target = renderer.device().create_texture(&wgpu::TextureDescriptor {
+        label: Some("offscreen-frame-target"),
+        size: wgpu::Extent3d {
+            width: W,
+            height: H,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        // Match the renderer's surfaceless pipeline target format so the
+        // render pipelines are compatible with this pass. Bytes read back are
+        // therefore BGRA, sRGB-encoded (see px()).
+        format: wgpu::TextureFormat::Bgra8UnormSrgb,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+        view_formats: &[],
+    });
+    let view = target.create_view(&wgpu::TextureViewDescriptor::default());
+    Some(Harness {
+        renderer,
+        atlas,
+        target,
+        view,
+    })
+}
+
+fn mapping_for(frame: &FrameGlyphBuffer, width: u32, height: u32) -> PresentMapping {
+    mapping_for_scale(frame, width, height, 1.0)
+}
+
+fn mapping_for_scale(
+    frame: &FrameGlyphBuffer,
+    width: u32,
+    height: u32,
+    scale: f32,
+) -> PresentMapping {
+    let SurfaceState::Drawable(surface) =
+        SurfaceState::from_device_size(width, height, DeviceScale::new(scale).unwrap()).unwrap()
+    else {
+        unreachable!("offscreen targets are drawable")
+    };
+    PresentMapping::top_left_clip(
+        surface,
+        PresentationExtent::new(
+            frame.presentation_id,
+            GeometrySize::<LogicalPixels>::from_px(frame.width, frame.height).unwrap(),
+        ),
+    )
+}
+
+fn boxed_stretch_frame(scale: f32, face_id: FaceId) -> FrameGlyphBuffer {
+    let mut frame = FrameGlyphBuffer::with_size(W as f32 / scale, H as f32 / scale);
+    frame.background = Color::BLACK;
+    frame.set_face(
+        face_id,
+        Color::WHITE,
+        Some(Color::BLACK),
+        400,
+        false,
+        0,
+        None,
+        0,
+        None,
+        0,
+        None,
+    );
+    let face = frame.faces.get_mut(&face_id).unwrap();
+    face.attributes |= FaceAttributes::BOX;
+    face.box_type = BoxType::Line;
+    face.box_color = Some(Color::GREEN);
+    face.box_line_width = 1.into();
+    frame.set_draw_context(DisplayWindowId::new(1), GlyphRowRole::Text, None);
+    frame.add_stretch(10.0, 8.0, 20.0, 10.0, Color::BLACK, face_id, false);
+    frame
+}
+
+fn top_box_edge_green_rows(buf: &[u8]) -> usize {
+    let physical_x = 30;
+    let physical_top = 16;
+    (physical_top..physical_top + 4)
+        .filter(|&y| {
+            let pixel = px(buf, physical_x, y);
+            pixel[1] > 180 && pixel[1] > pixel[0] + 80 && pixel[1] > pixel[2] + 80
+        })
+        .count()
+}
+
+#[test]
+fn gnu_box_line_width_is_one_device_pixel_at_two_x_scale() {
+    let Some(mut h) = try_harness() else {
+        eprintln!("SKIP: no GPU adapter");
+        return;
+    };
+    let scale = 2.0;
+    let frame = boxed_stretch_frame(scale, FaceId::new(22));
+
+    h.renderer.render_frame_glyphs(
+        &h.view,
+        &frame,
+        &mut h.atlas,
+        mapping_for_scale(&frame, W, H, scale),
+        false,
+        None,
+        None,
+        None,
+        None,
+        None,
+    );
+    let buf = read_back(&h);
+
+    assert_eq!(
+        top_box_edge_green_rows(&buf),
+        1,
+        "GNU :box line-width 1 must paint exactly one device-pixel row"
+    );
+}
+
+#[test]
+fn child_frame_box_line_width_is_one_device_pixel_at_two_x_scale() {
+    let Some(mut h) = try_harness() else {
+        eprintln!("SKIP: no GPU adapter");
+        return;
+    };
+    let scale = 2.0;
+    h.renderer.set_scale_factor(scale);
+    h.renderer.resize(W, H);
+    let frame = boxed_stretch_frame(scale, FaceId::new(23));
+
+    h.renderer.render_frame_content(
+        &h.view,
+        &frame,
+        &mut h.atlas,
+        W,
+        H,
+        0.0,
+        0.0,
+        false,
+        None,
+        0.0,
+        None,
+        None,
+        1.0,
+        1.0,
+        [0.0; 2],
+    );
+    let buf = read_back(&h);
+
+    assert_eq!(
+        top_box_edge_green_rows(&buf),
+        1,
+        "child-frame rendering must preserve GNU device-pixel box widths"
+    );
+}
+
+fn frame_with_cursor(cursor_color: Color) -> FrameGlyphBuffer {
+    let mut frame = FrameGlyphBuffer::with_size(W as f32, H as f32);
+    frame.background = Color::rgb(0.10, 0.12, 0.16);
+    // A bar cursor near the left edge: a clean top-layer cursor (no inverse
+    // video), so its pixels are localized and its color is the only variable.
+    frame.set_phys_cursor(PhysCursor {
+        window_id: DisplayWindowId::new(1),
+        charpos: 0,
+        row: 0,
+        col: 0,
+        slot_id: DisplaySlotId {
+            window_id: DisplayWindowId::new(1),
+            row: 0,
+            col: 0,
+        },
+        x: 8.0,
+        y: 8.0,
+        width: 4.0,
+        height: 24.0,
+        ascent: 20.0,
+        style: CursorStyle::Bar(4.0),
+        color: cursor_color,
+        cursor_fg: Color::BLACK,
+    });
+    frame
+}
+
+fn read_back(h: &Harness) -> Vec<u8> {
+    // bytes_per_row must be 256-aligned.
+    let unpadded = W * 4;
+    let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+    let padded = unpadded.div_ceil(align) * align;
+    let buf = h.renderer.device().create_buffer(&wgpu::BufferDescriptor {
+        label: Some("readback"),
+        size: (padded * H) as u64,
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+    let mut enc = h
+        .renderer
+        .device()
+        .create_command_encoder(&Default::default());
+    enc.copy_texture_to_buffer(
+        wgpu::TexelCopyTextureInfo {
+            texture: &h.target,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        wgpu::TexelCopyBufferInfo {
+            buffer: &buf,
+            layout: wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(padded),
+                rows_per_image: Some(H),
+            },
+        },
+        wgpu::Extent3d {
+            width: W,
+            height: H,
+            depth_or_array_layers: 1,
+        },
+    );
+    h.renderer.queue().submit(std::iter::once(enc.finish()));
+    let slice = buf.slice(..);
+    slice.map_async(wgpu::MapMode::Read, |_| {});
+    h.renderer
+        .device()
+        .poll(wgpu::PollType::Wait {
+            submission_index: None,
+            timeout: Some(std::time::Duration::from_secs(3)),
+        })
+        .expect("poll");
+    let data = slice
+        .get_mapped_range()
+        .expect("offscreen frame readback buffer should remain mapped");
+    // Un-pad into tight W*H*4.
+    let mut out = vec![0u8; (unpadded * H) as usize];
+    for row in 0..H {
+        let src = (row * padded) as usize;
+        let dst = (row * unpadded) as usize;
+        out[dst..dst + unpadded as usize].copy_from_slice(&data[src..src + unpadded as usize]);
+    }
+    out
+}
+
+/// One pixel as (r, g, b, a). The target is BGRA, so swizzle on read.
+fn px(buf: &[u8], x: u32, y: u32) -> [u8; 4] {
+    let i = ((y * W + x) * 4) as usize;
+    [buf[i + 2], buf[i + 1], buf[i], buf[i + 3]]
+}
+
+#[test]
+fn compact_toolbar_paints_its_own_face_background() {
+    use romacs_display_protocol::{
+        BandRect, ChromeAction, CompactBarContent, PositionedChromeItem, ToolBarItem,
+        ToolBarItemType,
+    };
+    let Some(mut h) = try_harness() else {
+        eprintln!("SKIP: no GPU adapter");
+        return;
+    };
+    let item = ToolBarItem {
+        index: 0,
+        key: "open".into(),
+        image: None,
+        label: String::new(),
+        help: String::new(),
+        enabled: true,
+        selected: false,
+        item_type: ToolBarItemType::Button,
+        wrap: false,
+    };
+    let content = CompactBarContent::new(
+        vec![],
+        vec![PositionedChromeItem::new(
+            BandRect::new(32.0, 0.0, 24.0, 32.0).unwrap(),
+            item,
+            ChromeAction::InvokeToolBarItem { index: 0 },
+        )],
+        Color::WHITE,
+        Color::RED,
+        Color::WHITE,
+        Color::GREEN,
+        16,
+        4,
+    );
+    h.renderer.render_compact_bar(
+        &h.view,
+        &content,
+        FrameRect::new(0.0, 0.0, W as f32, 32.0).unwrap(),
+        &Default::default(),
+        None,
+        None,
+        None,
+        None,
+        &mut h.atlas,
+        W,
+        H,
+    );
+    let pixels = read_back(&h);
+    assert_eq!(px(&pixels, 8, 8), [255, 0, 0, 255]);
+    assert_eq!(px(&pixels, 80, 8), [0, 255, 0, 255]);
+}
+
+#[test]
+fn toolbar_icon_load_and_draw_share_face_alpha_and_fractional_scale() {
+    use romacs_display_protocol::{
+        BandRect, ChromeAction, PositionedChromeItem, ToolBarContent, ToolBarImageSource,
+        ToolBarItem, ToolBarItemType,
+    };
+    let Some(mut h) = try_harness() else {
+        eprintln!("SKIP: no GPU adapter");
+        return;
+    };
+    let source = ToolBarImageSource::File {
+        path: concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/toolbar-symbolic.svg"
+        )
+        .into(),
+    };
+    let item = ToolBarItem {
+        index: 0,
+        key: "open".into(),
+        image: Some(source.clone()),
+        label: String::new(),
+        help: String::new(),
+        enabled: true,
+        selected: false,
+        item_type: ToolBarItemType::Button,
+        wrap: false,
+    };
+    let content = ToolBarContent::new(
+        vec![PositionedChromeItem::new(
+            BandRect::new(0.0, 0.0, 32.0, 32.0).unwrap(),
+            item,
+            ChromeAction::InvokeToolBarItem { index: 0 },
+        )],
+        Color::RED,
+        Color::GREEN,
+        24,
+        4,
+    );
+    let key = content
+        .icon_style()
+        .realize(source, DeviceScale::new(1.5).unwrap());
+    // Loading must not depend on whichever window the renderer drew last.
+    h.renderer.set_scale_factor(2.0);
+    let bytes_before = h.renderer.image_cache_usage().texture_bytes();
+    let image = h.renderer.load_toolbar_icon(&key);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    while !h.renderer.is_image_ready(image) && std::time::Instant::now() < deadline {
+        h.renderer.process_pending_images();
+        std::thread::yield_now();
+    }
+    assert!(h.renderer.is_image_ready(image));
+    assert_eq!(
+        h.renderer.get_image_size(image),
+        Some((24, 24)),
+        "logical layout stays fixed"
+    );
+    assert_eq!(
+        h.renderer.image_cache_usage().texture_bytes() - bytes_before,
+        36 * 36 * 4,
+        "the GPU texture uses the requested 1.5x scale, not the ambient 2x scale"
+    );
+    let textures = std::collections::HashMap::from([(key, image)]);
+    h.renderer.set_scale_factor(1.5);
+    h.renderer.render_toolbar(
+        &h.view,
+        &content,
+        FrameRect::new(0.0, 0.0, 64.0, 32.0).unwrap(),
+        &textures,
+        None,
+        None,
+        W,
+        H,
+    );
+    let pixels = read_back(&h);
+    assert_eq!(
+        px(&pixels, 12, 24),
+        [255, 0, 0, 255],
+        "symbolic face foreground"
+    );
+    assert_eq!(
+        px(&pixels, 24, 24),
+        [0, 0, 255, 255],
+        "intrinsic artwork color"
+    );
+    assert_eq!(
+        px(&pixels, 36, 24),
+        [0, 255, 0, 255],
+        "toolbar through transparent icon"
+    );
+
+    // Compact chrome must look up the tool face, not its distinct menu face.
+    let compact = romacs_display_protocol::CompactBarContent::new(
+        vec![],
+        content.items().to_vec(),
+        Color::WHITE,
+        Color::BLACK,
+        Color::RED,
+        Color::GREEN,
+        24,
+        4,
+    );
+    h.renderer.render_compact_bar(
+        &h.view,
+        &compact,
+        FrameRect::new(0.0, 0.0, 64.0, 32.0).unwrap(),
+        &textures,
+        None,
+        None,
+        None,
+        None,
+        &mut h.atlas,
+        W,
+        H,
+    );
+    let compact_pixels = read_back(&h);
+    for x in [12, 24, 36] {
+        assert_eq!(px(&compact_pixels, x, 24), px(&pixels, x, 24));
+    }
+}
+
+#[test]
+fn offscreen_frame_renders_background_and_cursor() {
+    let Some(mut h) = try_harness() else {
+        eprintln!("SKIP: no GPU adapter");
+        return;
+    };
+    let frame = frame_with_cursor(Color::rgb(1.0, 0.0, 0.0));
+    h.renderer.render_frame_glyphs(
+        &h.view,
+        &frame,
+        &mut h.atlas,
+        mapping_for(&frame, W, H),
+        true,
+        None,
+        None,
+        None,
+        None,
+        None,
+    );
+    let buf = read_back(&h);
+    // A corner pixel is background (dark blue-ish), definitely not the red cursor.
+    let corner = px(&buf, W - 2, H - 2);
+    assert!(
+        corner[2] > corner[0],
+        "corner should be background (blue>red), got {corner:?}"
+    );
+    // The red bar cursor occupies its slot (x≈8..12, y≈8..31): red-dominant
+    // pixels clearly distinct from the background.
+    let mut found_red = false;
+    for y in 8..31 {
+        for x in 8..12 {
+            let p = px(&buf, x, y);
+            if p[0] > 180 && p[0] > p[1] + 60 && p[0] > p[2] + 60 {
+                found_red = true;
+            }
+        }
+    }
+    assert!(found_red, "expected the red bar cursor to be drawn");
+}
+
+#[test]
+fn primary_frame_inline_image_samples_only_its_source_slice() {
+    let Some(mut h) = try_harness() else {
+        eprintln!("SKIP: no GPU adapter");
+        return;
+    };
+
+    const IMAGE_ID: u32 = 701;
+    let image_id = ImageId::new(IMAGE_ID);
+    const IMAGE_WIDTH: u32 = 8;
+    const IMAGE_HEIGHT: u32 = 8;
+    let mut argb = Vec::with_capacity((IMAGE_WIDTH * IMAGE_HEIGHT * 4) as usize);
+    for y in 0..IMAGE_HEIGHT {
+        let pixel = if y < IMAGE_HEIGHT / 2 {
+            [255, 255, 0, 0]
+        } else {
+            [255, 0, 0, 255]
+        };
+        for _ in 0..IMAGE_WIDTH {
+            argb.extend_from_slice(&pixel);
+        }
+    }
+    h.renderer.load_image_argb32_with_id(
+        test_image_load(IMAGE_ID),
+        &argb,
+        IMAGE_WIDTH,
+        IMAGE_HEIGHT,
+        IMAGE_WIDTH * 4,
+    );
+    let decode_deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    while std::time::Instant::now() < decode_deadline {
+        h.renderer.process_pending_images();
+        if h.renderer.is_image_ready(image_id) {
+            break;
+        }
+        std::thread::yield_now();
+    }
+    assert!(
+        h.renderer.is_image_ready(image_id),
+        "test image must decode"
+    );
+
+    let mut frame = FrameGlyphBuffer::with_size(W as f32, H as f32);
+    frame.background = Color::BLACK;
+    let image_face_id = FaceId::new(41);
+    let mut image_face = Face::new(image_face_id);
+    image_face.background = Color::GREEN;
+    image_face.box_type = BoxType::Line;
+    image_face.box_color = Some(Color::RED);
+    image_face.box_line_width = 1.into();
+    frame.faces.insert(image_face_id, image_face);
+    frame.glyphs.push(FrameGlyph::Image {
+        window_id: DisplayWindowId::new(1),
+        row_role: GlyphRowRole::Text,
+        clip_rect: None,
+        slot_id: None,
+        image_id: ImageId::new(IMAGE_ID),
+        source_rect: ImageSourceRect::new(0.0, 0.5, 1.0, 0.5).expect("bottom-half slice"),
+        slot_rect: romacs_display_protocol::Rect::new(16.0, 16.0, 32.0, 16.0),
+        box_rect: romacs_display_protocol::Rect::new(16.0, 8.0, 32.0, 32.0),
+        x: 20.0,
+        y: 20.0,
+        width: 24.0,
+        height: 8.0,
+        face_id: image_face_id,
+        box_vertical_edges: BoxVerticalEdges::Both,
+    });
+
+    h.renderer.render_frame_glyphs(
+        &h.view,
+        &frame,
+        &mut h.atlas,
+        mapping_for(&frame, W, H),
+        false,
+        None,
+        None,
+        None,
+        None,
+        None,
+    );
+    let rendered = read_back(&h);
+    let sampled = px(&rendered, 24, 24);
+    assert!(
+        sampled[2] > 180 && sampled[2] > sampled[0] + 80,
+        "the bottom-half slice must sample blue pixels, got {sampled:?}"
+    );
+    let horizontal_margin = px(&rendered, 17, 20);
+    assert!(
+        horizontal_margin[1] > 180 && horizontal_margin[0] < 80,
+        "the boxed image face must fill its horizontal margin, got {horizontal_margin:?}"
+    );
+    let row_above_image = px(&rendered, 24, 12);
+    assert!(
+        row_above_image[1] > 180 && row_above_image[0] < 80,
+        "the boxed image face must fill the complete row-height box slot, got {row_above_image:?}"
+    );
+}
+
+/// REGRESSION (telega reply icon on dark themes): an image glyph whose face
+/// has NO box must still paint that face's background across its GNU box
+/// extent.  The image texture covers only its margin-inset content rect;
+/// without this fill a masked/transparent image (telega's reply.svg arrow)
+/// shows the window background through its slot instead of the face
+/// background GNU paints behind the glyph.
+#[test]
+fn unboxed_image_face_background_fills_the_glyph_box_extent() {
+    let Some(mut h) = try_harness() else {
+        eprintln!("SKIP: no GPU adapter");
+        return;
+    };
+
+    const IMAGE_ID: u32 = 702;
+    let image_id = ImageId::new(IMAGE_ID);
+    const IMAGE_WIDTH: u32 = 8;
+    const IMAGE_HEIGHT: u32 = 8;
+    let mut argb = Vec::with_capacity((IMAGE_WIDTH * IMAGE_HEIGHT * 4) as usize);
+    for _ in 0..IMAGE_WIDTH * IMAGE_HEIGHT {
+        // [A, R, G, B]: opaque red content.
+        argb.extend_from_slice(&[255, 255, 0, 0]);
+    }
+    h.renderer.load_image_argb32_with_id(
+        test_image_load(IMAGE_ID),
+        &argb,
+        IMAGE_WIDTH,
+        IMAGE_HEIGHT,
+        IMAGE_WIDTH * 4,
+    );
+    let decode_deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    while std::time::Instant::now() < decode_deadline {
+        h.renderer.process_pending_images();
+        if h.renderer.is_image_ready(image_id) {
+            break;
+        }
+        std::thread::yield_now();
+    }
+    assert!(
+        h.renderer.is_image_ready(image_id),
+        "test image must decode"
+    );
+
+    let mut frame = FrameGlyphBuffer::with_size(W as f32, H as f32);
+    frame.background = Color::BLACK;
+    let image_face_id = FaceId::new(42);
+    let mut image_face = Face::new(image_face_id);
+    // A solid background and NO box: the face-background fill has no box
+    // pass to lean on, which is exactly the telega reply-icon case.
+    image_face.background = Color::GREEN;
+    frame.faces.insert(image_face_id, image_face);
+    frame.glyphs.push(FrameGlyph::Image {
+        window_id: DisplayWindowId::new(1),
+        row_role: GlyphRowRole::Text,
+        clip_rect: None,
+        slot_id: None,
+        image_id: ImageId::new(IMAGE_ID),
+        source_rect: ImageSourceRect::FULL,
+        slot_rect: romacs_display_protocol::Rect::new(16.0, 16.0, 32.0, 16.0),
+        box_rect: romacs_display_protocol::Rect::new(16.0, 8.0, 32.0, 32.0),
+        x: 20.0,
+        y: 20.0,
+        width: 24.0,
+        height: 8.0,
+        face_id: image_face_id,
+        box_vertical_edges: BoxVerticalEdges::Both,
+    });
+
+    h.renderer.render_frame_glyphs(
+        &h.view,
+        &frame,
+        &mut h.atlas,
+        mapping_for(&frame, W, H),
+        false,
+        None,
+        None,
+        None,
+        None,
+        None,
+    );
+    let rendered = read_back(&h);
+    let content = px(&rendered, 24, 24);
+    assert!(
+        content[0] > 180 && content[1] < 80,
+        "the image content rect must sample the red texture, got {content:?}"
+    );
+    let horizontal_margin = px(&rendered, 17, 20);
+    assert!(
+        horizontal_margin[1] > 180 && horizontal_margin[0] < 80,
+        "the unboxed image face must fill its horizontal margin with its background, got {horizontal_margin:?}"
+    );
+    let row_above_image = px(&rendered, 24, 12);
+    assert!(
+        row_above_image[1] > 180 && row_above_image[0] < 80,
+        "the unboxed image face must fill the complete row-height box slot, got {row_above_image:?}"
+    );
+    let corner = px(&rendered, 2, 2);
+    assert!(
+        corner[0] < 80 && corner[1] < 80 && corner[2] < 80,
+        "the face-background fill must stay clipped to the box extent, got {corner:?}"
+    );
+}
+
+#[test]
+fn stale_presentation_is_clipped_at_native_scale_after_surface_growth() {
+    let Some(mut h) = try_harness() else {
+        eprintln!("SKIP: no GPU adapter");
+        return;
+    };
+    let mut frame = FrameGlyphBuffer::with_size((W / 2) as f32, H as f32);
+    frame.presentation_id = PresentationId::new(501);
+    frame.background = Color::BLACK;
+    frame.set_face(
+        FaceId::new(1),
+        Color::WHITE,
+        Some(Color::RED),
+        400,
+        false,
+        0,
+        None,
+        0,
+        None,
+        0,
+        None,
+    );
+    frame.set_draw_context(DisplayWindowId::new(1), GlyphRowRole::Text, None);
+    frame.add_stretch(
+        0.0,
+        0.0,
+        (W / 2) as f32,
+        H as f32,
+        Color::RED,
+        FaceId::new(1),
+        false,
+    );
+
+    h.renderer.render_frame_glyphs(
+        &h.view,
+        &frame,
+        &mut h.atlas,
+        mapping_for(&frame, W, H),
+        false,
+        None,
+        None,
+        None,
+        None,
+        None,
+    );
+    let buf = read_back(&h);
+
+    let old_content = px(&buf, W / 4, H / 2);
+    assert!(
+        old_content[0] > 180 && old_content[1] < 80 && old_content[2] < 80,
+        "the stale presentation must remain at its original size: {old_content:?}"
+    );
+    let newly_exposed_surface = px(&buf, W * 3 / 4, H / 2);
+    assert!(
+        newly_exposed_surface[0] < 40
+            && newly_exposed_surface[1] < 40
+            && newly_exposed_surface[2] < 40,
+        "new surface area must expose background, not stretched stale pixels: {newly_exposed_surface:?}"
+    );
+}
+
+#[test]
+fn ime_preedit_cjk_background_covers_the_shaped_run() {
+    let Some(mut h) = try_harness() else {
+        return;
+    };
+    let mut frame = FrameGlyphBuffer::with_size(W as f32, H as f32);
+    frame.background = Color::rgb(0.10, 0.12, 0.16);
+    h.renderer.render_frame_glyphs(
+        &h.view,
+        &frame,
+        &mut h.atlas,
+        mapping_for(&frame, W, H),
+        false,
+        None,
+        None,
+        None,
+        None,
+        None,
+    );
+    let base = read_back(&h);
+
+    let preedit = "你好";
+    let shaped = h
+        .atlas
+        .get_or_create_composed_atlas(
+            h.renderer.device(),
+            h.renderer.queue(),
+            preedit,
+            FaceId::new(0),
+            0.0_f32.to_bits(),
+            None,
+            cosmic_text::SubpixelBin::Zero,
+            cosmic_text::SubpixelBin::Zero,
+            SubpixelRequest::Disabled,
+        )
+        .expect("the GUI test environment must provide a CJK fallback font");
+    let shaped_width = shaped
+        .first()
+        .expect("a shaped composition must have an atlas part")
+        .advance_width;
+    let fixed_cell_width = preedit.chars().count() as f32 * h.atlas.default_char_width();
+    assert!(
+        shaped_width > fixed_cell_width + 2.0,
+        "the regression needs a wide CJK run: shaped={shaped_width}, fixed={fixed_cell_width}"
+    );
+
+    let cursor_x = 8.0;
+    let cursor_y = 8.0;
+    h.renderer.render_ime_preedit(
+        &h.view,
+        preedit,
+        cursor_x,
+        cursor_y,
+        24.0,
+        &mut h.atlas,
+        W,
+        H,
+    );
+    let rendered = read_back(&h);
+
+    // Sample inside the final shaped advance.  The preedit background must
+    // cover the complete run; using `chars().count() * default_char_width`
+    // leaves this pixel untouched and also places adjacent CJK glyphs on top
+    // of one another.
+    let tail_x = (cursor_x + 2.0 + shaped_width - 1.0).floor() as u32;
+    let sample_y = (cursor_y + 2.0) as u32;
+    assert_ne!(
+        px(&rendered, tail_x, sample_y),
+        px(&base, tail_x, sample_y),
+        "the preedit visual must cover its shaped run through x={tail_x}"
+    );
+}
+
+#[test]
+fn negative_box_line_width_paints_an_inset_border() {
+    let Some(mut h) = try_harness() else {
+        return;
+    };
+    let mut frame = FrameGlyphBuffer::with_size(W as f32, H as f32);
+    frame.background = Color::BLACK;
+    let face_id = FaceId::new(20);
+    frame.set_face(
+        face_id,
+        Color::WHITE,
+        Some(Color::BLACK),
+        700,
+        false,
+        0,
+        None,
+        0,
+        None,
+        0,
+        None,
+    );
+    let face = frame.faces.get_mut(&face_id).unwrap();
+    face.attributes |= FaceAttributes::BOX;
+    face.box_type = BoxType::Line;
+    face.box_color = Some(Color::GREEN);
+    face.box_line_width = (-2).into();
+    frame.set_draw_context(DisplayWindowId::new(1), GlyphRowRole::TabBar, None);
+    frame.add_stretch(20.0, 20.0, 40.0, 20.0, Color::BLACK, face_id, false);
+
+    h.renderer.render_frame_glyphs(
+        &h.view,
+        &frame,
+        &mut h.atlas,
+        mapping_for(&frame, W, H),
+        false,
+        None,
+        None,
+        None,
+        None,
+        None,
+    );
+    let buf = read_back(&h);
+    let top = px(&buf, 40, 20);
+    let interior = px(&buf, 40, 25);
+    assert!(
+        top[1] > 180 && top[1] > top[0] + 80 && top[1] > top[2] + 80,
+        "negative line-width must still paint its top box edge, got {top:?}"
+    );
+    assert!(
+        interior[0] < 30 && interior[1] < 30 && interior[2] < 30,
+        "inset border must not fill the box interior, got {interior:?}"
+    );
+}
+
+fn boxed_one_cell_frame() -> FrameGlyphBuffer {
+    let mut frame = FrameGlyphBuffer::with_size(W as f32, H as f32);
+    frame.background = Color::BLACK;
+    let face_id = FaceId::new(21);
+    frame.set_face(
+        face_id,
+        Color::WHITE,
+        Some(Color::rgb(0.2, 0.2, 0.2)),
+        400,
+        false,
+        0,
+        None,
+        0,
+        None,
+        0,
+        None,
+    );
+    let face = frame.faces.get_mut(&face_id).unwrap();
+    face.attributes |= FaceAttributes::BOX;
+    face.box_type = BoxType::Line;
+    face.box_color = Some(Color::BLACK);
+    face.box_line_width = (-4).into();
+    frame.set_draw_context(DisplayWindowId::new(1), GlyphRowRole::Text, None);
+    frame.add_char('p', 20.0, 20.0, 8.0, 18.0, 14.0, false);
+    frame
+}
+
+fn boxed_p_is_visible(buf: &[u8]) -> bool {
+    (20..28).any(|x| {
+        (20..38).any(|y| {
+            let pixel = px(buf, x, y);
+            pixel[0] > 120 && pixel[1] > 120 && pixel[2] > 120
+        })
+    })
+}
+
+#[test]
+fn negative_box_border_does_not_cover_a_one_cell_glyph() {
+    let Some(mut h) = try_harness() else {
+        return;
+    };
+    let frame = boxed_one_cell_frame();
+    h.renderer.render_frame_glyphs(
+        &h.view,
+        &frame,
+        &mut h.atlas,
+        mapping_for(&frame, W, H),
+        false,
+        None,
+        None,
+        None,
+        None,
+        None,
+    );
+    let buf = read_back(&h);
+    assert!(
+        boxed_p_is_visible(&buf),
+        "GNU draws character glyphs over their box; the boxed `p` must remain visible"
+    );
+}
+
+#[test]
+fn child_frame_negative_box_border_does_not_cover_a_one_cell_glyph() {
+    let Some(mut h) = try_harness() else {
+        return;
+    };
+    let frame = boxed_one_cell_frame();
+    h.renderer.render_frame_content(
+        &h.view,
+        &frame,
+        &mut h.atlas,
+        W,
+        H,
+        0.0,
+        0.0,
+        false,
+        None,
+        0.0,
+        None,
+        None,
+        1.0,
+        1.0,
+        [0.0; 2],
+    );
+    let buf = read_back(&h);
+    assert!(
+        boxed_p_is_visible(&buf),
+        "child-frame glyphs must be drawn over their boxes like GNU Emacs"
+    );
+}
+
+fn open_ended_box_frame(corner_radius: i32) -> FrameGlyphBuffer {
+    let mut frame = FrameGlyphBuffer::with_size(W as f32, H as f32);
+    frame.background = Color::BLACK;
+    let face_id = FaceId::new(22);
+    frame.set_face(
+        face_id,
+        Color::WHITE,
+        Some(Color::BLUE),
+        400,
+        false,
+        0,
+        None,
+        0,
+        None,
+        0,
+        None,
+    );
+    let face = frame.faces.get_mut(&face_id).unwrap();
+    face.attributes |= FaceAttributes::BOX;
+    face.box_type = BoxType::Line;
+    face.box_color = Some(Color::RED);
+    face.box_line_width = 2.into();
+    face.box_corner_radius = corner_radius;
+    frame.set_draw_context(DisplayWindowId::new(1), GlyphRowRole::Text, None);
+    frame.add_stretch(20.0, 20.0, 8.0, 20.0, Color::BLUE, face_id, false);
+    frame.add_stretch_with_box_vertical_edges(
+        28.0,
+        20.0,
+        40.0,
+        20.0,
+        Color::BLUE,
+        face_id,
+        BoxVerticalEdges::Neither,
+        false,
+    );
+    frame
+}
+
+fn assert_open_ended_box(buf: &[u8]) {
+    let left = px(buf, 20, 30);
+    let top = px(buf, 60, 20);
+    let right = px(buf, 67, 30);
+    assert!(
+        left[0] > 180 && left[0] > left[2] + 80,
+        "the owned left side must remain red, got {left:?}"
+    );
+    assert!(
+        top[0] > 180 && top[0] > top[2] + 80,
+        "the box's top rail must extend across the filler, got {top:?}"
+    );
+    assert!(
+        right[2] > 180 && right[2] > right[0] + 80,
+        "the non-owning filler end must stay open over its blue fill, got {right:?}"
+    );
+}
+
+#[test]
+fn primary_frame_rounded_extend_box_has_no_terminal_vertical_edge() {
+    let Some(mut h) = try_harness() else {
+        return;
+    };
+    let frame = open_ended_box_frame(6);
+    h.renderer.render_frame_glyphs(
+        &h.view,
+        &frame,
+        &mut h.atlas,
+        mapping_for(&frame, W, H),
+        false,
+        None,
+        None,
+        None,
+        None,
+        None,
+    );
+    assert_open_ended_box(&read_back(&h));
+}
+
+#[test]
+fn child_frame_rounded_extend_box_has_no_terminal_vertical_edge() {
+    let Some(mut h) = try_harness() else {
+        return;
+    };
+    let frame = open_ended_box_frame(6);
+    h.renderer.render_frame_content(
+        &h.view,
+        &frame,
+        &mut h.atlas,
+        W,
+        H,
+        0.0,
+        0.0,
+        false,
+        None,
+        0.0,
+        None,
+        None,
+        1.0,
+        1.0,
+        [0.0; 2],
+    );
+    assert_open_ended_box(&read_back(&h));
+}
+
+#[test]
+fn primary_frame_sharp_extend_box_has_no_terminal_vertical_edge() {
+    let Some(mut h) = try_harness() else {
+        return;
+    };
+    let frame = open_ended_box_frame(0);
+    h.renderer.render_frame_glyphs(
+        &h.view,
+        &frame,
+        &mut h.atlas,
+        mapping_for(&frame, W, H),
+        false,
+        None,
+        None,
+        None,
+        None,
+        None,
+    );
+    assert_open_ended_box(&read_back(&h));
+}
+
+#[test]
+fn child_frame_sharp_extend_box_has_no_terminal_vertical_edge() {
+    let Some(mut h) = try_harness() else {
+        return;
+    };
+    let frame = open_ended_box_frame(0);
+    h.renderer.render_frame_content(
+        &h.view,
+        &frame,
+        &mut h.atlas,
+        W,
+        H,
+        0.0,
+        0.0,
+        false,
+        None,
+        0.0,
+        None,
+        None,
+        1.0,
+        1.0,
+        [0.0; 2],
+    );
+    assert_open_ended_box(&read_back(&h));
+}
+
+#[test]
+fn cursor_visible_false_suppresses_cursor() {
+    let Some(mut h) = try_harness() else {
+        return;
+    };
+    let frame = frame_with_cursor(Color::rgb(1.0, 0.0, 0.0));
+    h.renderer.render_frame_glyphs(
+        &h.view,
+        &frame,
+        &mut h.atlas,
+        mapping_for(&frame, W, H),
+        false,
+        None,
+        None,
+        None,
+        None,
+        None,
+    );
+    let buf = read_back(&h);
+    let mut red = 0;
+    for y in 0..H {
+        for x in 0..W {
+            let p = px(&buf, x, y);
+            if p[0] > 180 && p[0] > p[1] + 60 && p[0] > p[2] + 60 {
+                red += 1;
+            }
+        }
+    }
+    eprintln!("cursor_visible=false red pixels: {}", red);
+    assert_eq!(red, 0, "cursor_visible=false must draw no cursor");
+}
+
+fn presented_pointer_integration_relief(pressed: bool, background: Color) -> PointerImageRelief {
+    let light = Color::rgb(0.95, 0.95, 0.95);
+    let dark = Color::rgb(0.08, 0.08, 0.08);
+    let (top_left, bottom_right) = if pressed {
+        (dark, light)
+    } else {
+        (light, dark)
+    };
+    PointerImageRelief::new(
+        top_left,
+        bottom_right,
+        2.0,
+        PointerReliefMargins::new(0.0, 0.0, 0.0, 0.0),
+        PointerReliefEdges::new(true, true, true, true),
+        PointerReliefCornerErase::new(background, 4.0, 1.0),
+    )
+}
+
+fn presented_pointer_integration_image_frame() -> FrameGlyphBuffer {
+    let background = Color::rgb(0.05, 0.06, 0.07);
+    let mut frame = FrameGlyphBuffer::with_size(W as f32, H as f32);
+    frame.presentation_id = PresentationId::new(502);
+    frame.background = background;
+    frame.add_image(
+        romacs_display_protocol::ImageId::new(77),
+        24.0,
+        20.0,
+        24.0,
+        24.0,
+    );
+    frame
+        .install_presented_pointer(
+            vec![PresentedPointerRegion::new(
+                FrameRect::new(20.0, 16.0, 32.0, 32.0).unwrap(),
+                Some(romacs_display_protocol::InteractionId::new(3)),
+                Some(PointerAppearanceId::try_from(0usize).unwrap()),
+            )],
+            vec![PresentedPointerAppearance::new(
+                vec![PresentedPaintSpan::new(
+                    PresentedPrimitiveKind::Image,
+                    0,
+                    1,
+                    FrameRect::new(24.0, 20.0, 24.0, 24.0).unwrap(),
+                )],
+                PointerDrawMode::ImageRelief(presented_pointer_integration_relief(
+                    false, background,
+                )),
+                PointerDrawMode::ImageRelief(presented_pointer_integration_relief(
+                    true, background,
+                )),
+            )],
+        )
+        .unwrap();
+    frame
+}
+
+fn pixel_luma(pixel: [u8; 4]) -> u16 {
+    u16::from(pixel[0]) + u16::from(pixel[1]) + u16::from(pixel[2])
+}
+
+#[test]
+fn presented_pointer_integration_image_relief_flips_edge_polarity_without_moving_content() {
+    let Some(mut h) = try_harness() else {
+        eprintln!("SKIP: no GPU adapter");
+        return;
+    };
+    let pixels = [255_u8, 40, 180, 80].repeat(16 * 16);
+    let image = ImageId::new(77);
+    h.renderer
+        .load_image_argb32_with_id(test_image_load(77), &pixels, 16, 16, 16 * 4);
+    let decode_deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    while std::time::Instant::now() < decode_deadline {
+        h.renderer.process_pending_images();
+        if h.renderer.is_image_ready(image) {
+            break;
+        }
+        std::thread::yield_now();
+    }
+    assert!(h.renderer.is_image_ready(image), "test image must decode");
+    let frame = presented_pointer_integration_image_frame();
+    let render = |h: &mut Harness, selection| {
+        h.renderer.render_frame_glyphs(
+            &h.view,
+            &frame,
+            &mut h.atlas,
+            mapping_for(&frame, W, H),
+            false,
+            None,
+            None,
+            None,
+            selection,
+            None,
+        );
+        read_back(h)
+    };
+    let selection = |phase| {
+        Some(PointerAppearanceSelection::new(
+            PointerAppearanceId::try_from(0usize).unwrap(),
+            phase,
+        ))
+    };
+
+    let base = render(&mut h, None);
+    let raised = render(&mut h, selection(PointerAppearancePhase::Hover));
+    let sunken = render(&mut h, selection(PointerAppearancePhase::Pressed));
+    let restored = render(&mut h, None);
+
+    // GNU's thick-edge correction paints the outermost top/left pixel with
+    // the opposite shade, so sample the inner pixel of each 2px edge.
+    let raised_top = pixel_luma(px(&raised, 36, 21));
+    let raised_bottom = pixel_luma(px(&raised, 36, 42));
+    let sunken_top = pixel_luma(px(&sunken, 36, 21));
+    let sunken_bottom = pixel_luma(px(&sunken, 36, 42));
+    assert!(
+        raised_top > raised_bottom,
+        "raised top edge must be lighter than bottom: {raised_top} <= {raised_bottom}"
+    );
+    assert!(
+        sunken_top < sunken_bottom,
+        "sunken top edge must be darker than bottom: {sunken_top} >= {sunken_bottom}"
+    );
+    assert_eq!(
+        px(&raised, 36, 32),
+        px(&base, 36, 32),
+        "relief must not move or recolor interior image content"
+    );
+    assert_eq!(px(&sunken, 36, 32), px(&base, 36, 32));
+    assert_eq!(
+        restored, base,
+        "leaving restores byte-identical base pixels"
+    );
+}
+
+// Stage 4 core invariant: compositing (static-scene-without-cursor) + blit +
+// cursor-only produces the same pixels as a single full render. This proves
+// the retained-scene fast path is correct by construction for a clean cursor.
+fn make_tex(r: &WgpuRenderer, label: &str) -> (wgpu::Texture, wgpu::TextureView) {
+    make_tex_sized(r, label, W, H)
+}
+
+fn make_tex_sized(
+    r: &WgpuRenderer,
+    label: &str,
+    width: u32,
+    height: u32,
+) -> (wgpu::Texture, wgpu::TextureView) {
+    let t = r.device().create_texture(&wgpu::TextureDescriptor {
+        label: Some(label),
+        size: wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Bgra8UnormSrgb,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+            | wgpu::TextureUsages::COPY_SRC
+            | wgpu::TextureUsages::TEXTURE_BINDING,
+        view_formats: &[],
+    });
+    let v = t.create_view(&wgpu::TextureViewDescriptor::default());
+    (t, v)
+}
+#[test]
+fn native_tooltip_uses_target_scale_not_editor_scale() {
+    use romacs_display_protocol::tooltip::TooltipRequest;
+    use romacs_renderer_wgpu::TooltipLayout;
+    use romacs_renderer_wgpu::renderer::RenderTarget;
+
+    let mut h = try_harness().expect("native tooltip probe requires a GPU adapter");
+    h.atlas.set_scale_factor(2.0);
+    let request = TooltipRequest {
+        text: "Tip".into(),
+        background: Some(0xffffff),
+        border_width: 0,
+        ..Default::default()
+    };
+    let mut layout = TooltipLayout::measure_with_atlas(
+        &request,
+        8.0,
+        16.0,
+        2.0,
+        &mut h.atlas,
+        h.renderer.device(),
+        h.renderer.queue(),
+    );
+    layout.fit_surface(W as f32 / 2.0, H as f32 / 2.0);
+    let SurfaceState::Drawable(surface) =
+        SurfaceState::from_device_size(W, H, DeviceScale::new(2.0).unwrap()).unwrap()
+    else {
+        unreachable!()
+    };
+    h.renderer.set_scale_factor(1.0);
+    h.renderer
+        .render_native_tooltip(RenderTarget::new(&h.view, surface), &layout, &mut h.atlas);
+    let first = read_tex(&h.renderer, &h.target);
+    assert!(
+        first
+            .chunks_exact(4)
+            .any(|pixel| pixel[0] < 128 && pixel[3] == 255),
+        "tooltip must draw text, not just a background"
+    );
+    h.renderer.set_scale_factor(3.0);
+    h.renderer
+        .render_native_tooltip(RenderTarget::new(&h.view, surface), &layout, &mut h.atlas);
+    assert_eq!(
+        first,
+        read_tex(&h.renderer, &h.target),
+        "editor scale leaked into tooltip painting"
+    );
+}
+
+fn read_tex(r: &WgpuRenderer, t: &wgpu::Texture) -> Vec<u8> {
+    let unpadded = W * 4;
+    let padded =
+        unpadded.div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT) * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+    let buf = r.device().create_buffer(&wgpu::BufferDescriptor {
+        label: None,
+        size: (padded * H) as u64,
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+    let mut enc = r.device().create_command_encoder(&Default::default());
+    enc.copy_texture_to_buffer(
+        wgpu::TexelCopyTextureInfo {
+            texture: t,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        wgpu::TexelCopyBufferInfo {
+            buffer: &buf,
+            layout: wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(padded),
+                rows_per_image: Some(H),
+            },
+        },
+        wgpu::Extent3d {
+            width: W,
+            height: H,
+            depth_or_array_layers: 1,
+        },
+    );
+    r.queue().submit(std::iter::once(enc.finish()));
+    let slice = buf.slice(..);
+    slice.map_async(wgpu::MapMode::Read, |_| {});
+    r.device()
+        .poll(wgpu::PollType::Wait {
+            submission_index: None,
+            timeout: Some(std::time::Duration::from_secs(3)),
+        })
+        .expect("poll");
+    let data = slice
+        .get_mapped_range()
+        .expect("offscreen frame readback buffer should remain mapped");
+    let mut out = vec![0u8; (unpadded * H) as usize];
+    for row in 0..H {
+        let s = (row * padded) as usize;
+        let d = (row * unpadded) as usize;
+        out[d..d + unpadded as usize].copy_from_slice(&data[s..s + unpadded as usize]);
+    }
+    out
+}
+fn pxb(buf: &[u8], x: u32, y: u32) -> [u8; 4] {
+    let i = ((y * W + x) * 4) as usize;
+    [buf[i + 2], buf[i + 1], buf[i], buf[i + 3]]
+}
+
+#[test]
+fn composite_matches_full_render() {
+    let Some(mut h) = try_harness() else {
+        return;
+    };
+    let frame = frame_with_cursor(Color::rgb(1.0, 0.0, 0.0));
+
+    // A: full render (cursor inline).
+    let (ta, va) = make_tex(&h.renderer, "full");
+    h.renderer.render_frame_glyphs(
+        &va,
+        &frame,
+        &mut h.atlas,
+        mapping_for(&frame, W, H),
+        true,
+        None,
+        None,
+        None,
+        None,
+        None,
+    );
+    let full = read_tex(&h.renderer, &ta);
+
+    // B: static (no cursor) -> retained tex; blit -> composite tex; cursor-only.
+    let (_ts, vs) = make_tex(&h.renderer, "static");
+    h.renderer.render_frame_glyphs(
+        &vs,
+        &frame,
+        &mut h.atlas,
+        mapping_for(&frame, W, H),
+        false,
+        None,
+        None,
+        None,
+        None,
+        None,
+    );
+    let (tc, vc) = make_tex(&h.renderer, "composite");
+    let bg = h.renderer.create_texture_bind_group(&vs);
+    h.renderer
+        .begin_draw(romacs_renderer_wgpu::renderer::RenderTarget::new(
+            &vc,
+            mapping_for(&frame, W, H).surface(),
+        ))
+        .blit_retained(&bg);
+    h.renderer
+        .render_cursor_only(&vc, &frame, mapping_for(&frame, W, H), true, None, None);
+    let comp = read_tex(&h.renderer, &tc);
+
+    // Compare: allow tiny per-channel tolerance for the sRGB blit round-trip.
+    let mut max_diff = 0i32;
+    let mut ndiff = 0;
+    for y in 0..H {
+        for x in 0..W {
+            let a = pxb(&full, x, y);
+            let b = pxb(&comp, x, y);
+            for c in 0..4 {
+                let d = (a[c] as i32 - b[c] as i32).abs();
+                if d > max_diff {
+                    max_diff = d;
+                }
+                if d > 2 {
+                    ndiff += 1;
+                }
+            }
+        }
+    }
+    eprintln!(
+        "composite vs full: max_diff={} pixels_over_tol={}",
+        max_diff, ndiff
+    );
+    assert!(
+        max_diff <= 2,
+        "composite must match full render within sRGB round-trip tolerance, max_diff={max_diff}"
+    );
+}
+
+#[test]
+fn popup_redraw_preserves_unchanged_main_frame_pixels() {
+    use romacs_display_protocol::menu::{MenuPanel, MenuPanelPaint, PopupMenuItem};
+    let mut h = try_harness().expect("popup isolation probe requires a GPU adapter");
+    let frame = boxed_one_cell_frame();
+    let (_retained, retained_view) = make_tex(&h.renderer, "main-retained-scene");
+    h.renderer.render_frame_glyphs(
+        &retained_view,
+        &frame,
+        &mut h.atlas,
+        mapping_for(&frame, W, H),
+        false,
+        None,
+        None,
+        None,
+        None,
+        None,
+    );
+    let retained_bind_group = h.renderer.create_texture_bind_group(&retained_view);
+    let draw = |h: &mut Harness| {
+        let target = romacs_renderer_wgpu::renderer::RenderTarget::new(
+            &h.view,
+            mapping_for(&frame, W, H).surface(),
+        );
+        h.renderer
+            .begin_draw(target)
+            .blit_retained(&retained_bind_group);
+        read_tex(&h.renderer, &h.target)
+    };
+    let before = draw(&mut h);
+    assert!(boxed_p_is_visible(&before));
+    let mut popup_atlas = WgpuGlyphAtlas::new_with_scale(h.renderer.device(), 1.0);
+    popup_atlas.set_current_frame_fonts(frame.font_bindings());
+    let (_popup, popup_view) = make_tex_sized(&h.renderer, "popup-isolation", 32, 24);
+    let panel = MenuPanel {
+        x: 0.0,
+        y: 0.0,
+        item_indices: vec![0],
+        hover_index: -1,
+        bounds: (0.0, 0.0, 32.0, 24.0),
+        item_offsets: vec![0.0],
+        item_height: 18.0,
+    };
+    let items = [PopupMenuItem {
+        kind: romacs_display_protocol::menu::MenuItemKind::Command {
+            availability: romacs_display_protocol::menu::MenuAvailability::Enabled,
+            indicator: romacs_display_protocol::menu::MenuIndicator::None,
+        },
+        help: None,
+        label: "H".into(),
+        shortcut: String::new(),
+        depth: 0,
+    }];
+    let text =
+        romacs_display_protocol::menu::MeasuredMenu::measure(items.to_vec(), None, 8.0, |_| 8.0);
+    let paint = MenuPanelPaint {
+        panel: &panel,
+        menu: &text,
+        role: romacs_display_protocol::menu::MenuPanelRole::Root,
+        face_fg: None,
+        face_bg: None,
+        font_face: None,
+    };
+    // Fractional scaling and cache eviction must not affect the destination
+    // of the next main-frame draw. No global resize/restore is performed.
+    for index in 0..80 {
+        let scale = 1.0 + index as f32 / 40.0;
+        popup_atlas.set_scale_factor(scale);
+        let SurfaceState::Drawable(surface) =
+            SurfaceState::from_device_size(32, 24, DeviceScale::new(scale).unwrap()).unwrap()
+        else {
+            unreachable!()
+        };
+        h.renderer
+            .begin_draw(romacs_renderer_wgpu::renderer::RenderTarget::new(
+                &popup_view,
+                surface,
+            ))
+            .paint_menu(&paint, &mut popup_atlas);
+    }
+    let after = draw(&mut h);
+    let changed = before
+        .chunks_exact(4)
+        .zip(after.chunks_exact(4))
+        .filter(|(a, b)| a != b)
+        .count();
+    assert_eq!(
+        changed, 0,
+        "popup redraw changed pixels in the unchanged main frame"
+    );
+    h.renderer.render_frame_glyphs(
+        &h.view,
+        &frame,
+        &mut h.atlas,
+        mapping_for(&frame, W, H),
+        false,
+        None,
+        None,
+        None,
+        None,
+        None,
+    );
+    assert_eq!(
+        before,
+        read_tex(&h.renderer, &h.target),
+        "popup text changed a subsequent editor glyph redraw"
+    );
+}
+
+// Stage 4 reuse invariant: a retained static scene built once is reused
+// across cursor color changes. The static region stays bit-identical while
+// only the cursor color updates — the actual cursor-cycling win.
+#[test]
+fn retained_static_reused_across_cursor_colors() {
+    let Some(mut h) = try_harness() else {
+        return;
+    };
+    // The default config cycles cursor color from time; disable it so the
+    // frame's explicit cursor colors drive the pixels for this test.
+    h.renderer.effects.cursor_color_cycle.enabled = false;
+    let frame_a = frame_with_cursor(Color::rgb(1.0, 0.0, 0.0)); // red cursor
+    let frame_b = frame_with_cursor(Color::rgb(0.0, 0.4, 1.0)); // blue cursor
+
+    // Build the retained (cursorless) static scene ONCE.
+    let (_ts, vs) = make_tex(&h.renderer, "static");
+    h.renderer.render_frame_glyphs(
+        &vs,
+        &frame_a,
+        &mut h.atlas,
+        mapping_for(&frame_a, W, H),
+        false,
+        None,
+        None,
+        None,
+        None,
+        None,
+    );
+    let bg = h.renderer.create_texture_bind_group(&vs);
+
+    // Composite the SAME retained scene with the red then blue cursor.
+    let (tr, vr) = make_tex(&h.renderer, "comp-red");
+    h.renderer
+        .begin_draw(romacs_renderer_wgpu::renderer::RenderTarget::new(
+            &vr,
+            mapping_for(&frame_a, W, H).surface(),
+        ))
+        .blit_retained(&bg);
+    h.renderer
+        .render_cursor_only(&vr, &frame_a, mapping_for(&frame_a, W, H), true, None, None);
+    let red = read_tex(&h.renderer, &tr);
+
+    let (tb, vb) = make_tex(&h.renderer, "comp-blue");
+    h.renderer
+        .begin_draw(romacs_renderer_wgpu::renderer::RenderTarget::new(
+            &vb,
+            mapping_for(&frame_b, W, H).surface(),
+        ))
+        .blit_retained(&bg);
+    h.renderer
+        .render_cursor_only(&vb, &frame_b, mapping_for(&frame_b, W, H), true, None, None);
+    let blue = read_tex(&h.renderer, &tb);
+
+    // Outside the cursor slot (x>=16), the two composites are bit-identical.
+    let mut static_diffs = 0;
+    for y in 0..H {
+        for x in 16..W {
+            if pxb(&red, x, y) != pxb(&blue, x, y) {
+                static_diffs += 1;
+            }
+        }
+    }
+    assert_eq!(
+        static_diffs, 0,
+        "static scene must be identical across cursor colors"
+    );
+
+    // The cursor slot itself differs (red vs blue).
+    let mut cursor_changed = false;
+    for y in 8..31 {
+        for x in 8..12 {
+            let r = pxb(&red, x, y);
+            let b = pxb(&blue, x, y);
+            if r[0] > b[0] + 40 && b[2] > r[2] + 40 {
+                cursor_changed = true;
+            }
+        }
+    }
+    assert!(
+        cursor_changed,
+        "cursor color must change between composites"
+    );
+}
+
+// Filled-box cursor over a glyph: the composite (static cursorless scene +
+// blit + scissored cell redraw with box + char in cursor_fg) must equal the
+// full render. The glyph renders as an emergency fallback here, but both
+// paths use it identically, so pixel-equality proves the composite logic.
+fn filled_box_frame() -> FrameGlyphBuffer {
+    use romacs_display_protocol::types::FaceId;
+    let mut frame = FrameGlyphBuffer::with_size(W as f32, H as f32);
+    frame.background = Color::rgb(0.10, 0.12, 0.16);
+    frame.set_face(
+        FaceId::default(),
+        Color::rgb(0.9, 0.9, 0.9),
+        None,
+        400,
+        false,
+        0,
+        None,
+        0,
+        None,
+        0,
+        None,
+    );
+    frame.add_char('A', 20.0, 16.0, 10.0, 18.0, 14.0, false);
+    frame.set_phys_cursor(PhysCursor {
+        window_id: DisplayWindowId::new(1),
+        charpos: 0,
+        row: 0,
+        col: 0,
+        slot_id: DisplaySlotId {
+            window_id: DisplayWindowId::new(1),
+            row: 0,
+            col: 0,
+        },
+        x: 20.0,
+        y: 16.0,
+        width: 10.0,
+        height: 18.0,
+        ascent: 14.0,
+        style: CursorStyle::FilledBox,
+        color: Color::rgb(1.0, 0.5, 0.0),
+        cursor_fg: Color::rgb(0.05, 0.05, 0.05),
+    });
+    frame
+}
+
+#[test]
+fn filled_box_composite_matches_full_render() {
+    let Some(mut h) = try_harness() else {
+        return;
+    };
+    h.renderer.effects.cursor_color_cycle.enabled = false;
+    let frame = filled_box_frame();
+    h.atlas.set_current_frame_fonts(frame.font_bindings());
+
+    // A: full render with the filled-box cursor inline.
+    let (ta, va) = make_tex(&h.renderer, "fb-full");
+    h.renderer.render_frame_glyphs(
+        &va,
+        &frame,
+        &mut h.atlas,
+        mapping_for(&frame, W, H),
+        true,
+        None,
+        None,
+        None,
+        None,
+        None,
+    );
+    let full = read_tex(&h.renderer, &ta);
+
+    // B: cursorless static -> blit -> scissored cell redraw (box + char).
+    let (_ts, vs) = make_tex(&h.renderer, "fb-static");
+    h.renderer.render_frame_glyphs(
+        &vs,
+        &frame,
+        &mut h.atlas,
+        mapping_for(&frame, W, H),
+        false,
+        None,
+        None,
+        None,
+        None,
+        None,
+    );
+    let (tc, vc) = make_tex(&h.renderer, "fb-composite");
+    let bg = h.renderer.create_texture_bind_group(&vs);
+    h.renderer
+        .begin_draw(romacs_renderer_wgpu::renderer::RenderTarget::new(
+            &vc,
+            mapping_for(&frame, W, H).surface(),
+        ))
+        .blit_retained(&bg);
+    // Match the runtime sequence exactly: render_cursor_only draws the box
+    // (cursor_bg) unscissored, then the scissored cell redraw adds box + char.
+    h.renderer
+        .render_cursor_only(&vc, &frame, mapping_for(&frame, W, H), true, None, None);
+    // cursor cell = the glyph cell (20,16,10,18)
+    h.renderer.render_frame_cell_loaded(
+        &vc,
+        &frame,
+        &mut h.atlas,
+        mapping_for(&frame, W, H),
+        true,
+        None,
+        (20, 16, 10, 18),
+    );
+    let comp = read_tex(&h.renderer, &tc);
+
+    let mut max_diff = 0i32;
+    for y in 0..H {
+        for x in 0..W {
+            let a = pxb(&full, x, y);
+            let b = pxb(&comp, x, y);
+            for c in 0..4 {
+                let d = (a[c] as i32 - b[c] as i32).abs();
+                if d > max_diff {
+                    max_diff = d;
+                }
+            }
+        }
+    }
+    eprintln!("filled-box composite vs full: max_diff={}", max_diff);
+    assert!(
+        max_diff <= 2,
+        "filled-box composite must match full render, max_diff={max_diff}"
+    );
+}
+
+#[test]
+fn filled_box_vertical_motion_keeps_destination_text_normal_until_arrival() {
+    let Some(mut h) = try_harness() else {
+        return;
+    };
+    h.renderer.effects.cursor_color_cycle.enabled = false;
+    let frame = filled_box_frame();
+    h.atlas.set_current_frame_fonts(frame.font_bindings());
+
+    let render = |h: &mut Harness, label, visible, animated_cursor| {
+        let (texture, view) = make_tex(&h.renderer, label);
+        h.renderer.render_frame_glyphs(
+            &view,
+            &frame,
+            &mut h.atlas,
+            mapping_for(&frame, W, H),
+            visible,
+            animated_cursor,
+            None,
+            None,
+            None,
+            None,
+        );
+        read_tex(&h.renderer, &texture)
+    };
+
+    let cursorless = render(&mut h, "fb-motion-cursorless", false, None);
+    let in_flight = render(
+        &mut h,
+        "fb-motion-in-flight",
+        true,
+        Some(AnimatedCursor {
+            window_id: DisplayWindowId::new(1),
+            x: 20.0,
+            y: 38.0,
+            width: 10.0,
+            height: 18.0,
+            corners: None,
+            frame_id: DisplayFrameId::new(0),
+        }),
+    );
+    let settled = render(&mut h, "fb-motion-settled", true, None);
+
+    for y in 16..34 {
+        for x in 20..30 {
+            assert_eq!(
+                pxb(&in_flight, x, y),
+                pxb(&cursorless, x, y),
+                "destination cell must retain ordinary text until the visual box arrives"
+            );
+        }
+    }
+    assert!(
+        (16..34).any(|y| (20..30).any(|x| pxb(&settled, x, y) != pxb(&cursorless, x, y))),
+        "settled box must apply GNU inverse video at the destination"
+    );
+    assert!(
+        (38..56).any(|y| (20..30).any(|x| pxb(&in_flight, x, y) != pxb(&cursorless, x, y))),
+        "the in-flight box must still be drawn at its animated geometry"
+    );
+}
+
+#[test]
+fn child_filled_box_motion_uses_the_same_inverse_video_contract() {
+    let Some(mut h) = try_harness() else {
+        return;
+    };
+    h.renderer.effects.cursor_color_cycle.enabled = false;
+    let frame = filled_box_frame();
+    h.atlas.set_current_frame_fonts(frame.font_bindings());
+    let offset_x = 4.0;
+    let offset_y = 2.0;
+
+    let render = |h: &mut Harness, label, visible, animated_cursor| {
+        let (texture, view) = make_tex(&h.renderer, label);
+        // Establish a deterministic root surface because child content uses
+        // LoadOp::Load, then composite the child through its dedicated path.
+        h.renderer.render_frame_glyphs(
+            &view,
+            &frame,
+            &mut h.atlas,
+            mapping_for(&frame, W, H),
+            false,
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+        h.renderer.render_frame_content(
+            &view,
+            &frame,
+            &mut h.atlas,
+            W,
+            H,
+            offset_x,
+            offset_y,
+            visible,
+            animated_cursor,
+            0.0,
+            None,
+            None,
+            1.0,
+            1.0,
+            [0.0; 2],
+        );
+        read_tex(&h.renderer, &texture)
+    };
+
+    let cursorless = render(&mut h, "child-fb-motion-cursorless", false, None);
+    let in_flight = render(
+        &mut h,
+        "child-fb-motion-in-flight",
+        true,
+        Some(AnimatedCursor {
+            window_id: DisplayWindowId::new(1),
+            x: 20.0,
+            y: 38.0,
+            width: 10.0,
+            height: 18.0,
+            corners: None,
+            frame_id: DisplayFrameId::new(0),
+        }),
+    );
+    let settled = render(&mut h, "child-fb-motion-settled", true, None);
+
+    for y in 18..36 {
+        for x in 24..34 {
+            assert_eq!(
+                pxb(&in_flight, x, y),
+                pxb(&cursorless, x, y),
+                "child destination must retain ordinary text until its cursor arrives"
+            );
+        }
+    }
+    assert!(
+        (18..36).any(|y| (24..34).any(|x| pxb(&settled, x, y) != pxb(&cursorless, x, y))),
+        "settled child cursor must apply inverse video at its offset destination"
+    );
+    assert!(
+        (40..58).any(|y| (24..34).any(|x| pxb(&in_flight, x, y) != pxb(&cursorless, x, y))),
+        "child in-flight body must include the child-frame offset exactly once"
+    );
+}
+
+#[test]
+fn filled_box_cell_redraw_ignores_stale_cell_below_resized_surface() {
+    let Some(mut h) = try_harness() else {
+        return;
+    };
+    let frame = filled_box_frame();
+    h.atlas.set_current_frame_fonts(frame.font_bindings());
+
+    // Model a rapid shrink: the committed frame still places the cursor cell
+    // at y=16..34, while the newly acquired surface is only eight pixels tall.
+    // The stale cell has no intersection with the render target and must be
+    // skipped rather than encoded as an out-of-bounds zero-height scissor.
+    let (_target, view) = make_tex_sized(&h.renderer, "resized-below-cursor", W, 8);
+    h.renderer.render_frame_cell_loaded(
+        &view,
+        &frame,
+        &mut h.atlas,
+        mapping_for(&frame, W, 8),
+        true,
+        None,
+        (20, 16, 10, 18),
+    );
+}
+
+/// A PNG wide and tall enough to band — over `BANDING_MIN_PIXELS` — whose every
+/// pixel is bright and distinct, so a row drawn from the wrong place (or not
+/// drawn at all) is visible against the black background these tests paint.
+fn banding_png(width: u32, height: u32) -> Vec<u8> {
+    let pixels: Vec<u8> = (0..height)
+        .flat_map(|y| {
+            (0..width).flat_map(move |x| {
+                [
+                    64 + (x % 180) as u8,
+                    64 + (y % 160) as u8,
+                    64 + ((x + y) % 180) as u8,
+                    0xff,
+                ]
+            })
+        })
+        .collect();
+    let image = image::RgbaImage::from_raw(width, height, pixels).expect("pixel buffer");
+    let mut bytes = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::ImageRgba8(image)
+        .write_to(&mut bytes, image::ImageFormat::Png)
+        .expect("PNG is encodable");
+    bytes.into_inner()
+}
+
+/// Every pixel of `texture`, un-padded, as RGBA.
+fn read_image_texture(
+    renderer: &WgpuRenderer,
+    texture: &wgpu::Texture,
+    width: u32,
+    height: u32,
+) -> Vec<u8> {
+    let unpadded = width * 4;
+    let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+    let padded = unpadded.div_ceil(align) * align;
+    let buf = renderer.device().create_buffer(&wgpu::BufferDescriptor {
+        label: Some("image readback"),
+        size: u64::from(padded) * u64::from(height),
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+    let mut enc = renderer
+        .device()
+        .create_command_encoder(&Default::default());
+    enc.copy_texture_to_buffer(
+        wgpu::TexelCopyTextureInfo {
+            texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        wgpu::TexelCopyBufferInfo {
+            buffer: &buf,
+            layout: wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(padded),
+                rows_per_image: Some(height),
+            },
+        },
+        wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+    );
+    renderer.queue().submit(std::iter::once(enc.finish()));
+    let slice = buf.slice(..);
+    slice.map_async(wgpu::MapMode::Read, |_| {});
+    renderer
+        .device()
+        .poll(wgpu::PollType::Wait {
+            submission_index: None,
+            timeout: Some(std::time::Duration::from_secs(10)),
+        })
+        .expect("poll");
+    let data = slice.get_mapped_range().expect("readback is mapped");
+    let mut out = vec![0u8; (unpadded * height) as usize];
+    for row in 0..height {
+        let src = (row * padded) as usize;
+        let dst = (row * unpadded) as usize;
+        out[dst..dst + unpadded as usize].copy_from_slice(&data[src..src + unpadded as usize]);
+    }
+    out
+}
+
+/// Load `data` through the renderer and drain image events the way the frame
+/// loop does. Stops, leaving the decode running, the first time `watch` is
+/// satisfied — which is how a test asks for a frame drawn at one particular
+/// point of the fill rather than after it — and otherwise runs to the end.
+///
+/// Returns every fill observed while rows were still arriving, in order; an
+/// empty list says the decode was never caught mid-flight.
+fn drive_banded_load(
+    h: &mut Harness,
+    image: u32,
+    data: &[u8],
+    realization: ImageRealization,
+    watch: impl Fn(FilledRows) -> bool,
+) -> Vec<FilledRows> {
+    h.renderer.load_image_data_with_id(
+        test_image_load(image),
+        EncodedBytes::copy_of(data),
+        ImageSizeSpec::default(),
+        ImageRotation::None,
+        realization,
+        ImageColorContext::default(),
+        ImageMaskPolicy::Preserve,
+        romacs_display_protocol::ImageAnimationPolicy::disabled(),
+        ImageFrameIndex::default(),
+        ImageSequenceId::new(u64::from(image)).expect("non-zero test sequence"),
+        romacs_renderer_wgpu::SvgResourceContext::Isolated,
+        romacs_display_protocol::image_diagnostic::ImageLoadIdentity::unspecified(),
+    );
+    let image_id = ImageId::new(image);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+    let mut partial = Vec::new();
+    while std::time::Instant::now() < deadline {
+        h.renderer.process_pending_images();
+        if let Some(cached) = h.renderer.image_cache().get(image_id)
+            && !cached.filled.is_complete()
+            && partial.last() != Some(&cached.filled)
+        {
+            partial.push(cached.filled);
+            if watch(cached.filled) {
+                return partial;
+            }
+        }
+        if h.renderer.is_image_ready(image_id) {
+            break;
+        }
+        std::thread::yield_now();
+    }
+    assert!(h.renderer.is_image_ready(image_id), "the image must decode");
+    partial
+}
+
+/// `sin(pi * t) / (pi * t)`, with the removable singularity at zero taken.
+fn sinc(t: f64) -> f64 {
+    if t == 0.0 {
+        1.0
+    } else {
+        let a = t * std::f64::consts::PI;
+        a.sin() / a
+    }
+}
+
+/// Lanczos's windowed sinc with a window of three, from the definition.
+///
+/// The kernel the banded path filters with, stated here rather than reached
+/// into the crate for, so the acceptance test's expectation does not depend on
+/// the implementation it checks.
+fn lanczos3(distance: f64) -> f64 {
+    let x = distance.abs();
+    if x < 3.0 {
+        sinc(x) * sinc(x / 3.0)
+    } else {
+        0.0
+    }
+}
+
+/// One unit of weight, the divisor a weight is stored in.
+const WEIGHT_ONE: f64 = 65536.0;
+
+/// The resample of `rgba` into `raster`, one axis at a time, written out the
+/// obvious way: every output sample walks the inputs its support covers and
+/// weights each by the kernel.
+///
+/// This is the definition the banded path implements with a streaming target,
+/// stated here so the acceptance test's expectation is independent of that
+/// implementation. Output `o` is centred at `(o + 0.5) * n / m` in input
+/// coordinates, where input texel `i` spans `[i, i + 1)`; the kernel's support
+/// is three output texels — widened by the reduction, so it is `3n/m` input
+/// texels either side — and a tap is any texel whose centre lies inside that.
+/// Weights are the kernel's value at each tap, scaled by [`WEIGHT_ONE`] and
+/// normalized by the sum of the taps that fell inside the source, and the
+/// sample is that weighted sum divided by the sum of the *quantized* weights
+/// and rounded.
+///
+/// Two rules belong to the path rather than to the kernel. The first axis hands
+/// the second a *mean* rather than an 8-bit level: the clamp that turns a mean
+/// into a sample happens once, at the end, because clamping per axis discards
+/// an excursion the second axis was going to cancel. And an axis with as many
+/// outputs as inputs is **copied**: Lanczos3's taps at scale one land on
+/// whole-texel offsets where two of its three sinc factors are zero, so
+/// filtering would come out the same today, but only while the zeros survive
+/// quantization — and an image shown at its own size is the case this path has
+/// to keep exact by construction.
+fn lanczos_resample(
+    rgba: &[u8],
+    (width, height): (u32, u32),
+    (out_width, out_height): (u32, u32),
+) -> Vec<u8> {
+    /// The taps of one output, as `(input index, weight)`.
+    fn taps(centre: f64, scale: f64, input: u32) -> (Vec<(usize, f64)>, f64) {
+        let half = 3.0 * scale;
+        let first = ((centre - half - 0.5).floor().max(0.0)) as u32;
+        let last = ((centre + half - 0.5).ceil().min(f64::from(input - 1))) as u32;
+        let weighted: Vec<(usize, f64)> = (first..=last)
+            .map(|i| (i as usize, ((f64::from(i) + 0.5) - centre).abs() / scale))
+            .map(|(i, distance)| (i, lanczos3(distance)))
+            .collect();
+        let sum = weighted.iter().map(|(_, weight)| *weight).sum();
+        (weighted, sum)
+    }
+    let mean = |sum: i64, total: i64| (sum + total / 2).div_euclid(total) as i32;
+    let level = |mean: i32| u8::try_from(mean.clamp(0, 255)).expect("a clamped level is a level");
+
+    let mut lines: Vec<i32> = Vec::with_capacity(height as usize * out_width as usize * 4);
+    let x_scale = f64::from(width) / f64::from(out_width);
+    for row in rgba.chunks_exact(width as usize * 4) {
+        if width == out_width {
+            lines.extend(row.iter().map(|sample| i32::from(*sample)));
+            continue;
+        }
+        for o in 0..out_width {
+            let (taps, sum) = taps((f64::from(o) + 0.5) * x_scale, x_scale, width);
+            let mut sums = [0_i64; 4];
+            let mut total = 0_i64;
+            for (i, weight) in taps {
+                let weight = (weight * WEIGHT_ONE / sum).round() as i64;
+                total += weight;
+                for (c, sum) in sums.iter_mut().enumerate() {
+                    *sum += weight * i64::from(row[i * 4 + c]);
+                }
+            }
+            for sum in sums {
+                lines.push(mean(sum, total));
+            }
+        }
+    }
+
+    let mut out = vec![0_u8; out_width as usize * out_height as usize * 4];
+    let y_scale = f64::from(height) / f64::from(out_height);
+    for column in 0..out_width as usize {
+        for o in 0..out_height {
+            let at = (o as usize * out_width as usize + column) * 4;
+            if height == out_height {
+                for c in 0..4 {
+                    out[at + c] = level(lines[at + c]);
+                }
+                continue;
+            }
+            let (taps, sum) = taps((f64::from(o) + 0.5) * y_scale, y_scale, height);
+            let mut sums = [0_i64; 4];
+            let mut total = 0_i64;
+            for (i, weight) in taps {
+                let weight = (weight * WEIGHT_ONE / sum).round() as i64;
+                total += weight;
+                for (c, sum) in sums.iter_mut().enumerate() {
+                    *sum += weight * i64::from(lines[(i * out_width as usize + column) * 4 + c]);
+                }
+            }
+            for (channel, sum) in out[at..at + 4].iter_mut().zip(sums) {
+                *channel = level(mean(sum, total));
+            }
+        }
+    }
+    out
+}
+
+/// The area average of `rgba` into `raster`, one axis at a time — the filter
+/// the banded path resampled with between step 4 and step 6, and the control
+/// the acceptance test below holds the new one against.
+fn area_average(
+    rgba: &[u8],
+    (width, height): (u32, u32),
+    (out_width, out_height): (u32, u32),
+) -> Vec<u8> {
+    fn weights(lo: u64, hi: u64, step: u64) -> impl Iterator<Item = (usize, u64)> {
+        (lo / step..hi.div_ceil(step)).filter_map(move |i| {
+            let overlap = hi.min((i + 1) * step) - lo.max(i * step);
+            (overlap > 0).then_some((i as usize, overlap))
+        })
+    }
+    let round = |sum: u64, total: u64| ((sum + total / 2) / total) as u8;
+
+    let mut lines = Vec::with_capacity(height as usize * out_width as usize * 4);
+    for row in rgba.chunks_exact(width as usize * 4) {
+        let mut line = vec![0_u8; out_width as usize * 4];
+        for (o, texel) in line.chunks_exact_mut(4).enumerate() {
+            let (lo, hi) = (
+                o as u64 * u64::from(width),
+                (o as u64 + 1) * u64::from(width),
+            );
+            let mut sums = [0_u64; 4];
+            for (i, weight) in weights(lo, hi, u64::from(out_width)) {
+                for (c, sum) in sums.iter_mut().enumerate() {
+                    *sum += weight * u64::from(row[i * 4 + c]);
+                }
+            }
+            for (channel, sum) in texel.iter_mut().zip(sums) {
+                *channel = round(sum, u64::from(width));
+            }
+        }
+        lines.extend_from_slice(&line);
+    }
+
+    let mut out = vec![0_u8; out_width as usize * out_height as usize * 4];
+    for column in 0..out_width as usize {
+        for o in 0..out_height {
+            let (lo, hi) = (
+                u64::from(o) * u64::from(height),
+                (u64::from(o) + 1) * u64::from(height),
+            );
+            let mut sums = [0_u64; 4];
+            for (i, weight) in weights(lo, hi, u64::from(out_height)) {
+                for (c, sum) in sums.iter_mut().enumerate() {
+                    *sum += weight * u64::from(lines[i * out_width as usize * 4 + column * 4 + c]);
+                }
+            }
+            let at = (o as usize * out_width as usize + column) * 4;
+            for (channel, sum) in out[at..at + 4].iter_mut().zip(sums) {
+                *channel = round(sum, u64::from(height));
+            }
+        }
+    }
+    out
+}
+
+/// The acceptance criterion, on the real GPU path: an image decoded in bands
+/// ends in exactly the texture the same decode realized through the same filter
+/// would have produced — the same bytes, not merely the same picture.
+///
+/// The expected bytes are stated here without reference to the cache: `image`'s
+/// own decode of the fixture, reduced to the raster the texture limit clamps it
+/// to by the Lanczos3 resample above.
+///
+/// This was an equality against `image::imageops::resize(…, Lanczos3)` until
+/// the banded path stopped resampling with Lanczos3. It resamples with it
+/// again, but the equality is not restored, and deliberately: that contract
+/// said a banded decode ends as the *whole-image path's* bytes, which cannot be
+/// true of a path that has no whole-image buffer to agree with. The contract
+/// that survives — and that this test is — is that the finished texture is the
+/// bytes the decode's own filter defines, and that the bands along the way fill
+/// it from row zero.
+///
+/// Two controls keep that from being a statement about any resample at all. The
+/// crate's own Lanczos3 is a *different implementation* of the same filter —
+/// weight quantization and accumulation order are not the same — so it is held
+/// to within a couple of levels of the texture rather than to equality, which
+/// is a bound the area average does not come close to. And the area average,
+/// the filter this replaced, is measured to be a different picture by a margin
+/// the same bound would call a failure.
+#[test]
+fn a_banded_image_ends_in_the_texture_its_own_filter_defines() {
+    let Some(mut h) = try_harness() else {
+        eprintln!("SKIP: no GPU adapter");
+        return;
+    };
+
+    // Five source pixels per raster pixel across: the raster is the clamped
+    // 4096x819, so a band is mapped through a real scaling rather than one to
+    // one, and the clamping is part of what this pins.
+    let (width, height) = (5000u32, 1000u32);
+    let data = banding_png(width, height);
+    let fills = drive_banded_load(
+        &mut h,
+        907,
+        &data,
+        ImageRealization::with_device_scale(1.0, 1.0),
+        |_| false,
+    );
+    assert!(
+        !fills.is_empty(),
+        "a five-megapixel PNG is still arriving when the first frame is drained"
+    );
+
+    let cached = h
+        .renderer
+        .image_cache()
+        .get(ImageId::new(907))
+        .expect("a decoded image has a texture");
+    assert_eq!(
+        (cached.raster.width(), cached.raster.height()),
+        (4096, 819),
+        "the texture limit clamps the raster"
+    );
+    assert!(cached.filled.is_complete());
+    let read_back = read_image_texture(
+        &h.renderer,
+        &cached.texture,
+        cached.raster.width(),
+        cached.raster.height(),
+    );
+
+    let whole = image::load_from_memory(&data)
+        .expect("the fixture decodes")
+        .to_rgba8();
+    let expected = lanczos_resample(whole.as_raw(), (width, height), (4096, 819));
+    assert_eq!(
+        read_back, expected,
+        "the finished texture must be the Lanczos3 resample of the source"
+    );
+
+    // The independent control, and the one that says the equality above is a
+    // statement about *which* filter rather than about this implementation of
+    // it: `image`'s own Lanczos3, resampled whole, is the same picture to
+    // within the level a quantized weight table and two accumulation orders
+    // are worth. Nothing about the banded path is an input to it.
+    let crate_lanczos =
+        image::imageops::resize(&whole, 4096, 819, image::imageops::FilterType::Lanczos3)
+            .into_raw();
+    let worst = read_back
+        .iter()
+        .zip(&crate_lanczos)
+        .map(|(got, want)| got.abs_diff(*want))
+        .max()
+        .expect("a raster has pixels");
+    assert!(
+        worst <= 2,
+        "the banded path must be the same filter the whole-image path resamples \
+         with, to within a level or two: worst texel differs by {worst}"
+    );
+
+    // And the filter this replaced: the area average of the same source is a
+    // different picture by a wide margin, so the equality above cannot be
+    // passing for want of a filter in it.
+    let averaged = area_average(whole.as_raw(), (width, height), (4096, 819));
+    assert_ne!(
+        read_back, averaged,
+        "the banded path does not resample with the area average any more"
+    );
+    assert!(
+        read_back
+            .iter()
+            .zip(&averaged)
+            .map(|(got, want)| got.abs_diff(*want))
+            .max()
+            .expect("a raster has pixels")
+            > 8,
+        "the two filters are not near neighbours; a bound this loose would be a \
+         bound about nothing"
+    );
+}
+
+/// A band's rows are drawn as soon as they are uploaded, and nothing below them
+/// is: the frame that catches a decode mid-flight shows the image down to where
+/// its pixels have arrived and the background underneath.
+#[test]
+fn a_frame_drawn_mid_decode_shows_only_the_rows_that_have_arrived() {
+    let Some(mut h) = try_harness() else {
+        eprintln!("SKIP: no GPU adapter");
+        return;
+    };
+
+    let (width, height) = (5000u32, 1000u32);
+    let data = banding_png(width, height);
+    // Stopped somewhere in the middle of the decode, so the boundary between
+    // drawn and undrawn rows lands inside the target: one row of it drawn, or
+    // all but one, would not exercise the boundary at all.
+    let fills = drive_banded_load(
+        &mut h,
+        908,
+        &data,
+        ImageRealization::with_device_scale(1.0, 1.0),
+        |filled| (0.2..0.8).contains(&filled.filled_fraction()),
+    );
+    let filled = *fills
+        .last()
+        .expect("the decode must be caught part-way through");
+    let image_id = ImageId::new(908);
+
+    let mut frame = FrameGlyphBuffer::with_size(W as f32, H as f32);
+    frame.background = Color::BLACK;
+    let image_face_id = FaceId::new(42);
+    let mut image_face = Face::new(image_face_id);
+    image_face.background = Color::BLACK;
+    frame.faces.insert(image_face_id, image_face);
+    frame.glyphs.push(FrameGlyph::Image {
+        window_id: DisplayWindowId::new(1),
+        row_role: GlyphRowRole::Text,
+        clip_rect: None,
+        slot_id: None,
+        image_id,
+        source_rect: ImageSourceRect::new(0.0, 0.0, 1.0, 1.0).expect("the whole image"),
+        slot_rect: romacs_display_protocol::Rect::new(0.0, 0.0, W as f32, H as f32),
+        box_rect: romacs_display_protocol::Rect::new(0.0, 0.0, W as f32, H as f32),
+        x: 0.0,
+        y: 0.0,
+        width: W as f32,
+        height: H as f32,
+        face_id: image_face_id,
+        box_vertical_edges: BoxVerticalEdges::Unboxed,
+    });
+
+    h.renderer.render_frame_glyphs(
+        &h.view,
+        &frame,
+        &mut h.atlas,
+        mapping_for(&frame, W, H),
+        false,
+        None,
+        None,
+        None,
+        None,
+        None,
+    );
+    let rendered = read_back(&h);
+
+    // Where the boundary between drawn and undrawn rows falls on screen: the
+    // glyph is the whole target, so its texture rows are the target's rows.
+    let boundary =
+        (f64::from(filled.filled()) / f64::from(filled.total().get()) * f64::from(H)) as u32;
+    assert!(
+        (2..H - 2).contains(&boundary),
+        "the boundary must be inside the frame, got {boundary}"
+    );
+    let above = px(&rendered, W / 2, boundary - 2);
+    let below = px(&rendered, W / 2, boundary + 2);
+    assert!(
+        above[0] > 40 && above[1] > 40,
+        "rows that arrived must be drawn, got {above:?} at row {}",
+        boundary - 2
+    );
+    assert_eq!(
+        below,
+        [0, 0, 0, 255],
+        "rows that have not arrived must not be drawn, got {below:?} at row {}",
+        boundary + 2
+    );
+}
+
+/// A decode that fails after bands have been written leaves nothing behind: the
+/// rows it filled are rows of an image that will never arrive, and a texture
+/// holding them would draw part of a picture forever.
+///
+/// The fixture is a real PNG cut short — header and some rows — so the decode
+/// genuinely produces bands and then genuinely fails, which is the case a
+/// truncated download is.
+#[test]
+fn a_failed_banded_decode_leaves_no_partial_texture() {
+    let Some(mut h) = try_harness() else {
+        eprintln!("SKIP: no GPU adapter");
+        return;
+    };
+
+    let (width, height) = (5000u32, 1000u32);
+    let full = banding_png(width, height);
+    let data = &full[..full.len() * 2 / 5];
+    h.renderer.load_image_data_with_id(
+        test_image_load(909),
+        EncodedBytes::copy_of(data),
+        ImageSizeSpec::default(),
+        ImageRotation::None,
+        ImageRealization::with_device_scale(1.0, 1.0),
+        ImageColorContext::default(),
+        ImageMaskPolicy::Preserve,
+        romacs_display_protocol::ImageAnimationPolicy::disabled(),
+        ImageFrameIndex::default(),
+        ImageSequenceId::new(909).expect("non-zero test sequence"),
+        romacs_renderer_wgpu::SvgResourceContext::Isolated,
+        romacs_display_protocol::image_diagnostic::ImageLoadIdentity::unspecified(),
+    );
+    let image_id = ImageId::new(909);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+    let mut saw_band = false;
+    while std::time::Instant::now() < deadline {
+        h.renderer.process_pending_images();
+        saw_band |= h
+            .renderer
+            .image_cache()
+            .get(image_id)
+            .is_some_and(|cached| !cached.filled.is_complete());
+        if matches!(
+            h.renderer.image_cache().get_state(image_id),
+            Some(romacs_renderer_wgpu::ImageState::Failed(_))
+        ) {
+            break;
+        }
+        std::thread::yield_now();
+    }
+
+    assert!(
+        saw_band,
+        "the truncated source bands before it fails, which is what makes the cleanup a case"
+    );
+    assert!(
+        matches!(
+            h.renderer.image_cache().get_state(image_id),
+            Some(romacs_renderer_wgpu::ImageState::Failed(_))
+        ),
+        "a source that cannot be decoded fails"
+    );
+    assert!(
+        h.renderer.image_cache().get(image_id).is_none(),
+        "a failed decode keeps no texture, partial or otherwise"
+    );
+}

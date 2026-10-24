@@ -1,0 +1,1509 @@
+;;; gnosis-test-anki.el --- Anki import tests  -*- lexical-binding: t; -*-
+
+;; Copyright (C) 2026  Free Software Foundation, Inc.
+
+;; Author: Thanos Apollo <public@thanosapollo.org>
+
+;;; Commentary:
+
+;; Tests for Anki .apkg import pipeline: parse-notes, bulk-insert-chunk,
+;; and full import.  Creates Anki databases matching the real schema
+;; (notetypes, fields, templates, notes) and populates them with
+;; random data.
+
+;;; Code:
+(require 'ert)
+(require 'gnosis)
+(require 'gnosis-anki)
+
+(require 'gnosis-test-helpers)
+
+;;; ---- Schema creation (mirrors Anki .apkg DB) ----
+
+(defun gnosis-test-anki--create-schema (db)
+  "Create Anki tables in DB matching the real .apkg schema.
+Uses NOCASE instead of Anki's custom unicase collation."
+  (sqlite-execute db "
+    CREATE TABLE notetypes (
+      id integer NOT NULL PRIMARY KEY,
+      name text NOT NULL COLLATE NOCASE,
+      mtime_secs integer NOT NULL,
+      usn integer NOT NULL,
+      config blob NOT NULL)")
+  (sqlite-execute db "
+    CREATE TABLE fields (
+      ntid integer NOT NULL,
+      ord integer NOT NULL,
+      name text NOT NULL COLLATE NOCASE,
+      config blob NOT NULL,
+      PRIMARY KEY (ntid, ord)) WITHOUT ROWID")
+  (sqlite-execute db "
+    CREATE TABLE templates (
+      ntid integer NOT NULL,
+      ord integer NOT NULL,
+      name text NOT NULL COLLATE NOCASE,
+      mtime_secs integer NOT NULL,
+      usn integer NOT NULL,
+      config blob NOT NULL,
+      PRIMARY KEY (ntid, ord)) WITHOUT ROWID")
+  (sqlite-execute db "
+    CREATE TABLE notes (
+      id integer PRIMARY KEY,
+      guid text NOT NULL,
+      mid integer NOT NULL,
+      mod integer NOT NULL,
+      usn integer NOT NULL,
+      tags text NOT NULL,
+      flds text NOT NULL,
+      sfld integer NOT NULL,
+      csum integer NOT NULL,
+      flags integer NOT NULL,
+      data text NOT NULL)"))
+
+(defun gnosis-test-anki--encode-varint (n)
+  "Encode integer N as a protobuf varint byte list."
+  (let (bytes)
+    (while (> n #x7f)
+      (push (logior (logand n #x7f) #x80) bytes)
+      (setq n (ash n -7)))
+    (push n bytes)
+    (nreverse bytes)))
+
+(defun gnosis-test-anki--make-template-config (qfmt afmt)
+  "Build a minimal protobuf config blob with QFMT and AFMT strings."
+  (let* ((q-bytes (encode-coding-string qfmt 'utf-8))
+         (a-bytes (encode-coding-string afmt 'utf-8))
+         (result nil))
+    ;; Field 1 (tag 0x0a): qfmt
+    (push #x0a result)
+    (dolist (b (gnosis-test-anki--encode-varint (length q-bytes)))
+      (push b result))
+    (dotimes (i (length q-bytes))
+      (push (aref q-bytes i) result))
+    ;; Field 2 (tag 0x12): afmt
+    (push #x12 result)
+    (dolist (b (gnosis-test-anki--encode-varint (length a-bytes)))
+      (push b result))
+    (dotimes (i (length a-bytes))
+      (push (aref a-bytes i) result))
+    (apply #'unibyte-string (nreverse result))))
+
+(defun gnosis-test-anki--insert-notetype (db id name type)
+  "Insert notetype ID with NAME into DB.  TYPE is basic or cloze."
+  (sqlite-execute db
+    "INSERT INTO notetypes VALUES (?,?,0,0,?)"
+    (list id name (if (eq type 'cloze) (unibyte-string 8 1) "")))
+  (if (eq type 'cloze)
+      (progn
+        (sqlite-execute db
+          "INSERT INTO fields VALUES (?,0,'Text','')" (list id))
+        (sqlite-execute db
+          "INSERT INTO fields VALUES (?,1,'Extra','')" (list id))
+        (sqlite-execute db
+          "INSERT INTO templates VALUES (?,0,'Cloze',0,0,?)"
+          (list id (gnosis-test-anki--make-template-config
+                    "{{cloze:Text}}" "{{cloze:Text}}<br>{{Extra}}"))))
+    ;; basic
+    (sqlite-execute db
+      "INSERT INTO fields VALUES (?,0,'Front','')" (list id))
+    (sqlite-execute db
+      "INSERT INTO fields VALUES (?,1,'Back','')" (list id))
+    (sqlite-execute db
+      "INSERT INTO templates VALUES (?,0,'Card 1',0,0,?)"
+      (list id (gnosis-test-anki--make-template-config
+                "{{Front}}" "{{FrontSide}}<hr>{{Back}}")))))
+
+(defun gnosis-test-anki--insert-image-notetype (db id name)
+  "Insert image-occlusion notetype ID with NAME into DB."
+  (sqlite-execute db
+    "INSERT INTO notetypes VALUES (?,?,0,0,'')" (list id name))
+  (sqlite-execute db
+    "INSERT INTO fields VALUES (?,0,'Image','')" (list id))
+  (sqlite-execute db
+    "INSERT INTO fields VALUES (?,1,'Original Mask','')" (list id))
+  (sqlite-execute db
+    "INSERT INTO templates VALUES (?,0,'Card 1',0,0,?)"
+    (list id (gnosis-test-anki--make-template-config
+              "{{Image}}" "{{Image}}{{Original Mask}}"))))
+
+(defun gnosis-test-anki--insert-note (db id mid flds tags)
+  "Insert a note into DB with ID, MID, FLDS, TAGS."
+  (sqlite-execute db
+    "INSERT INTO notes VALUES (?,?,?,0,0,?,?,0,0,0,'')"
+    (list id (format "guid%d" id) mid tags flds)))
+
+;;; ---- Random data generation ----
+
+(defvar gnosis-test-anki--words
+  '("Emacs" "Lisp" "buffer" "window" "frame" "mode" "hook"
+    "function" "variable" "macro" "defun" "lambda" "cons"
+    "car" "cdr" "list" "vector" "string" "symbol" "integer"
+    "float" "hash" "table" "alist" "plist" "sequence" "atom"
+    "nil" "point" "mark" "region" "overlay" "text" "font"
+    "face" "keymap" "binding" "command" "prefix" "minor"
+    "major" "global" "local" "dynamic" "lexical" "scope")
+  "Word pool for random note generation.")
+
+(defvar gnosis-test-anki--tag-pool
+  '("Science" "Math" "History" "Biology::Genetics"
+    "CS::Algorithms" "CS::Data_Structures" "Languages::Lisp"
+    "Languages::Python" "#tagged" "multi-word-tag"
+    "Geography" "Physics::Quantum" "Art::Music")
+  "Tag pool for random note generation.")
+
+(defun gnosis-test-anki--random-sentence (n)
+  "Generate a random sentence of N words."
+  (let ((words gnosis-test-anki--words)
+        (len (length gnosis-test-anki--words)))
+    (mapconcat (lambda (_) (nth (random len) words))
+               (number-sequence 1 n) " ")))
+
+(defun gnosis-test-anki--random-tags (max-tags)
+  "Return a tag string with 1 to MAX-TAGS random tags."
+  (let* ((pool gnosis-test-anki--tag-pool)
+         (len (length pool))
+         (n (1+ (random max-tags)))
+         (tags nil))
+    (dotimes (_ n)
+      (push (nth (random len) pool) tags))
+    (concat " " (mapconcat #'identity (delete-dups tags) " ") " ")))
+
+(defun gnosis-test-anki--random-html-sentence (n)
+  "Generate a sentence of N words with random HTML markup."
+  (let ((words gnosis-test-anki--words)
+        (len (length gnosis-test-anki--words)))
+    (mapconcat
+     (lambda (_)
+       (let ((w (nth (random len) words))
+             (r (random 10)))
+         (cond ((= r 0) (format "<b>%s</b>" w))
+               ((= r 1) (format "<i>%s</i>" w))
+               ((= r 2) (format "<u>%s</u>" w))
+               (t w))))
+     (number-sequence 1 n) " ")))
+
+(defun gnosis-test-anki--populate-db (path n-basic n-cloze)
+  "Create an Anki test DB at PATH with random data.
+N-BASIC basic notes and N-CLOZE cloze notes, plus 1 image occlusion."
+  (let ((db (sqlite-open path))
+        (note-id 1))
+    (gnosis-test-anki--create-schema db)
+    ;; Notetypes: 100=Basic, 200=Cloze, 300=Image Occlusion
+    (gnosis-test-anki--insert-notetype db 100 "Basic" 'basic)
+    (gnosis-test-anki--insert-notetype db 200 "Cloze" 'cloze)
+    (gnosis-test-anki--insert-image-notetype db 300 "Image Occlusion")
+    ;; Basic notes
+    (dotimes (_ n-basic)
+      (let ((front (gnosis-test-anki--random-html-sentence (+ 3 (random 8))))
+            (back (gnosis-test-anki--random-html-sentence (+ 2 (random 10))))
+            (tags (gnosis-test-anki--random-tags 4)))
+        (gnosis-test-anki--insert-note db note-id 100
+                                       (concat front "\x1f" back) tags)
+        (setq note-id (1+ note-id))))
+    ;; Cloze notes
+    (dotimes (_ n-cloze)
+      (let* ((w1 (nth (random (length gnosis-test-anki--words))
+                       gnosis-test-anki--words))
+             (w2 (nth (random (length gnosis-test-anki--words))
+                       gnosis-test-anki--words))
+             (text (format "%s is related to {{c1::%s}}"
+                           (gnosis-test-anki--random-sentence 3) w1))
+             ;; Some notes get a second cloze deletion
+             (text (if (zerop (random 3))
+                       (concat text (format " and {{c2::%s}}" w2))
+                     text))
+             (extra (gnosis-test-anki--random-sentence (+ 1 (random 5))))
+             (tags (gnosis-test-anki--random-tags 3)))
+        (gnosis-test-anki--insert-note db note-id 200
+                                       (concat text "\x1f" extra) tags)
+        (setq note-id (1+ note-id))))
+    ;; One image occlusion note (should be skipped)
+    (gnosis-test-anki--insert-note db note-id 300
+                                   (concat "image_data" "\x1f" "svg_mask")
+                                   " img ")
+    (sqlite-close db)
+    path))
+
+;;; ---- Group 1: parse-notes ----
+
+(ert-deftest gnosis-test-anki-parse-notes ()
+  "Parse notes from an Anki DB with random data."
+  (let* ((tmp (make-temp-file "anki-parse-" nil ".db"))
+         (anki-db nil)
+         (model-info (make-hash-table :test 'equal)))
+    (unwind-protect
+        (progn
+          (gnosis-test-anki--populate-db tmp 10 5)
+          (setq anki-db (sqlite-open tmp))
+          ;; Build model-info as import-db does
+          (gnosis-anki--build-model-info-from-tables anki-db model-info)
+          (let* ((result (gnosis-anki--parse-notes anki-db model-info))
+                 (skipped (car result))
+                 (prepared (cdr result)))
+            ;; 1 image occlusion skipped
+            (should (>= skipped 1))
+            ;; At least 10 basic + some clozes (each cloze note -> 1-2 items)
+            (should (>= (length prepared) 15))
+            ;; All items have required keys
+            (dolist (item prepared)
+              (should (plist-get item :type))
+              (should (plist-get item :keimenon))
+              (should (plist-get item :tags)))))
+      (when anki-db (sqlite-close anki-db))
+      (delete-file tmp))))
+
+(ert-deftest gnosis-test-anki-parse-basic-content ()
+  "Verify basic note parsing produces correct fields."
+  (let* ((tmp (make-temp-file "anki-basic-" nil ".db"))
+         (anki-db nil)
+         (model-info (make-hash-table :test 'equal)))
+    (unwind-protect
+        (progn
+          ;; Single known basic note
+          (let ((db (sqlite-open tmp)))
+            (gnosis-test-anki--create-schema db)
+            (gnosis-test-anki--insert-notetype db 100 "Basic" 'basic)
+            (gnosis-test-anki--insert-note db 1 100
+              (concat "<b>Bold</b> question" "\x1f" "<i>Italic</i> answer")
+              " emacs lisp ")
+            (sqlite-close db))
+          (setq anki-db (sqlite-open tmp))
+          (puthash "100" '(0 1 ("Front") ("Back") "Front" "Back") model-info)
+          (let* ((result (gnosis-anki--parse-notes anki-db model-info))
+                 (prepared (cdr result))
+                 (item (car prepared)))
+            (should (= 1 (length prepared)))
+            (should (string= "basic" (plist-get item :type)))
+            (should (string= "*Bold* question" (plist-get item :keimenon)))
+            (should (equal '("Italic answer") (plist-get item :answer)))
+            (should (member "emacs" (plist-get item :tags)))
+            (should (member "lisp" (plist-get item :tags)))))
+      (when anki-db (sqlite-close anki-db))
+      (delete-file tmp))))
+
+(ert-deftest gnosis-test-anki-parse-cloze-content ()
+  "Verify cloze note parsing extracts answers and hints."
+  (let* ((tmp (make-temp-file "anki-cloze-" nil ".db"))
+         (anki-db nil)
+         (model-info (make-hash-table :test 'equal)))
+    (unwind-protect
+        (progn
+          (let ((db (sqlite-open tmp)))
+            (gnosis-test-anki--create-schema db)
+            (gnosis-test-anki--insert-notetype db 200 "Cloze" 'cloze)
+            ;; Multi-cloze note
+            (gnosis-test-anki--insert-note db 1 200
+              (concat "{{c1::Emacs}} is a {{c2::text editor}}"
+                      "\x1f" "Extra info")
+              " cloze ")
+            (sqlite-close db))
+          (setq anki-db (sqlite-open tmp))
+          (puthash "200" '(1 1 ("Text") ("Extra") "Text" "Extra") model-info)
+          (let* ((result (gnosis-anki--parse-notes anki-db model-info))
+                 (prepared (cdr result)))
+            ;; 2 cloze items from one note
+            (should (= 2 (length prepared)))
+            (dolist (item prepared)
+              (should (string= "cloze" (plist-get item :type)))
+              (should (string= "Emacs is a text editor"
+                                (plist-get item :keimenon)))
+              (should (string= "Extra info" (plist-get item :parathema))))))
+      (when anki-db (sqlite-close anki-db))
+      (delete-file tmp))))
+
+(ert-deftest gnosis-test-anki-parse-skips ()
+  "Image occlusion, empty answers, and no-cloze notes are skipped."
+  (let* ((tmp (make-temp-file "anki-skip-" nil ".db"))
+         (anki-db nil)
+         (model-info (make-hash-table :test 'equal)))
+    (unwind-protect
+        (progn
+          (let ((db (sqlite-open tmp)))
+            (gnosis-test-anki--create-schema db)
+            (gnosis-test-anki--insert-notetype db 100 "Basic" 'basic)
+            (gnosis-test-anki--insert-notetype db 200 "Cloze" 'cloze)
+            (gnosis-test-anki--insert-image-notetype db 300 "Image Occlusion")
+            ;; Empty back
+            (gnosis-test-anki--insert-note db 1 100
+              (concat "Q" "\x1f" "") " t ")
+            ;; No cloze markers
+            (gnosis-test-anki--insert-note db 2 200
+              (concat "no cloze" "\x1f" "extra") " t ")
+            ;; Image occlusion
+            (gnosis-test-anki--insert-note db 3 300
+              (concat "img" "\x1f" "mask") " t ")
+            (sqlite-close db))
+          (setq anki-db (sqlite-open tmp))
+          (puthash "100" '(0 1 ("Front") ("Back") "Front" "Back") model-info)
+          (puthash "200" '(1 1 ("Text") ("Extra") "Text" "Extra") model-info)
+          (puthash "300" '(skip 1 ("Image") ("Original Mask") "Image" "Original Mask") model-info)
+          (let* ((result (gnosis-anki--parse-notes anki-db model-info))
+                 (skipped (car result))
+                 (prepared (cdr result)))
+            (should (= 3 skipped))
+            (should (= 0 (length prepared)))))
+      (when anki-db (sqlite-close anki-db))
+      (delete-file tmp))))
+
+(ert-deftest gnosis-test-anki-parse-tags-cached ()
+  "Tag parsing is cached per unique tag string."
+  (let* ((tmp (make-temp-file "anki-cache-" nil ".db"))
+         (anki-db nil)
+         (model-info (make-hash-table :test 'equal)))
+    (unwind-protect
+        (progn
+          (let ((db (sqlite-open tmp)))
+            (gnosis-test-anki--create-schema db)
+            (gnosis-test-anki--insert-notetype db 100 "Basic" 'basic)
+            (gnosis-test-anki--insert-note db 1 100
+              (concat "Q1" "\x1f" "A1") " shared_tag ")
+            (gnosis-test-anki--insert-note db 2 100
+              (concat "Q2" "\x1f" "A2") " shared_tag ")
+            (sqlite-close db))
+          (setq anki-db (sqlite-open tmp))
+          (puthash "100" '(0 1 ("Front") ("Back") "Front" "Back") model-info)
+          (let* ((result (gnosis-anki--parse-notes anki-db model-info))
+                 (prepared (cdr result)))
+            (should (= 2 (length prepared)))
+            ;; Tags should be equal (segment cache produces same values)
+            (should (equal (plist-get (nth 0 prepared) :tags)
+                           (plist-get (nth 1 prepared) :tags)))))
+      (when anki-db (sqlite-close anki-db))
+      (delete-file tmp))))
+
+;;; ---- Group 2: bulk-insert-chunk ----
+
+(ert-deftest gnosis-test-anki-bulk-insert-basic ()
+  "Bulk insert basic themata and verify all DB tables."
+  (gnosis-test-with-db
+    (let* ((items (list (list :type "basic"
+                              :keimenon "What is Emacs?"
+                              :hypothesis '("")
+                              :answer '("A text editor")
+                              :parathema "See manual"
+                              :tags '("emacs" "editor"))
+                        (list :type "basic"
+                              :keimenon "What is Lisp?"
+                              :hypothesis '("")
+                              :answer '("A programming language")
+                              :parathema ""
+                              :tags '("lisp"))))
+           (ids '(1001 1002))
+           (today (gnosis--today-int)))
+      (gnosis-anki--bulk-insert-chunk gnosis-db items ids today)
+      ;; Verify themata
+      (should (= 2 (length (gnosis-select 'id 'themata nil t))))
+      (should (string= "basic" (gnosis-get 'type 'themata '(= id 1001))))
+      (should (string= "What is Emacs?"
+                        (gnosis-get 'keimenon 'themata '(= id 1001))))
+      (should
+       (equal `((1001 ,today 0 0) (1002 ,today 0 0))
+              (gnosis-sqlite-select
+               gnosis-db "SELECT * FROM scheduler_baseline ORDER BY thema_id")))
+      (should
+       (equal `((1001 1 nil nil nil nil ,today 0 0 0)
+                (1002 1 nil nil nil nil ,today 0 0 0))
+              (gnosis-sqlite-select
+               gnosis-db "SELECT * FROM scheduler_state ORDER BY thema_id")))
+      ;; Verify extras
+      (should (string= "See manual"
+                        (gnosis-get 'parathema 'extras '(= id 1001))))
+      ;; Verify tags
+      (let ((tags (gnosis-select 'tag 'thema-tag '(= thema-id 1001) t)))
+        (should (= 2 (length tags)))
+        (should (member "emacs" tags))
+        (should (member "editor" tags)))
+      (let ((tags (gnosis-select 'tag 'thema-tag '(= thema-id 1002) t)))
+        (should (= 1 (length tags)))
+        (should (member "lisp" tags))))))
+
+(ert-deftest gnosis-test-anki-bulk-insert-scheduler-rollback ()
+  "Roll back a whole Anki chunk when scheduler insertion fails."
+  (gnosis-test-with-db
+    (gnosis-sqlite-execute
+     gnosis-db
+     "CREATE TRIGGER controlled_anki_scheduler_failure
+        BEFORE INSERT ON scheduler_state
+        BEGIN SELECT RAISE(ABORT, 'controlled scheduler failure'); END")
+    (let ((item (list :type "basic" :keimenon "Q" :hypothesis '("")
+                      :answer '("A") :parathema "" :tags '("test")))
+          (today (gnosis--today-int)))
+      (should-error
+       (gnosis-anki--bulk-insert-chunk
+        gnosis-db (list item) '(1001) today nil t))
+      (dolist (table '(themata extras thema-tag
+                      scheduler-baseline scheduler-state))
+        (should (= 0 (caar (gnosis-sqlite-select
+                            gnosis-db
+                            (format "SELECT COUNT(*) FROM %s"
+                                    (gnosis-sqlite--ident table))))))))))
+
+(ert-deftest gnosis-test-anki-bulk-insert-cloze ()
+  "Bulk insert cloze themata and verify encoding."
+  (gnosis-test-with-db
+    (let* ((items (list (list :type "cloze"
+                              :keimenon "Emacs is a text editor"
+                              :hypothesis '("editor hint")
+                              :answer '("text editor")
+                              :parathema "extra info"
+                              :tags '("cloze"))))
+           (ids '(2001))
+           (today (gnosis--today-int)))
+      (gnosis-anki--bulk-insert-chunk gnosis-db items ids today nil t)
+      (should (= 1 (length (gnosis-select 'id 'themata nil t))))
+      (should (string= "cloze" (gnosis-get 'type 'themata '(= id 2001))))
+      (should (string= "Emacs is a text editor"
+                        (gnosis-get 'keimenon 'themata '(= id 2001))))
+      (should (equal '("text editor")
+                     (gnosis-get 'answer 'themata '(= id 2001))))
+      (should (string= "extra info"
+                        (gnosis-get 'parathema 'extras '(= id 2001))))
+      (should (= 1 (gnosis-get 'suspended 'scheduler-state
+                               '(= thema-id 2001)))))))
+
+(ert-deftest gnosis-test-anki-bulk-insert-many-tags ()
+  "Bulk insert with many tags triggers tag batching."
+  (gnosis-test-with-db
+    (let* ((many-tags (cl-loop for i from 1 to 20
+                               collect (format "tag%d" i)))
+           (items (list (list :type "basic"
+                              :keimenon "Q"
+                              :hypothesis '("")
+                              :answer '("A")
+                              :parathema ""
+                              :tags many-tags)))
+           (ids '(3001))
+           (today (gnosis--today-int)))
+      (gnosis-anki--bulk-insert-chunk gnosis-db items ids today)
+      (let ((tags (gnosis-select 'tag 'thema-tag '(= thema-id 3001) t)))
+        (should (= 20 (length tags)))))))
+
+;;; ---- Group 3: full import ----
+
+(ert-deftest gnosis-test-anki-import ()
+  "Import an Anki DB with random basic and cloze notes."
+  (gnosis-test-with-db
+    (let ((anki-file (make-temp-file "anki-import-" nil ".db")))
+      (unwind-protect
+          (progn
+            (gnosis-test-anki--populate-db anki-file 10 5)
+            (gnosis-anki--import-db anki-file)
+            ;; Wait for async timer to complete
+            (sleep-for 1)
+            ;; At least 15 themata (10 basic + 5+ cloze items)
+            (let ((count (length (gnosis-select 'id 'themata nil t))))
+              (should (>= count 15)))
+            ;; Every thema has scheduler baseline and current state.
+            (should (= (length (gnosis-select 'id 'themata nil t))
+                       (length (gnosis-select 'thema-id
+                                              'scheduler-baseline nil t))))
+            (should (= (length (gnosis-select 'id 'themata nil t))
+                       (length (gnosis-select 'thema-id
+                                              'scheduler-state nil t))))
+            ;; Every thema has an extras entry
+            (should (= (length (gnosis-select 'id 'themata nil t))
+                       (length (gnosis-select 'id 'extras nil t))))
+            ;; Tags were inserted
+            (should (> (length (gnosis-select 'tag 'thema-tag nil t)) 0)))
+        (when (file-exists-p anki-file)
+          (delete-file anki-file))))))
+
+(defun gnosis-test-anki--check-typed-answers (kind)
+  "Import KIND notes and check literal answers in the destination database."
+  (gnosis-test-with-db
+    (let* ((source (expand-file-name "answers.anki2" gnosis-dir))
+           (cases '(("5 mg/kg/day" . "5 mg/kg/day")
+                    ("gene_alpha_beta" . "gene_alpha_beta")
+                    ("https://example.org/a/b" . "https://example.org/a/b")
+                    ("2*3*4" . "2*3*4")
+                    ("*literal* /literal/ _literal_"
+                     . "*literal* /literal/ _literal_")
+                    ("<b>5 mg/kg/day</b>" . "5 mg/kg/day")
+                    ("<i>gene_alpha_beta</i>" . "gene_alpha_beta")
+                    ("<u>2*3*4</u>" . "2*3*4")
+                    ("<b><i><u>α/β/γ</u></i></b>" . "α/β/γ")
+                    ("<strong>5 mg/kg/day</strong> &amp; <em>2*3*4</em>"
+                     . "5 mg/kg/day & 2*3*4")))
+           (db (sqlite-open source))
+           pending)
+      (unwind-protect
+          (progn
+            (gnosis-test-anki--create-schema db)
+            (gnosis-test-anki--insert-notetype db 100 "Answers" kind)
+            (when (eq kind 'reversed)
+              (sqlite-execute
+               db "INSERT INTO templates VALUES (100,1,'Reverse',0,0,?)"
+               (list (gnosis-test-anki--make-template-config
+                      "{{Back}}" "{{Front}}"))))
+            (cl-loop for (input . _) in cases for id from 1
+                     do (gnosis-test-anki--insert-note
+                         db id 100
+                         (if (eq kind 'cloze)
+                             (concat "Answer: {{c1::" input "}}" "\x1f" "Extra")
+                           (concat input "\x1f" input))
+                         "literal")))
+        (sqlite-close db))
+      ;; Drain the real import callbacks without sleeps or surviving timers.
+      (cl-letf (((symbol-function 'run-with-timer)
+                 (lambda (_delay _repeat function &rest args)
+                   (push (lambda () (apply function args)) pending))))
+        (gnosis-anki--import-db source)
+        (while pending (funcall (pop pending))))
+      (cl-loop for (input . expected) in cases for id from 1
+               do (ert-info ((format "%s: %s" kind input))
+                    (let ((answers
+                           (gnosis-sqlite--decode-rows
+                            (sqlite-select
+                             gnosis-db
+                             "SELECT answer FROM themata WHERE source_guid = ?"
+                             (list (format "guid%d" id))))))
+                      (should (equal answers
+                                     (make-list (if (eq kind 'reversed) 2 1)
+                                                (list (list expected)))))))))))
+
+(ert-deftest gnosis-test-anki-import-basic-literal-answers ()
+  "Preserve punctuation while removing only source HTML emphasis."
+  (gnosis-test-anki--check-typed-answers 'basic))
+
+(ert-deftest gnosis-test-anki-import-reversed-literal-answers ()
+  "Preserve literal answers in both directions of a reversed note."
+  (gnosis-test-anki--check-typed-answers 'reversed))
+
+(ert-deftest gnosis-test-anki-import-cloze-literal-answers ()
+  "Preserve literal cloze answers through parsing and storage."
+  (gnosis-test-anki--check-typed-answers 'cloze))
+
+(ert-deftest gnosis-test-anki-empty-emphasis-is-not-an-answer ()
+  "Do not promote an explanation when the selected answer is empty markup."
+  (should-not
+   (gnosis-anki--parse-basic-note
+    (concat "Question" "\x1f" "<b></b>" "\x1f" "Explanation")
+    '("Front") '("Back" "Extra") '("Front" "Back" "Extra") "" 2
+    (make-hash-table :test 'equal) (make-hash-table :test 'equal))))
+
+(defun gnosis-test-anki--check-answer-field-identity (kind)
+  "Import KIND notes without promoting extra fields into empty answers."
+  (gnosis-test-with-db
+    (let* ((source (expand-file-name "field-identity.anki2" gnosis-dir))
+           (empty-answers '("<b></b>" "<strong></strong>" "<em></em>"
+                            "<b class=\"x\"></b>" "<b>\n</b>"))
+           (db (sqlite-open source))
+           pending)
+      (unwind-protect
+          (progn
+            (gnosis-test-anki--create-schema db)
+            (gnosis-test-anki--insert-notetype db 100 "Fields" kind)
+            (cl-loop for name in '("Extra" "Context" "Absent" "Media")
+                     for ord from 2 do
+                     (sqlite-execute db "INSERT INTO fields VALUES (100,?,?,'')"
+                                     (list ord name)))
+            (sqlite-execute
+             db "UPDATE templates SET config=? WHERE ntid=100"
+             (list (gnosis-test-anki--make-template-config
+                    "{{Context}}{{Front}}"
+                    "{{FrontSide}}{{Missing}}{{Absent}}{{Media}}{{Back}}{{Extra}}")))
+            (when (eq kind 'reversed)
+              (sqlite-execute
+               db "INSERT INTO templates VALUES (100,1,'Reverse',0,0,?)"
+               (list (gnosis-test-anki--make-template-config
+                      "{{Back}}" "{{Front}}"))))
+            (cl-loop for back in empty-answers for id from 1 do
+                     (gnosis-test-anki--insert-note
+                      db id 100
+                      (mapconcat #'identity
+                                 (list "Question" back "Explanation" "" "" "")
+                                 "\x1f") ""))
+            ;; Unknown, absent, blank and media-only fields remain skippable.
+            ;; Distinct valid roles also prove template order and formatting.
+            (cl-loop for media in '("" "[sound:a.mp3]" "<img src=\"a.png\">")
+                     for id from 100 do
+                     (gnosis-test-anki--insert-note
+                      db id 100
+                      (mapconcat #'identity
+                                 (list "<i>gene_alpha_beta</i>" "<b>5 mg/kg/day</b>"
+                                       "<u>Explain 2*3*4</u>" "<b>Context</b>"
+                                       " \n " media)
+                                 "\x1f") "")))
+        (sqlite-close db))
+      (cl-letf (((symbol-function 'run-with-timer)
+                 (lambda (_delay _repeat function &rest args)
+                   (push (lambda () (apply function args)) pending))))
+        (gnosis-anki--import-db source)
+        (while pending (funcall (pop pending))))
+      (should-not (sqlite-select
+                   gnosis-db
+                   "SELECT source_guid,keimenon,answer FROM themata
+                    WHERE source_guid IN ('guid1','guid2','guid3','guid4','guid5')"))
+      (cl-loop for id from 100 to 102 do
+               (let ((rows (gnosis-sqlite--decode-rows
+                            (sqlite-select
+                             gnosis-db
+                             "SELECT t.keimenon,t.answer,e.parathema
+                              FROM themata t JOIN extras e USING(id)
+                              WHERE source_guid=?"
+                             (list (format "guid%d" id))))))
+                 (should (= (length rows) (if (eq kind 'reversed) 2 1)))
+                 (should (member '("*Context*\n/gene_alpha_beta/" ("5 mg/kg/day")
+                                   "_Explain 2*3*4_") rows))
+                 (when (eq kind 'reversed)
+                   (should (member '("*5 mg/kg/day*" ("Context\ngene_alpha_beta")
+                                     "_Explain 2*3*4_") rows))))))))
+
+(ert-deftest gnosis-test-anki-import-basic-answer-field-identity ()
+  "Skip unusable selected basic answers without promoting explanations."
+  (gnosis-test-anki--check-answer-field-identity 'basic))
+
+(ert-deftest gnosis-test-anki-import-reversed-answer-field-identity ()
+  "Never use explanations as reversed questions after empty answer markup."
+  (gnosis-test-anki--check-answer-field-identity 'reversed))
+
+(defun gnosis-test-anki--check-generated-answers (kind cases)
+  "Import KIND CASES and check stored fields and the reported skip count.
+Each case is (FIELDS ROWS SKIPPED).  ROWS contain question, hints, answers
+and explanation; SKIPPED counts rejected items, or one for an empty note."
+  (gnosis-test-with-db
+    (let* ((source (expand-file-name "generated-answers.anki2" gnosis-dir))
+           (db (sqlite-open source))
+           pending messages)
+      (unwind-protect
+          (progn
+            (gnosis-test-anki--create-schema db)
+            (gnosis-test-anki--insert-notetype db 100 "Answers" kind)
+            (unless (eq kind 'cloze)
+              (sqlite-execute db "INSERT INTO fields VALUES (100,2,'Extra','')")
+              (sqlite-execute db "INSERT INTO fields VALUES (100,3,'Context','')")
+              (sqlite-execute
+               db "UPDATE templates SET config=? WHERE ntid=100"
+               (list (gnosis-test-anki--make-template-config
+                      "{{Context}}{{Front}}" "{{FrontSide}}{{Back}}{{Extra}}"))))
+            (when (eq kind 'reversed)
+              (sqlite-execute
+               db "INSERT INTO templates VALUES (100,1,'Reverse',0,0,?)"
+               (list (gnosis-test-anki--make-template-config
+                      "{{Back}}" "{{Front}}"))))
+            (cl-loop for (fields) in cases for id from 1 do
+                     (gnosis-test-anki--insert-note
+                      db id 100 (mapconcat #'identity fields "\x1f") "")))
+        (sqlite-close db))
+      (cl-letf (((symbol-function 'run-with-timer)
+                 (lambda (_delay _repeat function &rest args)
+                   (push (lambda () (apply function args)) pending)))
+                ((symbol-function 'message)
+                 (lambda (format-string &rest args)
+                   (push (apply #'format format-string args) messages))))
+        (gnosis-anki--import-db source)
+        (while pending (funcall (pop pending))))
+      (cl-loop for (fields expected) in cases for id from 1 do
+               (ert-info ((format "%s: %S" kind fields))
+                 (let ((rows (gnosis-sqlite--decode-rows
+                              (sqlite-select
+                               gnosis-db
+                               "SELECT t.keimenon,t.hypothesis,t.answer,e.parathema
+                                FROM themata t JOIN extras e USING(id)
+                                WHERE source_guid=?"
+                               (list (format "guid%d" id))))))
+                   (should (= (length rows) (length expected)))
+                   (dolist (row expected) (should (member row rows)))
+                   (dolist (row rows)
+                     (should (nth 2 row))
+                     (dolist (answer (nth 2 row))
+                       (should-not (string-empty-p (string-trim answer))))))))
+      (let ((imported (cl-loop for (_ rows) in cases sum (length rows)))
+            (skipped (cl-loop for (_ _ count) in cases sum count)))
+        (should (equal (car messages)
+                       (format "Anki import%s: %d imported, %d skipped"
+                               (if (zerop imported) "" " complete")
+                               imported skipped)))))))
+
+(ert-deftest gnosis-test-anki-import-reversed-empty-generated-answers ()
+  "Skip empty reverse answers without losing usable forward siblings."
+  (gnosis-test-anki--check-generated-answers
+   'reversed
+   (append
+    (mapcar
+     (lambda (input)
+       (list (list input "<b>5 mg/kg/day</b>" "<u>Explain 2*3*4</u>")
+             (when (equal input "<b></b>")
+               '(("**" ("") ("5 mg/kg/day") "_Explain 2*3*4_")))
+             1))
+     '("<b></b>" "<strong></strong>" "<em></em>"
+       "<b class=\"x\"></b>" "<b>\n</b>"))
+    '((("<b> </b>" "<b>5 mg/kg/day</b>" "Extra" "<i> </i>")
+       (("/ /\n* *" ("") ("5 mg/kg/day") "Extra")) 1)
+      (("<i>gene_alpha_beta</i>" "<b>5 mg/kg/day</b>" "<u>Explain 2*3*4</u>")
+       (("/gene_alpha_beta/" ("") ("5 mg/kg/day") "_Explain 2*3*4_")
+        ("*5 mg/kg/day*" ("") ("gene_alpha_beta") "_Explain 2*3*4_")) 0)
+      (("/_*" "2*3*4" "Extra")
+       (("/_*" ("") ("2*3*4") "Extra")
+        ("2*3*4" ("") ("/_*") "Extra")) 0)))))
+
+(ert-deftest gnosis-test-anki-import-cloze-empty-generated-answers ()
+  "Reject empty converted cloze groups, including HTML whitespace."
+  (gnosis-test-anki--check-generated-answers
+   'cloze
+   (append
+    (mapcar (lambda (input)
+              (list (list (concat "Question {{c1::" input "::hint}}") "Extra")
+                    nil 1))
+            '("<b></b>" "<strong></strong>" "<em></em>"
+              "<b class=\"x\"></b>" "<b>\n</b>" "<b> &nbsp; </b>"))
+    '((("Dose {{c1::<b>5 mg/kg/day</b>::<i>dose</i>}}" "<u>Explain 2*3*4</u>")
+       (("Dose *5 mg/kg/day*" ("/dose/") ("5 mg/kg/day") "_Explain 2*3*4_")) 0)))))
+
+(ert-deftest gnosis-test-anki-import-cloze-mixed-generated-answers ()
+  "Skip a whole unusable group; retain sibling groups and aligned hints."
+  (gnosis-test-anki--check-generated-answers
+   'cloze
+   '((("A {{c1::<b></b>::first}} B {{c2::<em></em>::second}}" "Extra")
+      nil 2)
+     (("A {{c1::<b></b>::empty}} B {{c1::gene_alpha_beta::gene}}" "Extra")
+      nil 1)
+     (("A {{c1::gene_alpha_beta::gene}} B {{c1::<b></b>::empty}}" "Extra")
+      nil 1)
+     (("A {{c1::<b></b>::empty}} B {{c2::gene_alpha_beta::gene}} C {{c2::2*3*4::math}}"
+        "<u>Explain</u>")
+      (("A ** B gene_alpha_beta C 2*3*4" ("gene" "math")
+        ("gene_alpha_beta" "2*3*4") "_Explain_")) 1)
+     (("A {{c1::gene_alpha_beta::gene}} B {{c2::<b></b>::empty}} C {{c1::/_*}}"
+        "<u>Explain</u>")
+      (("A gene_alpha_beta B ** C /_*" ("gene" nil)
+        ("gene_alpha_beta" "/_*") "_Explain_")) 1)
+     (("A {{c1::5 mg/kg/day::dose}} B {{c2::<b></b>::empty}} C {{c2::2*3*4::math}}"
+        "Extra")
+      (("A 5 mg/kg/day B ** C 2*3*4" ("dose") ("5 mg/kg/day") "Extra")) 1))))
+
+(ert-deftest gnosis-test-anki-import-cloze-multiline-empty-first ()
+  "Reject the whole group when its first member converts to a newline."
+  (gnosis-test-anki--check-generated-answers
+   'cloze
+   '((("A {{c1::<b>\n</b>::empty}} B {{c1::gene_alpha_beta::gene}} C {{c2::5 mg/kg/day::dose}}"
+        "Extra")
+      (("A \n B gene_alpha_beta C 5 mg/kg/day" ("dose") ("5 mg/kg/day") "Extra")) 1))))
+
+(ert-deftest gnosis-test-anki-import-cloze-multiline-empty-last ()
+  "Reject the whole group when its last member converts to a newline."
+  (gnosis-test-anki--check-generated-answers
+   'cloze
+   '((("A {{c1::gene_alpha_beta::gene}} B {{c1::<b>\n</b>::empty}} C {{c2::5 mg/kg/day::dose}}"
+        "Extra")
+      (("A gene_alpha_beta B \n C 5 mg/kg/day" ("dose") ("5 mg/kg/day") "Extra")) 1))))
+
+(ert-deftest gnosis-test-anki-import-cloze-multiline-invalid-groups ()
+  "Count isolated and multiple invalid multiline groups without partial rows."
+  (gnosis-test-anki--check-generated-answers
+   'cloze
+   '((("A {{c1::<b>\n</b>::empty}}" "Extra") nil 1)
+     (("A {{c1::<b>\n</b>::first}} B {{c2::<b>\n</b>::second}}" "Extra") nil 2)
+     (("A {{c1::<b>\n</b>::empty}} B {{c1::gene_alpha_beta::gene}}" "Extra") nil 1))))
+
+(ert-deftest gnosis-test-anki-import-cloze-multiline-valid-members ()
+  "Store complete multiline answers and hints without hint text in answers."
+  (gnosis-test-anki--check-generated-answers
+   'cloze
+   '((("A {{c1::gene_alpha_beta\n2*3*4::gene\nmath}} B {{c1::5 mg/kg/day::dose}} C {{c2::/_*\nα}}"
+        "Extra\nline")
+      (("A gene_alpha_beta\n2*3*4 B 5 mg/kg/day C /_*\nα"
+        ("gene\nmath" "dose") ("gene_alpha_beta\n2*3*4" "5 mg/kg/day") "Extra\nline")
+       ("A gene_alpha_beta\n2*3*4 B 5 mg/kg/day C /_*\nα"
+        (nil) ("/_*\nα") "Extra\nline")) 0))))
+
+(ert-deftest gnosis-test-anki-import-cloze-multiline-mixed-totals ()
+  "Count every rejected group while keeping complete independent siblings."
+  (gnosis-test-anki--check-generated-answers
+   'cloze
+   '((("A {{c1::<b>\n</b>::empty}} B {{c2::gene_alpha_beta::gene\nname}} C {{c2::2*3*4::math}} D {{c3::<b>\n</b>::empty}}"
+        "Extra")
+      (("A \n B gene_alpha_beta C 2*3*4 D" ("gene\nname" "math")
+        ("gene_alpha_beta" "2*3*4") "Extra")) 2)
+     (("A {{c1::<b>\n</b>::empty}} B {{c2::5 mg/kg/day::dose}}" "Extra")
+      (("A \n B 5 mg/kg/day" ("dose") ("5 mg/kg/day") "Extra")) 1))))
+
+(ert-deftest gnosis-test-anki-cloze-multiline-input-immutable ()
+  "Keep caller-owned source text unchanged when rejecting multiline members."
+  (let* ((input (concat "A {{c1::<b>\n</b>::empty}} B {{c1::gene_alpha_beta::gene}} "
+                        "C {{c2::5 mg/kg/day::dose\namount}}\x1fExtra"))
+         (before (copy-sequence input))
+         (items (gnosis-anki--parse-cloze-note
+                 input "" (make-hash-table :test 'equal) (make-hash-table :test 'equal))))
+    (should (equal input before))
+    (should (= (length items) 2))
+    (should-not (car items))
+    (should (equal (plist-get (cadr items) :answer) '("5 mg/kg/day")))
+    (should (equal (plist-get (cadr items) :hypothesis) '("dose\namount")))))
+
+(ert-deftest gnosis-test-anki-import-basic-blank-generated-answers ()
+  "Reject whitespace conversions, not punctuation-only typed answers."
+  (gnosis-test-anki--check-generated-answers
+   'basic
+   '((("Question" "<b> &nbsp; </b>" "Do not promote") nil 1)
+     (("Question" "/_*" "Extra") (("Question" ("") ("/_*") "Extra")) 0))))
+
+(ert-deftest gnosis-test-anki-import-empty ()
+  "Import from Anki DB with no notes."
+  (gnosis-test-with-db
+    (let ((anki-file (make-temp-file "anki-empty-" nil ".db")))
+      (unwind-protect
+          (progn
+            (let ((db (sqlite-open anki-file)))
+              (gnosis-test-anki--create-schema db)
+              (gnosis-test-anki--insert-notetype db 100 "Basic" 'basic)
+              (sqlite-close db))
+            (gnosis-anki--import-db anki-file)
+            (should (= 0 (length (gnosis-select 'id 'themata nil t)))))
+        (when (file-exists-p anki-file)
+          (delete-file anki-file))))))
+
+;;; ---- Group 4: generate-ids ----
+
+(ert-deftest gnosis-test-anki-generate-ids-unique ()
+  "gnosis-generate-ids returns N unique IDs."
+  (gnosis-test-with-db
+    (let* ((gnosis--id-cache (make-hash-table :test 'equal))
+           (ids (gnosis-generate-ids 100)))
+      (should (= 100 (length ids)))
+      (should (= 100 (length (delete-dups (copy-sequence ids))))))))
+
+(ert-deftest gnosis-test-anki-generate-ids-no-collisions ()
+  "gnosis-generate-ids avoids existing IDs in cache."
+  (gnosis-test-with-db
+    (let* ((gnosis--id-cache (make-hash-table :test 'equal)))
+      ;; Pre-fill cache with some IDs
+      (dotimes (i 100)
+        (puthash (+ 1000000000 i) t gnosis--id-cache))
+      (let ((ids (gnosis-generate-ids 50)))
+        (should (= 50 (length ids)))
+        (dolist (id ids)
+          (should-not (and (>= id 1000000000)
+                           (< id 1000000100))))))))
+
+;;; ---- Group 5: html-to-org ----
+
+(ert-deftest gnosis-test-anki-html-bold ()
+  "Convert bold HTML to org."
+  (should (string= "*text*" (gnosis-anki--html-to-org "<b>text</b>"))))
+
+(ert-deftest gnosis-test-anki-html-italic ()
+  "Convert italic HTML to org."
+  (should (string= "/text/" (gnosis-anki--html-to-org "<i>text</i>"))))
+
+(ert-deftest gnosis-test-anki-html-link ()
+  "Convert HTML link to org link."
+  (should (string= "[[http://example.com][click]]"
+                    (gnosis-anki--html-to-org
+                     "<a href=\"http://example.com\">click</a>"))))
+
+(ert-deftest gnosis-test-anki-html-strip-tags ()
+  "Strip unknown HTML tags."
+  (should (string= "plain text"
+                    (gnosis-anki--html-to-org "<span>plain text</span>"))))
+
+;;; ---- Group 6: parse-tags ----
+
+(ert-deftest gnosis-test-anki-parse-tags-hierarchical ()
+  "Split hierarchical tags on :: and flatten."
+  (should (equal '("Science" "Biology" "Genetics")
+                 (gnosis-anki--parse-tags "Science::Biology::Genetics"))))
+
+(ert-deftest gnosis-test-anki-parse-tags-dashes ()
+  "Replace dashes with underscores."
+  (should (equal '("my_tag")
+                 (gnosis-anki--parse-tags "my-tag"))))
+
+(ert-deftest gnosis-test-anki-parse-tags-hash-prefix ()
+  "Strip # prefixes."
+  (should (equal '("tagged")
+                 (gnosis-anki--parse-tags "#tagged"))))
+
+(ert-deftest gnosis-test-anki-parse-tags-strip-symbols ()
+  "Remove characters invalid in org tags."
+  (should (equal '("AnKing_Step_1_2")
+                 (gnosis-anki--parse-tags "AnKing_Step_1_&_2")))
+  (should (equal '("ObGyn")
+                 (gnosis-anki--parse-tags "Ob/Gyn")))
+  (should (equal '("gram")
+                 (gnosis-anki--parse-tags "gram+")))
+  (should (equal '("OLD_VERSION")
+                 (gnosis-anki--parse-tags "[OLD_VERSION]"))))
+
+(ert-deftest gnosis-test-anki-parse-tags-unicode ()
+  "Keep Unicode letters in tags."
+  (should (equal '("ΑΓΙΑ_ΓΡΑΦΗ")
+                 (gnosis-anki--parse-tags "ΑΓΙΑ_ΓΡΑΦΗ"))))
+
+(ert-deftest gnosis-test-anki-parse-tags-dedup ()
+  "Deduplicate tags."
+  (should (equal '("a" "b")
+                 (gnosis-anki--parse-tags "a b a"))))
+
+;;; ---- Group 7: robustness ----
+
+(ert-deftest gnosis-test-anki-parse-db-unwind-protect ()
+  "sqlite-close runs even when parsing errors."
+  (let* ((tmp (make-temp-file "anki-leak-" nil ".db"))
+         (db (sqlite-open tmp)))
+    (unwind-protect
+        (progn
+          ;; Create schema but omit the notes table so parse-notes fails
+          (sqlite-execute db "CREATE TABLE notetypes (id integer PRIMARY KEY, name text, mtime_secs integer, usn integer, config blob)")
+          (sqlite-close db)
+          ;; parse-anki-db should still close the handle despite error
+          (should-error (gnosis-anki--parse-anki-db tmp))
+          ;; If we get here, the handle was closed (no leak).
+          ;; Verify by re-opening the file successfully
+          (let ((db2 (sqlite-open tmp)))
+            (should db2)
+            (sqlite-close db2)))
+      (delete-file tmp))))
+
+(ert-deftest gnosis-test-anki-constants-defined ()
+  "Chunk and batch size constants are defined."
+  (should (integerp gnosis-anki--chunk-size))
+  (should (> gnosis-anki--chunk-size 0))
+  (should (integerp gnosis-anki--tag-batch-size))
+  (should (> gnosis-anki--tag-batch-size 0)))
+
+(ert-deftest gnosis-test-anki-insert-tags-batching ()
+  "Tag insertion helper batches correctly."
+  (gnosis-test-with-db
+    ;; First insert a thema so FK constraint is satisfied
+    (gnosis--insert-into 'themata '([5001 "basic" "Q" ("") ("A") nil]))
+    (let ((tag-params nil))
+      (dotimes (i 10)
+        (setq tag-params
+              (nconc tag-params
+                     (list 5001 (prin1-to-string (format "tag%d" i))))))
+      (let ((gnosis-anki--tag-batch-size 3))
+        (gnosis-anki--insert-tags gnosis-db tag-params))
+      (should (= 10 (length (gnosis-select 'tag 'thema-tag
+                                            '(= thema-id 5001) t)))))))
+
+(ert-deftest gnosis-test-anki-system-tags-stripped ()
+  "Anki system tags (marked, leech) are excluded."
+  (should (equal '("biology")
+                 (gnosis-anki--parse-tags "biology marked leech")))
+  ;; Case-insensitive stripping
+  (should (equal '("test")
+                 (gnosis-anki--parse-tags "test Marked LEECH"))))
+
+(ert-deftest gnosis-test-anki-nfc-normalization ()
+  "NFC normalization produces consistent tags."
+  ;; e followed by combining acute accent (NFD) vs precomposed e-acute (NFC)
+  (let* ((nfc (concat "caf" (string #xe9)))  ; precomposed
+         (nfd (concat "caf" (string #x65 #x301)))) ; decomposed
+    (should (equal (gnosis-anki--parse-tags nfd)
+                   (gnosis-anki--parse-tags nfc)))))
+
+(ert-deftest gnosis-test-anki-guid-stored ()
+  "GUID from Anki notes is stored in parsed items."
+  (let* ((tmp (make-temp-file "anki-guid-" nil ".db"))
+         (anki-db nil)
+         (model-info (make-hash-table :test 'equal)))
+    (unwind-protect
+        (progn
+          (let ((db (sqlite-open tmp)))
+            (gnosis-test-anki--create-schema db)
+            (gnosis-test-anki--insert-notetype db 100 "Basic" 'basic)
+            (gnosis-test-anki--insert-note db 1 100
+              (concat "Q" "\x1f" "A") " test ")
+            (sqlite-close db))
+          (setq anki-db (sqlite-open tmp))
+          (puthash "100" '(0 1 ("Front") ("Back") "Front" "Back") model-info)
+          (let* ((result (gnosis-anki--parse-notes anki-db model-info))
+                 (prepared (cdr result))
+                 (item (car prepared)))
+            (should (= 1 (length prepared)))
+            ;; Our insert-note helper generates "guid1"
+            (should (string= "guid1" (plist-get item :guid)))))
+      (when anki-db (sqlite-close anki-db))
+      (delete-file tmp))))
+
+(ert-deftest gnosis-test-anki-guid-dedup ()
+  "Re-import skips notes with existing GUIDs."
+  (gnosis-test-with-db
+    (let ((anki-file (make-temp-file "anki-dedup-" nil ".db")))
+      (unwind-protect
+          (progn
+            ;; Create Anki DB with 3 basic notes
+            (let ((db (sqlite-open anki-file)))
+              (gnosis-test-anki--create-schema db)
+              (gnosis-test-anki--insert-notetype db 100 "Basic" 'basic)
+              (gnosis-test-anki--insert-note db 1 100
+                (concat "Q1" "\x1f" "A1") " t ")
+              (gnosis-test-anki--insert-note db 2 100
+                (concat "Q2" "\x1f" "A2") " t ")
+              (gnosis-test-anki--insert-note db 3 100
+                (concat "Q3" "\x1f" "A3") " t ")
+              (sqlite-close db))
+            ;; First import
+            (let ((gnosis-testing t))
+              (gnosis-anki--import-db anki-file nil nil nil anki-file))
+            (sleep-for 1)
+            (let ((first-count (length (gnosis-select 'id 'themata nil t))))
+              (should (= 3 first-count))
+              ;; Second import: all 3 should be skipped as duplicates
+              (let ((gnosis-testing t))
+                (gnosis-anki--import-db anki-file nil nil nil anki-file))
+              (sleep-for 1)
+              (should (= first-count
+                         (length (gnosis-select 'id 'themata nil t))))))
+        (when (file-exists-p anki-file)
+          (delete-file anki-file))))))
+
+(ert-deftest gnosis-test-anki-bulk-insert-with-guid ()
+  "Bulk insert stores source_guid in themata."
+  (gnosis-test-with-db
+    (let* ((items (list (list :type "basic"
+                              :keimenon "Q"
+                              :hypothesis '("")
+                              :answer '("A")
+                              :parathema ""
+                              :tags '("test")
+                              :guid "abc123")))
+           (ids '(6001))
+           (today (gnosis--today-int)))
+      (gnosis-anki--bulk-insert-chunk gnosis-db items ids today)
+      (should (string= "abc123"
+                        (gnosis-get 'source-guid 'themata '(= id 6001)))))))
+
+(defun gnosis-test-anki--overlap-source (file kind note-ids)
+  "Write Anki FILE with shared note KIND and the requested NOTE-IDS."
+  (let ((db (sqlite-open file)))
+    (unwind-protect
+        (progn
+          (gnosis-test-anki--create-schema db)
+          (gnosis-test-anki--insert-notetype db 100 "Basic" 'basic)
+          (gnosis-test-anki--insert-notetype db 200 "Shared" kind)
+          (when (eq kind 'double)
+            (sqlite-execute
+             db "INSERT INTO templates VALUES (200,1,'Reverse',0,0,?)"
+             (list (gnosis-test-anki--make-template-config
+                    "{{Back}}" "{{Front}}"))))
+          (dolist (id note-ids)
+            (gnosis-test-anki--insert-note
+             db id (if (= id 2) 200 100)
+             (if (= id 2)
+                 (if (eq kind 'cloze)
+                     (concat "{{c1::Alpha}} and {{c2::Beta}}" "\x1f" "Extra")
+                   (concat "Front" "\x1f" "Back"))
+               (concat (format "Q%d" id) "\x1f" (format "A%d" id)))
+             " shared ")))
+      (sqlite-close db))))
+
+(ert-deftest gnosis-test-anki-overlapping-imports ()
+  "Interleaved jobs import complete GUID groups once with truthful counts."
+  (dolist (kind '(basic double cloze))
+    (dolist (same-file '(nil t))
+      (gnosis-test-with-db
+        (let* ((source-a (expand-file-name "a.anki2" gnosis-dir))
+               (source-b (if same-file source-a
+                           (expand-file-name "b.anki2" gnosis-dir)))
+               (siblings (if (eq kind 'basic) 1 2))
+               (gnosis-anki--chunk-size 1)
+               pending completions commits)
+          (gnosis-test-anki--overlap-source source-a kind '(1 2))
+          (unless same-file
+            (gnosis-test-anki--overlap-source source-b kind '(2 3)))
+          (cl-letf (((symbol-function 'run-with-timer)
+                     (lambda (_delay _repeat fn &rest args)
+                       (setq pending
+                             (append pending (list (lambda () (apply fn args)))))))
+                    ((symbol-function 'gnosis-anki--commit-import)
+                     (lambda (count file) (push (list count file) commits)))
+                    ((symbol-function 'message)
+                     (lambda (format-string &rest args)
+                       (when (equal format-string
+                                    "Anki import complete: %d imported, %d skipped")
+                         (push args completions)))))
+            ;; A queues the shared note.  B commits it before A resumes.
+            (gnosis-anki--import-db source-a)
+            (should (= 1 (length pending)))
+            (gnosis-anki--import-db source-b)
+            (should (= 2 (length pending)))
+            (while pending (funcall (pop pending)))
+            (should
+             (equal (sqlite-select
+                     gnosis-db
+                     "SELECT source_guid, COUNT(*) FROM themata
+                      GROUP BY source_guid ORDER BY source_guid")
+                    (append (list '("guid1" 1) (list "guid2" siblings))
+                            (unless same-file '(("guid3" 1))))))
+            (should (equal (sort completions (lambda (a b) (< (car a) (car b))))
+                           (list (list 1 siblings)
+                                 (list (+ siblings (if same-file 0 1))
+                                       (if same-file 1 0)))))
+            (should (member (list 1 source-a) commits))
+            (should (member (list (+ siblings (if same-file 0 1)) source-b)
+                            commits))
+            (should
+             (equal (gnosis-sqlite--decode-rows
+                     (sqlite-select
+                      gnosis-db "SELECT keimenon, answer FROM themata
+                                 WHERE source_guid = 'guid2' ORDER BY keimenon, answer"))
+                    (pcase kind
+                      ('basic '(("Front" ("Back"))))
+                      ('double '(("Back" ("Front")) ("Front" ("Back"))))
+                      ('cloze '(("Alpha and Beta" ("Alpha"))
+                                ("Alpha and Beta" ("Beta")))))))
+            ;; No sibling may be missing its dependent rows.
+            (dolist (table '(extras scheduler_baseline scheduler_state thema_tag))
+              (should (= (+ siblings (if same-file 1 2))
+                         (caar (sqlite-select
+                                gnosis-db (format "SELECT COUNT(*) FROM %s" table))))))
+            (should-not (sqlite-select gnosis-db "PRAGMA foreign_key_check"))
+            (let ((before (sqlite-select gnosis-db "SELECT * FROM themata ORDER BY id")))
+              (gnosis-anki--import-db source-a)
+              (gnosis-anki--import-db source-b)
+              (should-not pending)
+              (should (equal before (sqlite-select
+                                     gnosis-db "SELECT * FROM themata ORDER BY id"))))))))))
+
+(ert-deftest gnosis-test-anki-overlap-failed-siblings-retry ()
+  "A failed overlapping writer releases its whole note for a queued job."
+  (dolist (failure '(error quit))
+    (gnosis-test-with-db
+      (let* ((source-a (expand-file-name "a.anki2" gnosis-dir))
+             (source-b (expand-file-name "b.anki2" gnosis-dir))
+             (gnosis-anki--chunk-size 1)
+             (writer (symbol-function 'gnosis-anki--bulk-insert-chunk))
+             (writes 0)
+             pending commits)
+        (gnosis-test-anki--overlap-source source-a 'double '(1 2))
+        (gnosis-test-anki--overlap-source source-b 'double '(2))
+        (cl-letf (((symbol-function 'run-with-timer)
+                   (lambda (_delay _repeat fn &rest args)
+                     (setq pending
+                           (append pending (list (lambda () (apply fn args)))))))
+                  ((symbol-function 'gnosis-anki--commit-import)
+                   (lambda (count file) (push (list count file) commits))))
+          (gnosis-anki--import-db source-a)
+          (let ((items (cdr (gnosis-anki--parse-anki-db source-b))))
+            (cl-letf (((symbol-function 'gnosis-anki--bulk-insert-chunk)
+                       (lambda (&rest args)
+                         (apply writer args)
+                         (when (= (cl-incf writes) 2)
+                           (signal failure '("Controlled second sibling failure"))))))
+              (condition-case err
+                  (gnosis-anki--chunk-insert
+                   gnosis-db (list items) '((9001 9002)) 2 0
+                   (gnosis--today-int) source-b)
+                (quit (should (eq (car err) failure))))))
+          (should (= writes 2))
+          (should (equal (sqlite-select gnosis-db "SELECT source_guid FROM themata")
+                         '(("guid1"))))
+          (while pending (funcall (pop pending)))
+          (should (equal commits (list (list 3 source-a))))
+          (should (equal (sqlite-select
+                          gnosis-db "SELECT source_guid, COUNT(*) FROM themata
+                                     GROUP BY source_guid ORDER BY source_guid")
+                         '(("guid1" 1) ("guid2" 2))))
+          (gnosis-anki--import-db source-b)
+          (should-not pending)
+          (dolist (table '(extras scheduler_baseline scheduler_state thema_tag))
+            (should (= 3 (caar (sqlite-select
+                               gnosis-db (format "SELECT COUNT(*) FROM %s" table))))))
+          (should-not (sqlite-select gnosis-db "PRAGMA foreign_key_check")))))))
+
+(ert-deftest gnosis-test-anki-overlap-mixed-chunk ()
+  "Filtering a stale chunk preserves IDs, GUID-less items and zero counts."
+  (gnosis-test-with-db
+    (let* ((gnosis-anki--chunk-size 1)
+           (today (gnosis--today-int))
+           (items (cl-loop for guid in '("old" "new" nil "new")
+                           for index from 0
+                           collect (list :guid guid :type "basic"
+                                         :keimenon (format "Q%d" index)
+                                         :hypothesis '("") :answer '("A")
+                                         :parathema "" :tags '("tag"))))
+           (before (copy-tree items))
+           pending completions)
+      (gnosis-anki--bulk-insert-chunk gnosis-db (list (car items)) '(700) today)
+      (cl-letf (((symbol-function 'run-with-timer)
+                 (lambda (_delay _repeat fn &rest args)
+                   (setq pending (lambda () (apply fn args)))))
+                ((symbol-function 'message)
+                 (lambda (format-string &rest args)
+                   (when (equal format-string
+                                "Anki import complete: %d imported, %d skipped")
+                     (push args completions)))))
+        (gnosis-anki--chunk-insert gnosis-db (list items) '((701 702 703 704))
+                                  4 0 today "mixed.anki2" "extra" t)
+        (funcall pending)
+        (should (equal completions '((3 1))))
+        (should (equal (gnosis-sqlite-select
+                        gnosis-db "SELECT id, keimenon FROM themata ORDER BY id")
+                       '((700 "Q0") (702 "Q1") (703 "Q2") (704 "Q3"))))
+        (should (equal items before))
+        (dolist (id '(702 703 704))
+          (should (= 1 (gnosis-get 'suspended 'scheduler-state `(= thema-id ,id))))
+          (should (equal (sort (gnosis-select 'tag 'thema-tag `(= thema-id ,id) t)
+                              #'string<)
+                         '("extra" "tag"))))
+        ;; A chunk that became entirely redundant still completes cleanly.
+        (gnosis-anki--chunk-insert gnosis-db (list (list (car items))) '((800))
+                                  1 0 today "redundant.anki2")
+        (funcall pending)
+        (should (equal completions '((0 1) (3 1))))
+        (should (= 4 (length (gnosis-select 'id 'themata))))))))
+
+(defmacro gnosis-test-anki--with-git (&rest body)
+  "Run BODY without inherited Git configuration or repository overrides."
+  (declare (indent 0) (debug t))
+  `(let ((process-environment
+          (seq-remove (lambda (entry) (string-prefix-p "GIT_" entry))
+                      process-environment)))
+     (setenv "GIT_CONFIG_NOSYSTEM" "1")
+     (setenv "GIT_CONFIG_GLOBAL" null-device)
+     (setenv "GIT_AUTHOR_NAME" "Gnosis Test")
+     (setenv "GIT_AUTHOR_EMAIL" "test@example.invalid")
+     (setenv "GIT_COMMITTER_NAME" "Gnosis Test")
+     (setenv "GIT_COMMITTER_EMAIL" "test@example.invalid")
+     ,@body))
+
+(defun gnosis-test-anki--git (directory &rest args)
+  "Run Git ARGS in DIRECTORY and return its trimmed output."
+  (let ((default-directory directory))
+    (with-temp-buffer
+      (should (zerop (apply #'call-process "git" nil t nil args)))
+      (string-trim (buffer-string)))))
+
+(defun gnosis-test-anki--wait-git ()
+  "Drain the disposable import's Git processes within five seconds."
+  (let ((deadline (+ (float-time) 5)))
+    (while (and (seq-some (lambda (process)
+                           (string-prefix-p "gnosis-git" (process-name process)))
+                         (process-list))
+                (< (float-time) deadline))
+      (accept-process-output nil 0.05))
+    (should-not (seq-some (lambda (process)
+                           (string-prefix-p "gnosis-git" (process-name process)))
+                         (process-list)))))
+
+(ert-deftest gnosis-test-anki-import-git-database-owner ()
+  "Commit the imported connection's file, not mutable directory options."
+  (skip-unless (executable-find "git"))
+  (gnosis-test-anki--with-git
+    (dolist (change '(unchanged after-dispatch before-dispatch))
+      (gnosis-test-with-db
+        (let* ((source (expand-file-name "source.anki2" gnosis-dir))
+               (db-a gnosis-db)
+               (dir-a gnosis-dir)
+               (gnosis-anki--chunk-size 1)
+               pending)
+          (gnosis-test-anki--overlap-source source 'basic '(1 2))
+          (gnosis-test-with-db
+            (let* ((db-b gnosis-db)
+                   (dir-b gnosis-dir)
+                   (before-b (sqlite-select db-b "SELECT * FROM themata"))
+                   (gnosis-db db-a)
+                   (gnosis-dir (if (eq change 'before-dispatch) dir-b dir-a))
+                   (gnosis-testing nil))
+              (cl-letf (((symbol-function 'run-with-timer)
+                         (lambda (_delay _repeat fn &rest args)
+                           (setq pending
+                                 (append pending
+                                         (list (lambda () (apply fn args))))))))
+                (gnosis-anki--import-db source)
+                (should (= 1 (caar (sqlite-select db-a "SELECT COUNT(*) FROM themata"))))
+                (unless (eq change 'unchanged)
+                  (setq gnosis-db db-b gnosis-dir dir-b))
+                (let ((current-db gnosis-db) (current-dir gnosis-dir))
+                  (while pending (funcall (pop pending)))
+                  (gnosis-test-anki--wait-git)
+                  (should (eq gnosis-db current-db))
+                  (should (equal gnosis-dir current-dir))))
+              (should (= 2 (caar (sqlite-select db-a "SELECT COUNT(*) FROM themata"))))
+              (should (equal before-b (sqlite-select db-b "SELECT * FROM themata")))
+              (should-not (file-exists-p (expand-file-name ".git" dir-b)))
+              (should (equal (gnosis-test-anki--git dir-a "log" "-1" "--format=%s")
+                             "Anki import: 2 themata from source.anki2"))
+              (should (equal (gnosis-test-anki--git dir-a "ls-tree" "--name-only" "HEAD")
+                             "gnosis.db"))
+              (should (equal (gnosis-test-anki--git dir-a "remote") ""))
+              ;; Prove the committed database contains the import, not just its message.
+              (let* ((snapshot (expand-file-name "committed.db" dir-a))
+                     (coding-system-for-write 'no-conversion))
+                (with-temp-buffer
+                  (set-buffer-multibyte nil)
+                  (let ((default-directory dir-a))
+                    (should (zerop (call-process "git" nil t nil "show" "HEAD:gnosis.db"))))
+                  (write-region (point-min) (point-max) snapshot nil 'silent))
+                (let ((committed (sqlite-open snapshot)))
+                  (unwind-protect
+                      (should (equal (sqlite-select committed
+                                                    "SELECT source_guid FROM themata ORDER BY source_guid")
+                                     '(("guid1") ("guid2"))))
+                    (sqlite-close committed)))))))))))
+
+(ert-deftest gnosis-test-anki-import-closed-owner-retry ()
+  "A closed owner aborts without Git effects; retry retains committed chunks."
+  (dolist (completed-chunks '(1 2))
+    (gnosis-test-with-db
+     (let* ((source (expand-file-name "source.anki2" gnosis-dir))
+            (db-a gnosis-db)
+            (dir-a gnosis-dir)
+            (gnosis-anki--chunk-size 1)
+            pending)
+       (gnosis-test-anki--overlap-source source 'basic '(1 2))
+       (let ((items (cdr (gnosis-anki--parse-anki-db source))))
+         (cl-letf (((symbol-function 'run-with-timer)
+                    (lambda (_delay _repeat fn &rest args)
+                      (setq pending (lambda () (apply fn args))))))
+           (gnosis-anki--chunk-insert
+            db-a (mapcar #'list items) '((901) (902)) 2 0
+            (gnosis--today-int) source)
+           (when (= completed-chunks 2) (funcall pending))
+           (sqlite-close db-a)
+           (gnosis-test-with-db
+            (let ((db-b gnosis-db) (dir-b gnosis-dir) (gnosis-testing nil))
+              (funcall pending)
+              (should (eq gnosis-db db-b))
+              (should (equal gnosis-dir dir-b))
+              (should-not (sqlite-select db-b "SELECT * FROM themata"))
+              (should-not (file-exists-p (expand-file-name ".git" dir-b)))))
+           (should-not (file-exists-p (expand-file-name ".git" dir-a)))
+           (setq gnosis-db (gnosis-db--open dir-a))
+           (should (= completed-chunks
+                      (caar (sqlite-select gnosis-db "SELECT COUNT(*) FROM themata"))))
+           (setq pending nil)
+           (gnosis-anki--import-db source)
+           (when pending (funcall pending))
+           (should (equal (sqlite-select gnosis-db
+                                         "SELECT source_guid FROM themata ORDER BY source_guid")
+                          '(("guid1") ("guid2"))))))))))
+
+(ert-deftest gnosis-test-anki-import-optional-git-failure ()
+  "Missing Git and real commit rejection preserve successful import SQL."
+  (skip-unless (executable-find "git"))
+  (gnosis-test-anki--with-git
+    (dolist (failure '(missing rejected))
+      (gnosis-test-with-db
+        (let* ((source (expand-file-name "source.anki2" gnosis-dir))
+               (gnosis-anki--chunk-size 1)
+               (gnosis-testing nil)
+               pending)
+          (gnosis-test-anki--overlap-source source 'basic '(1 2))
+          (when (eq failure 'rejected)
+            (gnosis--ensure-git-repo)
+            (let ((hook (expand-file-name ".git/hooks/pre-commit" gnosis-dir)))
+              (with-temp-file hook (insert "#!/bin/sh\nexit 1\n"))
+              (set-file-modes hook #o700)))
+          (let ((exec-path (unless (eq failure 'missing) exec-path)))
+            (cl-letf (((symbol-function 'run-with-timer)
+                       (lambda (_delay _repeat fn &rest args)
+                         (setq pending
+                               (append pending (list (lambda () (apply fn args))))))))
+              (gnosis-anki--import-db source)
+              (while pending (funcall (pop pending)))
+              (gnosis-test-anki--wait-git)))
+          (should (= 2 (caar (sqlite-select gnosis-db "SELECT COUNT(*) FROM themata"))))
+          (should-not (file-exists-p (expand-file-name ".git/refs/heads/master" gnosis-dir)))
+          (when (eq failure 'missing)
+            (should-not (file-exists-p (expand-file-name ".git" gnosis-dir)))))))))
+
+(ert-deftest gnosis-test-anki-import-nonstandard-database ()
+  "Never commit a neighboring gnosis.db for an unversionable import owner."
+  (dolist (filename '(nil "other.db"))
+    (gnosis-test-with-db
+      (let* ((source (expand-file-name "source.anki2" gnosis-dir))
+             (owner (sqlite-open (and filename (expand-file-name filename gnosis-dir))))
+             (configured-db gnosis-db)
+             (gnosis-db owner)
+             (gnosis-anki--chunk-size 1)
+             commits pending)
+        (unwind-protect
+            (progn
+              (gnosis-db-init)
+              (gnosis-test-anki--overlap-source source 'basic '(1 2))
+              (let ((gnosis-testing nil))
+                (cl-letf (((symbol-function 'gnosis-anki--commit-import)
+                           (lambda (&rest args) (push args commits)))
+                          ((symbol-function 'run-with-timer)
+                           (lambda (_delay _repeat fn &rest args)
+                             (setq pending
+                                   (append pending (list (lambda () (apply fn args))))))))
+                  (gnosis-anki--import-db source)
+                  (while pending (funcall (pop pending)))))
+              (should-not commits)
+              (should (= 2 (caar (sqlite-select owner "SELECT COUNT(*) FROM themata"))))
+              (should-not (sqlite-select configured-db "SELECT * FROM themata"))
+              (should-not (file-exists-p (expand-file-name ".git" gnosis-dir))))
+          (sqlite-close owner))))))
+
+(ert-deftest gnosis-test-anki-import-modern-notetype-kind ()
+  "Persist semantic kinds from protobuf, independently of template labels."
+  (dolist (spec '((cloze "Anatomy" (8 1))
+                  (cloze "Ανατομία" (8 1))
+                  (basic "Cloze" ())
+                  (basic "Cloze" (8 0))
+                  ;; sort_field_idx=1 and CSS containing kind-like bytes must
+                  ;; not be mistaken for the top-level enum, wherever it occurs.
+                  (cloze "Renamed" (16 1 26 2 8 0 8 1))
+                  (basic "Cloze" (26 2 8 1))
+                  (basic "Cloze" (8 1 8 0))))
+    (gnosis-test-with-db
+      (let* ((file (expand-file-name "source.anki2" gnosis-dir))
+             (source (sqlite-open file))
+             (kind (nth 0 spec))
+             pending)
+        (unwind-protect
+            (progn
+              (gnosis-test-anki--create-schema source)
+              (gnosis-test-anki--insert-notetype source 200 "Medicine" kind)
+              (sqlite-execute source "UPDATE notetypes SET config = ?"
+                              (list (apply #'unibyte-string (nth 2 spec))))
+              (sqlite-execute source "UPDATE templates SET name = ?" (list (nth 1 spec)))
+              (gnosis-test-anki--insert-note
+               source 1 200
+               (if (eq kind 'cloze)
+                   (concat "The {{c1::heart}} pumps blood" (string 31) "Extra context")
+                 (concat "Question" (string 31) "Answer")) "")
+              (cl-letf (((symbol-function 'run-with-timer)
+                         (lambda (_delay _repeat fn &rest args)
+                           (setq pending (lambda () (apply fn args))))))
+                (gnosis-anki--import-db file)
+                (when pending (funcall pending)))
+              (should (equal (gnosis-select '[type keimenon answer] 'themata)
+                             (if (eq kind 'cloze)
+                                 '(("cloze" "The heart pumps blood" ("heart")))
+                               '(("basic" "Question" ("Answer")))))))
+          (sqlite-close source))))))
+
+(ert-deftest gnosis-test-anki-notetype-kind-protobuf ()
+  "Decode full field tags and skip unknown fields without scanning their bodies."
+  (dolist (bytes '((8 1)
+                    (249 15 0 0 0 0 0 0 0 0 8 1)
+                    (250 15 2 8 0 8 1)
+                    (253 15 0 0 0 0 8 1)))
+    (should (= 1 (gnosis-anki--notetype-kind (apply #'unibyte-string bytes))))))
+
+(ert-deftest gnosis-test-anki-import-invalid-kind-refuses-and-retries ()
+  "Malformed and unsupported kind configs refuse before writes and permit repair."
+  (dolist (bytes '((8 2) (8) (128) (26 5 0) (0) (10 0)))
+    (gnosis-test-with-db
+      (let* ((file (expand-file-name "source.anki2" gnosis-dir))
+             (source (sqlite-open file))
+             pending)
+        (unwind-protect
+            (progn
+              (gnosis-test-anki--create-schema source)
+              (gnosis-test-anki--insert-notetype source 200 "Medicine" 'cloze)
+              (gnosis-test-anki--insert-note
+               source 1 200 (concat "The {{c1::heart}}" (string 31) "Extra") "")
+              (sqlite-execute source "UPDATE notetypes SET config = ?"
+                              (list (apply #'unibyte-string bytes)))
+              (should-error (gnosis-anki--import-db file))
+              (should-not (gnosis-select '* 'themata))
+              (should-not (file-exists-p (expand-file-name ".git" gnosis-dir)))
+              (sqlite-execute source "UPDATE notetypes SET config = x'0801'")
+              (cl-letf (((symbol-function 'run-with-timer)
+                         (lambda (_delay _repeat fn &rest args)
+                           (setq pending (lambda () (apply fn args))))))
+                (gnosis-anki--import-db file)
+                (funcall pending))
+              (should (equal (gnosis-select '[type answer] 'themata)
+                             '(("cloze" ("heart"))))))
+          (sqlite-close source))))))
+
+(provide 'gnosis-test-anki)
+
+;;; gnosis-test-anki.el ends here

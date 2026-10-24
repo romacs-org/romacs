@@ -1,0 +1,827 @@
+{
+  "protocol": "widen-gnu-offline-v1",
+  "limitations": {
+    "vector": "Vector sequence traversal / vector reader substrate is not yet exposed to Leaf.",
+    "text-properties": "Property-bearing string storage and property inspection are not implemented.",
+    "unibyte": "Distinct unibyte strings / Emacs raw-byte characters are not implemented.",
+    "extended-character": "GNU non-Unicode character codes exceed the Unicode-only string substrate."
+  },
+  "cases": [
+    {
+      "id": "symbol-name/nil",
+      "primitive": "symbol-name",
+      "expression": "(symbol-name nil)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (symbol-name nil)) (error (list 'sig e))))"
+    },
+    {
+      "id": "symbol-name/t",
+      "primitive": "symbol-name",
+      "expression": "(symbol-name t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (symbol-name t)) (error (list 'sig e))))"
+    },
+    {
+      "id": "symbol-name/ordinary",
+      "primitive": "symbol-name",
+      "expression": "(symbol-name 'widen-name)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (symbol-name 'widen-name)) (error (list 'sig e))))"
+    },
+    {
+      "id": "symbol-name/keyword",
+      "primitive": "symbol-name",
+      "expression": "(symbol-name :widen)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (symbol-name :widen)) (error (list 'sig e))))"
+    },
+    {
+      "id": "symbol-name/unicode",
+      "primitive": "symbol-name",
+      "expression": "(symbol-name 'λ雪😀)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (symbol-name 'λ雪😀)) (error (list 'sig e))))"
+    },
+    {
+      "id": "symbol-name/empty-name",
+      "primitive": "symbol-name",
+      "expression": "(symbol-name (intern \"\"))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (symbol-name (intern \"\"))) (error (list 'sig e))))"
+    },
+    {
+      "id": "symbol-name/escaped-name",
+      "primitive": "symbol-name",
+      "expression": "(symbol-name 'a\\ b)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (symbol-name 'a\\ b)) (error (list 'sig e))))"
+    },
+    {
+      "id": "symbol-name/integer",
+      "primitive": "symbol-name",
+      "expression": "(symbol-name 7)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (symbol-name 7)) (error (list 'sig e))))"
+    },
+    {
+      "id": "symbol-name/negative",
+      "primitive": "symbol-name",
+      "expression": "(symbol-name -1)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (symbol-name -1)) (error (list 'sig e))))"
+    },
+    {
+      "id": "symbol-name/float",
+      "primitive": "symbol-name",
+      "expression": "(symbol-name 1.5)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (symbol-name 1.5)) (error (list 'sig e))))"
+    },
+    {
+      "id": "symbol-name/string",
+      "primitive": "symbol-name",
+      "expression": "(symbol-name \"hello\")",
+      "source": "(prin1-to-string (condition-case e (list 'ok (symbol-name \"hello\")) (error (list 'sig e))))"
+    },
+    {
+      "id": "symbol-name/empty-string",
+      "primitive": "symbol-name",
+      "expression": "(symbol-name \"\")",
+      "source": "(prin1-to-string (condition-case e (list 'ok (symbol-name \"\")) (error (list 'sig e))))"
+    },
+    {
+      "id": "symbol-name/list",
+      "primitive": "symbol-name",
+      "expression": "(symbol-name '(a b))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (symbol-name '(a b))) (error (list 'sig e))))"
+    },
+    {
+      "id": "symbol-name/dotted",
+      "primitive": "symbol-name",
+      "expression": "(symbol-name '(a . b))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (symbol-name '(a . b))) (error (list 'sig e))))"
+    },
+    {
+      "id": "symbol-name/vector",
+      "primitive": "symbol-name",
+      "expression": "(symbol-name [65 66])",
+      "source": "(prin1-to-string (condition-case e (list 'ok (symbol-name [65 66])) (error (list 'sig e))))",
+      "limitation": "vector"
+    },
+    {
+      "id": "symbol-name/arity-0",
+      "primitive": "symbol-name",
+      "expression": "(apply #'symbol-name '())",
+      "source": "(prin1-to-string (condition-case e (list 'ok (apply #'symbol-name '())) (error (list 'sig e))))"
+    },
+    {
+      "id": "symbol-name/arity-2",
+      "primitive": "symbol-name",
+      "expression": "(apply #'symbol-name '(1 1))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (apply #'symbol-name '(1 1))) (error (list 'sig e))))"
+    },
+    {
+      "id": "symbol-name/arity-4",
+      "primitive": "symbol-name",
+      "expression": "(apply #'symbol-name '(1 1 1 1))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (apply #'symbol-name '(1 1 1 1))) (error (list 'sig e))))"
+    },
+    {
+      "id": "concat/zero",
+      "primitive": "concat",
+      "expression": "(concat)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (concat)) (error (list 'sig e))))"
+    },
+    {
+      "id": "concat/empty",
+      "primitive": "concat",
+      "expression": "(concat \"\")",
+      "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq widen-arg-0 \"\") (concat widen-arg-0))) (error (list 'sig e))))"
+    },
+    {
+      "id": "concat/nil",
+      "primitive": "concat",
+      "expression": "(concat nil)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq widen-arg-0 nil) (concat widen-arg-0))) (error (list 'sig e))))"
+    },
+    {
+      "id": "concat/nils",
+      "primitive": "concat",
+      "expression": "(concat nil nil nil)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq widen-arg-0 nil) (setq widen-arg-1 nil) (setq widen-arg-2 nil) (concat widen-arg-0 widen-arg-1 widen-arg-2))) (error (list 'sig e))))"
+    },
+    {
+      "id": "concat/one",
+      "primitive": "concat",
+      "expression": "(concat \"abc\")",
+      "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq widen-arg-0 \"abc\") (concat widen-arg-0))) (error (list 'sig e))))"
+    },
+    {
+      "id": "concat/unicode",
+      "primitive": "concat",
+      "expression": "(concat \"λ\" \"雪\" \"😀\")",
+      "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq widen-arg-0 \"λ\") (setq widen-arg-1 \"雪\") (setq widen-arg-2 \"😀\") (concat widen-arg-0 widen-arg-1 widen-arg-2))) (error (list 'sig e))))"
+    },
+    {
+      "id": "concat/several",
+      "primitive": "concat",
+      "expression": "(concat \"a\" \"\" \"bc\" \"d\")",
+      "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq widen-arg-0 \"a\") (setq widen-arg-1 \"\") (setq widen-arg-2 \"bc\") (setq widen-arg-3 \"d\") (concat widen-arg-0 widen-arg-1 widen-arg-2 widen-arg-3))) (error (list 'sig e))))"
+    },
+    {
+      "id": "concat/mixed-nil",
+      "primitive": "concat",
+      "expression": "(concat nil \"a\" nil \"β\" nil)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq widen-arg-0 nil) (setq widen-arg-1 \"a\") (setq widen-arg-2 nil) (setq widen-arg-3 \"β\") (setq widen-arg-4 nil) (concat widen-arg-0 widen-arg-1 widen-arg-2 widen-arg-3 widen-arg-4))) (error (list 'sig e))))"
+    },
+    {
+      "id": "concat/many",
+      "primitive": "concat",
+      "expression": "(concat \"0\" \"1\" \"2\" \"3\" \"4\" \"5\" \"6\" \"7\" \"8\" \"9\" \"0\" \"1\" \"2\" \"3\" \"4\" \"5\" \"6\" \"7\" \"8\" \"9\" \"0\" \"1\" \"2\" \"3\" \"4\" \"5\" \"6\" \"7\" \"8\" \"9\" \"0\" \"1\" \"2\" \"3\" \"4\" \"5\" \"6\" \"7\" \"8\" \"9\" \"0\" \"1\" \"2\" \"3\" \"4\" \"5\" \"6\" \"7\" \"8\" \"9\" \"0\" \"1\" \"2\" \"3\" \"4\" \"5\" \"6\" \"7\" \"8\" \"9\" \"0\" \"1\" \"2\" \"3\" \"4\" \"5\" \"6\" \"7\" \"8\" \"9\" \"0\" \"1\" \"2\" \"3\" \"4\" \"5\" \"6\" \"7\" \"8\" \"9\" \"0\" \"1\" \"2\" \"3\" \"4\" \"5\" \"6\" \"7\" \"8\" \"9\" \"0\" \"1\" \"2\" \"3\" \"4\" \"5\" \"6\" \"7\" \"8\" \"9\" \"0\" \"1\" \"2\" \"3\" \"4\" \"5\" \"6\" \"7\" \"8\" \"9\" \"0\" \"1\" \"2\" \"3\" \"4\" \"5\" \"6\" \"7\" \"8\" \"9\" \"0\" \"1\" \"2\" \"3\" \"4\" \"5\" \"6\" \"7\")",
+      "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq widen-arg-0 \"0\") (setq widen-arg-1 \"1\") (setq widen-arg-2 \"2\") (setq widen-arg-3 \"3\") (setq widen-arg-4 \"4\") (setq widen-arg-5 \"5\") (setq widen-arg-6 \"6\") (setq widen-arg-7 \"7\") (setq widen-arg-8 \"8\") (setq widen-arg-9 \"9\") (setq widen-arg-10 \"0\") (setq widen-arg-11 \"1\") (setq widen-arg-12 \"2\") (setq widen-arg-13 \"3\") (setq widen-arg-14 \"4\") (setq widen-arg-15 \"5\") (setq widen-arg-16 \"6\") (setq widen-arg-17 \"7\") (setq widen-arg-18 \"8\") (setq widen-arg-19 \"9\") (setq widen-arg-20 \"0\") (setq widen-arg-21 \"1\") (setq widen-arg-22 \"2\") (setq widen-arg-23 \"3\") (setq widen-arg-24 \"4\") (setq widen-arg-25 \"5\") (setq widen-arg-26 \"6\") (setq widen-arg-27 \"7\") (setq widen-arg-28 \"8\") (setq widen-arg-29 \"9\") (setq widen-arg-30 \"0\") (setq widen-arg-31 \"1\") (setq widen-arg-32 \"2\") (setq widen-arg-33 \"3\") (setq widen-arg-34 \"4\") (setq widen-arg-35 \"5\") (setq widen-arg-36 \"6\") (setq widen-arg-37 \"7\") (setq widen-arg-38 \"8\") (setq widen-arg-39 \"9\") (setq widen-arg-40 \"0\") (setq widen-arg-41 \"1\") (setq widen-arg-42 \"2\") (setq widen-arg-43 \"3\") (setq widen-arg-44 \"4\") (setq widen-arg-45 \"5\") (setq widen-arg-46 \"6\") (setq widen-arg-47 \"7\") (setq widen-arg-48 \"8\") (setq widen-arg-49 \"9\") (setq widen-arg-50 \"0\") (setq widen-arg-51 \"1\") (setq widen-arg-52 \"2\") (setq widen-arg-53 \"3\") (setq widen-arg-54 \"4\") (setq widen-arg-55 \"5\") (setq widen-arg-56 \"6\") (setq widen-arg-57 \"7\") (setq widen-arg-58 \"8\") (setq widen-arg-59 \"9\") (setq widen-arg-60 \"0\") (setq widen-arg-61 \"1\") (setq widen-arg-62 \"2\") (setq widen-arg-63 \"3\") (setq widen-arg-64 \"4\") (setq widen-arg-65 \"5\") (setq widen-arg-66 \"6\") (setq widen-arg-67 \"7\") (setq widen-arg-68 \"8\") (setq widen-arg-69 \"9\") (setq widen-arg-70 \"0\") (setq widen-arg-71 \"1\") (setq widen-arg-72 \"2\") (setq widen-arg-73 \"3\") (setq widen-arg-74 \"4\") (setq widen-arg-75 \"5\") (setq widen-arg-76 \"6\") (setq widen-arg-77 \"7\") (setq widen-arg-78 \"8\") (setq widen-arg-79 \"9\") (setq widen-arg-80 \"0\") (setq widen-arg-81 \"1\") (setq widen-arg-82 \"2\") (setq widen-arg-83 \"3\") (setq widen-arg-84 \"4\") (setq widen-arg-85 \"5\") (setq widen-arg-86 \"6\") (setq widen-arg-87 \"7\") (setq widen-arg-88 \"8\") (setq widen-arg-89 \"9\") (setq widen-arg-90 \"0\") (setq widen-arg-91 \"1\") (setq widen-arg-92 \"2\") (setq widen-arg-93 \"3\") (setq widen-arg-94 \"4\") (setq widen-arg-95 \"5\") (setq widen-arg-96 \"6\") (setq widen-arg-97 \"7\") (setq widen-arg-98 \"8\") (setq widen-arg-99 \"9\") (setq widen-arg-100 \"0\") (setq widen-arg-101 \"1\") (setq widen-arg-102 \"2\") (setq widen-arg-103 \"3\") (setq widen-arg-104 \"4\") (setq widen-arg-105 \"5\") (setq widen-arg-106 \"6\") (setq widen-arg-107 \"7\") (setq widen-arg-108 \"8\") (setq widen-arg-109 \"9\") (setq widen-arg-110 \"0\") (setq widen-arg-111 \"1\") (setq widen-arg-112 \"2\") (setq widen-arg-113 \"3\") (setq widen-arg-114 \"4\") (setq widen-arg-115 \"5\") (setq widen-arg-116 \"6\") (setq widen-arg-117 \"7\") (setq widen-arg-118 \"8\") (setq widen-arg-119 \"9\") (setq widen-arg-120 \"0\") (setq widen-arg-121 \"1\") (setq widen-arg-122 \"2\") (setq widen-arg-123 \"3\") (setq widen-arg-124 \"4\") (setq widen-arg-125 \"5\") (setq widen-arg-126 \"6\") (setq widen-arg-127 \"7\") (concat widen-arg-0 widen-arg-1 widen-arg-2 widen-arg-3 widen-arg-4 widen-arg-5 widen-arg-6 widen-arg-7 widen-arg-8 widen-arg-9 widen-arg-10 widen-arg-11 widen-arg-12 widen-arg-13 widen-arg-14 widen-arg-15 widen-arg-16 widen-arg-17 widen-arg-18 widen-arg-19 widen-arg-20 widen-arg-21 widen-arg-22 widen-arg-23 widen-arg-24 widen-arg-25 widen-arg-26 widen-arg-27 widen-arg-28 widen-arg-29 widen-arg-30 widen-arg-31 widen-arg-32 widen-arg-33 widen-arg-34 widen-arg-35 widen-arg-36 widen-arg-37 widen-arg-38 widen-arg-39 widen-arg-40 widen-arg-41 widen-arg-42 widen-arg-43 widen-arg-44 widen-arg-45 widen-arg-46 widen-arg-47 widen-arg-48 widen-arg-49 widen-arg-50 widen-arg-51 widen-arg-52 widen-arg-53 widen-arg-54 widen-arg-55 widen-arg-56 widen-arg-57 widen-arg-58 widen-arg-59 widen-arg-60 widen-arg-61 widen-arg-62 widen-arg-63 widen-arg-64 widen-arg-65 widen-arg-66 widen-arg-67 widen-arg-68 widen-arg-69 widen-arg-70 widen-arg-71 widen-arg-72 widen-arg-73 widen-arg-74 widen-arg-75 widen-arg-76 widen-arg-77 widen-arg-78 widen-arg-79 widen-arg-80 widen-arg-81 widen-arg-82 widen-arg-83 widen-arg-84 widen-arg-85 widen-arg-86 widen-arg-87 widen-arg-88 widen-arg-89 widen-arg-90 widen-arg-91 widen-arg-92 widen-arg-93 widen-arg-94 widen-arg-95 widen-arg-96 widen-arg-97 widen-arg-98 widen-arg-99 widen-arg-100 widen-arg-101 widen-arg-102 widen-arg-103 widen-arg-104 widen-arg-105 widen-arg-106 widen-arg-107 widen-arg-108 widen-arg-109 widen-arg-110 widen-arg-111 widen-arg-112 widen-arg-113 widen-arg-114 widen-arg-115 widen-arg-116 widen-arg-117 widen-arg-118 widen-arg-119 widen-arg-120 widen-arg-121 widen-arg-122 widen-arg-123 widen-arg-124 widen-arg-125 widen-arg-126 widen-arg-127))) (error (list 'sig e))))"
+    },
+    {
+      "id": "concat/list-empty",
+      "primitive": "concat",
+      "expression": "(concat '())",
+      "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq widen-arg-0 '()) (concat widen-arg-0))) (error (list 'sig e))))"
+    },
+    {
+      "id": "concat/list-ascii",
+      "primitive": "concat",
+      "expression": "(concat '(65 0 66))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq widen-arg-0 '(65 0 66)) (concat widen-arg-0))) (error (list 'sig e))))"
+    },
+    {
+      "id": "concat/list-unicode",
+      "primitive": "concat",
+      "expression": "(concat '(955 38634 128512))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq widen-arg-0 '(955 38634 128512)) (concat widen-arg-0))) (error (list 'sig e))))"
+    },
+    {
+      "id": "concat/list-mixed",
+      "primitive": "concat",
+      "expression": "(concat '(65) \"β\" nil '(67 68))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq widen-arg-0 '(65)) (setq widen-arg-1 \"β\") (setq widen-arg-2 nil) (setq widen-arg-3 '(67 68)) (concat widen-arg-0 widen-arg-1 widen-arg-2 widen-arg-3))) (error (list 'sig e))))"
+    },
+    {
+      "id": "concat/dotted",
+      "primitive": "concat",
+      "expression": "(concat '(65 . 66))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq widen-arg-0 '(65 . 66)) (concat widen-arg-0))) (error (list 'sig e))))"
+    },
+    {
+      "id": "concat/dotted-bad-first",
+      "primitive": "concat",
+      "expression": "(concat '(bad . 66))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq widen-arg-0 '(bad . 66)) (concat widen-arg-0))) (error (list 'sig e))))"
+    },
+    {
+      "id": "concat/dotted-tail",
+      "primitive": "concat",
+      "expression": "(concat '(65 66 . bad))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq widen-arg-0 '(65 66 . bad)) (concat widen-arg-0))) (error (list 'sig e))))"
+    },
+    {
+      "id": "concat/error-order",
+      "primitive": "concat",
+      "expression": "(concat '(65 bad) 7)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq widen-arg-0 '(65 bad)) (setq widen-arg-1 7) (concat widen-arg-0 widen-arg-1))) (error (list 'sig e))))"
+    },
+    {
+      "id": "concat/late-error",
+      "primitive": "concat",
+      "expression": "(concat \"ok\" nil 7)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq widen-arg-0 \"ok\") (setq widen-arg-1 nil) (setq widen-arg-2 7) (concat widen-arg-0 widen-arg-1 widen-arg-2))) (error (list 'sig e))))"
+    },
+    {
+      "id": "concat/cycle",
+      "primitive": "concat",
+      "expression": "(let ((x (list 65))) (setcdr x x) (condition-case e (concat x) (error (let ((payload (car (cdr e)))) (list (car e) (car payload) (eq payload x) (eq (cdr payload) payload) (cdr (cdr e)))))))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (let ((x (list 65))) (setcdr x x) (condition-case e (concat x) (error (let ((payload (car (cdr e)))) (list (car e) (car payload) (eq payload x) (eq (cdr payload) payload) (cdr (cdr e)))))))) (error (list 'sig e))))"
+    },
+    {
+      "id": "concat/bad-sequence-integer",
+      "primitive": "concat",
+      "expression": "(concat 65)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq widen-arg-0 65) (concat widen-arg-0))) (error (list 'sig e))))"
+    },
+    {
+      "id": "concat/bad-sequence-float",
+      "primitive": "concat",
+      "expression": "(concat 1.5)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq widen-arg-0 1.5) (concat widen-arg-0))) (error (list 'sig e))))"
+    },
+    {
+      "id": "concat/bad-sequence-symbol",
+      "primitive": "concat",
+      "expression": "(concat 'bad)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq widen-arg-0 'bad) (concat widen-arg-0))) (error (list 'sig e))))"
+    },
+    {
+      "id": "concat/bad-sequence-t",
+      "primitive": "concat",
+      "expression": "(concat t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq widen-arg-0 t) (concat widen-arg-0))) (error (list 'sig e))))"
+    },
+    {
+      "id": "concat/character-negative",
+      "primitive": "concat",
+      "expression": "(concat '(-1))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq widen-arg-0 '(-1)) (concat widen-arg-0))) (error (list 'sig e))))"
+    },
+    {
+      "id": "concat/character-too-large",
+      "primitive": "concat",
+      "expression": "(concat '(4194304))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq widen-arg-0 '(4194304)) (concat widen-arg-0))) (error (list 'sig e))))"
+    },
+    {
+      "id": "concat/character-float",
+      "primitive": "concat",
+      "expression": "(concat '(1.5))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq widen-arg-0 '(1.5)) (concat widen-arg-0))) (error (list 'sig e))))"
+    },
+    {
+      "id": "concat/character-symbol",
+      "primitive": "concat",
+      "expression": "(concat '(bad))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq widen-arg-0 '(bad)) (concat widen-arg-0))) (error (list 'sig e))))"
+    },
+    {
+      "id": "concat/character-nil",
+      "primitive": "concat",
+      "expression": "(concat '(nil))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq widen-arg-0 '(nil)) (concat widen-arg-0))) (error (list 'sig e))))"
+    },
+    {
+      "id": "concat/character-t",
+      "primitive": "concat",
+      "expression": "(concat '(t))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq widen-arg-0 '(t)) (concat widen-arg-0))) (error (list 'sig e))))"
+    },
+    {
+      "id": "concat/character-string",
+      "primitive": "concat",
+      "expression": "(concat '(\"a\"))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq widen-arg-0 '(\"a\")) (concat widen-arg-0))) (error (list 'sig e))))"
+    },
+    {
+      "id": "concat/character-cons",
+      "primitive": "concat",
+      "expression": "(concat '((65)))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq widen-arg-0 '((65))) (concat widen-arg-0))) (error (list 'sig e))))"
+    },
+    {
+      "id": "concat/character-unicode-max",
+      "primitive": "concat",
+      "expression": "(concat '(1114111))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq widen-arg-0 '(1114111)) (concat widen-arg-0))) (error (list 'sig e))))"
+    },
+    {
+      "id": "concat/character-beyond-unicode",
+      "primitive": "concat",
+      "expression": "(concat '(1114112))",
+      "source": "(let ((print-escape-nonascii t) (print-escape-multibyte t)) (prin1-to-string (condition-case e (list 'ok (progn (setq widen-arg-0 '(1114112)) (concat widen-arg-0))) (error (list 'sig e)))))",
+      "limitation": "extended-character"
+    },
+    {
+      "id": "concat/vector-empty",
+      "primitive": "concat",
+      "expression": "(concat [])",
+      "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq widen-arg-0 []) (concat widen-arg-0))) (error (list 'sig e))))",
+      "limitation": "vector"
+    },
+    {
+      "id": "concat/vector-ascii",
+      "primitive": "concat",
+      "expression": "(concat [65 66])",
+      "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq widen-arg-0 [65 66]) (concat widen-arg-0))) (error (list 'sig e))))",
+      "limitation": "vector"
+    },
+    {
+      "id": "concat/vector-unicode",
+      "primitive": "concat",
+      "expression": "(concat [955 38634 128512])",
+      "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq widen-arg-0 [955 38634 128512]) (concat widen-arg-0))) (error (list 'sig e))))",
+      "limitation": "vector"
+    },
+    {
+      "id": "concat/vector-mixed",
+      "primitive": "concat",
+      "expression": "(concat \"a\" [66] nil '(67))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq widen-arg-0 \"a\") (setq widen-arg-1 [66]) (setq widen-arg-2 nil) (setq widen-arg-3 '(67)) (concat widen-arg-0 widen-arg-1 widen-arg-2 widen-arg-3))) (error (list 'sig e))))",
+      "limitation": "vector"
+    },
+    {
+      "id": "concat/vector-negative",
+      "primitive": "concat",
+      "expression": "(concat [-1])",
+      "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq widen-arg-0 [-1]) (concat widen-arg-0))) (error (list 'sig e))))",
+      "limitation": "vector"
+    },
+    {
+      "id": "concat/vector-bad",
+      "primitive": "concat",
+      "expression": "(concat [65 bad])",
+      "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq widen-arg-0 [65 bad]) (concat widen-arg-0))) (error (list 'sig e))))",
+      "limitation": "vector"
+    },
+    {
+      "id": "concat/vector-dotted-precedence",
+      "primitive": "concat",
+      "expression": "(concat [bad] 7)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq widen-arg-0 [bad]) (setq widen-arg-1 7) (concat widen-arg-0 widen-arg-1))) (error (list 'sig e))))",
+      "limitation": "vector"
+    },
+    {
+      "id": "concat/unibyte-raw",
+      "primitive": "concat",
+      "expression": "(concat (unibyte-string 128 255))",
+      "source": "(let ((print-escape-nonascii t) (print-escape-multibyte t)) (prin1-to-string (condition-case e (list 'ok (progn (setq widen-arg-0 (unibyte-string 128 255)) (concat widen-arg-0))) (error (list 'sig e)))))",
+      "limitation": "unibyte"
+    },
+    {
+      "id": "concat/unibyte-mixed",
+      "primitive": "concat",
+      "expression": "(concat (unibyte-string 255) \"λ\")",
+      "source": "(let ((print-escape-nonascii t) (print-escape-multibyte t)) (prin1-to-string (condition-case e (list 'ok (progn (setq widen-arg-0 (unibyte-string 255)) (setq widen-arg-1 \"λ\") (concat widen-arg-0 widen-arg-1))) (error (list 'sig e)))))",
+      "limitation": "unibyte"
+    },
+    {
+      "id": "concat/unibyte-kind",
+      "primitive": "concat",
+      "expression": "(multibyte-string-p (concat (unibyte-string 65)))",
+      "source": "(let ((print-escape-nonascii t) (print-escape-multibyte t)) (prin1-to-string (condition-case e (list 'ok (multibyte-string-p (concat (unibyte-string 65)))) (error (list 'sig e)))))",
+      "limitation": "unibyte"
+    },
+    {
+      "id": "concat/properties-reader",
+      "primitive": "concat",
+      "expression": "(concat #(\"ab\" 0 1 (face bold)) \"c\")",
+      "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq widen-arg-0 #(\"ab\" 0 1 (face bold))) (setq widen-arg-1 \"c\") (concat widen-arg-0 widen-arg-1))) (error (list 'sig e))))",
+      "limitation": "text-properties"
+    },
+    {
+      "id": "concat/properties-inspect",
+      "primitive": "concat",
+      "expression": "(get-text-property 0 'face (concat (propertize \"a\" 'face 'bold) \"b\"))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (get-text-property 0 'face (concat (propertize \"a\" 'face 'bold) \"b\"))) (error (list 'sig e))))",
+      "limitation": "text-properties"
+    },
+    {
+      "id": "indirect-function/nil-omitted",
+      "primitive": "indirect-function",
+      "expression": "(indirect-function nil)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (indirect-function nil)) (error (list 'sig e))))"
+    },
+    {
+      "id": "indirect-function/nil-nil",
+      "primitive": "indirect-function",
+      "expression": "(indirect-function nil nil)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (indirect-function nil nil)) (error (list 'sig e))))"
+    },
+    {
+      "id": "indirect-function/nil-t",
+      "primitive": "indirect-function",
+      "expression": "(indirect-function nil t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (indirect-function nil t)) (error (list 'sig e))))"
+    },
+    {
+      "id": "indirect-function/nil-arbitrary",
+      "primitive": "indirect-function",
+      "expression": "(indirect-function nil '(anything . 9))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (indirect-function nil '(anything . 9))) (error (list 'sig e))))"
+    },
+    {
+      "id": "indirect-function/t-omitted",
+      "primitive": "indirect-function",
+      "expression": "(indirect-function t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (indirect-function t)) (error (list 'sig e))))"
+    },
+    {
+      "id": "indirect-function/t-nil",
+      "primitive": "indirect-function",
+      "expression": "(indirect-function t nil)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (indirect-function t nil)) (error (list 'sig e))))"
+    },
+    {
+      "id": "indirect-function/t-t",
+      "primitive": "indirect-function",
+      "expression": "(indirect-function t t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (indirect-function t t)) (error (list 'sig e))))"
+    },
+    {
+      "id": "indirect-function/t-arbitrary",
+      "primitive": "indirect-function",
+      "expression": "(indirect-function t '(anything . 9))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (indirect-function t '(anything . 9))) (error (list 'sig e))))"
+    },
+    {
+      "id": "indirect-function/unbound-omitted",
+      "primitive": "indirect-function",
+      "expression": "(indirect-function 'widen-unbound)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (indirect-function 'widen-unbound)) (error (list 'sig e))))"
+    },
+    {
+      "id": "indirect-function/unbound-nil",
+      "primitive": "indirect-function",
+      "expression": "(indirect-function 'widen-unbound nil)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (indirect-function 'widen-unbound nil)) (error (list 'sig e))))"
+    },
+    {
+      "id": "indirect-function/unbound-t",
+      "primitive": "indirect-function",
+      "expression": "(indirect-function 'widen-unbound t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (indirect-function 'widen-unbound t)) (error (list 'sig e))))"
+    },
+    {
+      "id": "indirect-function/unbound-arbitrary",
+      "primitive": "indirect-function",
+      "expression": "(indirect-function 'widen-unbound '(anything . 9))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (indirect-function 'widen-unbound '(anything . 9))) (error (list 'sig e))))"
+    },
+    {
+      "id": "indirect-function/integer-omitted",
+      "primitive": "indirect-function",
+      "expression": "(indirect-function 7)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (indirect-function 7)) (error (list 'sig e))))"
+    },
+    {
+      "id": "indirect-function/integer-nil",
+      "primitive": "indirect-function",
+      "expression": "(indirect-function 7 nil)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (indirect-function 7 nil)) (error (list 'sig e))))"
+    },
+    {
+      "id": "indirect-function/integer-t",
+      "primitive": "indirect-function",
+      "expression": "(indirect-function 7 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (indirect-function 7 t)) (error (list 'sig e))))"
+    },
+    {
+      "id": "indirect-function/integer-arbitrary",
+      "primitive": "indirect-function",
+      "expression": "(indirect-function 7 '(anything . 9))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (indirect-function 7 '(anything . 9))) (error (list 'sig e))))"
+    },
+    {
+      "id": "indirect-function/negative-omitted",
+      "primitive": "indirect-function",
+      "expression": "(indirect-function -2)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (indirect-function -2)) (error (list 'sig e))))"
+    },
+    {
+      "id": "indirect-function/negative-nil",
+      "primitive": "indirect-function",
+      "expression": "(indirect-function -2 nil)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (indirect-function -2 nil)) (error (list 'sig e))))"
+    },
+    {
+      "id": "indirect-function/negative-t",
+      "primitive": "indirect-function",
+      "expression": "(indirect-function -2 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (indirect-function -2 t)) (error (list 'sig e))))"
+    },
+    {
+      "id": "indirect-function/negative-arbitrary",
+      "primitive": "indirect-function",
+      "expression": "(indirect-function -2 '(anything . 9))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (indirect-function -2 '(anything . 9))) (error (list 'sig e))))"
+    },
+    {
+      "id": "indirect-function/float-omitted",
+      "primitive": "indirect-function",
+      "expression": "(indirect-function 1.5)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (indirect-function 1.5)) (error (list 'sig e))))"
+    },
+    {
+      "id": "indirect-function/float-nil",
+      "primitive": "indirect-function",
+      "expression": "(indirect-function 1.5 nil)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (indirect-function 1.5 nil)) (error (list 'sig e))))"
+    },
+    {
+      "id": "indirect-function/float-t",
+      "primitive": "indirect-function",
+      "expression": "(indirect-function 1.5 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (indirect-function 1.5 t)) (error (list 'sig e))))"
+    },
+    {
+      "id": "indirect-function/float-arbitrary",
+      "primitive": "indirect-function",
+      "expression": "(indirect-function 1.5 '(anything . 9))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (indirect-function 1.5 '(anything . 9))) (error (list 'sig e))))"
+    },
+    {
+      "id": "indirect-function/string-omitted",
+      "primitive": "indirect-function",
+      "expression": "(indirect-function \"λ雪\")",
+      "source": "(prin1-to-string (condition-case e (list 'ok (indirect-function \"λ雪\")) (error (list 'sig e))))"
+    },
+    {
+      "id": "indirect-function/string-nil",
+      "primitive": "indirect-function",
+      "expression": "(indirect-function \"λ雪\" nil)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (indirect-function \"λ雪\" nil)) (error (list 'sig e))))"
+    },
+    {
+      "id": "indirect-function/string-t",
+      "primitive": "indirect-function",
+      "expression": "(indirect-function \"λ雪\" t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (indirect-function \"λ雪\" t)) (error (list 'sig e))))"
+    },
+    {
+      "id": "indirect-function/string-arbitrary",
+      "primitive": "indirect-function",
+      "expression": "(indirect-function \"λ雪\" '(anything . 9))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (indirect-function \"λ雪\" '(anything . 9))) (error (list 'sig e))))"
+    },
+    {
+      "id": "indirect-function/list-omitted",
+      "primitive": "indirect-function",
+      "expression": "(indirect-function '(lambda (x) x))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (indirect-function '(lambda (x) x))) (error (list 'sig e))))"
+    },
+    {
+      "id": "indirect-function/list-nil",
+      "primitive": "indirect-function",
+      "expression": "(indirect-function '(lambda (x) x) nil)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (indirect-function '(lambda (x) x) nil)) (error (list 'sig e))))"
+    },
+    {
+      "id": "indirect-function/list-t",
+      "primitive": "indirect-function",
+      "expression": "(indirect-function '(lambda (x) x) t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (indirect-function '(lambda (x) x) t)) (error (list 'sig e))))"
+    },
+    {
+      "id": "indirect-function/list-arbitrary",
+      "primitive": "indirect-function",
+      "expression": "(indirect-function '(lambda (x) x) '(anything . 9))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (indirect-function '(lambda (x) x) '(anything . 9))) (error (list 'sig e))))"
+    },
+    {
+      "id": "indirect-function/dotted-omitted",
+      "primitive": "indirect-function",
+      "expression": "(indirect-function '(a . b))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (indirect-function '(a . b))) (error (list 'sig e))))"
+    },
+    {
+      "id": "indirect-function/dotted-nil",
+      "primitive": "indirect-function",
+      "expression": "(indirect-function '(a . b) nil)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (indirect-function '(a . b) nil)) (error (list 'sig e))))"
+    },
+    {
+      "id": "indirect-function/dotted-t",
+      "primitive": "indirect-function",
+      "expression": "(indirect-function '(a . b) t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (indirect-function '(a . b) t)) (error (list 'sig e))))"
+    },
+    {
+      "id": "indirect-function/dotted-arbitrary",
+      "primitive": "indirect-function",
+      "expression": "(indirect-function '(a . b) '(anything . 9))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (indirect-function '(a . b) '(anything . 9))) (error (list 'sig e))))"
+    },
+    {
+      "id": "indirect-function/vector-omitted",
+      "primitive": "indirect-function",
+      "expression": "(indirect-function [65 66])",
+      "source": "(prin1-to-string (condition-case e (list 'ok (indirect-function [65 66])) (error (list 'sig e))))",
+      "limitation": "vector"
+    },
+    {
+      "id": "indirect-function/vector-nil",
+      "primitive": "indirect-function",
+      "expression": "(indirect-function [65 66] nil)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (indirect-function [65 66] nil)) (error (list 'sig e))))",
+      "limitation": "vector"
+    },
+    {
+      "id": "indirect-function/vector-t",
+      "primitive": "indirect-function",
+      "expression": "(indirect-function [65 66] t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (indirect-function [65 66] t)) (error (list 'sig e))))",
+      "limitation": "vector"
+    },
+    {
+      "id": "indirect-function/vector-arbitrary",
+      "primitive": "indirect-function",
+      "expression": "(indirect-function [65 66] '(anything . 9))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (indirect-function [65 66] '(anything . 9))) (error (list 'sig e))))",
+      "limitation": "vector"
+    },
+    {
+      "id": "indirect-function/chain-nil-omitted",
+      "primitive": "indirect-function",
+      "expression": "(progn (fset 'widen-z nil) (fset 'widen-b nil) (fset 'widen-a 'widen-b) (indirect-function 'widen-a))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (progn (fset 'widen-z nil) (fset 'widen-b nil) (fset 'widen-a 'widen-b) (indirect-function 'widen-a))) (error (list 'sig e))))"
+    },
+    {
+      "id": "indirect-function/chain-nil-nil",
+      "primitive": "indirect-function",
+      "expression": "(progn (fset 'widen-z nil) (fset 'widen-b nil) (fset 'widen-a 'widen-b) (indirect-function 'widen-a nil))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (progn (fset 'widen-z nil) (fset 'widen-b nil) (fset 'widen-a 'widen-b) (indirect-function 'widen-a nil))) (error (list 'sig e))))"
+    },
+    {
+      "id": "indirect-function/chain-nil-t",
+      "primitive": "indirect-function",
+      "expression": "(progn (fset 'widen-z nil) (fset 'widen-b nil) (fset 'widen-a 'widen-b) (indirect-function 'widen-a t))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (progn (fset 'widen-z nil) (fset 'widen-b nil) (fset 'widen-a 'widen-b) (indirect-function 'widen-a t))) (error (list 'sig e))))"
+    },
+    {
+      "id": "indirect-function/chain-nil-arbitrary",
+      "primitive": "indirect-function",
+      "expression": "(progn (fset 'widen-z nil) (fset 'widen-b nil) (fset 'widen-a 'widen-b) (indirect-function 'widen-a 17))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (progn (fset 'widen-z nil) (fset 'widen-b nil) (fset 'widen-a 'widen-b) (indirect-function 'widen-a 17))) (error (list 'sig e))))"
+    },
+    {
+      "id": "indirect-function/chain-integer-omitted",
+      "primitive": "indirect-function",
+      "expression": "(progn (fset 'widen-z nil) (fset 'widen-b 42) (fset 'widen-a 'widen-b) (indirect-function 'widen-a))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (progn (fset 'widen-z nil) (fset 'widen-b 42) (fset 'widen-a 'widen-b) (indirect-function 'widen-a))) (error (list 'sig e))))"
+    },
+    {
+      "id": "indirect-function/chain-integer-nil",
+      "primitive": "indirect-function",
+      "expression": "(progn (fset 'widen-z nil) (fset 'widen-b 42) (fset 'widen-a 'widen-b) (indirect-function 'widen-a nil))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (progn (fset 'widen-z nil) (fset 'widen-b 42) (fset 'widen-a 'widen-b) (indirect-function 'widen-a nil))) (error (list 'sig e))))"
+    },
+    {
+      "id": "indirect-function/chain-integer-t",
+      "primitive": "indirect-function",
+      "expression": "(progn (fset 'widen-z nil) (fset 'widen-b 42) (fset 'widen-a 'widen-b) (indirect-function 'widen-a t))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (progn (fset 'widen-z nil) (fset 'widen-b 42) (fset 'widen-a 'widen-b) (indirect-function 'widen-a t))) (error (list 'sig e))))"
+    },
+    {
+      "id": "indirect-function/chain-integer-arbitrary",
+      "primitive": "indirect-function",
+      "expression": "(progn (fset 'widen-z nil) (fset 'widen-b 42) (fset 'widen-a 'widen-b) (indirect-function 'widen-a 17))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (progn (fset 'widen-z nil) (fset 'widen-b 42) (fset 'widen-a 'widen-b) (indirect-function 'widen-a 17))) (error (list 'sig e))))"
+    },
+    {
+      "id": "indirect-function/chain-string-omitted",
+      "primitive": "indirect-function",
+      "expression": "(progn (fset 'widen-z nil) (fset 'widen-b \"end\") (fset 'widen-a 'widen-b) (indirect-function 'widen-a))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (progn (fset 'widen-z nil) (fset 'widen-b \"end\") (fset 'widen-a 'widen-b) (indirect-function 'widen-a))) (error (list 'sig e))))"
+    },
+    {
+      "id": "indirect-function/chain-string-nil",
+      "primitive": "indirect-function",
+      "expression": "(progn (fset 'widen-z nil) (fset 'widen-b \"end\") (fset 'widen-a 'widen-b) (indirect-function 'widen-a nil))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (progn (fset 'widen-z nil) (fset 'widen-b \"end\") (fset 'widen-a 'widen-b) (indirect-function 'widen-a nil))) (error (list 'sig e))))"
+    },
+    {
+      "id": "indirect-function/chain-string-t",
+      "primitive": "indirect-function",
+      "expression": "(progn (fset 'widen-z nil) (fset 'widen-b \"end\") (fset 'widen-a 'widen-b) (indirect-function 'widen-a t))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (progn (fset 'widen-z nil) (fset 'widen-b \"end\") (fset 'widen-a 'widen-b) (indirect-function 'widen-a t))) (error (list 'sig e))))"
+    },
+    {
+      "id": "indirect-function/chain-string-arbitrary",
+      "primitive": "indirect-function",
+      "expression": "(progn (fset 'widen-z nil) (fset 'widen-b \"end\") (fset 'widen-a 'widen-b) (indirect-function 'widen-a 17))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (progn (fset 'widen-z nil) (fset 'widen-b \"end\") (fset 'widen-a 'widen-b) (indirect-function 'widen-a 17))) (error (list 'sig e))))"
+    },
+    {
+      "id": "indirect-function/chain-list-omitted",
+      "primitive": "indirect-function",
+      "expression": "(progn (fset 'widen-z nil) (fset 'widen-b '(lambda (x) x)) (fset 'widen-a 'widen-b) (indirect-function 'widen-a))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (progn (fset 'widen-z nil) (fset 'widen-b '(lambda (x) x)) (fset 'widen-a 'widen-b) (indirect-function 'widen-a))) (error (list 'sig e))))"
+    },
+    {
+      "id": "indirect-function/chain-list-nil",
+      "primitive": "indirect-function",
+      "expression": "(progn (fset 'widen-z nil) (fset 'widen-b '(lambda (x) x)) (fset 'widen-a 'widen-b) (indirect-function 'widen-a nil))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (progn (fset 'widen-z nil) (fset 'widen-b '(lambda (x) x)) (fset 'widen-a 'widen-b) (indirect-function 'widen-a nil))) (error (list 'sig e))))"
+    },
+    {
+      "id": "indirect-function/chain-list-t",
+      "primitive": "indirect-function",
+      "expression": "(progn (fset 'widen-z nil) (fset 'widen-b '(lambda (x) x)) (fset 'widen-a 'widen-b) (indirect-function 'widen-a t))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (progn (fset 'widen-z nil) (fset 'widen-b '(lambda (x) x)) (fset 'widen-a 'widen-b) (indirect-function 'widen-a t))) (error (list 'sig e))))"
+    },
+    {
+      "id": "indirect-function/chain-list-arbitrary",
+      "primitive": "indirect-function",
+      "expression": "(progn (fset 'widen-z nil) (fset 'widen-b '(lambda (x) x)) (fset 'widen-a 'widen-b) (indirect-function 'widen-a 17))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (progn (fset 'widen-z nil) (fset 'widen-b '(lambda (x) x)) (fset 'widen-a 'widen-b) (indirect-function 'widen-a 17))) (error (list 'sig e))))"
+    },
+    {
+      "id": "indirect-function/chain-unbound-omitted",
+      "primitive": "indirect-function",
+      "expression": "(progn (fset 'widen-z nil) (fset 'widen-b 'widen-z) (fset 'widen-a 'widen-b) (indirect-function 'widen-a))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (progn (fset 'widen-z nil) (fset 'widen-b 'widen-z) (fset 'widen-a 'widen-b) (indirect-function 'widen-a))) (error (list 'sig e))))"
+    },
+    {
+      "id": "indirect-function/chain-unbound-nil",
+      "primitive": "indirect-function",
+      "expression": "(progn (fset 'widen-z nil) (fset 'widen-b 'widen-z) (fset 'widen-a 'widen-b) (indirect-function 'widen-a nil))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (progn (fset 'widen-z nil) (fset 'widen-b 'widen-z) (fset 'widen-a 'widen-b) (indirect-function 'widen-a nil))) (error (list 'sig e))))"
+    },
+    {
+      "id": "indirect-function/chain-unbound-t",
+      "primitive": "indirect-function",
+      "expression": "(progn (fset 'widen-z nil) (fset 'widen-b 'widen-z) (fset 'widen-a 'widen-b) (indirect-function 'widen-a t))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (progn (fset 'widen-z nil) (fset 'widen-b 'widen-z) (fset 'widen-a 'widen-b) (indirect-function 'widen-a t))) (error (list 'sig e))))"
+    },
+    {
+      "id": "indirect-function/chain-unbound-arbitrary",
+      "primitive": "indirect-function",
+      "expression": "(progn (fset 'widen-z nil) (fset 'widen-b 'widen-z) (fset 'widen-a 'widen-b) (indirect-function 'widen-a 17))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (progn (fset 'widen-z nil) (fset 'widen-b 'widen-z) (fset 'widen-a 'widen-b) (indirect-function 'widen-a 17))) (error (list 'sig e))))"
+    },
+    {
+      "id": "indirect-function/chain-t-omitted",
+      "primitive": "indirect-function",
+      "expression": "(progn (fset 'widen-z nil) (fset 'widen-b t) (fset 'widen-a 'widen-b) (indirect-function 'widen-a))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (progn (fset 'widen-z nil) (fset 'widen-b t) (fset 'widen-a 'widen-b) (indirect-function 'widen-a))) (error (list 'sig e))))"
+    },
+    {
+      "id": "indirect-function/chain-t-nil",
+      "primitive": "indirect-function",
+      "expression": "(progn (fset 'widen-z nil) (fset 'widen-b t) (fset 'widen-a 'widen-b) (indirect-function 'widen-a nil))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (progn (fset 'widen-z nil) (fset 'widen-b t) (fset 'widen-a 'widen-b) (indirect-function 'widen-a nil))) (error (list 'sig e))))"
+    },
+    {
+      "id": "indirect-function/chain-t-t",
+      "primitive": "indirect-function",
+      "expression": "(progn (fset 'widen-z nil) (fset 'widen-b t) (fset 'widen-a 'widen-b) (indirect-function 'widen-a t))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (progn (fset 'widen-z nil) (fset 'widen-b t) (fset 'widen-a 'widen-b) (indirect-function 'widen-a t))) (error (list 'sig e))))"
+    },
+    {
+      "id": "indirect-function/chain-t-arbitrary",
+      "primitive": "indirect-function",
+      "expression": "(progn (fset 'widen-z nil) (fset 'widen-b t) (fset 'widen-a 'widen-b) (indirect-function 'widen-a 17))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (progn (fset 'widen-z nil) (fset 'widen-b t) (fset 'widen-a 'widen-b) (indirect-function 'widen-a 17))) (error (list 'sig e))))"
+    },
+    {
+      "id": "indirect-function/identity",
+      "primitive": "indirect-function",
+      "expression": "(let ((x (list 1 2))) (eq x (indirect-function x)))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (let ((x (list 1 2))) (eq x (indirect-function x)))) (error (list 'sig e))))"
+    },
+    {
+      "id": "indirect-function/self-cycle-fset",
+      "primitive": "indirect-function",
+      "expression": "(progn (fset 'widen-a nil) (fset 'widen-a 'widen-a) (indirect-function 'widen-a))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (progn (fset 'widen-a nil) (fset 'widen-a 'widen-a) (indirect-function 'widen-a))) (error (list 'sig e))))"
+    },
+    {
+      "id": "indirect-function/two-cycle-fset",
+      "primitive": "indirect-function",
+      "expression": "(progn (fset 'widen-a nil) (fset 'widen-b nil) (fset 'widen-a 'widen-b) (fset 'widen-b 'widen-a) (indirect-function 'widen-a))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (progn (fset 'widen-a nil) (fset 'widen-b nil) (fset 'widen-a 'widen-b) (fset 'widen-b 'widen-a) (indirect-function 'widen-a))) (error (list 'sig e))))"
+    },
+    {
+      "id": "indirect-function/arity-0",
+      "primitive": "indirect-function",
+      "expression": "(apply #'indirect-function '())",
+      "source": "(prin1-to-string (condition-case e (list 'ok (apply #'indirect-function '())) (error (list 'sig e))))"
+    },
+    {
+      "id": "indirect-function/arity-3",
+      "primitive": "indirect-function",
+      "expression": "(apply #'indirect-function '(1 1 1))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (apply #'indirect-function '(1 1 1))) (error (list 'sig e))))"
+    },
+    {
+      "id": "indirect-function/arity-5",
+      "primitive": "indirect-function",
+      "expression": "(apply #'indirect-function '(1 1 1 1 1))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (apply #'indirect-function '(1 1 1 1 1))) (error (list 'sig e))))"
+    }
+  ]
+}

@@ -1,0 +1,249 @@
+{
+ "name": "corpus-02",
+ "frame": {
+  "width": 480,
+  "height": 168,
+  "bg": "#ffffff",
+  "fg": "#000000"
+ },
+ "font": {
+  "family": "Liberation Mono",
+  "pixel_size": 20,
+  "regular": "/usr/share/fonts/liberation/LiberationMono-Regular.ttf",
+  "bold": "/usr/share/fonts/liberation/LiberationMono-Bold.ttf",
+  "italic": "/usr/share/fonts/liberation/LiberationMono-Italic.ttf"
+ },
+ "cursor_color": "#00a000",
+ "buffer": [
+  {
+   "text": "R2D2"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "Αθήνα",
+   "bold": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "world"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "world"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "λόγος",
+   "bold": true,
+   "underline": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "Hello",
+   "fg": "#2e8b57"
+  },
+  {
+   "text": "\n"
+  },
+  {
+   "text": "cursor",
+   "fg": "#1e90ff"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "q?"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "dog",
+   "bold": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "@user",
+   "italic": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "Emacs",
+   "underline": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "#if",
+   "italic": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "ήλιος",
+   "bold": true
+  },
+  {
+   "text": "\n"
+  },
+  {
+   "text": "ψυχή",
+   "fg": "#a020f0"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "Αθήνα",
+   "fg": "#696969"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "ψυχή",
+   "fg": "#ff8c00"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "x=42;",
+   "fg": "#0000ff",
+   "underline": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "λόγος"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "a&b",
+   "fg": "#ff8c00"
+  },
+  {
+   "text": "\n"
+  }
+ ],
+ "point": 40,
+ "expect": {
+  "origin": [
+   0,
+   0
+  ],
+  "rows": [
+   {
+    "text": "R2D2 Αθήνα world world λόγος Hello",
+    "runs": [
+     {
+      "start": 5,
+      "end": 10,
+      "bold": true
+     },
+     {
+      "start": 23,
+      "end": 28,
+      "bold": true,
+      "underline": true
+     },
+     {
+      "start": 29,
+      "end": 34,
+      "fg": "#2e8b57"
+     }
+    ]
+   },
+   {
+    "text": "cursor q? dog @user Emacs #if ήλιος",
+    "runs": [
+     {
+      "start": 0,
+      "end": 6,
+      "fg": "#1e90ff"
+     },
+     {
+      "start": 10,
+      "end": 13,
+      "bold": true
+     },
+     {
+      "start": 14,
+      "end": 19,
+      "italic": true
+     },
+     {
+      "start": 20,
+      "end": 25,
+      "underline": true
+     },
+     {
+      "start": 26,
+      "end": 29,
+      "italic": true
+     },
+     {
+      "start": 30,
+      "end": 35,
+      "bold": true
+     }
+    ]
+   },
+   {
+    "text": "ψυχή Αθήνα ψυχή x=42; λόγος a&b",
+    "runs": [
+     {
+      "start": 0,
+      "end": 4,
+      "fg": "#a020f0"
+     },
+     {
+      "start": 5,
+      "end": 10,
+      "fg": "#696969"
+     },
+     {
+      "start": 11,
+      "end": 15,
+      "fg": "#ff8c00"
+     },
+     {
+      "start": 16,
+      "end": 21,
+      "fg": "#0000ff",
+      "underline": true
+     },
+     {
+      "start": 28,
+      "end": 31,
+      "fg": "#ff8c00"
+     }
+    ]
+   }
+  ],
+  "cursor": {
+   "row": 1,
+   "col": 4
+  }
+ }
+}

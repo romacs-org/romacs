@@ -1,0 +1,211 @@
+{
+ "name": "corpus-16",
+ "frame": {
+  "width": 480,
+  "height": 168,
+  "bg": "#ffffff",
+  "fg": "#000000"
+ },
+ "font": {
+  "family": "Liberation Mono",
+  "pixel_size": 20,
+  "regular": "/usr/share/fonts/liberation/LiberationMono-Regular.ttf",
+  "bold": "/usr/share/fonts/liberation/LiberationMono-Bold.ttf",
+  "italic": "/usr/share/fonts/liberation/LiberationMono-Italic.ttf"
+ },
+ "cursor_color": "#00a000",
+ "buffer": [
+  {
+   "text": "Emacs"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "(car)",
+   "bold": true,
+   "bg": "#ffff00"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "fox"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "ΔΕΛΤΑ",
+   "fg": "#b8860b",
+   "italic": true,
+   "bg": "#ffff00"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "{ok}"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "50%"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "lazy",
+   "bg": "#e0e0ff"
+  },
+  {
+   "text": "\n"
+  },
+  {
+   "text": "lazy"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "q?",
+   "fg": "#b8860b"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "Ωμέγα"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "Αθήνα",
+   "fg": "#1e90ff"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "buffer"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "ψυχή"
+  },
+  {
+   "text": "\n"
+  },
+  {
+   "text": "βιβλίο"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "(car)",
+   "underline": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "C:\\tmp"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "Ωμέγα",
+   "bold": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "ΣΟΦΙΑ",
+   "italic": true,
+   "bg": "#e0e0ff"
+  },
+  {
+   "text": "\n"
+  }
+ ],
+ "point": 56,
+ "expect": {
+  "origin": [
+   0,
+   0
+  ],
+  "rows": [
+   {
+    "text": "Emacs (car) fox ΔΕΛΤΑ {ok} 50% lazy",
+    "runs": [
+     {
+      "start": 6,
+      "end": 11,
+      "bold": true,
+      "bg": "#ffff00"
+     },
+     {
+      "start": 16,
+      "end": 21,
+      "fg": "#b8860b",
+      "italic": true,
+      "bg": "#ffff00"
+     },
+     {
+      "start": 31,
+      "end": 35,
+      "bg": "#e0e0ff"
+     }
+    ]
+   },
+   {
+    "text": "lazy q? Ωμέγα Αθήνα buffer ψυχή",
+    "runs": [
+     {
+      "start": 5,
+      "end": 7,
+      "fg": "#b8860b"
+     },
+     {
+      "start": 14,
+      "end": 19,
+      "fg": "#1e90ff"
+     }
+    ]
+   },
+   {
+    "text": "βιβλίο (car) C:\\tmp Ωμέγα ΣΟΦΙΑ",
+    "runs": [
+     {
+      "start": 7,
+      "end": 12,
+      "underline": true
+     },
+     {
+      "start": 20,
+      "end": 25,
+      "bold": true
+     },
+     {
+      "start": 26,
+      "end": 31,
+      "italic": true,
+      "bg": "#e0e0ff"
+     }
+    ]
+   }
+  ],
+  "cursor": {
+   "row": 1,
+   "col": 19
+  }
+ }
+}

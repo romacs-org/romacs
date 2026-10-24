@@ -1,0 +1,50 @@
+# EXCLUSIONS.toml -- the ONLY way a GNU test may be set aside on romacs.
+#
+# A row moves ONE failing deftest out of `failing` into `intentional-divergence`
+# or `out-of-scope`. It never makes a test pass and is never counted as passing.
+# gnu-tests/run.py refuses the WHOLE ledger (exit 2, nothing measured) unless
+# every row:
+#   - names exactly one top-level deftest of a GNU file (no globs, no prefixes);
+#   - cites `divergence`, an existing entry id in DIVERGENCES.md or a crate
+#     GNU-DIVERGENCES.md (record the divergence THERE first);
+#   - names `symbol`, a Lisp symbol that entry lists AND that the test's own
+#     source uses, so the citation is about what the test exercises;
+#   - states `gnu` (GNU's behaviour), `romacs` (ours) and `why` the difference
+#     is intentional, each as a sentence;
+#   - uses category "intentional-divergence" or "out-of-scope" and nothing else;
+#   - cites `gnu_source`, the GNU IMPLEMENTATION the author read at the pin
+#     (src/FILE.c:A-B, or lisp/FILE.el:A-B for Lisp-owned behaviour; never a
+#     docstring), with `gnu_source_sha256` of exactly those lines, re-checked
+#     against the GNU mirror on every run; and says in `verified_by` how the
+#     DIVERGENCES.md row was checked against that code.
+# The DIVERGENCES.md ledger is NOT trustworthy by itself (reference/
+# LEDGER-AUDIT.md: about half its rows unverified or wrong on the GNU side).
+# A row citing an id listed in SUSPECT-DIVERGENCES.toml, or whose citation
+# could not be re-checked, is filed as `excluded-unverified-row`: debt, never
+# a divergence and never parity evidence.
+# What the runner checks is MECHANICAL: the citation's bytes and the id's
+# standing. It cannot check that the cited code supports the claim or that the
+# divergence is what makes the test fail. So every row also needs a human (or
+# independent reviewer) to read the cited code before it lands; the hash only
+# stops the citation silently changing afterwards.
+# A row whose test now PASSES on romacs also refuses the run: delete the row.
+#
+# "Not implemented yet" is NOT a reason to exclude. It is reported as
+# not-yet-implemented with the missing symbol named, and stays a failure.
+#
+# Row shape:
+# [[exclude]]
+# file = "src/data-tests.el"
+# test = "data-aset-string"
+# category = "intentional-divergence"
+# divergence = "D001"
+# symbol = "aset"
+# gnu = "GNU ..."
+# romacs = "VM2 ..."
+# why = "..."
+# gnu_source = "src/data.c:2665-2673"
+# gnu_source_sha256 = "<sha256 of those lines, newline-terminated>"
+# verified_by = "..."
+#
+# There are no rows yet: at master 0aded923 no measured failure has been shown
+# to be caused by an intentional divergence rather than by a missing feature.

@@ -1,0 +1,1328 @@
+//! Frame ingestion and cursor target extraction.
+
+use super::RenderApp;
+use super::frame_windows::{
+    ActivePresentationTransition, GuiFrameRenderState, GuiFrameWindowState,
+};
+use crate::core::types::DisplayFrameId;
+use crate::render_thread::cursor::{CursorConfigSnapshot, CursorTarget};
+
+#[cfg(feature = "webview")]
+fn collect_frame_webviews(
+    frame: &crate::core::frame_glyphs::FrameGlyphBuffer,
+    offset_x: f32,
+    offset_y: f32,
+    frame_clip: romacs_display_protocol::RootSurfaceRect,
+    scale: romacs_display_protocol::DeviceScale,
+    next_occurrence: &mut u64,
+    placements: &mut std::collections::HashMap<
+        romacs_display_protocol::WebViewId,
+        romacs_webview::ResolvedWebViewPlacement,
+    >,
+) {
+    for glyph in &frame.glyphs {
+        let crate::core::frame_glyphs::FrameGlyph::Xwidget {
+            window_id,
+            webview_id,
+            presentation,
+            ..
+        } = glyph
+        else {
+            continue;
+        };
+        // The native view is sized from the widget's own extent, GNU
+        // `xww->width`/`xww->height`, never from the glyph slot: layout may
+        // have cropped the slot at the right edge (`produce_xwidget_glyph`,
+        // src/xdisp.c:32577-32579, emacs-31.0.90) and GNU answers that by
+        // clipping the view, not resizing it (`x_draw_xwidget_glyph_string`,
+        // src/xwidget.c:2841-2849).  The clip below is that text-area clip.
+        let Ok(frame_to_root) = romacs_display_protocol::SpaceTranslation::<
+            romacs_display_protocol::FrameSpace,
+            romacs_display_protocol::RootSurfaceSpace,
+            romacs_display_protocol::LogicalPixels,
+        >::from_px(offset_x, offset_y) else {
+            continue;
+        };
+        let Ok(root_presentation) = presentation.translated(frame_to_root) else {
+            continue;
+        };
+        let Ok(Some(visible)) = root_presentation.resolve_visible(Some(frame_clip)) else {
+            continue;
+        };
+        let content_rect = visible.content_rect();
+        let visible_rect = visible.visible_rect();
+        *next_occurrence = next_occurrence.saturating_add(1);
+        let Ok(placement) = romacs_webview::ResolvedWebViewPlacement::new(
+            *webview_id,
+            romacs_webview::WebViewOccurrenceId::new(*next_occurrence),
+            *window_id,
+            content_rect,
+            visible_rect,
+            scale,
+        ) else {
+            continue;
+        };
+        // Portable native backends support one active occurrence. Frames are
+        // visited in renderer z-order, so a later/topmost occurrence wins.
+        placements.insert(*webview_id, placement);
+    }
+}
+
+/// Monotonic revision source for one top-level host's derived WebView scene.
+///
+/// A host scene combines one root frame and any number of child-frame
+/// presentations. Their evaluator presentation IDs are independent clocks,
+/// so a `max()` of those IDs can move backwards when a child disappears.
+/// This clock advances only when the resolved placement snapshot changes.
+/// Everything the resolved placements of one top-level host depend on,
+/// cheap enough to rebuild on every event-loop pass.
+///
+/// The glyph walk in `collect_frame_webviews` is a function of the presented
+/// root frame, the presented child frames with their placement and clip, and
+/// the native presentation mapping and device scale. Redisplay replaces a presentation
+/// wholesale (a new `PresentationId`), so equal inputs mean equal glyphs and
+/// the walk can be skipped; that is what makes an idle session with one web
+/// view stop paying O(glyphs) per pass.
+#[cfg(feature = "webview")]
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct WebViewPlacementInputs {
+    /// Root presentation, width and height; `None` before the first frame.
+    root: Option<(
+        romacs_display_protocol::frame_chrome::PresentationId,
+        f32,
+        f32,
+    )>,
+    scale: f32,
+    mapping: Option<romacs_display_protocol::PresentMapping>,
+    /// Child frames in renderer z-order: id, presentation, absolute offset,
+    /// clip in root.
+    children: Vec<(
+        u64,
+        romacs_display_protocol::frame_chrome::PresentationId,
+        f32,
+        f32,
+        romacs_display_protocol::PresentedClip,
+    )>,
+}
+
+#[cfg(feature = "webview")]
+#[derive(Default)]
+pub(super) struct WebViewSceneClock {
+    revision: u64,
+    placements: Vec<romacs_webview::ResolvedWebViewPlacement>,
+    /// The inputs `placements` were resolved from, so an unchanged
+    /// presentation reuses them instead of walking the glyph buffer again.
+    inputs: Option<WebViewPlacementInputs>,
+}
+
+#[cfg(feature = "webview")]
+impl WebViewSceneClock {
+    /// The host's scene for this pass.  `compute` -- the glyph walk -- runs
+    /// only when `inputs` differ from the inputs the cached placements came
+    /// from, and the revision advances only when the placements changed.
+    fn resolve_cached(
+        &mut self,
+        host: romacs_webview::HostWindowId,
+        inputs: WebViewPlacementInputs,
+        compute: impl FnOnce() -> Vec<romacs_webview::ResolvedWebViewPlacement>,
+    ) -> Result<romacs_webview::ResolvedWebViewScene, romacs_webview::WebViewSceneError> {
+        if self.inputs.as_ref() != Some(&inputs) {
+            let placements = compute();
+            if self.revision == 0 || self.placements != placements {
+                self.revision = self.revision.saturating_add(1);
+                self.placements = placements;
+            }
+            self.inputs = Some(inputs);
+        }
+        romacs_webview::ResolvedWebViewScene::try_new(
+            host,
+            romacs_webview::WebViewSceneRevision::new(self.revision),
+            self.placements.clone(),
+        )
+    }
+}
+
+struct CursorSyncOutcome {
+    target: CursorTarget,
+    had_target: bool,
+    target_moved: bool,
+    old_cursor_rect: (f32, f32, f32, f32),
+}
+
+struct FrameIngestOutcome {
+    cursor: Option<CursorSyncOutcome>,
+    presentation: Option<ActivePresentationTransition>,
+}
+
+impl RenderApp {
+    #[cfg(feature = "core-free")]
+    pub(super) fn ingest_paint(&mut self, frame: romacs_display_protocol::FrameGlyphBuffer) {
+        let current = self.frame_windows.primary_window().and_then(|window| {
+            window.render.compositor.current_frame.as_ref()
+        });
+        if crate::paint_host::validate_frame(&frame).is_err()
+            || current.is_some_and(|current| {
+                current.presentation_id.get() >= frame.presentation_id.get()
+            })
+        {
+            self.comms.send_input(crate::thread_comm::InputEvent::PresentationDiscarded {
+                presentation: frame.presentation_id.get(),
+                emacs_frame_id: frame.frame_placement.frame().get(),
+            });
+            return;
+        }
+        // Seam P already owns its font projection. No matrix materialization,
+        // Lisp, or speculative row-reuse metadata is needed for this full paint.
+        super::frame_stats::note_scene_commit(
+            romacs_display_protocol::frame_time::observe_platform_now(),
+        );
+        self.ingest_primary_paint(
+            frame,
+            Default::default(),
+            Default::default(),
+            Default::default(),
+        );
+        if let Some(window) = self.frame_windows.primary_window() {
+            window.request_redraw();
+        }
+    }
+
+    fn ingest_primary_paint(
+        &mut self,
+        frame: crate::core::frame_glyphs::FrameGlyphBuffer,
+        row_damage: romacs_renderer_wgpu::FrameRowDamage,
+        scroll_anchors: crate::render_thread::frame_compositor::ScrollAnchorsByWindow,
+        reflow_imprints: crate::render_thread::frame_compositor::ReflowImprintsByWindow,
+    ) {
+        let frame_id = frame.frame_placement.frame();
+        let cursor_config = self.cursor_defaults.config_snapshot();
+        if let Some(primary_frame) = self
+            .frame_windows
+            .primary_window_mut()
+            .map(|ws| &mut ws.render)
+        {
+            let outcome = Self::ingest_top_level_render_frame(
+                primary_frame,
+                frame,
+                row_damage,
+                cursor_config,
+                scroll_anchors,
+                reflow_imprints,
+            );
+            if let Some(transition) = outcome.presentation {
+                self.comms.send_input(
+                    crate::thread_comm::InputEvent::PresentationActivated {
+                        presentation: transition.activated.get(),
+                        emacs_frame_id: frame_id.get(),
+                    },
+                );
+                if let Some(presentation) = transition.replaced.and_then(|replaced| {
+                    primary_frame.route_presentation_retirement(replaced.get())
+                }) {
+                    self.comms.send_input(
+                        crate::thread_comm::InputEvent::PresentationRetired {
+                            presentation,
+                        },
+                    );
+                }
+            }
+        } else {
+            self.comms.send_input(
+                crate::thread_comm::InputEvent::PresentationDiscarded {
+                    presentation: frame.presentation_id.get(),
+                    emacs_frame_id: frame_id.get(),
+                },
+            );
+        }
+    }
+
+    /// Lease and paint the pre-update content of a size-changing child
+    /// frame, when the resize slot is enabled.
+    ///
+    /// Returns the leased picture, the old content's logical size and the
+    /// resize spec that drove the decision, so the attach after the update
+    /// uses the same curve the trigger consulted. Any failure -- the slot
+    /// off, the size unchanged, the pool refusing the lease -- degrades to
+    /// the instant swap GNU Emacs does.
+    fn lease_child_resize_crossfade(
+        render_policy: &crate::render_thread::render_quality::RenderQualityPolicy,
+        style: &crate::render_thread::state::ChildFrameStyle,
+        renderer: Option<&mut romacs_renderer_wgpu::WgpuRenderer>,
+        window_state: &mut crate::render_thread::frame_windows::GuiFrameWindowState,
+        frame_id: u64,
+        next: &crate::core::frame_glyphs::FrameGlyphBuffer,
+    ) -> Option<(
+        romacs_renderer_wgpu::SnapshotLease,
+        f32,
+        f32,
+        romacs_display_protocol::motion_spec::MotionSpec,
+    )> {
+        let resize_spec = render_policy.child_frame_motion().resize;
+        if resize_spec.is_instant() {
+            return None;
+        }
+        let old_entry = window_state
+            .render
+            .compositor
+            .child_frames
+            .frames
+            .get(&frame_id)?;
+        let old_width = old_entry.frame.width;
+        let old_height = old_entry.frame.height;
+        if (old_width - next.width).abs() < f32::EPSILON
+            && (old_height - next.height).abs() < f32::EPSILON
+        {
+            return None;
+        }
+        let scale = window_state.scale_factor() as f32;
+        let shadow_extent = if style.shadow_enabled {
+            style.shadow_layers as f32 * style.shadow_offset.max(0.0)
+        } else {
+            0.0
+        };
+        let phys_w = ((old_width + shadow_extent) * scale).ceil() as u32;
+        let phys_h = ((old_height + shadow_extent) * scale).ceil() as u32;
+        let Some(size) = romacs_renderer_wgpu::SnapshotSize::new(phys_w, phys_h) else {
+            return None;
+        };
+        let renderer = renderer?;
+        let lease = renderer.acquire_snapshot(size).ok()?;
+        let atlas = window_state.render.compositor.glyph_atlas.as_mut()?;
+        let previous_scale = renderer.scale_factor();
+        renderer.set_scale_factor(scale);
+        renderer.capture_child_frame_picture(
+            &lease,
+            &old_entry.frame,
+            atlas,
+            style.corner_radius,
+            style.shadow_enabled,
+            style.shadow_layers,
+            style.shadow_offset,
+            style.shadow_opacity,
+        );
+        renderer.set_scale_factor(previous_scale);
+        Some((
+            lease,
+            phys_w as f32 / scale,
+            phys_h as f32 / scale,
+            resize_spec,
+        ))
+    }
+
+    #[cfg(feature = "webview")]
+    fn resolved_webview_placements(
+        window_state: &GuiFrameWindowState,
+    ) -> Vec<romacs_webview::ResolvedWebViewPlacement> {
+        let render = &window_state.render;
+        let Some(root) = render.compositor.current_frame.as_ref() else {
+            return Vec::new();
+        };
+        let Ok(scale) =
+            romacs_display_protocol::DeviceScale::new(window_state.scale_factor() as f32)
+        else {
+            return Vec::new();
+        };
+        let Some(mapping) = render.present_mapping() else {
+            return Vec::new();
+        };
+        let Some(root_clip) = mapping.visible_content_rect() else {
+            return Vec::new();
+        };
+        let offset_x = root_clip.x();
+        let offset_y = root_clip.y();
+        // Child clips are expressed in the editor's root scene; native
+        // placements additionally include the occupied native chrome area.
+        let Ok(scene_to_native) = romacs_display_protocol::SpaceTranslation::<
+            romacs_display_protocol::RootSurfaceSpace,
+            romacs_display_protocol::RootSurfaceSpace,
+            romacs_display_protocol::LogicalPixels,
+        >::from_px(offset_x, offset_y) else {
+            return Vec::new();
+        };
+        let mut occurrence = 0;
+        let mut placements = std::collections::HashMap::new();
+        collect_frame_webviews(
+            root,
+            offset_x,
+            offset_y,
+            root_clip,
+            scale,
+            &mut occurrence,
+            &mut placements,
+        );
+        for frame_id in render.compositor.child_frames.sorted_for_rendering() {
+            let Some(entry) = render.compositor.child_frames.frames.get(frame_id) else {
+                continue;
+            };
+            let clip = match entry.clip_in_root {
+                romacs_display_protocol::PresentedClip::Empty => continue,
+                romacs_display_protocol::PresentedClip::Rect(clip) => clip,
+            };
+            let Ok(clip) = scene_to_native.map_rect(clip) else {
+                continue;
+            };
+            let Ok(Some(clip)) = clip.try_intersection(root_clip) else {
+                continue;
+            };
+            collect_frame_webviews(
+                &entry.frame,
+                entry.abs_x + offset_x,
+                entry.abs_y + offset_y,
+                clip,
+                scale,
+                &mut occurrence,
+                &mut placements,
+            );
+        }
+        let mut placements = placements.into_values().collect::<Vec<_>>();
+        placements.sort_by_key(|placement| placement.occurrence());
+        placements
+    }
+
+    /// The inputs the host's resolved placements depend on; see
+    /// [`WebViewPlacementInputs`].
+    #[cfg(feature = "webview")]
+    fn webview_placement_inputs(window_state: &GuiFrameWindowState) -> WebViewPlacementInputs {
+        let render = &window_state.render;
+        let root = render
+            .compositor
+            .current_frame
+            .as_ref()
+            .map(|root| (root.presentation_id, root.width, root.height));
+        let children = render
+            .compositor
+            .child_frames
+            .sorted_for_rendering()
+            .iter()
+            .filter_map(|frame_id| {
+                let entry = render.compositor.child_frames.frames.get(frame_id)?;
+                Some((
+                    *frame_id,
+                    entry.frame.presentation_id,
+                    entry.abs_x,
+                    entry.abs_y,
+                    entry.clip_in_root,
+                ))
+            })
+            .collect();
+        WebViewPlacementInputs {
+            root,
+            scale: window_state.scale_factor() as f32,
+            mapping: render.present_mapping(),
+            children,
+        }
+    }
+
+    #[cfg(feature = "webview")]
+    pub(super) fn synchronize_webview_presentations(&mut self) {
+        let mut scenes = Vec::new();
+        let mut live_hosts = std::collections::HashSet::new();
+        let clocks = &mut self.webview_scene_clocks;
+        self.frame_windows
+            .for_each_top_level_window(|window_state| {
+                let host_id =
+                    romacs_webview::HostWindowId::new(window_state.render.emacs_frame_id);
+                live_hosts.insert(host_id);
+                let host = window_state
+                    .window()
+                    .cloned()
+                    .map(romacs_webview::WebViewHost::new);
+                // The glyph walk runs only when the presented frames changed.
+                let inputs = Self::webview_placement_inputs(window_state);
+                match clocks
+                    .entry(host_id)
+                    .or_default()
+                    .resolve_cached(host_id, inputs, || {
+                        Self::resolved_webview_placements(window_state)
+                    }) {
+                    Ok(scene) => scenes.push((scene, host)),
+                    Err(error) => {
+                        tracing::warn!(?host_id, %error, "invalid resolved WebView scene");
+                    }
+                }
+            });
+        clocks.retain(|host, _clock| live_hosts.contains(host));
+        let Some(system) = self.webview_system.as_mut() else {
+            return;
+        };
+        for stale in system
+            .presented_host_ids()
+            .into_iter()
+            .filter(|host| !live_hosts.contains(host))
+            .collect::<Vec<_>>()
+        {
+            system.unregister_host(stale);
+        }
+        for (scene, host) in scenes {
+            if let Some(host) = host {
+                system.register_host(scene.host(), host);
+            }
+            if let Err(error) = system.synchronize_presentation(scene) {
+                tracing::warn!(%error, "failed to synchronize WebView presentation");
+            }
+        }
+    }
+
+    fn ingest_frame_window_root_frame(
+        window_state: &mut GuiFrameWindowState,
+        frame: crate::core::frame_glyphs::FrameGlyphBuffer,
+        row_damage: romacs_renderer_wgpu::FrameRowDamage,
+        cursor_config: CursorConfigSnapshot,
+        scroll_anchors: crate::render_thread::frame_compositor::ScrollAnchorsByWindow,
+        reflow_imprints: crate::render_thread::frame_compositor::ReflowImprintsByWindow,
+    ) -> FrameIngestOutcome {
+        Self::ingest_top_level_render_frame(
+            &mut window_state.render,
+            frame,
+            row_damage,
+            cursor_config,
+            scroll_anchors,
+            reflow_imprints,
+        )
+    }
+
+    fn ingest_top_level_render_frame(
+        render: &mut GuiFrameRenderState,
+        frame: crate::core::frame_glyphs::FrameGlyphBuffer,
+        row_damage: romacs_renderer_wgpu::FrameRowDamage,
+        cursor_config: CursorConfigSnapshot,
+        scroll_anchors: crate::render_thread::frame_compositor::ScrollAnchorsByWindow,
+        reflow_imprints: crate::render_thread::frame_compositor::ReflowImprintsByWindow,
+    ) -> FrameIngestOutcome {
+        use romacs_display_protocol::frame_chrome::FrameChromeKind;
+        if frame.frame_chrome.band(FrameChromeKind::MenuBar).is_none() {
+            render.chrome.interaction.clear_menu_bar();
+        }
+        if frame.frame_chrome.band(FrameChromeKind::ToolBar).is_none() {
+            render.chrome.interaction.clear_toolbar();
+        }
+        if frame
+            .frame_chrome
+            .band(FrameChromeKind::CompactBar)
+            .is_none()
+        {
+            render.chrome.interaction.clear_compact_bar();
+        }
+        if frame.frame_chrome.band(FrameChromeKind::TabBar).is_none() {
+            render.chrome.interaction.clear_tab_bar();
+        }
+        render
+            .cursor
+            .reset_blink(romacs_display_protocol::frame_time::observe_platform_now());
+        let presentation = render.set_current_frame(
+            Some(frame),
+            Some(row_damage),
+            scroll_anchors,
+            reflow_imprints,
+        );
+        let cursor_sync = Self::sync_render_cursor(render, cursor_config);
+        render.sync_visual_cursors_from_current_frame(
+            |cursor| cursor.apply_config(cursor_config),
+            romacs_display_protocol::frame_time::observe_platform_now(),
+        );
+        render.mark_dirty();
+        FrameIngestOutcome {
+            cursor: cursor_sync,
+            presentation,
+        }
+    }
+
+    fn sync_render_cursor(
+        render: &mut GuiFrameRenderState,
+        cursor_config: CursorConfigSnapshot,
+    ) -> Option<CursorSyncOutcome> {
+        let mut active_cursor = render.compositor.current_frame.as_ref().and_then(|frame| {
+            crate::render_thread::frame_windows::GuiFrameWindowManager::cursor_target_for_frame(
+                render.emacs_frame_id,
+                frame,
+            )
+        });
+
+        if active_cursor.is_none() {
+            for entry in render.compositor.child_frames.frames.values() {
+                if let Some(cursor) = entry.frame.active_cursor() {
+                    // Resolve through the shared cursor_draw_rect (where the
+                    // static cursor draws), not the grid-approximate cursor
+                    // geometry; see cursor_target_for_frame.
+                    let (x, y, width, height) = entry.frame.cursor_draw_rect(
+                        cursor.slot_id,
+                        cursor.style,
+                        cursor.ascent,
+                        (cursor.x, cursor.y, cursor.width, cursor.height),
+                    );
+                    active_cursor = Some(CursorTarget {
+                        window_id: cursor.window_id.get(),
+                        x,
+                        y,
+                        width,
+                        height,
+                        style: cursor.style,
+                        frame_id: entry.frame_id,
+                    });
+                    break;
+                }
+            }
+        }
+
+        render.cursor.apply_config(cursor_config);
+        if let Some(new_target) = active_cursor {
+            let old_cursor_rect = (
+                render.cursor.current_x,
+                render.cursor.current_y,
+                render.cursor.current_w,
+                render.cursor.current_h,
+            );
+            let (had_target, target_moved) = render.cursor.set_target(
+                new_target.clone(),
+                romacs_display_protocol::frame_time::observe_platform_now(),
+            );
+            if target_moved {
+                render.mark_dirty();
+            }
+            Some(CursorSyncOutcome {
+                target: new_target,
+                had_target,
+                target_moved,
+                old_cursor_rect,
+            })
+        } else {
+            render.cursor.clear_target();
+            render.clear_ime_preedit();
+            None
+        }
+    }
+
+    fn sync_frame_window_cursor(
+        window_state: &mut GuiFrameWindowState,
+        cursor_config: CursorConfigSnapshot,
+    ) -> Option<CursorSyncOutcome> {
+        let cursor_sync = Self::sync_render_cursor(&mut window_state.render, cursor_config);
+        if window_state.render.cursor.target_cloned().is_none() {
+            window_state.reset_ime_cursor_area();
+        }
+        cursor_sync
+    }
+
+    fn update_top_level_cursor_effects(
+        renderer: Option<&romacs_renderer_wgpu::WgpuRenderer>,
+        render: &mut GuiFrameRenderState,
+        new_target: &CursorTarget,
+        had_target: bool,
+        target_moved: bool,
+        old_cursor_rect: (f32, f32, f32, f32),
+        typing_ripple_enabled: bool,
+        cursor_trail_fade_enabled: bool,
+    ) {
+        if target_moved
+            && had_target
+            && typing_ripple_enabled
+            && let Some(renderer) = renderer
+        {
+            let cx = new_target.x + new_target.width / 2.0;
+            let cy = new_target.y + new_target.height / 2.0;
+            renderer.spawn_transient_ripple(&mut render.compositor.renderer_effects, cx, cy);
+        }
+
+        if target_moved
+            && had_target
+            && cursor_trail_fade_enabled
+            && let Some(renderer) = renderer
+        {
+            renderer.record_transient_cursor_trail(
+                &mut render.compositor.renderer_effects,
+                old_cursor_rect.0,
+                old_cursor_rect.1,
+                old_cursor_rect.2,
+                old_cursor_rect.3,
+            );
+        }
+    }
+
+    fn update_frame_window_cursor_side_effects(
+        renderer: Option<&romacs_renderer_wgpu::WgpuRenderer>,
+        window_state: &mut GuiFrameWindowState,
+        cursor_sync: CursorSyncOutcome,
+        typing_ripple_enabled: bool,
+        cursor_trail_fade_enabled: bool,
+        update_transient_effects: bool,
+    ) {
+        if update_transient_effects {
+            Self::update_top_level_cursor_effects(
+                renderer,
+                &mut window_state.render,
+                &cursor_sync.target,
+                cursor_sync.had_target,
+                cursor_sync.target_moved,
+                cursor_sync.old_cursor_rect,
+                typing_ripple_enabled,
+                cursor_trail_fade_enabled,
+            );
+        }
+        Self::update_frame_window_ime_cursor_area_if_needed(window_state, &cursor_sync.target);
+    }
+
+    /// Get latest frame from Emacs (non-blocking).
+    pub(super) fn poll_frame(&mut self) {
+        self.frame_windows.tick_top_level_child_frames();
+        let mut queued = std::collections::VecDeque::new();
+        queued.extend(std::mem::take(&mut self.pending_child_frames).into_values());
+        if let Some(worker) = &self.frame_preparation {
+            queued.extend(worker.ready());
+        } else {
+            queued.extend(
+                self.comms
+                    .frame_rx
+                    .drain_pending()
+                    .into_iter()
+                    .map(super::frame_preparation::PreparedFrame::from_queued),
+            );
+        }
+        loop {
+            let mut deferred = std::collections::HashMap::new();
+            let mut made_progress = false;
+            while let Some(display_state) = queued.pop_front() {
+                super::frame_stats::note_scene_commit(display_state.received);
+                let frame_id = display_state.state.frame_placement.frame();
+                let parent_id = display_state
+                    .state
+                    .frame_placement
+                    .parent()
+                    .unwrap_or(romacs_display_protocol::DisplayFrameId::new(0));
+                if parent_id != DisplayFrameId::new(0)
+                    && !self.frame_windows.has_presented_frame(parent_id.get())
+                {
+                    if let Some(superseded) = deferred.insert(frame_id.get(), display_state) {
+                        let placement = superseded.state.frame_placement;
+                        romacs_display_protocol::present_trace::record(
+                            romacs_display_protocol::present_trace::Stage::Superseded,
+                            placement.frame().get(),
+                            placement.presentation(),
+                        );
+                        self.comms.send_input(
+                            crate::thread_comm::InputEvent::PresentationDiscarded {
+                                presentation: placement.presentation().get(),
+                                emacs_frame_id: placement.frame().get(),
+                            },
+                        );
+                    }
+                    continue;
+                }
+                made_progress = true;
+
+                let super::frame_preparation::PreparedFrame {
+                    frame,
+                    damage: row_damage,
+                    scroll: scroll_anchors,
+                    reflow: reflow_imprints,
+                    ..
+                } = display_state;
+
+                // ── Observation point: inspect what will be rendered ──
+                // `ROMACS_DUMP_FRAME_GLYPHS=1`   → counts + role/text + raw glyph Debug.
+                // `ROMACS_DUMP_FRAME_GLYPHS=full` → the above PLUS a diff-stable,
+                //   face-RESOLVED per-glyph view (fg/bg as hex + stipple size) sorted
+                //   by (window, y, x), plus cursors. This is the reusable frontend
+                //   debugging view: any color/face/stipple/position bug is a text diff
+                //   (romacs-before vs -after, or vs GNU) with no rebuild or screenshot.
+                let dump_frame_glyphs_mode = std::env::var("ROMACS_DUMP_FRAME_GLYPHS").ok();
+                if matches!(dump_frame_glyphs_mode.as_deref(), Some("1") | Some("full")) {
+                    let mut char_count = 0usize;
+                    let mut bg_count = 0usize;
+                    let mut border_count = 0usize;
+                    let mut scrollbar_count = 0usize;
+                    let mut image_count = 0usize;
+                    let mut stretch_count = 0usize;
+                    let mut video_count = 0usize;
+                    let mut webkit_count = 0usize;
+                    let mut other_count = 0usize;
+                    for g in &frame.glyphs {
+                        match g {
+                            crate::core::frame_glyphs::FrameGlyph::Char { .. } => char_count += 1,
+                            crate::core::frame_glyphs::FrameGlyph::Background { .. } => {
+                                bg_count += 1
+                            }
+                            crate::core::frame_glyphs::FrameGlyph::Border { .. } => {
+                                border_count += 1
+                            }
+                            crate::core::frame_glyphs::FrameGlyph::ScrollBar { .. } => {
+                                scrollbar_count += 1
+                            }
+                            crate::core::frame_glyphs::FrameGlyph::Image { .. } => image_count += 1,
+                            crate::core::frame_glyphs::FrameGlyph::Stretch { .. } => {
+                                stretch_count += 1
+                            }
+                            crate::core::frame_glyphs::FrameGlyph::Video { .. } => video_count += 1,
+                            crate::core::frame_glyphs::FrameGlyph::Xwidget { .. } => {
+                                webkit_count += 1
+                            }
+                            _ => other_count += 1,
+                        }
+                    }
+                    // Role-aware breakdown: reconstruct chrome-row text + Y so we
+                    // can tell whether tab-line/header-line glyphs are emitted at
+                    // all (and where) vs. silently dropped.
+                    {
+                        use crate::core::frame_glyphs::FrameGlyph;
+                        let mut per_role: std::collections::HashMap<String, (usize, f32, String)> =
+                            std::collections::HashMap::new();
+                        for g in &frame.glyphs {
+                            if let FrameGlyph::Char {
+                                row_role,
+                                char: ch,
+                                y,
+                                window_id,
+                                ..
+                            } = g
+                            {
+                                let key = format!("{:?}/win{}", row_role, window_id);
+                                let e = per_role.entry(key).or_insert((0, *y, String::new()));
+                                e.0 += 1;
+                                e.1 = *y;
+                                if e.2.len() < 60 {
+                                    e.2.push(*ch);
+                                }
+                            }
+                        }
+                        let mut tabline_total = 0usize;
+                        for (role, (n, _, _)) in &per_role {
+                            if role.starts_with("TabLine") {
+                                tabline_total += n;
+                            }
+                        }
+                        let mut keys: Vec<_> = per_role.keys().cloned().collect();
+                        keys.sort();
+                        for k in keys {
+                            let (n, y, text) = &per_role[&k];
+                            tracing::info!("DUMP_ROLE {k}: {n} chars y={y:.1} text=[{text}]");
+                        }
+                        tracing::info!("DUMP_ROLE tabline_char_total={tabline_total}");
+                    }
+                    let cursor_count = frame.window_cursors.len();
+                    let active_cursor_count =
+                        frame.window_cursors.iter().filter(|c| c.active).count();
+                    tracing::info!(
+                        "poll_frame: frame_id={} parent_id={} size={:.0}x{:.0} char={:.1}x{:.1} \
+                     glyphs={} (char={} bg={} border={} stretch={} scrollbar={} image={} video={} webkit={} other={}) \
+                     windows={} window_cursors={} active_cursors={} faces={}",
+                        frame_id,
+                        parent_id,
+                        frame.width,
+                        frame.height,
+                        frame.char_width,
+                        frame.char_height,
+                        frame.glyphs.len(),
+                        char_count,
+                        bg_count,
+                        border_count,
+                        stretch_count,
+                        scrollbar_count,
+                        image_count,
+                        video_count,
+                        webkit_count,
+                        other_count,
+                        frame.window_infos.len(),
+                        cursor_count,
+                        active_cursor_count,
+                        frame.faces.len(),
+                    );
+                    if let Some(cursor) = frame.active_cursor() {
+                        tracing::info!(
+                            "active_cursor: window_id={} slot=(window_id={},row={},col={}) \
+                         rect=({:.2},{:.2}) {:.2}x{:.2} ascent={:.2} style={:?} color={:?} cursor_fg={:?}",
+                            cursor.window_id.get(),
+                            cursor.slot_id.window_id,
+                            cursor.slot_id.row,
+                            cursor.slot_id.col,
+                            cursor.x,
+                            cursor.y,
+                            cursor.width,
+                            cursor.height,
+                            cursor.ascent,
+                            cursor.style,
+                            cursor.color,
+                            cursor.cursor_fg,
+                        );
+                        match frame.slot_glyph(cursor.slot_id) {
+                            Some(slot_glyph) => {
+                                tracing::info!("active_cursor_slot_glyph: {:?}", slot_glyph)
+                            }
+                            None => tracing::warn!(
+                                "active_cursor_slot_glyph: missing slot=(window_id={},row={},col={})",
+                                cursor.slot_id.window_id,
+                                cursor.slot_id.row,
+                                cursor.slot_id.col,
+                            ),
+                        }
+                        if let Some(effects) = frame.phys_cursor_effects() {
+                            tracing::info!("active_cursor_effects: {:?}", effects);
+                        }
+                    } else {
+                        tracing::info!("active_cursor: none");
+                    }
+                    if !frame.window_cursors.is_empty() {
+                        let all_window_cursors: String = frame
+                        .window_cursors
+                        .iter()
+                        .enumerate()
+                        .fold(String::new(), |acc, (i, cursor)| {
+                            acc + &format!(
+                                "  window_cursor[{}]: window_id={} slot=(window_id={},row={},col={}) \
+                                 rect=({:.2},{:.2}) {:.2}x{:.2} style={:?} color={:?}\n",
+                                i,
+                                cursor.window_id.get(),
+                                cursor.slot_id.window_id,
+                                cursor.slot_id.row,
+                                cursor.slot_id.col,
+                                cursor.x,
+                                cursor.y,
+                                cursor.width,
+                                cursor.height,
+                                cursor.style,
+                                cursor.color,
+                            )
+                        });
+                        tracing::info!("window_cursors:\n{}", all_window_cursors);
+                    }
+                    let all_glyphs: String =
+                        frame
+                            .glyphs
+                            .iter()
+                            .enumerate()
+                            .fold(String::new(), |acc, (i, g)| {
+                                let slot = g.slot_id();
+                                acc + &format!(
+                                    "  glyph[{}][r={},c={}]: {:?}\n",
+                                    i,
+                                    slot.map_or(0, |s| s.row),
+                                    slot.map_or(0, |s| s.col),
+                                    g
+                                )
+                            });
+                    tracing::info!("all_glyphs:\n{}", all_glyphs);
+                    if dump_frame_glyphs_mode.as_deref() == Some("full") {
+                        tracing::info!(
+                            "GLYPH_DUMP_FULL frame={}:\n{}",
+                            frame_id,
+                            dump_frame_glyphs_resolved(&frame)
+                        );
+                    }
+                }
+
+                if parent_id == DisplayFrameId::new(0) {
+                    let routed_to_primary_fallback =
+                        self.frame_windows.is_primary_frame_id(frame_id.get());
+                    let update_transient_effects = routed_to_primary_fallback;
+                    let typing_ripple_enabled = self.effects.typing_ripple.enabled;
+                    let cursor_trail_fade_enabled = self.effects.cursor_trail_fade.enabled;
+                    let renderer = self.renderer.as_ref();
+                    if let Some(window_state) = self.frame_windows.get_mut(frame_id.get()) {
+                        let cursor_config = self.cursor_defaults.config_snapshot();
+                        let outcome = Self::ingest_frame_window_root_frame(
+                            window_state,
+                            frame,
+                            row_damage,
+                            cursor_config,
+                            scroll_anchors,
+                            reflow_imprints,
+                        );
+                        if let Some(cursor_sync) = outcome.cursor {
+                            Self::update_frame_window_cursor_side_effects(
+                                renderer,
+                                window_state,
+                                cursor_sync,
+                                typing_ripple_enabled,
+                                cursor_trail_fade_enabled,
+                                update_transient_effects,
+                            );
+                        } else {
+                            window_state.reset_ime_cursor_area();
+                        }
+                        if let Some(transition) = outcome.presentation {
+                            self.comms.send_input(
+                                crate::thread_comm::InputEvent::PresentationActivated {
+                                    presentation: transition.activated.get(),
+                                    emacs_frame_id: frame_id.get(),
+                                },
+                            );
+                            if let Some(presentation) = transition.replaced.and_then(|replaced| {
+                                window_state
+                                    .render
+                                    .route_presentation_retirement(replaced.get())
+                            }) {
+                                self.comms.send_input(
+                                    crate::thread_comm::InputEvent::PresentationRetired {
+                                        presentation,
+                                    },
+                                );
+                            }
+                        }
+                        continue;
+                    }
+                }
+
+                if parent_id != DisplayFrameId::new(0) {
+                    tracing::debug!(
+                        frame_id = frame_id.get(),
+                        parent_frame_id = parent_id.get(),
+                        width = frame.width,
+                        height = frame.height,
+                        parent_x = frame.frame_placement.outer_in_parent().x(),
+                        parent_y = frame.frame_placement.outer_in_parent().y(),
+                        glyphs = frame.glyphs.len(),
+                        "child_frame_lifecycle: render_thread_child_frame_state_received"
+                    );
+                    let update_transient_effects =
+                        self.frame_windows.is_primary_frame_id(parent_id.get());
+                    let typing_ripple_enabled = self.effects.typing_ripple.enabled;
+                    let cursor_trail_fade_enabled = self.effects.cursor_trail_fade.enabled;
+                    if let Some(window_state) = self
+                        .frame_windows
+                        .get_mut_by_presented_frame(parent_id.get())
+                    {
+                        let old_presentation = window_state
+                            .render
+                            .compositor
+                            .child_frames
+                            .frames
+                            .get(&frame_id.get())
+                            .map(|entry| entry.frame.presentation_id);
+                        let new_presentation = frame.presentation_id;
+                        let cursor_config = self.cursor_defaults.config_snapshot();
+                        let resize_crossfade = Self::lease_child_resize_crossfade(
+                            &self.render_policy,
+                            &self.child_frame_style,
+                            self.renderer.as_mut(),
+                            window_state,
+                            frame_id.get(),
+                            &frame,
+                        );
+                        let renderer = self.renderer.as_ref();
+                        if window_state.render.update_child_frame(frame) {
+                            if let Some((old, old_width, old_height, resize_spec)) =
+                                resize_crossfade
+                            {
+                                window_state
+                                    .render
+                                    .compositor
+                                    .child_frames
+                                    .begin_resize_crossfade(
+                                        frame_id.get(),
+                                        old,
+                                        old_width,
+                                        old_height,
+                                        resize_spec,
+                                        romacs_display_protocol::frame_time::observe_platform_now(
+                                        ),
+                                    );
+                                window_state.render.compositor.dirty = true;
+                            }
+                            let transition = ActivePresentationTransition::between(
+                                old_presentation,
+                                new_presentation,
+                            );
+                            let cursor_sync =
+                                Self::sync_frame_window_cursor(window_state, cursor_config);
+                            if let Some(cursor_sync) = cursor_sync {
+                                Self::update_frame_window_cursor_side_effects(
+                                    renderer,
+                                    window_state,
+                                    cursor_sync,
+                                    typing_ripple_enabled,
+                                    cursor_trail_fade_enabled,
+                                    update_transient_effects,
+                                );
+                            }
+                            if let Some(transition) = transition {
+                                self.comms.send_input(
+                                    crate::thread_comm::InputEvent::PresentationActivated {
+                                        presentation: transition.activated.get(),
+                                        emacs_frame_id: frame_id.get(),
+                                    },
+                                );
+                                if let Some(presentation) =
+                                    transition.replaced.and_then(|replaced| {
+                                        window_state
+                                            .render
+                                            .route_presentation_retirement(replaced.get())
+                                    })
+                                {
+                                    self.comms.send_input(
+                                        crate::thread_comm::InputEvent::PresentationRetired {
+                                            presentation,
+                                        },
+                                    );
+                                }
+                            }
+                        } else if old_presentation != Some(new_presentation) {
+                            self.comms.send_input(
+                                crate::thread_comm::InputEvent::PresentationDiscarded {
+                                    presentation: new_presentation.get(),
+                                    emacs_frame_id: frame_id.get(),
+                                },
+                            );
+                        }
+                        continue;
+                    }
+                }
+
+                if parent_id != DisplayFrameId::new(0)
+                    && self.frame_windows.is_primary_frame_id(parent_id.get())
+                {
+                    if let Some(ws) = self.frame_windows.primary_window_mut() {
+                        let old_presentation = ws
+                            .render
+                            .compositor
+                            .child_frames
+                            .frames
+                            .get(&frame_id.get())
+                            .map(|entry| entry.frame.presentation_id);
+                        let new_presentation = frame.presentation_id;
+                        let resize_crossfade = Self::lease_child_resize_crossfade(
+                            &self.render_policy,
+                            &self.child_frame_style,
+                            self.renderer.as_mut(),
+                            ws,
+                            frame_id.get(),
+                            &frame,
+                        );
+                        if ws.render.update_child_frame(frame) {
+                            if let Some((old, old_width, old_height, resize_spec)) =
+                                resize_crossfade
+                            {
+                                ws.render.compositor.child_frames.begin_resize_crossfade(
+                                    frame_id.get(),
+                                    old,
+                                    old_width,
+                                    old_height,
+                                    resize_spec,
+                                    romacs_display_protocol::frame_time::observe_platform_now(),
+                                );
+                                ws.render.compositor.dirty = true;
+                            }
+                            if let Some(transition) = ActivePresentationTransition::between(
+                                old_presentation,
+                                new_presentation,
+                            ) {
+                                self.comms.send_input(
+                                    crate::thread_comm::InputEvent::PresentationActivated {
+                                        presentation: transition.activated.get(),
+                                        emacs_frame_id: frame_id.get(),
+                                    },
+                                );
+                                if let Some(presentation) =
+                                    transition.replaced.and_then(|replaced| {
+                                        ws.render.route_presentation_retirement(replaced.get())
+                                    })
+                                {
+                                    self.comms.send_input(
+                                        crate::thread_comm::InputEvent::PresentationRetired {
+                                            presentation,
+                                        },
+                                    );
+                                }
+                            }
+                        } else if old_presentation != Some(new_presentation) {
+                            self.comms.send_input(
+                                crate::thread_comm::InputEvent::PresentationDiscarded {
+                                    presentation: new_presentation.get(),
+                                    emacs_frame_id: frame_id.get(),
+                                },
+                            );
+                        }
+                    } else {
+                        self.comms.send_input(
+                            crate::thread_comm::InputEvent::PresentationDiscarded {
+                                presentation: frame.presentation_id.get(),
+                                emacs_frame_id: frame_id.get(),
+                            },
+                        );
+                    };
+                } else if parent_id == DisplayFrameId::new(0)
+                    && self.frame_windows.is_primary_frame_id(frame_id.get())
+                {
+                    self.ingest_primary_paint(frame, row_damage, scroll_anchors, reflow_imprints);
+                } else {
+                    self.comms
+                        .send_input(crate::thread_comm::InputEvent::PresentationDiscarded {
+                            presentation: frame.presentation_id.get(),
+                            emacs_frame_id: frame_id.get(),
+                        });
+                }
+            }
+            if deferred.is_empty() {
+                break;
+            }
+            if !made_progress {
+                self.pending_child_frames = deferred;
+                break;
+            }
+            queued.extend(deferred.into_values());
+        }
+
+        let cursor_config = self.cursor_defaults.config_snapshot();
+        if let Some(primary_frame) = self
+            .frame_windows
+            .primary_window_mut()
+            .map(|ws| &mut ws.render)
+        {
+            let cursor_sync = Self::sync_render_cursor(primary_frame, cursor_config);
+            primary_frame.sync_visual_cursors_from_current_frame(
+                |cursor| cursor.apply_config(cursor_config),
+                romacs_display_protocol::frame_time::observe_platform_now(),
+            );
+            if let Some(cursor_sync) = cursor_sync {
+                self.update_ime_cursor_area_if_needed(&cursor_sync.target);
+            } else {
+                if let Some(window_state) = self.frame_windows.primary_window_mut() {
+                    window_state.reset_ime_cursor_area()
+                };
+                if let Some(ws) = self.frame_windows.primary_window_mut() {
+                    ws.render.clear_ime_preedit()
+                };
+            }
+        }
+    }
+}
+
+/// Diff-stable, face-RESOLVED dump of every visible glyph + cursors, sorted by
+/// (window, y, x). Powers `ROMACS_DUMP_FRAME_GLYPHS=full`: the reusable
+/// frontend-debugging view where any color/face/stipple/position bug becomes a
+/// text diff (romacs before-vs-after, or vs GNU) with no rebuild or screenshot.
+/// The face is resolved to final fg/bg (hex) + stipple size, so e.g. a text
+/// glyph and a stipple on the same cell reveal a face-id/color mismatch inline.
+fn dump_frame_glyphs_resolved(frame: &crate::core::frame_glyphs::FrameGlyphBuffer) -> String {
+    use crate::core::frame_glyphs::FrameGlyph;
+    use crate::core::types::Color;
+    let hx = |c: Color| -> String {
+        let ch = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+        format!("#{:02x}{:02x}{:02x}", ch(c.r), ch(c.g), ch(c.b))
+    };
+    // Param type is inferred as `FaceId` from `resolved_face`.
+    let face_desc = |face_id| {
+        let rf = frame.resolved_face(face_id);
+        let f = frame.faces.get(&face_id);
+        let stipple = f
+            .and_then(|f| f.stipple.as_deref())
+            .map(|s| format!("{}x{}", s.width, s.height))
+            .unwrap_or_else(|| "-".to_string());
+        let (family, size) = f
+            .map(|f| (f.font_family.as_str(), f.font_size))
+            .unwrap_or(("-", 0.0));
+        format!(
+            "face={:?} fg={} bg={} stipple={} font='{}'@{:.1}",
+            face_id,
+            hx(rf.fg),
+            hx(rf.bg),
+            stipple,
+            family,
+            size
+        )
+    };
+    let mut rows: Vec<(i64, i64, String)> = Vec::new();
+    for g in &frame.glyphs {
+        rows.push(match g {
+            FrameGlyph::Char {
+                window_id,
+                row_role,
+                char,
+                x,
+                y,
+                face_id,
+                ..
+            } => (
+                *y as i64,
+                *x as i64,
+                format!(
+                    "[win{} {:?} y={:.0} x={:.0}] {:?}  {}",
+                    window_id.get(),
+                    row_role,
+                    y,
+                    x,
+                    char,
+                    face_desc(*face_id)
+                ),
+            ),
+            FrameGlyph::Stretch {
+                window_id,
+                row_role,
+                x,
+                y,
+                width,
+                face_id,
+                ..
+            } => (
+                *y as i64,
+                *x as i64,
+                format!(
+                    "[win{} {:?} y={:.0} x={:.0}] <stretch w={:.0}>  {}",
+                    window_id.get(),
+                    row_role,
+                    y,
+                    x,
+                    width,
+                    face_desc(*face_id)
+                ),
+            ),
+            FrameGlyph::FringeBitmap {
+                window_id,
+                x,
+                y,
+                bitmap_index,
+                face_id,
+                ..
+            } => (
+                *y as i64,
+                *x as i64,
+                format!(
+                    "[win{} fringe y={:.0} x={:.0} bmp={}]  {}",
+                    window_id.get(),
+                    y,
+                    x,
+                    bitmap_index,
+                    face_desc(*face_id)
+                ),
+            ),
+            FrameGlyph::Image { x, y, width, .. } => (
+                *y as i64,
+                *x as i64,
+                format!("[y={:.0} x={:.0}] <image w={:.0}>", y, x, width),
+            ),
+            FrameGlyph::Background { bounds, color } => (
+                bounds.y as i64,
+                bounds.x as i64,
+                format!(
+                    "[y={:.0} x={:.0}] <bg {:.0}x{:.0}> color={}",
+                    bounds.y,
+                    bounds.x,
+                    bounds.width,
+                    bounds.height,
+                    hx(*color)
+                ),
+            ),
+            other => (i64::MAX, 0, format!("<other> {other:?}")),
+        });
+    }
+    rows.sort();
+    let mut out = String::new();
+    for (_, _, line) in &rows {
+        out.push_str("  ");
+        out.push_str(line);
+        out.push('\n');
+    }
+    for c in &frame.window_cursors {
+        out.push_str(&format!(
+            "  [cursor win{} y={:.0} x={:.0}] style={:?} color={} fg={}\n",
+            c.window_id.get(),
+            c.y,
+            c.x,
+            c.style,
+            hx(c.color),
+            hx(c.cursor_fg),
+        ));
+    }
+    out
+}
+
+#[cfg(all(test, feature = "webview"))]
+#[path = "frame_ingest/tests/frame_ingest_test.rs"]
+mod tests;

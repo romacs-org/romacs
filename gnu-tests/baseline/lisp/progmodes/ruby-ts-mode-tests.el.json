@@ -1,0 +1,506 @@
+{
+ "blob": "d88eb46a38500beb225a94785ad714d5fe0bbece",
+ "compiled": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": true,
+  "results": {
+   "ruby-ts-add-log-current-method-after-endless-method": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-ready-p 'ruby t)) :form (treesit-ready-p ruby t) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "ruby-ts-add-log-current-method-after-inner-class": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-ready-p 'ruby t)) :form (treesit-ready-p ruby t) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "ruby-ts-add-log-current-method-after-inner-class-outside-methods": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-ready-p 'ruby t)) :form (treesit-ready-p ruby t) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "ruby-ts-add-log-current-method-after-inner-class-outside-methods-with-text": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-ready-p 'ruby t)) :form (treesit-ready-p ruby t) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "ruby-ts-add-log-current-method-examples": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-ready-p 'ruby t)) :form (treesit-ready-p ruby t) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "ruby-ts-add-log-current-method-in-singleton-class": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-ready-p 'ruby t)) :form (treesit-ready-p ruby t) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "ruby-ts-add-log-current-method-namespace-shorthand": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-ready-p 'ruby t)) :form (treesit-ready-p ruby t) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "ruby-ts-add-log-current-method-outside-of-method": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-ready-p 'ruby t)) :form (treesit-ready-p ruby t) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "ruby-ts-align-to-stmt-keywords-case": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-ready-p 'ruby t)) :form (treesit-ready-p ruby t) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "ruby-ts-align-to-stmt-keywords-t": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-ready-p 'ruby t)) :form (treesit-ready-p ruby t) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "ruby-ts-imenu-index": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-ready-p 'ruby t)) :form (treesit-ready-p ruby t) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "ruby-ts-indent-call-no-args": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-ready-p 'ruby t)) :form (treesit-ready-p ruby t) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "ruby-ts-indent-empty-if-else": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-ready-p 'ruby t)) :form (treesit-ready-p ruby t) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "ruby-ts-indent-simple": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-ready-p 'ruby t)) :form (treesit-ready-p ruby t) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "ruby-ts-indent-test/ruby-after-operator-indent.rb": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-ready-p 'ruby t)) :form (treesit-ready-p ruby t) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "ruby-ts-indent-test/ruby-block-indent.rb": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-ready-p 'ruby t)) :form (treesit-ready-p ruby t) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "ruby-ts-indent-test/ruby-bracketed-args-indent.rb": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-ready-p 'ruby t)) :form (treesit-ready-p ruby t) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "ruby-ts-indent-test/ruby-method-call-indent.rb": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-ready-p 'ruby t)) :form (treesit-ready-p ruby t) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "ruby-ts-indent-test/ruby-method-params-indent.rb": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-ready-p 'ruby t)) :form (treesit-ready-p ruby t) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "ruby-ts-indent-test/ruby-parenless-call-arguments-indent.rb": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-ready-p 'ruby t)) :form (treesit-ready-p ruby t) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "ruby-ts-indent-test/ruby-ts.rb": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-ready-p 'ruby t)) :form (treesit-ready-p ruby t) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "ruby-ts-syntax-propertize-symbol": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-ready-p 'ruby t)) :form (treesit-ready-p ruby t) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   }
+  },
+  "timed_out": false
+ },
+ "file": "lisp/progmodes/ruby-ts-mode-tests.el",
+ "gnu": {
+  "emacs": "<recording-path-redacted>/emacs-32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+  "version": "32.0.50"
+ },
+ "harness_sha256": "78c20850429a08af22faadf73b5d164c560230e83d7eb88ef60cb995670703ef",
+ "mini": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": null,
+  "results": {
+   "ruby-ts-add-log-current-method-after-endless-method": {
+    "as_expected": null,
+    "detail": "((skip-unless (treesit-ready-p 'ruby t)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "ruby-ts-add-log-current-method-after-inner-class": {
+    "as_expected": null,
+    "detail": "((skip-unless (treesit-ready-p 'ruby t)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "ruby-ts-add-log-current-method-after-inner-class-outside-methods": {
+    "as_expected": null,
+    "detail": "((skip-unless (treesit-ready-p 'ruby t)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "ruby-ts-add-log-current-method-after-inner-class-outside-methods-with-text": {
+    "as_expected": null,
+    "detail": "((skip-unless (treesit-ready-p 'ruby t)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "ruby-ts-add-log-current-method-examples": {
+    "as_expected": null,
+    "detail": "((skip-unless (treesit-ready-p 'ruby t)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "ruby-ts-add-log-current-method-in-singleton-class": {
+    "as_expected": null,
+    "detail": "((skip-unless (treesit-ready-p 'ruby t)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "ruby-ts-add-log-current-method-namespace-shorthand": {
+    "as_expected": null,
+    "detail": "((skip-unless (treesit-ready-p 'ruby t)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "ruby-ts-add-log-current-method-outside-of-method": {
+    "as_expected": null,
+    "detail": "((skip-unless (treesit-ready-p 'ruby t)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "ruby-ts-align-to-stmt-keywords-case": {
+    "as_expected": null,
+    "detail": "((skip-unless (treesit-ready-p 'ruby t)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "ruby-ts-align-to-stmt-keywords-t": {
+    "as_expected": null,
+    "detail": "((skip-unless (treesit-ready-p 'ruby t)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "ruby-ts-imenu-index": {
+    "as_expected": null,
+    "detail": "((skip-unless (treesit-ready-p 'ruby t)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "ruby-ts-indent-call-no-args": {
+    "as_expected": null,
+    "detail": "((skip-unless (treesit-ready-p 'ruby t)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "ruby-ts-indent-empty-if-else": {
+    "as_expected": null,
+    "detail": "((skip-unless (treesit-ready-p 'ruby t)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "ruby-ts-indent-simple": {
+    "as_expected": null,
+    "detail": "((skip-unless (treesit-ready-p 'ruby t)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "ruby-ts-indent-test/ruby-after-operator-indent.rb": {
+    "as_expected": null,
+    "detail": "((skip-unless (treesit-ready-p 'ruby t)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "ruby-ts-indent-test/ruby-block-indent.rb": {
+    "as_expected": null,
+    "detail": "((skip-unless (treesit-ready-p 'ruby t)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "ruby-ts-indent-test/ruby-bracketed-args-indent.rb": {
+    "as_expected": null,
+    "detail": "((skip-unless (treesit-ready-p 'ruby t)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "ruby-ts-indent-test/ruby-method-call-indent.rb": {
+    "as_expected": null,
+    "detail": "((skip-unless (treesit-ready-p 'ruby t)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "ruby-ts-indent-test/ruby-method-params-indent.rb": {
+    "as_expected": null,
+    "detail": "((skip-unless (treesit-ready-p 'ruby t)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "ruby-ts-indent-test/ruby-parenless-call-arguments-indent.rb": {
+    "as_expected": null,
+    "detail": "((skip-unless (treesit-ready-p 'ruby t)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "ruby-ts-indent-test/ruby-ts.rb": {
+    "as_expected": null,
+    "detail": "((skip-unless (treesit-ready-p 'ruby t)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "ruby-ts-syntax-propertize-symbol": {
+    "as_expected": null,
+    "detail": "((skip-unless (treesit-ready-p 'ruby t)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   }
+  },
+  "timed_out": false
+ },
+ "read_error": null,
+ "real": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": true,
+  "results": {
+   "ruby-ts-add-log-current-method-after-endless-method": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-ready-p 'ruby t)) :form (treesit-ready-p ruby t) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "ruby-ts-add-log-current-method-after-inner-class": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-ready-p 'ruby t)) :form (treesit-ready-p ruby t) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "ruby-ts-add-log-current-method-after-inner-class-outside-methods": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-ready-p 'ruby t)) :form (treesit-ready-p ruby t) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "ruby-ts-add-log-current-method-after-inner-class-outside-methods-with-text": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-ready-p 'ruby t)) :form (treesit-ready-p ruby t) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "ruby-ts-add-log-current-method-examples": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-ready-p 'ruby t)) :form (treesit-ready-p ruby t) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "ruby-ts-add-log-current-method-in-singleton-class": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-ready-p 'ruby t)) :form (treesit-ready-p ruby t) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "ruby-ts-add-log-current-method-namespace-shorthand": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-ready-p 'ruby t)) :form (treesit-ready-p ruby t) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "ruby-ts-add-log-current-method-outside-of-method": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-ready-p 'ruby t)) :form (treesit-ready-p ruby t) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "ruby-ts-align-to-stmt-keywords-case": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-ready-p 'ruby t)) :form (treesit-ready-p ruby t) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "ruby-ts-align-to-stmt-keywords-t": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-ready-p 'ruby t)) :form (treesit-ready-p ruby t) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "ruby-ts-imenu-index": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-ready-p 'ruby t)) :form (treesit-ready-p ruby t) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "ruby-ts-indent-call-no-args": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-ready-p 'ruby t)) :form (treesit-ready-p ruby t) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "ruby-ts-indent-empty-if-else": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-ready-p 'ruby t)) :form (treesit-ready-p ruby t) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "ruby-ts-indent-simple": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-ready-p 'ruby t)) :form (treesit-ready-p ruby t) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "ruby-ts-indent-test/ruby-after-operator-indent.rb": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-ready-p 'ruby t)) :form (treesit-ready-p ruby t) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "ruby-ts-indent-test/ruby-block-indent.rb": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-ready-p 'ruby t)) :form (treesit-ready-p ruby t) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "ruby-ts-indent-test/ruby-bracketed-args-indent.rb": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-ready-p 'ruby t)) :form (treesit-ready-p ruby t) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "ruby-ts-indent-test/ruby-method-call-indent.rb": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-ready-p 'ruby t)) :form (treesit-ready-p ruby t) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "ruby-ts-indent-test/ruby-method-params-indent.rb": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-ready-p 'ruby t)) :form (treesit-ready-p ruby t) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "ruby-ts-indent-test/ruby-parenless-call-arguments-indent.rb": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-ready-p 'ruby t)) :form (treesit-ready-p ruby t) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "ruby-ts-indent-test/ruby-ts.rb": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-ready-p 'ruby t)) :form (treesit-ready-p ruby t) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "ruby-ts-syntax-propertize-symbol": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-ready-p 'ruby t)) :form (treesit-ready-p ruby t) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   }
+  },
+  "timed_out": false
+ },
+ "schema": 1,
+ "toplevel_deftests": 15
+}

@@ -1,0 +1,28 @@
+{
+ "name": "frame-bottom-divider-width",
+ "arity": [
+  0,
+  1
+ ],
+ "effect": "reads",
+ "gnu_files": [
+  "frame.c"
+ ],
+ "gnu_def": "frame.c:4538",
+ "rust": "src/prims/window.rs:202",
+ "args": [
+  "none"
+ ],
+ "extra": {
+  "0": [
+   "1",
+   "'sym",
+   "(copy-sequence \"s\")"
+  ]
+ },
+ "probes": [
+  "(frame-bottom-divider-width)",
+  "(frame-bottom-divider-width (selected-frame))",
+  "(condition-case e (frame-bottom-divider-width (selected-window)) (error (list (car e) (car (cdr e)) (eq (car (cdr (cdr e))) (selected-window)))))"
+ ]
+}

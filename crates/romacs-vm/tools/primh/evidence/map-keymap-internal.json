@@ -1,0 +1,56 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "map-keymap-internal",
+ "spec_sha256": "4effdf4e65bd22533c6bf8f0af0b193c8c2e93a2b607209a6a9e859fb8f4da6c",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "map-keymap-internal",
+    "subr",
+    2,
+    2
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "keymap.c": "b7bf7e9e3df8a2dc5f82f05f44dcba7abfdd4cc9be370357ce8829b83bfe94fb",
+  "chartab.c": "ee3cc0b6fc04e92281a19ac10493c3db216ab0497c2fe0c12edca33073fe5c51"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "map-keymap-internal/0000",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'map-keymap-internal '(1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr map-keymap-internal> 1))"
+  },
+  {
+   "id": "map-keymap-internal/0001",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'map-keymap-internal '(1 1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr map-keymap-internal> 3))"
+  },
+  {
+   "id": "map-keymap-internal/0002",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((p '(keymap (p . q))) (seen nil)) (list (eq p (map-keymap-internal (lambda (k v) (setq seen (cons (cons k v) seen))) (cons 'keymap (cons '(a . b) p)))) (nreverse seen)))) (error (list 'sig e))))",
+   "expected": "(ok (t ((a . b))))"
+  },
+  {
+   "id": "map-keymap-internal/0003",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((seen nil)) (map-keymap-internal (lambda (k v) (setq seen (cons (cons k v) seen))) '(keymap (a . t) (b . nil))) (nreverse seen))) (error (list 'sig e))))",
+   "expected": "(ok ((a) (b)))"
+  }
+ ]
+}

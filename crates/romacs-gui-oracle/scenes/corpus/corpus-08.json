@@ -1,0 +1,314 @@
+{
+ "name": "corpus-08",
+ "frame": {
+  "width": 480,
+  "height": 168,
+  "bg": "#ffffff",
+  "fg": "#000000"
+ },
+ "font": {
+  "family": "Liberation Mono",
+  "pixel_size": 20,
+  "regular": "/usr/share/fonts/liberation/LiberationMono-Regular.ttf",
+  "bold": "/usr/share/fonts/liberation/LiberationMono-Bold.ttf",
+  "italic": "/usr/share/fonts/liberation/LiberationMono-Italic.ttf"
+ },
+ "cursor_color": "#00a000",
+ "buffer": [
+  {
+   "text": "Emacs",
+   "fg": "#1e90ff",
+   "underline": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "{ok}",
+   "bold": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "q?"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "βιβλίο",
+   "fg": "#1e90ff"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "κόσμε"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "(car)",
+   "fg": "#ff0000"
+  },
+  {
+   "text": "\n"
+  },
+  {
+   "text": "ζωή",
+   "italic": true,
+   "underline": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "dog",
+   "bold": true,
+   "underline": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "ΔΕΛΤΑ"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "ξένος",
+   "fg": "#0000ff"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "over",
+   "fg": "#ff0000",
+   "bold": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "brown"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "ξένος",
+   "underline": true
+  },
+  {
+   "text": "\n"
+  },
+  {
+   "text": "δέντρο"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "@user",
+   "fg": "#b8860b",
+   "bold": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "ψυχή"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "καλημέρα",
+   "underline": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "x=42;",
+   "italic": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "dog"
+  },
+  {
+   "text": "\n"
+  },
+  {
+   "text": "50%"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "#if",
+   "fg": "#a020f0"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "lazy",
+   "fg": "#ff8c00"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "fox"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "{ok}",
+   "bold": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "Emacs",
+   "underline": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "ήλιος"
+  },
+  {
+   "text": "\n"
+  }
+ ],
+ "point": 31,
+ "expect": {
+  "origin": [
+   0,
+   0
+  ],
+  "rows": [
+   {
+    "text": "Emacs {ok} q? βιβλίο κόσμε (car)",
+    "runs": [
+     {
+      "start": 0,
+      "end": 5,
+      "fg": "#1e90ff",
+      "underline": true
+     },
+     {
+      "start": 6,
+      "end": 10,
+      "bold": true
+     },
+     {
+      "start": 14,
+      "end": 20,
+      "fg": "#1e90ff"
+     },
+     {
+      "start": 27,
+      "end": 32,
+      "fg": "#ff0000"
+     }
+    ]
+   },
+   {
+    "text": "ζωή dog ΔΕΛΤΑ ξένος over brown ξένος",
+    "runs": [
+     {
+      "start": 0,
+      "end": 3,
+      "italic": true,
+      "underline": true
+     },
+     {
+      "start": 4,
+      "end": 7,
+      "bold": true,
+      "underline": true
+     },
+     {
+      "start": 14,
+      "end": 19,
+      "fg": "#0000ff"
+     },
+     {
+      "start": 20,
+      "end": 24,
+      "fg": "#ff0000",
+      "bold": true
+     },
+     {
+      "start": 31,
+      "end": 36,
+      "underline": true
+     }
+    ]
+   },
+   {
+    "text": "δέντρο @user ψυχή καλημέρα x=42; dog",
+    "runs": [
+     {
+      "start": 7,
+      "end": 12,
+      "fg": "#b8860b",
+      "bold": true
+     },
+     {
+      "start": 18,
+      "end": 26,
+      "underline": true
+     },
+     {
+      "start": 27,
+      "end": 32,
+      "italic": true
+     }
+    ]
+   },
+   {
+    "text": "50% #if lazy fox {ok} Emacs ήλιος",
+    "runs": [
+     {
+      "start": 4,
+      "end": 7,
+      "fg": "#a020f0"
+     },
+     {
+      "start": 8,
+      "end": 12,
+      "fg": "#ff8c00"
+     },
+     {
+      "start": 17,
+      "end": 21,
+      "bold": true
+     },
+     {
+      "start": 22,
+      "end": 27,
+      "underline": true
+     }
+    ]
+   }
+  ],
+  "cursor": {
+   "row": 0,
+   "col": 30
+  }
+ }
+}

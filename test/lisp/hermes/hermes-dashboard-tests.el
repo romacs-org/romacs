@@ -1,0 +1,3777 @@
+;;; hermes-dashboard-tests.el --- dashboard tests for hermes-el  -*- lexical-binding: t; -*-
+
+;;; Code:
+
+(require 'ert)
+(require 'hermes-test-helpers)
+
+;;; Instance selection
+
+(ert-deftest hermes-instance-configured-falls-back-to-dashboard-url ()
+  "An empty instance list preserves the configured dashboard URL."
+  (let ((hermes-instances nil)
+        (hermes-dashboard-transport-url "http://127.0.0.1:9119"))
+    (should (equal (hermes-instance-configured)
+                   '(("default" . "http://127.0.0.1:9119"))))))
+
+(ert-deftest hermes-instance-typed-identity-is-client-local ()
+  "Typed identity exposes local metadata without requiring server support."
+  (let* ((instance '(:id "constantine" :name "Constantine"
+                     :url "https://hermes.example.test"))
+         (hermes-instances (list instance)))
+    (should (equal (hermes-instance-configured) (list instance)))
+    (should (equal (hermes-instance-id instance) "constantine"))
+    (should (equal (hermes-instance-name instance) "Constantine"))
+    (should (equal (hermes-instance-url instance)
+                   "https://hermes.example.test"))
+    (should (equal (hermes-instance-resolve) instance))))
+
+(ert-deftest hermes-instance-typed-identity-selects-by-name ()
+  "Typed instances prompt with display names and retain stable ids."
+  (let* ((local '(:id "local" :name "Local"
+                  :url "http://127.0.0.1:9119"))
+         (remote '(:id "remote" :name "Remote"
+                   :url "https://hermes.example.test"))
+         (hermes-instances (list local remote))
+         (hermes-instance nil))
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (_prompt collection &rest _)
+                 (should (equal collection '("Local" "Remote")))
+                 "Remote")))
+      (should (equal (hermes-instance-resolve) remote)))))
+
+(ert-deftest hermes-instance-typed-identity-rejects-duplicate-ids ()
+  "Stable instance ids are unique even when display names differ."
+  (let ((hermes-instances
+         '((:id "server" :name "Primary" :url "http://primary")
+           (:id "server" :name "Backup" :url "http://backup"))))
+    (should-error (hermes-instance-configured) :type 'user-error)))
+
+(ert-deftest hermes-instance-typed-identity-rejects-malformed-fields ()
+  "Typed identities reject unknown and duplicated fields."
+  (dolist (instance
+           '((:foo "extra" :id "a" :name "A" :url "http://a")
+             (:id "a" :name "A" :url "http://a" :id "b")
+             (:id "a" :name "A" :name "B" :url "http://a")
+             (:id "a" :name "A" :url "http://a" :url "http://b")))
+    (let ((hermes-instances (list instance)))
+      (should-error (hermes-instance-configured) :type 'user-error))))
+
+(ert-deftest hermes-instance-configured-rejects-nil-and-nonproper-entries ()
+  "Nil, improper, and circular entries fail the instance shape contract."
+  (let* ((circular (list :id "a" :name "A" :url "http://a"))
+         (tail (last circular)))
+    (setcdr tail circular)
+    (unwind-protect
+        (dolist (instance (list nil '(:id "a" :name . "A") circular))
+          (let ((hermes-instances (list instance))
+                (print-circle t))
+            (should-error (hermes-instance-configured) :type 'user-error)))
+      (setcdr tail nil))))
+
+(ert-deftest hermes-instance-resolve-uses-buffer-context ()
+  "A buffer-owned instance wins without prompting."
+  (let ((hermes-instances '(("local" . "http://127.0.0.1:9119")
+                            ("remote" . "https://hermes.example.test")))
+        (hermes-instance '("remote" . "https://hermes.example.test")))
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (&rest _) (ert-fail "Unexpected instance prompt"))))
+      (should (equal (hermes-instance-resolve) hermes-instance)))))
+
+(ert-deftest hermes-instance-resolve-uses-only-configured-instance ()
+  "One configured instance is selected without prompting."
+  (let ((hermes-instances '(("remote" . "https://hermes.example.test")))
+        (hermes-instance nil))
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (&rest _) (ert-fail "Unexpected instance prompt"))))
+      (should (equal (hermes-instance-resolve)
+                     '("remote" . "https://hermes.example.test"))))))
+
+(ert-deftest hermes-instance-resolve-prompts-when-context-is-ambiguous ()
+  "Multiple configured instances prompt when the buffer owns none."
+  (let ((hermes-instances '(("local" . "http://127.0.0.1:9119")
+                            ("remote" . "https://hermes.example.test")))
+        (hermes-instance nil)
+        seen)
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (prompt collection &rest _)
+                 (setq seen (list prompt collection))
+                 "remote")))
+      (should (equal (hermes-instance-resolve)
+                     '("remote" . "https://hermes.example.test")))
+      (should (equal seen
+                     '("Hermes instance: " ("local" "remote")))))))
+
+(ert-deftest hermes-instance-context-does-not-prompt-when-ambiguous ()
+  "Passive context lookup returns nil when multiple instances need a choice."
+  (let ((hermes-instances '(("local" . "http://127.0.0.1:9119")
+                            ("remote" . "https://hermes.example.test")))
+        (hermes-instance nil))
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (&rest _) (ert-fail "Unexpected instance prompt"))))
+      (should-not (hermes-instance-context)))))
+
+(ert-deftest hermes-instance-context-uses-the-only-instance ()
+  "Passive context lookup returns the sole configured instance."
+  (let ((hermes-instances '(("remote" . "https://hermes.example.test")))
+        (hermes-instance nil))
+    (should (equal (hermes-instance-context)
+                   '("remote" . "https://hermes.example.test")))))
+
+(ert-deftest hermes-dashboard-profile-cache-follows-buffer-instance ()
+  "Profile completion reads the cache owned by the current buffer instance."
+  (let ((hermes-instances '(("local" . "http://127.0.0.1:9119")
+                            ("remote" . "https://hermes.example.test")))
+        (hermes-instance '("remote" . "https://hermes.example.test"))
+        (hermes-dashboard-transport-url "http://127.0.0.1:9119")
+        (hermes-dashboard-transport--profile-cache
+         '(("https://hermes.example.test" . ((profiles . (((name . "work"))))))
+           ("http://127.0.0.1:9119" . ((profiles . (((name . "default")))))))))
+    (should (equal (hermes-dashboard-transport-cached-profile-list)
+                   '((profiles . (((name . "work")))))))))
+
+(ert-deftest hermes-dashboard-http-json-async-forwards-request-timeout ()
+  "The JSON request seam receives a caller-specific timeout."
+  (let (arguments)
+    (let ((hermes-dashboard-transport-http-request-async-function
+           (lambda (_url &rest args)
+             (setq arguments args)
+             (hermes--promise-resolved '(:status 200 :body ((ok . t)))))))
+      (hermes-dashboard-transport--http-json-async
+       "http://example.test/slow" :method "POST" :timeout 300)
+      (should (equal (plist-get arguments :timeout) 300)))))
+
+(ert-deftest hermes-dashboard-http-json-async-omits-nil-request-timeout ()
+  "Existing request seams receive no new keyword without an override."
+  (let ((hermes-dashboard-transport-http-request-async-function
+         (cl-function
+          (lambda (_url &key method headers data secrets)
+            (ignore method headers data secrets)
+            (hermes--promise-resolved '(:status 200 :body ((ok . t))))))))
+    (should (hermes--promise-p
+             (hermes-dashboard-transport--http-json-async
+              "http://example.test/fast")))))
+
+(ert-deftest hermes-dashboard-api-request-async-forwards-request-timeout ()
+  "Authenticated async REST requests retain a caller-specific timeout."
+  (let ((hermes-dashboard-transport-url "http://example.test")
+        (hermes-dashboard-transport--api-auth
+         '(:base-url "http://example.test" :headers nil :secrets nil))
+        request)
+    (cl-letf (((symbol-function
+                'hermes-dashboard-transport--http-json-request-async)
+               (lambda (value)
+                 (setq request value)
+                 (hermes--promise-resolved '(:status 200 :body ((ok . t)))))))
+      (hermes-dashboard-transport-api-request-async
+       "POST" "/slow" :timeout 300)
+      (should (equal (plist-get request :timeout) 300)))))
+
+(ert-deftest hermes-dashboard-api-request-async-uses-client-url-without-token ()
+  "A tokenless client pins the URL while REST auth supplies credentials."
+  (let ((hermes-dashboard-transport-url "http://127.0.0.1:9119")
+        (client (make-hermes-dashboard-transport-client
+                 :base-url "https://hermes.example.test"))
+        auth-url request)
+    (cl-letf (((symbol-function 'hermes-dashboard-transport-api-auth-async)
+               (lambda (&optional _refresh)
+                 (setq auth-url hermes-dashboard-transport--api-auth-base-url)
+                 (hermes--promise-resolved
+                  `(:base-url ,hermes-dashboard-transport--api-auth-base-url
+                    :headers (("Authorization" . "Bearer bearer"))))))
+              ((symbol-function
+                'hermes-dashboard-transport--http-json-request-async)
+               (lambda (value)
+                 (setq request value)
+                 (hermes--promise-resolved '(:status 200 :body ((ok . t)))))))
+      (hermes-dashboard-transport-api-request-async
+       "GET" "/api/status" :client client)
+      (should (equal auth-url "https://hermes.example.test"))
+      (should (equal (plist-get request :url)
+                     "https://hermes.example.test/api/status"))
+      (should (equal (alist-get "Authorization" (plist-get request :headers)
+                                nil nil #'equal)
+                     "Bearer bearer")))))
+
+(ert-deftest hermes-dashboard-api-request-async-retry-keeps-client-url ()
+  "A tokenless client's URL survives REST re-authentication after HTTP 401."
+  (let ((hermes-dashboard-transport-url "http://127.0.0.1:9119")
+        (client (make-hermes-dashboard-transport-client
+                 :base-url "https://hermes.example.test"))
+        auth-urls request-urls)
+    (cl-letf (((symbol-function 'hermes-dashboard-transport-api-auth-async)
+               (lambda (&optional _refresh)
+                 (push hermes-dashboard-transport--api-auth-base-url auth-urls)
+                 (hermes--promise-resolved
+                  `(:base-url ,hermes-dashboard-transport--api-auth-base-url))))
+              ((symbol-function
+                'hermes-dashboard-transport--http-json-request-async)
+               (lambda (request)
+                 (push (plist-get request :url) request-urls)
+                 (if (cdr request-urls)
+                     (hermes--promise-resolved
+                      '(:status 200 :body ((ok . t))))
+                   (hermes--promise-rejected '(hermes-dashboard-http-error "Request failed (HTTP 401)" 401))))))
+      (hermes-dashboard-transport-api-request-async
+       "GET" "/api/status" :client client)
+      (should (equal (reverse auth-urls)
+                     '("https://hermes.example.test"
+                       "https://hermes.example.test")))
+      (should (equal (reverse request-urls)
+                     '("https://hermes.example.test/api/status"
+                       "https://hermes.example.test/api/status"))))))
+
+(ert-deftest hermes-dashboard-api-request-async-retry-keeps-selected-url ()
+  "A selected URL survives async REST re-authentication after HTTP 401."
+  (let ((hermes-dashboard-transport-url "http://legacy.example.test")
+        (first-request (hermes--promise-make))
+        auth-urls request-urls)
+    (cl-letf (((symbol-function 'hermes-dashboard-transport-api-auth-async)
+               (lambda (&optional _refresh)
+                 (push hermes-dashboard-transport--api-auth-base-url auth-urls)
+                 (hermes--promise-resolved
+                  `(:base-url ,hermes-dashboard-transport--api-auth-base-url))))
+              ((symbol-function
+                'hermes-dashboard-transport--http-json-request-async)
+               (lambda (request)
+                 (push (plist-get request :url) request-urls)
+                 (if (cdr request-urls)
+                     (hermes--promise-resolved
+                      '(:status 200 :body ((ok . t))))
+                   first-request))))
+      (let ((hermes-dashboard-transport-url
+             "https://selected.example.test"))
+        (hermes-dashboard-transport-api-request-async
+         "GET" "/api/status"))
+      (hermes--promise-reject first-request '(hermes-dashboard-http-error "Request failed (HTTP 401)" 401))
+      (should (equal (reverse auth-urls)
+                     '("https://selected.example.test"
+                       "https://selected.example.test")))
+      (should (equal (reverse request-urls)
+                     '("https://selected.example.test/api/status"
+                       "https://selected.example.test/api/status"))))))
+
+(ert-deftest hermes-dashboard-transport-call-resolves-on-result ()
+  "A call resolves its promise with the JSON-RPC result for the matching id."
+  (let* ((client (hermes-test--dashboard-client))
+         last-frame resolved
+         (hermes-dashboard-transport-websocket-send-function
+          (lambda (_ws text)
+            (setq last-frame (hermes-dashboard-transport--decode-frame text)))))
+    (hermes--promise-then
+     (hermes-dashboard-transport-call client "session.list" '((cols . 80)))
+     (lambda (result) (setq resolved result)))
+    (should (equal (alist-get 'method last-frame) "session.list"))
+    (hermes-dashboard-transport--handle-frame
+     client
+     `((jsonrpc . "2.0") (id . ,(alist-get 'id last-frame)) (result . "ok")))
+    (should (equal resolved "ok"))))
+
+(ert-deftest hermes-dashboard-transport-call-rejects-on-error ()
+  "A call rejects its promise with the error message for the matching id."
+  (let* ((client (hermes-test--dashboard-client))
+         last-frame rejected
+         (hermes-dashboard-transport-websocket-send-function
+          (lambda (_ws text)
+            (setq last-frame (hermes-dashboard-transport--decode-frame text)))))
+    (hermes--promise-catch
+     (hermes-dashboard-transport-call client "session.create" nil)
+     (lambda (reason) (setq rejected reason)))
+    (hermes-dashboard-transport--handle-frame
+     client
+     `((jsonrpc . "2.0") (id . ,(alist-get 'id last-frame))
+       (error . ((message . "boom")))))
+    (should (string-match-p "boom" rejected))))
+
+;; W0 proves the invocation contract that the observation owner will use.
+(defvar hermes-dashboard-transport-request-lossless-result)
+
+(defun hermes-test--inventory-request (client &rest callbacks)
+  "Request CLIENT inventory with finite deadline and lossless CALLBACKS."
+  (let ((hermes-dashboard-transport-request-timeout 10)
+        (hermes-dashboard-transport-request-lossless-result t))
+    (apply #'hermes-dashboard-transport-delegation-status client callbacks)))
+
+(ert-deftest hermes-dashboard-w0-wire-fidelity-and-legacy ()
+  "Opt-in survives registration; concurrent legacy results keep their shape."
+  (dolist (method '("delegation.status" "process.list"))
+    (dolist (body '("{}" "{\"active\":[]}" "{\"active\":null}"
+                    "{\"active\":false}" "{\"active\":{}}"
+                    "{\"active\":7}" "{\"active\":[{},null,false,[],7]}"
+                    "{\"active\":[{\"subagent_id\":\"a\",\"status\":\"running\"}]}"))
+      (let* ((wire (if (equal method "process.list")
+                       (replace-regexp-in-string "active" "processes" body)
+                     body))
+             (client (hermes-test--dashboard-client))
+             (hermes-dashboard-transport-request-timeout nil)
+             (hermes-dashboard-transport-websocket-send-function #'ignore)
+             legacy result events)
+        (setf (hermes-dashboard-transport-client-callback client)
+              (lambda (event) (push event events)))
+        (let* ((id (let ((hermes-dashboard-transport-request-lossless-result t))
+                     (if (equal method "delegation.status")
+                         (hermes-dashboard-transport-delegation-status
+                          client :resolve (lambda (value) (setq result value)))
+                       (hermes-dashboard-transport-process-list
+                        client :session-id "runtime"
+                        :resolve (lambda (value) (setq result value))))))
+               (old (hermes-dashboard-transport-delegation-status
+                     client :resolve (lambda (value) (setq legacy value)))))
+          (hermes-dashboard-transport--handle-frame
+           client (format "{\"jsonrpc\":\"2.0\",\"id\":%S,\"result\":%s}" id wire))
+          (hermes-dashboard-transport--handle-frame
+           client (format "{\"jsonrpc\":\"2.0\",\"id\":%S,\"result\":%s}" old wire))
+          (should (hash-table-p result))
+          (should (equal wire (json-serialize
+                               result :null-object :json-null
+                               :false-object :json-false)))
+          (should (equal legacy (hermes-transport-json-parse wire)))
+          (should (= 0 (hash-table-count
+                        (hermes-dashboard-transport-client-pending client))))
+          (should-not events))))))
+
+(ert-deftest hermes-dashboard-w0-synchronous-response-and-method-gate ()
+  "Pending metadata exists before send; unrelated methods stay legacy."
+  (let* ((client (hermes-test--dashboard-client))
+         (hermes-dashboard-transport-request-timeout nil)
+         result observed
+         (hermes-dashboard-transport-websocket-send-function
+          (lambda (_ws text)
+            (let* ((frame (hermes-transport-json-parse text))
+                   (id (alist-get 'id frame)))
+              (push (copy-sequence
+                     (gethash id (hermes-dashboard-transport-client-pending client)))
+                    observed)
+              (hermes-dashboard-transport--handle-frame
+               client (format "{\"id\":%S,\"result\":{\"active\":[]}}" id))))))
+    (let ((hermes-dashboard-transport-request-lossless-result t))
+      (hermes-test--inventory-request
+       client :resolve (lambda (value) (setq result value)))
+      (should (hash-table-p result))
+      (should (plist-get (car observed) :lossless-result))
+      (should (timerp (plist-get (car observed) :timer)))
+      (should-not (memq (plist-get (car observed) :timer) timer-list))
+      (hermes-dashboard-transport-session-list
+       client :resolve (lambda (value) (setq result value)))
+      (should (hash-table-p result))
+      (should (plist-get (car observed) :lossless-result))
+      (hermes-dashboard-transport-session-history
+       client "ordinary" :resolve (lambda (value) (setq result value)))
+      (should (equal result '((active))))
+      (should-not (plist-get (car observed) :lossless-result)))
+    (hermes-dashboard-transport-session-list
+     client :resolve (lambda (value) (setq result value)))
+    (should (equal result '((active))))
+    (should-not (plist-get (car observed) :lossless-result))
+    (should (= 0 (hash-table-count
+                  (hermes-dashboard-transport-client-pending client))))))
+
+(ert-deftest hermes-dashboard-w0-handled-errors-and-raw-required ()
+  "Wire errors stay message-only; decoded inventory frames reject locally."
+  (dolist (failure '(-32601 4001 5010 -32603 decoded parse))
+    (let* ((client (hermes-test--dashboard-client))
+           (hermes-dashboard-transport-request-timeout nil)
+           (hermes-dashboard-transport-websocket-send-function #'ignore)
+           rejects events resolves)
+      (setf (hermes-dashboard-transport-client-callback client)
+            (lambda (event) (push event events)))
+      (let ((id (let ((hermes-dashboard-transport-request-lossless-result t))
+                  (hermes-dashboard-transport-delegation-status
+                   client :resolve (lambda (_) (setq resolves t))
+                   :reject (lambda (message) (push message rejects))))))
+        (cond
+         ((eq failure 'decoded)
+          (hermes-dashboard-transport--handle-frame
+           client `((id . ,id) (result . ((active))))))
+         ((eq failure 'parse)
+          (cl-letf (((symbol-function 'hermes-transport-json-parse-lossless)
+                     (lambda (_) (error "Invalid lossless JSON"))))
+            (hermes-dashboard-transport--handle-frame
+             client (format "{\"id\":%S,\"result\":{}}" id))))
+         (t
+          (hermes-dashboard-transport--handle-frame
+           client (format "{\"id\":%S,\"error\":{\"code\":%s,\"message\":\"no inventory\"}}"
+                          id failure))))
+        (should (= 1 (length rejects)))
+        (should (stringp (car rejects)))
+        (when (integerp failure) (should (equal (car rejects) "no inventory")))
+        (should-not resolves)
+        (should-not events)
+        (should (= 0 (hash-table-count
+                      (hermes-dashboard-transport-client-pending client))))))))
+
+(ert-deftest hermes-dashboard-w0-deadline-and-cancellation ()
+  "Existing timer bounds readiness/response and never settles a successor."
+  (dolist (phase '(ready response cancel send-failure disconnect))
+    (let* ((client (hermes-test--dashboard-client))
+           (ready (hermes--promise-make))
+           (owner (list 'inventory))
+           (hermes-dashboard-transport-request-owner owner)
+           (hermes-dashboard-transport-request-timeout nil)
+           timers cancelled sent rejects resolves events
+           (hermes-dashboard-transport-websocket-send-function
+            (lambda (&rest _)
+              (push t sent)
+              (when (eq phase 'send-failure) (error "Send failed")))))
+      (setf (hermes-dashboard-transport-client-callback client)
+            (lambda (event) (push event events)))
+      (when (eq phase 'ready)
+        (setf (hermes-dashboard-transport-client-ready-p client) nil
+              (hermes-dashboard-transport-client-ready-promise client) ready))
+      (cl-letf (((symbol-function 'run-at-time)
+                 (lambda (delay repeat fn &rest args)
+                   (let ((timer (list delay repeat fn args)))
+                     (push timer timers) timer)))
+                ((symbol-function 'cancel-timer)
+                 (lambda (timer) (push timer cancelled))))
+        (let* ((id (hermes-test--inventory-request
+                    client :resolve (lambda (_) (push t resolves))
+                    :reject (lambda (message) (push message rejects))))
+               (deadline (car timers)))
+          (should-not hermes-dashboard-transport-request-timeout)
+          (should (= 1 (length timers)))
+          (should (= 10 (car deadline)))
+          (should-not (cadr deadline))
+          (should (eq (nth 2 deadline)
+                      #'hermes-dashboard-transport--on-request-timeout))
+          (pcase phase
+            ('cancel
+             (should (= 1 (hermes-dashboard-transport-cancel-owner-requests
+                            client owner)))
+             (should (= 0 (hermes-dashboard-transport-cancel-owner-requests
+                            client owner))))
+            ('disconnect
+             (hermes-dashboard-transport--reject-pending-requests client "Disconnected"))
+            ('send-failure nil)
+            (_ (apply (nth 2 deadline) (nth 3 deadline))))
+          (should (memq deadline cancelled))
+          (should (= (if (eq phase 'cancel) 0 1) (length rejects)))
+          (let* ((hermes-dashboard-transport-request-owner (list 'successor))
+                 (hermes-dashboard-transport-websocket-send-function #'ignore)
+                 (next (hermes-test--inventory-request client :resolve #'ignore))
+                 (pending (hermes-dashboard-transport-client-pending client))
+                 (successor (gethash next pending)))
+            ;; An already queued timeout and late reply cannot take NEXT.
+            (apply (nth 2 deadline) (nth 3 deadline))
+            (hermes-dashboard-transport--handle-frame
+             client (format "{\"id\":%S,\"result\":{\"active\":[]}}" id))
+            (hermes--promise-resolve ready client)
+            (should (eq successor (gethash next pending)))
+            (should (= 1 (hash-table-count pending)))
+            (should-not resolves)
+            (should-not events)
+            (when (eq phase 'ready) (should-not sent))
+            (should (= (if (eq phase 'cancel) 0 1) (length rejects)))
+            (hermes-dashboard-transport-cancel-owner-requests
+             client hermes-dashboard-transport-request-owner)
+            (should (= 0 (hash-table-count pending)))
+            (should (= 2 (length cancelled)))))))))
+
+(ert-deftest hermes-dashboard-w0-unowned-and-event-frames-stay-legacy ()
+  "Unknown replies never reparse; notifications use the original decoder."
+  (let* ((client (hermes-test--dashboard-client))
+         seen reparsed
+         (wire "{\"method\":\"event\",\"params\":{\"type\":\"test\",\"payload\":{\"a\":[],\"b\":false}}}"))
+    (cl-letf (((symbol-function 'hermes-transport-json-parse-lossless)
+               (lambda (_) (setq reparsed t) (error "Unexpected parse")))
+              ((symbol-function 'hermes-dashboard-transport--handle-event-frame)
+               (lambda (_client frame) (setq seen frame))))
+      (hermes-dashboard-transport--handle-frame client "{\"id\":999,\"result\":{}}")
+      (hermes-dashboard-transport--handle-frame client wire)
+      (should (equal seen (hermes-transport-json-parse wire)))
+      (should-not reparsed))))
+
+(ert-deftest hermes-dashboard-transport-call-rejects-on-timeout ()
+  "A call rejects its promise when the request times out."
+  (let* ((client (hermes-test--dashboard-client))
+         last-frame rejected
+         (hermes-dashboard-transport-websocket-send-function
+          (lambda (_ws text)
+            (setq last-frame (hermes-dashboard-transport--decode-frame text)))))
+    (hermes--promise-catch
+     (hermes-dashboard-transport-call client "session.list" nil)
+     (lambda (reason) (setq rejected reason)))
+    (hermes-dashboard-transport--on-request-timeout
+     client (alist-get 'id last-frame))
+    (should (string-match-p "timed out" rejected))))
+
+(ert-deftest hermes-dashboard-transport-tools-configure-sends-action-payload ()
+  "The transport wrapper sends `tools.configure' names/action/session_id."
+  :tags '(shared-socket-isolation)
+  (let (method params)
+    (cl-letf (((symbol-function 'hermes-dashboard-transport-request)
+               (lambda (_client m p resolve _reject)
+                 (setq method m params p)
+                 (funcall resolve '((ok . t))))))
+      (let ((client (hermes-test--dashboard-client)))
+        (hermes-dashboard-transport-tools-configure
+         client '("terminal") "disable"
+         :session-id "sid-1" :resolve #'ignore :reject #'ignore))
+      (should (equal method "tools.configure"))
+      (should (equal (cdr (assq 'names params)) '("terminal")))
+      (should (equal (cdr (assq 'action params)) "disable"))
+      (should (equal (cdr (assq 'session_id params)) "sid-1")))))
+
+(ert-deftest hermes-dashboard-transport-skills-reload-sends-rpc ()
+  "The transport wrapper sends `skills.reload' without shelling out."
+  (let (method params resolved)
+    (cl-letf (((symbol-function 'hermes-dashboard-transport-request)
+               (lambda (_client m p resolve _reject)
+                 (setq method m params p)
+                 (funcall resolve '((output . "ok"))))))
+      (hermes-dashboard-transport-skills-reload
+       'fake-client
+       :resolve (lambda (result) (setq resolved result))
+       :reject #'ignore)
+      (should (equal method "skills.reload"))
+      (should-not params)
+      (should (equal resolved '((output . "ok")))))))
+
+(ert-deftest hermes-dashboard-transport-handoff-request-sends-platform ()
+  "The transport wrapper sends `handoff.request' with platform and session_id."
+  :tags '(shared-socket-isolation)
+  (let (method params)
+    (cl-letf (((symbol-function 'hermes-dashboard-transport-request)
+               (lambda (_client m p resolve _reject)
+                 (setq method m params p)
+                 (funcall resolve '((queued . t))))))
+      (let ((client (hermes-test--dashboard-client)))
+        (hermes-dashboard-transport-handoff-request
+         client "telegram"
+         :session-id "sid-1" :resolve #'ignore :reject #'ignore))
+      (should (equal method "handoff.request"))
+      (should (equal (cdr (assq 'platform params)) "telegram"))
+      (should (equal (cdr (assq 'session_id params)) "sid-1")))))
+
+(ert-deftest hermes-dashboard-transport-handoff-state-sends-session ()
+  "The transport wrapper sends `handoff.state' scoped to the session."
+  :tags '(shared-socket-isolation)
+  (let (method params)
+    (cl-letf (((symbol-function 'hermes-dashboard-transport-request)
+               (lambda (_client m p resolve _reject)
+                 (setq method m params p)
+                 (funcall resolve '((state . "pending"))))))
+      (let ((client (hermes-test--dashboard-client)))
+        (hermes-dashboard-transport-handoff-state
+         client :session-id "sid-2" :resolve #'ignore :reject #'ignore))
+      (should (equal method "handoff.state"))
+      (should (equal (cdr (assq 'session_id params)) "sid-2")))))
+
+(ert-deftest hermes-dashboard-transport-handoff-fail-sends-error ()
+  "The transport wrapper sends `handoff.fail' with the error reason."
+  :tags '(shared-socket-isolation)
+  (let (method params)
+    (cl-letf (((symbol-function 'hermes-dashboard-transport-request)
+               (lambda (_client m p resolve _reject)
+                 (setq method m params p)
+                 (funcall resolve '((failed . t))))))
+      (let ((client (hermes-test--dashboard-client)))
+        (hermes-dashboard-transport-handoff-fail
+         client :error "poll timed out"
+         :session-id "sid-3" :resolve #'ignore :reject #'ignore))
+      (should (equal method "handoff.fail"))
+      (should (equal (cdr (assq 'error params)) "poll timed out"))
+      (should (equal (cdr (assq 'session_id params)) "sid-3")))))
+
+(ert-deftest hermes-dashboard-transport-complete-slash-sends-text ()
+  "The transport wrapper sends `complete.slash' with the partial command text."
+  (let (method params)
+    (cl-letf (((symbol-function 'hermes-dashboard-transport-request)
+               (lambda (_client m p resolve _reject)
+                 (setq method m params p)
+                 (funcall resolve '((items . []))))))
+      (hermes-dashboard-transport-complete-slash
+       'fake-client "/handoff " :resolve #'ignore :reject #'ignore)
+      (should (equal method "complete.slash"))
+      (should (equal (cdr (assq 'text params)) "/handoff ")))))
+
+(ert-deftest hermes-dashboard-rpc-wrapper-contracts-cover-current-features ()
+  "Less common feature wrappers preserve upstream methods and parameter names."
+  (let (requests)
+    (cl-letf (((symbol-function 'hermes-dashboard-transport-request)
+               (lambda (_client method params &rest _)
+                 (push (cons method params) requests))))
+      (hermes-dashboard-transport-setup-status 'client)
+      (hermes-dashboard-transport-rollback-restore
+       'client "checkpoint" :session-id "sid" :file-path "notes.org")
+      (hermes-dashboard-transport-subagent-interrupt 'client "child" :session-id "sid")
+      (hermes-dashboard-transport-cron-manage
+       'client :action "pause" :name "nightly")
+      (hermes-dashboard-transport-prompt-background
+       'client "audit" :session-id "sid")
+      (hermes-dashboard-transport-session-status 'client :session-id "sid"))
+    (should
+     (equal (nreverse requests)
+            '(("setup.status")
+              ("rollback.restore" (hash . "checkpoint")
+               (session_id . "sid") (file_path . "notes.org"))
+              ("subagent.interrupt" (session_id . "sid") (subagent_id . "child"))
+              ("cron.manage" (action . "pause") (name . "nightly"))
+              ("prompt.background" (session_id . "sid") (text . "audit"))
+              ("session.status" (session_id . "sid")))))))
+
+(ert-deftest hermes-dashboard-active-profile-uses-authenticated-rest-client ()
+  "Active-profile lookup uses asynchronous REST with the supplied client."
+  (let* ((client (make-hermes-dashboard-transport-client
+                  :base-url "http://dash.example" :token "fixture-token"))
+         request result
+         (hermes-dashboard-transport-http-request-async-function
+          (lambda (url &rest args)
+            (setq request (cons url args))
+            (hermes--promise-resolved
+             '(:body ((active . "default") (current . "work")))))))
+    (hermes--promise-then
+     (hermes-dashboard-transport-api-request-async
+      "GET" "/api/profiles/active" :client client)
+     (lambda (body) (setq result body)))
+    (should (equal result '((active . "default") (current . "work"))))
+    (should (equal (car request) "http://dash.example/api/profiles/active"))
+    (should (equal (plist-get (cdr request) :method) "GET"))
+    (should (equal (cdr (assoc "X-Hermes-Session-Token"
+                              (plist-get (cdr request) :headers)))
+                   "fixture-token"))))
+
+;;; Group: kanban events WS-URL plumbing
+
+(ert-deftest hermes-dashboard-websocket-endpoint-for-parameterizes-path ()
+  "The path-parameterized endpoint builds ws/wss URLs; the legacy one is /api/ws."
+  (should (equal "ws://127.0.0.1:8765/api/plugins/kanban/events"
+                 (hermes-dashboard-transport--websocket-endpoint-for
+                  "127.0.0.1" 8765 "/api/plugins/kanban/events")))
+  (should (string-prefix-p
+           "wss://example.com"
+           (hermes-dashboard-transport--websocket-endpoint-for
+            "example.com" nil "/api/plugins/kanban/events" "https://example.com")))
+  (should (equal "ws://127.0.0.1:8765/api/ws"
+                 (hermes-dashboard-transport--websocket-endpoint
+                  "127.0.0.1" 8765))))
+
+(ert-deftest hermes-dashboard-swap-websocket-path-preserves-query ()
+  "Swapping the endpoint path leaves the credential query untouched."
+  (should (equal "ws://h:1/api/plugins/kanban/events?token=ABC"
+                 (hermes-dashboard-transport--swap-websocket-path
+                  "ws://h:1/api/ws?token=ABC" "/api/plugins/kanban/events")))
+  (should (equal "ws://h:1/api/plugins/kanban/events?ticket=XYZ"
+                 (hermes-dashboard-transport--swap-websocket-path
+                  "ws://h:1/api/ws?ticket=XYZ" "/api/plugins/kanban/events"))))
+
+(ert-deftest hermes-dashboard-append-url-query-drops-nil-and-escapes ()
+  "Nil-valued params are dropped; values are percent-encoded."
+  (should (equal "u&since=5&board=emacs%20lisp"
+                 (hermes-dashboard-transport--append-url-query
+                  "u" '((since . 5) (board . "emacs lisp")))))
+  (should (equal "u&since=0"
+                 (hermes-dashboard-transport--append-url-query
+                  "u" '((since . 0) (board . nil))))))
+
+(ert-deftest hermes-dashboard-kanban-events-plist-swaps-and-redacts ()
+  "The events plist swaps the path, appends since/board, and never leaks a secret."
+  (let ((plist (hermes-dashboard-transport--kanban-events-plist
+                '(:url "ws://h:1/api/ws?token=SEKRIT"
+                  :redacted-url "ws://h:1/api/ws?token=<redacted>"
+                  :secrets ("SEKRIT"))
+                5 "emacs-lisp")))
+    (should (equal (concat "ws://h:1/api/plugins/kanban/events?token=SEKRIT"
+                           "&since=5&board=emacs-lisp")
+                   (plist-get plist :url)))
+    (should-not (string-match-p "SEKRIT" (plist-get plist :redacted-url)))
+    (should (string-search "kanban/events?token=<redacted>"
+                           (plist-get plist :redacted-url)))
+    (should (equal '("SEKRIT") (plist-get plist :secrets)))))
+
+(ert-deftest hermes-dashboard-external-local-startup-failure-never-spawns ()
+  "Failed service attachment settles with a hint, never an editor child."
+  (let ((hermes-dashboard-transport-start-mode 'remote)
+        (hermes-dashboard-transport-url "http://127.0.0.1:9119")
+        events client failure)
+    (cl-letf (((symbol-function 'hermes-dashboard-transport--start-spawn)
+               (lambda (&rest _) (ert-fail "External attachment spawned")))
+              ((symbol-function 'hermes-dashboard-transport--remote-auth-async)
+               (lambda (&rest _) (hermes--promise-rejected "Connection refused"))))
+      (setq client (hermes-dashboard-transport-start
+                    :callback (lambda (event) (push event events))))
+      (hermes--promise-catch
+       (hermes-dashboard-transport-client-ready-promise client)
+       (lambda (reason) (setq failure reason)))
+      (should failure)
+      (should (string-match-p "externally managed" (format "%s" failure)))
+      (should (string-match-p "reconnect" (format "%s" failure)))
+      (should-not (hermes-dashboard-transport-client-process client))
+      (should-not (hermes-dashboard-transport--client-viable-p client))
+      (should (seq-some (lambda (event) (eq (plist-get event :type) 'error))
+                        events)))))
+
+(ert-deftest hermes-dashboard-kanban-events-url-async-reuses-client ()
+  "A live client's resolved URL is reused without a fresh auth round-trip."
+  (let ((client (make-hermes-dashboard-transport-client
+                 :credential-kind 'legacy-token :credential-reusable-p t
+                 :websocket-url "ws://127.0.0.1:8765/api/ws?token=SEKRIT"
+                 :redacted-websocket-url "ws://127.0.0.1:8765/api/ws?token=<redacted>"
+                 :secrets '("SEKRIT")))
+        result)
+    (cl-letf (((symbol-function 'hermes-dashboard-transport--remote-auth-async)
+               (lambda (&rest _) (error "must not resolve fresh auth"))))
+      (hermes--promise-then
+       (hermes-dashboard-transport-kanban-events-url-async
+        :since 9 :board "emacs-lisp" :client client)
+       (lambda (v) (setq result v))))
+    (should (equal (concat "ws://127.0.0.1:8765/api/plugins/kanban/events"
+                           "?token=SEKRIT&since=9&board=emacs-lisp")
+                   (plist-get result :url)))
+    (should (equal '("SEKRIT") (plist-get result :secrets)))))
+
+(ert-deftest hermes-dashboard-credential-reuse-is-explicit-and-fail-closed ()
+  "Only explicitly reusable credential kinds expose active socket auth."
+  :tags '(candidate-4a)
+  (dolist (case '((nil t nil) (ticket t nil) (spawn nil nil)
+                  (spawn t t) (internal t t) (legacy-token t t)))
+    (let ((client (make-hermes-dashboard-transport-client
+                   :credential-kind (nth 0 case)
+                   :credential-reusable-p (nth 1 case)
+                   :websocket-url "ws://h/api/ws?token=active"
+                   :redacted-websocket-url "ws://h/api/ws?token=<redacted>"
+                   :secrets '("active"))))
+      (should (eq (and (hermes-dashboard-transport--client-auth-plist client) t)
+                  (nth 2 case))))))
+
+(ert-deftest hermes-dashboard-nonreusable-auxiliary-auth-resolves-fresh ()
+  "Nonreusable clients resolve from stored inputs under their own lifetime."
+  :tags '(candidate-4a)
+  (dolist (kind '(nil ticket discovered-token))
+    (let ((client (make-hermes-dashboard-transport-client
+                   :host "dash.example" :port 443
+                   :base-url "https://dash.example"
+                   :auth-method 'token :auth-token "resolver"
+                   :credential-kind kind :credential-reusable-p t
+                   :websocket-url "wss://dash.example/api/ws?ticket=consumed"
+                   :secrets '("consumed")))
+          call result)
+      (cl-letf (((symbol-function 'hermes-dashboard-transport--remote-auth-async)
+                 (lambda (&rest args)
+                   (setq call args)
+                   (hermes--promise-resolved
+                    '(:kind legacy-token :reusable-p t
+                      :url "wss://dash.example/api/ws?token=fresh"
+                      :redacted-url "wss://dash.example/api/ws?token=<redacted>"
+                      :secrets ("fresh"))))))
+        (hermes--promise-then
+         (hermes-dashboard-transport-capability-url-async :client client)
+         (lambda (value) (setq result value))))
+      (should (equal (cl-subseq call 0 7)
+                     '("dash.example" 443 "https://dash.example"
+                       token "resolver" nil nil)))
+      (should (funcall (nth 7 call)))
+      (hermes-dashboard-transport-stop client)
+      (should-not (funcall (nth 7 call)))
+      (should (string-suffix-p "token=fresh" (plist-get result :url)))
+      (should-not (string-match-p "consumed" (format "%S" result))))))
+
+(ert-deftest hermes-dashboard-auth-results-classify-credential-lifetime ()
+  "Token auth is reusable while basic/native tickets are explicitly one-shot."
+  :tags '(candidate-4a)
+  (let ((token (hermes-dashboard-transport--remote-token-auth
+                "h" 1 "http://h:1" "legacy"))
+        (basic (hermes-dashboard-transport--basic-ticket-auth
+                "h" 1 "http://h:1" "password" "cookie"
+                '(:body ((ticket . "basic-ticket")))))
+        (native (hermes-dashboard-transport--native-ticket-auth
+                 "h" 1 "http://h:1"
+                 '(:access-token "access" :refresh-token "refresh")
+                 '(:body ((ticket . "native-ticket"))))))
+    (should (equal (list (plist-get token :kind) (plist-get token :reusable-p))
+                   '(legacy-token t)))
+    (dolist (auth (list basic native))
+      (should (equal (list (plist-get auth :kind) (plist-get auth :reusable-p))
+                     '(ticket nil))))))
+
+(ert-deftest hermes-dashboard-native-auth-requires-explicit-browser-authority ()
+  "Automatic native auth stays headless; one interactive call may browse once."
+  :tags '(candidate-4a)
+  (let ((browsed 0) automatic-reason interactive-result)
+    (cl-letf (((symbol-function 'hermes-dashboard-transport--native-token-load)
+               (lambda (_base) nil))
+              ((symbol-function 'hermes-dashboard-transport--native-token-store)
+               (lambda (_base tokens &optional _owner-current-p) tokens))
+              ((symbol-function 'hermes-dashboard-transport--native-login-async)
+               (lambda (_base _provider &optional _cancel-setter _owner-current-p)
+                 (hermes-dashboard-transport--browse-url "https://login.example")
+                 (hermes--promise-resolved
+                  '(:access-token "access" :refresh-token "refresh")))))
+      (let ((hermes-dashboard-transport-browse-url-function
+             (lambda (_url) (cl-incf browsed))))
+        (hermes--promise-then
+         (hermes-dashboard-transport--native-ensure-tokens-async
+          "https://dash.example" nil nil nil)
+         #'ignore (lambda (reason) (setq automatic-reason reason)))
+        (hermes--promise-then
+         (hermes-dashboard-transport--native-ensure-tokens-async
+          "https://dash.example" nil nil t)
+         (lambda (tokens) (setq interactive-result tokens)))))
+    (should automatic-reason)
+    (should interactive-result)
+    (should (= browsed 1))))
+
+(ert-deftest hermes-dashboard-kanban-events-url-async-resolves-fresh ()
+  "Without a client, auth resolves against the configured URL and is path-swapped."
+  (let ((hermes-dashboard-transport-url "http://127.0.0.1:8765")
+        result)
+    (cl-letf (((symbol-function 'hermes-dashboard-transport--remote-auth-async)
+               (lambda (&rest _)
+                 (hermes--promise-resolved
+                  '(:url "ws://127.0.0.1:8765/api/ws?token=SEKRIT"
+                    :redacted-url "ws://127.0.0.1:8765/api/ws?token=<redacted>"
+                    :secrets ("SEKRIT"))))))
+      (hermes--promise-then
+       (hermes-dashboard-transport-kanban-events-url-async :board "emacs-lisp")
+       (lambda (v) (setq result v))))
+    (should (string-search "/api/plugins/kanban/events?token=SEKRIT"
+                           (plist-get result :url)))
+    (should (string-match-p "board=emacs-lisp" (plist-get result :url)))
+    (should-not (string-match-p "SEKRIT" (plist-get result :redacted-url)))))
+
+(ert-deftest hermes-dashboard-open-websocket-delivers-text-and-redacts-errors ()
+  "The opener hands frame text to :on-message and scrubs secrets from errors."
+  (let (msg err)
+    (cl-letf (((symbol-function 'hermes-dashboard-transport--require-websocket)
+               #'ignore)
+              ((symbol-function 'websocket-frame-text) (lambda (f) f))
+              ((symbol-function 'websocket-open)
+               (lambda (_url &rest args)
+                 (funcall (plist-get args :on-message) nil "{\"events\":[]}")
+                 (funcall (plist-get args :on-error) nil 'on-error "boom SEKRIT")
+                 'fake-socket)))
+      (let ((socket (hermes-dashboard-transport-open-websocket
+                     "ws://h/api/plugins/kanban/events?token=SEKRIT"
+                     "ws://h/api/plugins/kanban/events?token=<redacted>"
+                     '("SEKRIT")
+                     :on-message (lambda (text) (setq msg text))
+                     :on-error (lambda (m) (setq err m)))))
+        (should (eq socket 'fake-socket))
+        (should (equal msg "{\"events\":[]}"))
+        (should (stringp err))
+        (should-not (string-match-p "SEKRIT" err))))))
+
+;;; Group: startup viability
+
+(ert-deftest hermes-dashboard-transport-spawn-return-is-stale-after-starting-stop ()
+  "A synchronous starting callback cannot attach a returned process."
+  (let* ((dispatch (symbol-function
+                    'hermes-dashboard-transport--dispatch-event))
+         (hermes-dashboard-transport--clients (make-hash-table :test #'equal))
+         (hermes-dashboard-transport-ready-timeout 15)
+         (hermes-dashboard-transport-make-process-function
+          (lambda (&rest _) 'returned-process))
+         (hermes-dashboard-transport-websocket-open-function
+          (lambda (&rest _) (ert-fail "Terminal spawn opened a socket")))
+         (hermes-dashboard-transport-schedule-function
+          (lambda (&rest _) (ert-fail "Terminal spawn armed a timeout")))
+         client ready returned deleted)
+    (cl-letf (((symbol-function 'hermes-dashboard-transport--dispatch-event)
+               (lambda (current event)
+                 (setq client current
+                       ready (hermes-dashboard-transport-client-ready-promise
+                              current))
+                 (funcall dispatch current event)))
+              ((symbol-function 'delete-process)
+               (lambda (process)
+                 (push process deleted)
+                 (signal 'quit nil))))
+      (setq returned
+            (hermes-dashboard-transport-start
+             :start-mode 'spawn :host "127.0.0.1" :port 9119
+             :token "token"
+             :callback
+             (lambda (_event)
+               (hermes-dashboard-transport-stop client)))))
+    (should (eq returned client))
+    (should (hermes-dashboard-transport-client-stopping-p client))
+    (should (eq (hermes--promise-state ready) 'rejected))
+    (should (equal deleted '(returned-process)))
+    (should-not (hermes-dashboard-transport-client-process client))
+    (should-not (hermes-dashboard-transport-client-websocket client))
+    (should-not (hermes-dashboard-transport-client-idle-timer client))
+    (should-not (hermes-dashboard-transport-client-heartbeat-timer client))
+    (should-not (gethash '(spawn "127.0.0.1" 9119)
+                         hermes-dashboard-transport--clients))))
+
+(ert-deftest hermes-dashboard-transport-socket-return-is-stale-after-open-stop ()
+  "A synchronous socket opener cannot attach its return after stopping."
+  (let* ((hermes-dashboard-transport--clients (make-hash-table :test #'equal))
+         (hermes-dashboard-transport-ready-timeout 15)
+         scheduled client ready returned closed
+         (hermes-dashboard-transport-schedule-function
+          (lambda (delay &rest _) (push delay scheduled) 'timer))
+         (hermes-dashboard-transport-websocket-open-function
+          (lambda (_url current)
+            (setq client current
+                  ready (hermes-dashboard-transport-client-ready-promise current))
+            (hermes-dashboard-transport-stop current)
+            'returned-socket)))
+    (cl-letf (((symbol-function 'hermes-dashboard-transport--remote-auth-async)
+               (lambda (&rest _)
+                 (hermes--promise-resolved
+                  '(:token "ticket" :url "wss://dash.example/ws?token=ticket"
+                    :redacted-url "wss://dash.example/ws?token=<redacted>"
+                    :secrets ("ticket") :kind ticket :reusable-p nil))))
+              ((symbol-function 'websocket-close)
+               (lambda (socket)
+                 (push socket closed)
+                 (error "close failed"))))
+      (setq returned
+            (hermes-dashboard-transport-start
+             :start-mode 'remote :remote-url "https://dash.example")))
+    (should (eq returned client))
+    (should (hermes-dashboard-transport-client-stopping-p client))
+    (should (eq (hermes--promise-state ready) 'rejected))
+    (should (equal closed '(returned-socket)))
+    (should-not scheduled)
+    (should-not (hermes-dashboard-transport-client-process client))
+    (should-not (hermes-dashboard-transport-client-websocket client))
+    (should-not (hermes-dashboard-transport-client-idle-timer client))
+    (should-not (hermes-dashboard-transport-client-heartbeat-timer client))
+    (should-not (gethash "https://dash.example"
+                         hermes-dashboard-transport--clients))))
+
+(ert-deftest hermes-dashboard-transport-socket-stop-then-error-does-not-retry ()
+  "A socket callback that stops before an error cannot schedule stale retry."
+  (let* ((hermes-dashboard-transport-connect-retries 3)
+         (hermes-dashboard-transport-ready-timeout nil)
+         scheduled client)
+    (cl-letf (((symbol-function 'hermes-dashboard-transport--remote-auth-async)
+               (lambda (&rest _)
+                 (hermes--promise-resolved
+                  '(:token "ticket" :url "wss://dash.example/ws?token=ticket"
+                    :redacted-url "wss://dash.example/ws?token=<redacted>"
+                    :secrets ("ticket") :kind ticket :reusable-p nil))))
+              ((symbol-function 'hermes-dashboard-transport--open-websocket-once)
+               (lambda (current _url)
+                 (setq client current)
+                 (hermes-dashboard-transport-stop current)
+                 (error "open failed")))
+              ((symbol-function 'hermes-dashboard-transport--schedule)
+               (lambda (&rest args) (push args scheduled))))
+      (should (eq (hermes-dashboard-transport-start
+                   :start-mode 'remote :remote-url "https://dash.example")
+                  client)))
+    (should (hermes-dashboard-transport-client-stopping-p client))
+    (should-not scheduled)))
+
+(ert-deftest hermes-dashboard-transport-acquire-rejects-synchronous-auth-stop ()
+  "Shared acquire never publishes a client stopped by synchronous auth."
+  (let* ((hermes-dashboard-transport--clients (make-hash-table :test #'equal))
+         (stop (symbol-function 'hermes-dashboard-transport-stop))
+         clients messages auth-tokens
+         (auth-calls 0))
+    (cl-letf (((symbol-function 'hermes-dashboard-transport--remote-auth-async)
+               (lambda (_host _port _base _method token &rest _)
+                 (push token auth-tokens)
+                 (hermes--promise-rejected
+                  (format "remote auth SECRET-%d rejected"
+                          (cl-incf auth-calls)))))
+              ((symbol-function 'hermes-dashboard-transport-stop)
+               (lambda (client &rest args)
+                 (push client clients)
+                 (apply stop client args))))
+      (dotimes (_ 2)
+        (push (cadr (should-error
+                     (hermes-dashboard-transport-acquire
+                      :start-mode 'remote
+                      :remote-url "https://dash.example")
+                     :type 'user-error))
+              messages)))
+    (setq clients (nreverse clients)
+          messages (nreverse messages)
+          auth-tokens (nreverse auth-tokens))
+    (should (= auth-calls 2))
+    (should (equal auth-tokens '(nil nil)))
+    (should (= (length clients) 2))
+    (should-not (eq (car clients) (cadr clients)))
+    (dolist (client clients)
+      (should (hermes-dashboard-transport-client-stopping-p client))
+      (should (eq (hermes--promise-state
+                   (hermes-dashboard-transport-client-ready-promise client))
+                  'rejected))
+      (should (= (hermes-dashboard-transport-client-refcount client) 0))
+      (should-not (hermes-dashboard-transport-client-endpoint-key client))
+      (should-not (hermes-dashboard-transport-client-token client))
+      (should-not (hermes-dashboard-transport-client-auth-token client))
+      (should-not (hermes-dashboard-transport-client-secrets client)))
+    (dolist (message messages)
+      (should (equal message "Hermes dashboard transport failed during startup"))
+      (should-not (string-match-p "SECRET" message)))
+    (should-not (gethash "https://dash.example"
+                         hermes-dashboard-transport--clients))))
+
+;;; Group: terminal stop
+
+(ert-deftest hermes-dashboard-transport-terminal-routes-detach-before-callbacks ()
+  "Stop, readiness failure, and reconnect finalization detach before callbacks."
+  (dolist (route '(stop fail-ready finalize))
+    (dolist (callback-kind '(reject malformed-reject subscriber fallback))
+      (let* ((hermes-dashboard-transport--clients
+              (make-hash-table :test #'equal))
+             (key '(spawn "127.0.0.1" 9119))
+             (pending (make-hash-table :test #'equal))
+             closed deleted callback-event facts replacement
+             (old (make-hermes-dashboard-transport-client
+                   :endpoint-key key :port 9119 :websocket 'old-ws
+                   :process 'old-process :token "SECRET" :auth-token "SECRET"
+                   :secrets '("SECRET") :websocket-url "ws://h?token=SECRET"
+                   :credential-kind 'legacy-token :credential-reusable-p t
+                   :ready-p t :reconnecting-p t :refcount 1 :pending pending)))
+        (puthash key old hermes-dashboard-transport--clients)
+        (let ((callback
+               (lambda (&optional value)
+                 (setq callback-event value
+                       facts (list
+                              (hermes-dashboard-transport-client-stopping-p old)
+                              (hermes-dashboard-transport-client-ready-p old)
+                              (hermes-dashboard-transport-client-reconnecting-p old)
+                              (hermes-dashboard-transport-client-refcount old)
+                              (eq (gethash key hermes-dashboard-transport--clients) old)
+                              (hermes-dashboard-transport--client-auth-plist old)
+                              (hermes-dashboard-transport-client-websocket-url old)
+                              (hermes-dashboard-transport-client-credential-kind old)
+                              (hermes-dashboard-transport-client-credential-reusable-p old)
+                              (hermes-dashboard-transport-client-token old)
+                              (hermes-dashboard-transport-client-auth-token old)
+                              (hermes-dashboard-transport-client-secrets old)
+                              (hermes-dashboard-transport-client-websocket old)
+                              (hermes-dashboard-transport-client-process old)
+                              (copy-sequence closed) (copy-sequence deleted))
+                       replacement
+                       (hermes-dashboard-transport-acquire :start-mode 'spawn)))))
+          (pcase callback-kind
+            ('reject
+             (puthash "request" (list :method "test.method" :reject callback)
+                      pending))
+            ('malformed-reject
+             (puthash "request" (list :method "test.method" :reject "bad") pending)
+             (setf (hermes-dashboard-transport-client-callback old) callback))
+            ('subscriber (hermes-dashboard-transport-subscribe old callback))
+            ('fallback
+             (setf (hermes-dashboard-transport-client-callback old) callback)))
+          (cl-letf (((symbol-function 'hermes-dashboard-transport-start)
+                     (lambda (&rest _)
+                       (make-hermes-dashboard-transport-client
+                        :websocket 'replacement-ws)))
+                    ((symbol-function 'websocket-close)
+                     (lambda (resource) (push resource closed)))
+                    ((symbol-function 'delete-process)
+                     (lambda (resource) (push resource deleted))))
+            (pcase route
+              ('stop
+               (hermes-dashboard-transport-stop
+                old "terminal SECRET"
+                '(:type status :status "closed" :content "SECRET")))
+              ('fail-ready
+               (hermes-dashboard-transport--fail-ready old "terminal SECRET"))
+              ('finalize
+               (hermes-dashboard-transport--finalize-reconnect
+                old "terminal SECRET"))))
+          (should (equal facts '(t nil nil 0 nil nil nil nil nil nil nil nil nil nil
+                                  (old-ws) (old-process))))
+          (should-not (eq replacement old))
+          (should (eq (gethash key hermes-dashboard-transport--clients)
+                      replacement))
+          (should callback-event)
+          (when (eq callback-kind 'malformed-reject)
+            (should (eq (plist-get callback-event :type) 'error))
+            (should (equal (plist-get callback-event :method) "test.method")))
+          (should-not
+           (string-match-p "SECRET"
+                           (if (stringp callback-event) callback-event
+                             (plist-get callback-event :content)))))))))
+
+(ert-deftest hermes-dashboard-transport-stop-effects-survive-error-and-quit ()
+  "Each terminal effect runs even when any earlier effect errors or quits."
+  (dolist (condition '(error quit))
+    (dolist (fail-at '(startup idle heartbeat request websocket process
+                              event reject readiness))
+      (let* ((pending (make-hash-table :test #'equal))
+             (subscribers (make-hash-table :test #'eq))
+             log escaped
+             (effect (lambda (name)
+                       (push name log)
+                       (when (eq name fail-at)
+                         (signal condition (list name)))))
+             (client (make-hermes-dashboard-transport-client
+                      :startup-cancel (lambda () (funcall effect 'startup))
+                      :idle-timer 'idle :heartbeat-timer 'heartbeat
+                      :websocket 'websocket :process 'process
+                      :pending pending :subscribers subscribers
+                      :ready-promise 'readiness)))
+        (puthash "request"
+                 (list :timer 'request
+                       :reject (lambda (_) (funcall effect 'reject)))
+                 pending)
+        (puthash 'subscriber
+                 (list :fn (lambda (_) (funcall effect 'event))) subscribers)
+        (cl-letf (((symbol-function 'cancel-timer)
+                   (lambda (timer) (funcall effect timer)))
+                  ((symbol-function 'websocket-close)
+                   (lambda (_) (funcall effect 'websocket)))
+                  ((symbol-function 'delete-process)
+                   (lambda (_) (funcall effect 'process)))
+                  ((symbol-function 'hermes--promise-reject)
+                   (lambda (&rest _) (funcall effect 'readiness))))
+          (condition-case nil
+              (hermes-dashboard-transport-stop
+               client "terminal" '(:type status :content "terminal"))
+            ((error quit) (setq escaped t))))
+        (should-not escaped)
+        (should (equal (nreverse log)
+                       '(startup idle heartbeat request websocket process
+                                 event reject readiness)))))))
+
+(ert-deftest hermes-dashboard-transport-stop-tolerates-malformed-state ()
+  "Malformed ownership tables cannot prevent exact cleanup or readiness rejection."
+  (let* ((ready (hermes--promise-make))
+         (client (make-hermes-dashboard-transport-client
+                  :pending 'malformed :subscribers 'malformed
+                  :session-index 'malformed :ready-promise ready
+                  :websocket 'old-ws :process 'old-process))
+         closed deleted (rejected 0))
+    (hermes--promise-catch ready (lambda (_reason) (cl-incf rejected)))
+    (cl-letf (((symbol-function 'websocket-close)
+               (lambda (resource) (push resource closed)))
+              ((symbol-function 'delete-process)
+               (lambda (resource) (push resource deleted))))
+      (should (eq (hermes-dashboard-transport-stop client "terminal") client)))
+    (should-not (hermes-dashboard-transport-client-pending client))
+    (should-not (hermes-dashboard-transport-client-subscribers client))
+    (should-not (hermes-dashboard-transport-client-session-index client))
+    (should (equal closed '(old-ws)))
+    (should (equal deleted '(old-process)))
+    (should (= rejected 1))))
+
+;;; Historical reconnect regression oracles
+
+(defun s5-default-http-probe (edge &optional method)
+  (let* ((hermes-dashboard-transport-ready-timeout nil)
+         (hermes-dashboard-transport-reconnect-max-attempts 3)
+         (hermes-dashboard-transport-http-request-async-function
+          #'hermes-dashboard-transport--default-http-request-async)
+         (client (make-hermes-dashboard-transport-client
+                  :base-url "https://example.test" :auth-method (or method 'basic)
+                  :refcount 1 :ready-p t :websocket 'old :credential-kind 'ticket))
+         scheduled opened requests reentered closed
+         (hermes-dashboard-transport-schedule-function
+          (lambda (_delay fn &rest args)
+            (push (lambda () (apply fn args)) scheduled)))
+         (hermes-dashboard-transport-websocket-open-function
+          (lambda (url _) (let ((socket (cons 'socket url))) (push socket opened) socket))))
+    (cl-labels ((reenter (&rest _)
+                  (unless reentered (setq reentered t)
+                    (hermes-dashboard-transport-reconnect client)))
+                (respond ()
+                  (pcase-let ((`(,url ,callback ,buffer) (pop requests)))
+                                      (message "DEFAULT-HTTP stage=%s" url)
+                                      (with-current-buffer buffer
+                      (insert "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n")
+                      (when (string-suffix-p "/password-login" url)
+                        (insert "Set-Cookie: session=test\r\n"))
+                      (insert "\r\n"
+                              (cond ((string-suffix-p "/api/status" url)
+                                     "{\"auth_required\":true,\"auth_providers\":[\"basic\"]}")
+                                    ((string-suffix-p "/ws-ticket" url) "{\"ticket\":\"fresh\"}")
+                                    (t "{}")))
+                      (funcall callback nil)))))
+      (if (eq edge 'reject)
+          (puthash "old-request" (list :reject #'reenter)
+                   (hermes-dashboard-transport-client-pending client))
+        (setf (hermes-dashboard-transport-client-callback client)
+              (lambda (event) (when (equal (plist-get event :status) "closed") (reenter)))))
+      (cl-letf (((symbol-function 'hermes-dashboard-transport--remote-basic-credentials)
+                 (lambda (_) '(:username "test" :password "password")))
+                ((symbol-function 'run-at-time) (lambda (&rest _) 'http-timer))
+                ((symbol-function 'cancel-timer) #'ignore)
+                ((symbol-function 'websocket-close) (lambda (socket) (push socket closed)))
+                ((symbol-function 'url-retrieve)
+                 (lambda (url callback &rest _)
+                   (let ((buffer (generate-new-buffer " *s5-http*")))
+                     (setq requests (append requests (list (list url callback buffer))))
+                     buffer))))
+        (hermes-dashboard-transport--handle-socket-down client "closed" 'old)
+        (while requests (respond))
+        (let ((timers scheduled))
+          (message "DEFAULT-HTTP old-timer-opportunity=%d" (length timers))
+          (setq scheduled nil)
+          (dolist (timer timers) (funcall timer)))
+        (while requests (respond))
+        (message "DEFAULT-HTTP edge=%S sockets=%d startup-slot=%S retry-timers=%d closed=%S"
+                 edge (length opened)
+                 (not (null (hermes-dashboard-transport-client-startup-cancel client)))
+                 (length scheduled) closed)
+        (should (= (length opened) 1))
+        (should-not (hermes-dashboard-transport-client-startup-cancel client))
+        (should-not scheduled)))))
+(ert-deftest s5-default-http-reject-reentry () (s5-default-http-probe 'reject))
+(ert-deftest s5-default-http-status-reentry () (s5-default-http-probe 'status))
+(ert-deftest s5-default-http-auto-reject-reentry () (s5-default-http-probe 'reject 'auto))
+(ert-deftest s5-default-http-auto-status-reentry () (s5-default-http-probe 'status 'auto))
+
+(ert-deftest reviewer-basic-stop-prevents-auth-effects ()
+  (let* ((hermes-dashboard-transport-ready-timeout nil)
+         (hermes-dashboard-transport-reconnect-max-attempts 3)
+         (status (hermes--promise-make)) effects
+         (client (make-hermes-dashboard-transport-client
+                  :base-url "https://example.test" :auth-method 'basic
+                  :refcount 1 :credential-kind 'ticket)))
+    (cl-letf (((symbol-function 'hermes-dashboard-transport--remote-status-async)
+               (lambda (&rest _) status))
+              ((symbol-function 'hermes-dashboard-transport--basic-login-request)
+               (lambda (&rest _) (push 'credential-read effects) '(:url "https://example.test/auth/login")))
+              ((symbol-function 'hermes-dashboard-transport--http-json-request-async)
+               (lambda (&rest _) (push 'login-post effects) (hermes--promise-make))))
+      (hermes-dashboard-transport-reconnect client)
+      (hermes-dashboard-transport-stop client)
+      (hermes--promise-resolve status '(:auth_mode "basic"))
+      (princ (format "\nBASIC-STOP: stopping=%S effects=%S\n"
+                     (hermes-dashboard-transport-client-stopping-p client) effects))
+      (should-not effects))))
+(ert-deftest reviewer-reentrant-reconnect-one-auth-owner ()
+  (let* ((hermes-dashboard-transport-ready-timeout nil)
+         (hermes-dashboard-transport-reconnect-max-attempts 3)
+         requests owners opened reentered
+         (client (make-hermes-dashboard-transport-client
+                  :base-url "https://example.test" :auth-method 'native
+                  :refcount 1 :credential-kind 'ticket))
+         (hermes-dashboard-transport-websocket-open-function
+          (lambda (url _) (push url opened) url)))
+    (setf (hermes-dashboard-transport-client-callback client)
+          (lambda (event)
+            (when (and (equal (plist-get event :status) "reconnecting")
+                       (not reentered))
+              (setq reentered t)
+              (hermes-dashboard-transport-reconnect client))))
+    (cl-letf (((symbol-function 'hermes-dashboard-transport--remote-auth-async)
+               (lambda (_h _p _b _m _tok _int _setter owner)
+                 (push owner owners)
+                 (let ((p (hermes--promise-make))) (push p requests) p))))
+      (hermes-dashboard-transport-reconnect client)
+      (princ (format "\nREENTRY: requests=%S owners=%S\n" (length requests) (mapcar #'funcall owners)))
+      (dolist (p requests)
+        (hermes--promise-resolve p (list :url (format "socket-%s" (length opened)) :kind 'ticket)))
+      (princ (format "REENTRY: opened=%S\n" opened))
+      (should (= (length opened) 1)))))
+
+;;; Group: reconnect
+
+(defmacro hermes-dashboard-test--with-reconnect (&rest body)
+  "Run BODY with deterministic stored-credential sockets and timers."
+  (declare (indent 0) (debug t))
+  `(let* ((hermes-dashboard-transport-ready-timeout nil)
+          (hermes-dashboard-transport-heartbeat-interval nil)
+          (hermes-dashboard-transport-reconnect-max-attempts 3)
+          (client (make-hermes-dashboard-transport-client
+                   :refcount 1 :port 9119 :websocket-url "ws://example.invalid/ws?token=stored"
+                   :credential-reusable-p t :ready-promise (hermes--promise-make)))
+          sockets timers cancelled closed sent negotiated auth-calls
+          (hermes-dashboard-transport-websocket-open-function
+           #'hermes-dashboard-transport--default-websocket-open)
+          (hermes-dashboard-transport-websocket-send-function
+           (lambda (ws text)
+             (let ((frame (hermes-dashboard-transport--decode-frame text)))
+               (if (equal (hermes-transport--get frame 'method) "client.capabilities")
+                   (push (list ws frame) negotiated)
+                 (push (list ws text) sent)))))
+          (hermes-dashboard-transport-schedule-function
+           (lambda (delay fn &rest args)
+             (let ((timer (list delay fn args))) (push timer timers) timer))))
+     (cl-letf (((symbol-function 'hermes-dashboard-transport--require-websocket) #'ignore)
+               ((symbol-function 'websocket-open)
+                (lambda (url &rest callbacks)
+                  (let ((ws (list url callbacks))) (push ws sockets) ws)))
+               ((symbol-function 'websocket-inner-create) #'ignore)
+               ((symbol-function 'websocket-frame-text) #'identity)
+               ((symbol-function 'websocket-close) (lambda (ws) (push ws closed)))
+               ((symbol-function 'cancel-timer) (lambda (timer) (push timer cancelled)))
+               ((symbol-function 'run-at-time)
+                (lambda (delay _repeat fn &rest args)
+                  (apply hermes-dashboard-transport-schedule-function delay fn args)))
+               ((symbol-function 'hermes-dashboard-transport--remote-auth-async)
+                (lambda (&rest args)
+                  (push args auth-calls)
+                  (ert-fail "Reconnect must not acquire auth in S5a"))))
+       (prog1 (progn ,@body)
+         (should-not auth-calls)
+         ;; Negotiation is a real wire request, separate from application sends.
+         ;; Validate every advertisement and reject duplicates on one socket.
+         (should (= (length negotiated)
+                    (length (cl-remove-duplicates (mapcar #'car negotiated) :test #'eq))))
+         (dolist (entry negotiated)
+           (should (equal (hermes-transport--get (cadr entry) 'params)
+                          '((server_requests . t)))))))))
+
+(defun hermes-dashboard-test--ready (socket)
+  "Deliver gateway.ready through SOCKET's real on-message callback."
+  (funcall (plist-get (cadr socket) :on-message) socket
+           "{\"jsonrpc\":\"2.0\",\"method\":\"event\",\"params\":{\"type\":\"gateway.ready\"}}"))
+
+(defun hermes-dashboard-test--fire (timer)
+  "Run captured TIMER even if cancelled, like an already queued callback."
+  (apply (cadr timer) (caddr timer)))
+
+(ert-deftest hermes-dashboard-reconnect-stable-ready-resets-budget ()
+  "Only sustained readiness resets attempts/backoff, without stopping heartbeats."
+  (hermes-dashboard-test--with-reconnect
+    (let ((hermes-dashboard-transport-reconnect-stable-period 17)
+          (hermes-dashboard-transport-heartbeat-interval 5)
+          (hermes-dashboard-transport-reconnect-base-delay 1)
+          (hermes-dashboard-transport-ping-function (lambda (ws) (push ws sent))))
+      (hermes-dashboard-transport-reconnect client)
+      (hermes-dashboard-test--ready (car sockets))
+      (let ((old-reset (car timers)))
+        (should (= (car old-reset) 17))
+        (should (= (hermes-dashboard-transport-client-reconnect-attempts client) 1))
+        (hermes-dashboard-transport--handle-socket-down client "flap" (car sockets))
+        (should (memq old-reset cancelled))
+        (should (= (caar timers) 2))
+        (hermes-dashboard-test--fire (car timers))
+        (hermes-dashboard-test--ready (car sockets))
+        (let ((reset (car timers))
+              (heartbeat (hermes-dashboard-transport-client-heartbeat-timer client)))
+          (hermes-dashboard-test--fire old-reset)
+          (should (= (hermes-dashboard-transport-client-reconnect-attempts client) 2))
+          ;; Duplicate ready must neither consume nor extend the budget.
+          (hermes-dashboard-test--ready (car sockets))
+          (should (= (cl-count 17 timers :key #'car) 2))
+          (hermes-dashboard-test--fire reset)
+          (should (= (hermes-dashboard-transport-client-reconnect-attempts client) 0))
+          (should (= (hash-table-count
+                      (hermes-dashboard-transport-client-subscribers client)) 0))
+          (hermes-dashboard-test--fire heartbeat)
+          (should (eq (car sent) (car sockets)))
+          (hermes-dashboard-transport--handle-socket-down client "later" (car sockets))
+          (should (= (caar timers) 1))
+          (hermes-dashboard-test--fire (car timers))
+          (hermes-dashboard-test--ready (car sockets))
+          (hermes-dashboard-test--fire reset)
+          (should (= (hermes-dashboard-transport-client-reconnect-attempts client) 1)))))))
+
+(ert-deftest hermes-dashboard-reconnect-reset-retired-callback-is-inert ()
+  "Stopped, replaced, manually retried and unowned clients reject old resets."
+  (dolist (action '(stop manual registry release))
+    (hermes-dashboard-test--with-reconnect
+      (let ((hermes-dashboard-transport--clients (make-hash-table :test #'equal)))
+        (setf (hermes-dashboard-transport-client-endpoint-key client) 'fixture)
+        (puthash 'fixture client hermes-dashboard-transport--clients)
+        (hermes-dashboard-transport-reconnect client)
+        (hermes-dashboard-test--ready (car sockets))
+        (let ((reset (car timers)))
+          (pcase action
+            ('stop (hermes-dashboard-transport-stop client))
+            ('manual
+             (setf (hermes-dashboard-transport-client-reconnect-attempts client) 9)
+             (hermes-dashboard-transport-reconnect client)
+             (should (= (hermes-dashboard-transport-client-reconnect-attempts client) 0))
+             (hermes-dashboard-test--ready (car sockets)))
+            ('registry (puthash 'fixture (make-hermes-dashboard-transport-client)
+                                hermes-dashboard-transport--clients))
+            ('release (setf (hermes-dashboard-transport-client-refcount client) 0)))
+          (when (memq action '(stop manual)) (should (memq reset cancelled)))
+          (hermes-dashboard-test--fire reset)
+          (should (= (hermes-dashboard-transport-client-reconnect-attempts client) 1))
+          (should (= (hash-table-count
+                      (hermes-dashboard-transport-client-subscribers client))
+                     (if (eq action 'manual) 1 0)))
+          (when (eq action 'release)
+            (should (hermes-dashboard-transport-client-stopping-p client))))))))
+
+(ert-deftest hermes-dashboard-reconnect-reset-scheduler-teardown ()
+  "Teardown during reset scheduling cancels the returned timer too."
+  (hermes-dashboard-test--with-reconnect
+    (hermes-dashboard-transport-reconnect client)
+    (let* ((schedule hermes-dashboard-transport-schedule-function)
+           (hermes-dashboard-transport-schedule-function
+            (lambda (delay fn &rest args)
+              (hermes-dashboard-transport-stop client)
+              (apply schedule delay fn args))))
+      (hermes-dashboard-test--ready (car sockets)))
+    (should (memq (car timers) cancelled))
+    (hermes-dashboard-test--fire (car timers))
+    (should (= (hermes-dashboard-transport-client-reconnect-attempts client) 1))
+    (should (= (hash-table-count
+                (hermes-dashboard-transport-client-subscribers client)) 0))))
+
+(defun hermes-dashboard-test--await-socket (predicate)
+  "Pump disposable socket events until PREDICATE succeeds, within two seconds."
+  (let ((deadline (+ (float-time) 2)))
+    (while (and (not (funcall predicate)) (< (float-time) deadline))
+      (accept-process-output nil 0.01))
+    (should (funcall predicate))))
+
+(ert-deftest hermes-dashboard-reconnect-flapping-real-sockets-exhaust ()
+  "Repeated real ready/close cycles consume one bounded reconnect budget."
+  (require 'websocket)
+  (let* ((hermes-dashboard-transport-ready-timeout nil)
+         (hermes-dashboard-transport-heartbeat-interval nil)
+         (hermes-dashboard-transport-reconnect-max-attempts 3)
+         (hermes-dashboard-transport-reconnect-base-delay 0)
+         (hermes-dashboard-transport-reconnect-max-delay 0)
+         (client (make-hermes-dashboard-transport-client
+                  :refcount 1 :credential-reusable-p t))
+         server peers sockets)
+    (unwind-protect
+        (progn
+          (setq server
+                (websocket-server
+                 0 :host "127.0.0.1"
+                 :on-open
+                 (lambda (ws)
+                   (push ws peers)
+                   (websocket-send-text
+                    ws "{\"method\":\"event\",\"params\":{\"type\":\"gateway.ready\"}}"))))
+          (setf (hermes-dashboard-transport-client-port client)
+                (process-contact server :service)
+                (hermes-dashboard-transport-client-websocket-url client)
+                (format "ws://127.0.0.1:%d" (process-contact server :service)))
+          (hermes-dashboard-transport-reconnect client)
+          (dotimes (_ 3)
+            (hermes-dashboard-test--await-socket
+             (lambda () (hermes-dashboard-transport-client-ready-p client)))
+            (push (hermes-dashboard-transport-client-websocket client) sockets)
+            (websocket-close (car peers))
+            (hermes-dashboard-test--await-socket
+             (lambda () (not (websocket-openp (car sockets))))))
+          (hermes-dashboard-test--await-socket
+           (lambda () (or (hermes-dashboard-transport-client-stopping-p client)
+                          (> (length peers) 3))))
+          (should (= (length peers) 3))
+          (should (hermes-dashboard-transport-client-stopping-p client))
+          (should (= (hermes-dashboard-transport-client-reconnect-attempts client) 3))
+          (should-not (hermes-dashboard-transport-client-websocket client))
+          (should (cl-every (lambda (ws) (not (websocket-openp ws))) sockets)))
+      (hermes-dashboard-transport-stop client)
+      (when server (websocket-server-close server)))))
+
+(defmacro hermes-dashboard-test--with-auth (&rest body)
+  "Run BODY with real auth composition and deferred default HTTP."
+  (declare (indent 0) (debug t))
+  `(let ((auth-dispatch (symbol-function 'hermes-dashboard-transport--remote-auth-async)))
+     (hermes-dashboard-test--with-reconnect
+       (let ((hermes-dashboard-transport-http-request-async-function
+              #'hermes-dashboard-transport--default-http-request-async)
+             requests buffers http-timers http-log (credentials-read 0) (ticket-number 0))
+         (setf (hermes-dashboard-transport-client-base-url client) "https://example.invalid"
+               (hermes-dashboard-transport-client-auth-method client) 'basic
+               (hermes-dashboard-transport-client-credential-reusable-p client) nil)
+         (cl-letf (((symbol-function 'hermes-dashboard-transport--remote-auth-async) auth-dispatch)
+                   ((symbol-function 'hermes-dashboard-transport--remote-basic-credentials)
+                    (lambda (_) (cl-incf credentials-read)
+                      '(:username "fixture" :password "PASSWORD")))
+                   ((symbol-function 'run-at-time)
+                    (lambda (delay repeat fn &rest args)
+                      (let ((timer (list delay fn args)))
+                        (push timer http-timers) timer)))
+                   ((symbol-function 'url-retrieve)
+                    (lambda (url callback &rest _)
+                      (let ((buffer (generate-new-buffer " *hermes-auth-test*")))
+                        (push buffer buffers)
+                        (push url http-log)
+                        (setq requests (append requests (list (list url callback buffer))))
+                        buffer))))
+           (cl-labels
+               ((respond (&optional failure request)
+                  (let* ((request (or request (pop requests)))
+                         (url (car request))
+                         (callback (cadr request))
+                         (buffer (if (buffer-live-p (caddr request)) (caddr request)
+                                   (generate-new-buffer " *hermes-late-http*"))))
+                    (should request)
+                    (unwind-protect
+                        (with-current-buffer buffer
+                          (erase-buffer)
+                          (insert (if failure "HTTP/1.1 403 Forbidden\r\n" "HTTP/1.1 200 OK\r\n")
+                                  "Content-Type: application/json\r\n")
+                          (when (string-suffix-p "/password-login" url)
+                            (insert "Set-Cookie: session=COOKIE\r\n"))
+                          (insert "\r\n"
+                                  (cond (failure "{\"detail\":\"PASSWORD denied\"}")
+                                        ((string-suffix-p "/api/status" url)
+                                         "{\"auth_required\":true,\"auth_providers\":[\"basic\"]}")
+                                        ((string-suffix-p "/ws-ticket" url)
+                                         (format "{\"ticket\":\"fresh-%d\"}" (cl-incf ticket-number)))
+                                        (t "{}")))
+                          (funcall callback nil))
+                      (when (buffer-live-p buffer) (kill-buffer buffer)))))
+                (complete ()
+                  (let ((steps 0))
+                    (while requests (should (< (cl-incf steps) 10)) (respond)))))
+             (unwind-protect (progn ,@body)
+               (mapc (lambda (b) (when (buffer-live-p b) (kill-buffer b))) buffers))))))))
+
+(ert-deftest hermes-dashboard-s5b-fresh-ticket-journey ()
+  "Both entry paths reacquire after an uncertain dial and await actual ready."
+  (dolist (route '(manual automatic))
+    (hermes-dashboard-test--with-auth
+      (let ((open hermes-dashboard-transport-websocket-open-function) urls)
+        (let ((hermes-dashboard-transport-websocket-open-function
+               (lambda (url c)
+                 (push url urls)
+                 (if (= (length urls) 1) (error "uncertain dial") (funcall open url c)))))
+          (if (eq route 'manual) (hermes-dashboard-transport-reconnect client)
+            (hermes-dashboard-transport--handle-socket-down client "lost")
+            (hermes-dashboard-test--fire (car timers)))
+          (should (= (length requests) 1))
+          (should-not urls)
+          (complete)
+          (let ((retry (car timers)))
+            (hermes-dashboard-test--fire retry)
+            (hermes-dashboard-test--fire retry))
+          (complete)
+          (should (= (length http-log) 6))
+          (should (= (length urls) 2))
+          (should-not (equal (car urls) (cadr urls)))
+          (should (string-suffix-p "ticket=fresh-2" (car urls)))
+          (should-not (hermes-dashboard-transport-client-startup-cancel client))
+          (should (eq (hermes--promise-state
+                       (hermes-dashboard-transport-client-ready-promise client)) 'pending))
+          (hermes-dashboard-test--ready (car sockets))
+          (should (hermes-dashboard-transport-client-ready-p client)))))))
+
+(ert-deftest hermes-dashboard-s5b-basic-stage-revocation ()
+  "Default HTTP stops at every stage and late delivery cannot touch a successor."
+  (dolist (method '(basic auto))
+    (dolist (stage '(0 1 2))
+      (dolist (action '(stop manual registry remove release))
+        (dolist (failure '(nil t))
+          (hermes-dashboard-test--with-auth
+            (let ((hermes-dashboard-transport--clients (make-hash-table :test #'equal))
+                  (hermes-dashboard-transport-idle-close-delay 30))
+              (setf (hermes-dashboard-transport-client-auth-method client) method
+                    (hermes-dashboard-transport-client-endpoint-key client) 'endpoint)
+              (puthash 'endpoint client hermes-dashboard-transport--clients)
+              (hermes-dashboard-transport-reconnect client)
+              (dotimes (_ stage) (respond))
+              (let ((old (pop requests))
+                    (old-cancel (hermes-dashboard-transport-client-startup-cancel client))
+                    (old-http-timer (car http-timers))
+                    (before credentials-read) successor-slot successor-ready)
+                (should (functionp old-cancel))
+                (pcase action
+                  ('stop (hermes-dashboard-transport-stop client))
+                  ('manual (hermes-dashboard-transport-reconnect client))
+                  ('registry (puthash 'endpoint (make-hermes-dashboard-transport-client :refcount 1)
+                                       hermes-dashboard-transport--clients))
+                  ('remove (remhash 'endpoint hermes-dashboard-transport--clients))
+                  ('release (hermes-dashboard-transport-release client)))
+                (setq successor-slot (hermes-dashboard-transport-client-startup-cancel client)
+                      successor-ready (hermes-dashboard-transport-client-ready-promise client))
+                (let ((count (length http-log)) (scheduled (length timers)))
+                  (respond failure old)
+                  (respond (not failure) old)
+                  (should (= (cl-count old-http-timer cancelled :test #'eq) 1))
+                  (should (= before credentials-read))
+                  (should (= count (length http-log)))
+                  (should-not sockets)
+                  (if (memq action '(registry remove release))
+                      (should-not (hermes-dashboard-transport-client-startup-cancel client))
+                    (should (eq successor-slot (hermes-dashboard-transport-client-startup-cancel client))))
+                  (should (= scheduled (length timers)))
+                  (should (eq successor-ready (hermes-dashboard-transport-client-ready-promise client))))
+                (when (eq action 'release)
+                  (should (hermes-dashboard-transport-client-stopping-p client))
+                  (should (memq (car timers) cancelled)))
+                (when (eq action 'manual)
+                  (should (functionp successor-slot))
+                  (complete)
+                  (should (= (length sockets) 1)))))))))))
+
+(ert-deftest hermes-dashboard-s5b-credential-reentry ()
+  "Check ownership after credential and auto provider selection returns."
+  (dolist (method '(basic auto))
+    (hermes-dashboard-test--with-auth
+      (setf (hermes-dashboard-transport-client-auth-method client) method)
+      (cl-letf (((symbol-function 'hermes-dashboard-transport--remote-basic-credentials)
+                 (lambda (_) (hermes-dashboard-transport-stop client)
+                   '(:username "fixture" :password "PASSWORD")))
+                ((symbol-function 'hermes-dashboard-transport--preferred-auto-auth)
+                 (lambda (&rest _)
+                   (hermes-dashboard-transport-stop client)
+                   '(basic :username "fixture" :password "PASSWORD"))))
+        (hermes-dashboard-transport-reconnect client)
+        (respond)
+        (should (= (length http-log) 1))
+        (should-not requests)
+        (should-not sockets)
+        (should-not timers)))))
+
+(ert-deftest hermes-dashboard-s5b-deferred-manual-one-shot ()
+  "Capture nil/zero manual budgets across deferred HTTP success and failure."
+  (dolist (maximum '(nil 0))
+    (dolist (failure '(nil t))
+      (hermes-dashboard-test--with-auth
+        (let ((hermes-dashboard-transport-reconnect-max-attempts maximum))
+          (hermes-dashboard-transport-reconnect client))
+        (should (= (length requests) 1))
+        (if failure
+            (progn (respond t)
+                   (hermes-dashboard-test--fire (car timers))
+                   (should (= (length http-log) 1))
+                   (should (hermes-dashboard-transport-client-stopping-p client)))
+          (complete)
+          (should (= (length sockets) 1))
+          (should-not timers)
+          (let ((hermes-dashboard-transport-reconnect-max-attempts maximum))
+            (hermes-dashboard-transport--handle-socket-down client "lost" (car sockets)))
+          (should (hermes-dashboard-transport-client-stopping-p client)))))))
+
+(ert-deftest hermes-dashboard-s5b-public-request-survives-pre-ready-loss ()
+  "Keep the actual public request record and deadline until B can send it."
+  (hermes-dashboard-test--with-auth
+    (hermes-dashboard-transport-reconnect client)
+    (complete)
+    (let* ((a (car sockets))
+           (ready (hermes-dashboard-transport-client-ready-promise client))
+           (response (hermes-dashboard-transport-call client "test.query"))
+           (pending (hermes-dashboard-transport-client-pending client))
+           (id (car (hash-table-keys pending)))
+           (record (gethash id pending))
+           (timer (plist-get record :timer))
+           (resolved 0) (readied 0))
+      (hermes--promise-then response (lambda (_) (cl-incf resolved)))
+      (hermes--promise-then ready (lambda (_) (cl-incf readied)))
+      (hermes-dashboard-transport--handle-socket-down client "pre-ready" a)
+      (should (eq pending (hermes-dashboard-transport-client-pending client)))
+      (should (eq record (gethash id pending)))
+      (should (eq timer (plist-get (gethash id pending) :timer)))
+      (should (eq ready (hermes-dashboard-transport-client-ready-promise client)))
+      (should (eq (hermes--promise-state response) 'pending))
+      (should (= readied 0))
+      (should-not (memq timer cancelled))
+      (should-not sent)
+      (hermes-dashboard-test--fire (car timers))
+      (should (= (length requests) 1))
+      (should (eq record (gethash id pending)))
+      (should-not sent)
+      (complete)
+      (let ((b (car sockets)))
+        (should-not (eq a b))
+        (hermes-dashboard-test--ready b)
+        (hermes-dashboard-test--ready b)
+        (should (= readied 1))
+        (should (= (length negotiated) 1))
+        (should (eq (caar negotiated) b))
+        (should (= (length sent) 1))
+        (should (eq (caar sent) b))
+        (hermes-dashboard-transport--handle-frame
+         client `((jsonrpc . "2.0") (id . ,id) (result . "ok")))
+        (hermes-dashboard-transport--handle-frame
+         client `((jsonrpc . "2.0") (id . ,id) (result . "ok")))
+        (should (= resolved 1))))))
+
+(ert-deftest hermes-dashboard-s5b-entered-ready-reconnect ()
+  "A reconnected recipient replaces A before A can resolve B readiness."
+  (hermes-dashboard-test--with-auth
+    (hermes-dashboard-transport-reconnect client)
+    (complete)
+    (let ((a (car sockets)) b-ready b-slot q (entered 0))
+      (hermes-dashboard-transport-subscribe
+       client (lambda (event)
+                (when (and (equal (plist-get event :status) "reconnected")
+                           (= entered 0))
+                  (cl-incf entered)
+                  (hermes-dashboard-transport-reconnect client)
+                  (setq b-ready (hermes-dashboard-transport-client-ready-promise client)
+                        b-slot (hermes-dashboard-transport-client-startup-cancel client)
+                        q (hermes-dashboard-transport-call client "successor.query")))))
+      (hermes-dashboard-test--ready a)
+      (should (= entered 1))
+      (should q)
+      (should (eq (hermes--promise-state b-ready) 'pending))
+      (should-not (hermes-dashboard-transport-client-ready-p client))
+      (should-not sent)
+      (should (= (length requests) 1))
+      (should (functionp b-slot))
+        (should (eq b-slot (hermes-dashboard-transport-client-startup-cancel client)))
+      (complete)
+      (hermes-dashboard-test--ready (car sockets))
+      (should (= (length sent) 1)))))
+
+(ert-deftest hermes-dashboard-s5b-ready-inner-reentry ()
+  "Cancellation, timer return, recipients and promise callbacks revoke A completion."
+  (dolist (edge '(cancel schedule recipient promise))
+    (hermes-dashboard-test--with-auth
+      (hermes-dashboard-transport-reconnect client)
+    (complete)
+      (let* ((a (car sockets))
+             (old-ready (hermes-dashboard-transport-client-ready-promise client))
+             (hermes-dashboard-transport-heartbeat-interval 7)
+             (old-timer (list 'old-heartbeat))
+             (successor-timer (list 'successor-heartbeat))
+             stale-timer b-ready b-slot q delivery (entered 0)
+             (replace
+              (lambda ()
+                (when (= entered 0)
+                  (cl-incf entered)
+                  (hermes-dashboard-transport-reconnect client)
+                  (setq b-ready (hermes-dashboard-transport-client-ready-promise client)
+                        b-slot (hermes-dashboard-transport-client-startup-cancel client)
+                        q (hermes-dashboard-transport-call client "successor.query"))
+                  (setf (hermes-dashboard-transport-client-heartbeat-timer client)
+                        successor-timer)))))
+        (setf (hermes-dashboard-transport-client-heartbeat-timer client) old-timer)
+        ;; The snapshot currently reverses hash traversal; the newest recipient
+        ;; reenters first, with a remaining old recipient still to visit.
+        (hermes-dashboard-transport-subscribe
+         client (lambda (event)
+                  (when (or (equal (plist-get event :status) "reconnected")
+                            (equal (plist-get event :event) "gateway.ready"))
+                    (push event delivery))))
+        (hermes-dashboard-transport-subscribe
+         client (lambda (event)
+                  (when (and (eq edge 'recipient)
+                             (equal (plist-get event :status) "reconnected"))
+                    (funcall replace))))
+        (when (eq edge 'promise)
+          (hermes--promise-then old-ready (lambda (_) (funcall replace))))
+        (let ((hermes-dashboard-transport-schedule-function
+               (lambda (delay fn &rest args)
+                 (let ((timer (list delay fn args)))
+                   (push timer timers)
+                   (when (and (eq edge 'schedule) (= delay 7) (= entered 0))
+                     (setq stale-timer timer)
+                     (funcall replace))
+                   timer))))
+          (cl-letf (((symbol-function 'cancel-timer)
+                     (lambda (timer)
+                       (push timer cancelled)
+                       (when (and (eq edge 'cancel) (eq timer old-timer))
+                         (funcall replace)))))
+            (hermes-dashboard-test--ready a)))
+        (should (= entered 1))
+        (should q)
+        (should (eq (hermes--promise-state b-ready) 'pending))
+        (should-not sent)
+        (should-not (hermes-dashboard-transport-client-ready-p client))
+        (should (eq successor-timer (hermes-dashboard-transport-client-heartbeat-timer client)))
+        (unless (eq edge 'promise) (should-not delivery))
+        (should-not (cl-find "gateway.ready" delivery :key (lambda (e) (plist-get e :event)) :test #'equal))
+        (when (eq edge 'schedule)
+          (should (memq stale-timer cancelled))
+          (let ((before (length timers)))
+            (hermes-dashboard-test--fire stale-timer)
+            (should (= before (length timers)))))
+        (should (= (length requests) 1))
+        (should (functionp b-slot))
+        (should (eq b-slot (hermes-dashboard-transport-client-startup-cancel client)))
+        (complete)
+        (hermes-dashboard-test--ready (car sockets))
+        (should (= (length sent) 1))))))
+
+(ert-deftest hermes-dashboard-s5b-public-request-terminal-contrasts ()
+  "Timeout, cancellation, replacement and exhaustion prohibit a late send."
+  (dolist (ending '(timeout cancel manual exhausted))
+    (hermes-dashboard-test--with-auth
+      (hermes-dashboard-transport-reconnect client)
+    (complete)
+      (let* ((hermes-dashboard-transport-request-owner 'owner)
+             (q (hermes-dashboard-transport-call client "test.query"))
+             (table (hermes-dashboard-transport-client-pending client))
+             (id (car (hash-table-keys table)))
+             (request-timer (plist-get (gethash id table) :timer))
+             (ready (hermes-dashboard-transport-client-ready-promise client))
+             (rejected 0))
+        (hermes--promise-catch q (lambda (_) (cl-incf rejected)))
+        (hermes-dashboard-transport--handle-socket-down client "drop" (car sockets))
+        (let ((retry (car timers)))
+          (pcase ending
+            ('timeout (hermes-dashboard-test--fire request-timer))
+            ('cancel (hermes-dashboard-transport-cancel-owner-requests client 'owner))
+            ('manual (hermes-dashboard-transport-reconnect client))
+            ('exhausted
+             (dotimes (_ 2)
+               (hermes-dashboard-test--fire (car timers))
+               (complete)
+               (hermes-dashboard-transport--handle-socket-down client "drop" (car sockets)))
+             (hermes-dashboard-test--fire (car timers))))
+          (should-not (gethash id table))
+          (unless (eq ending 'cancel) (should (= rejected 1)))
+          (unless (eq ending 'exhausted)
+            (hermes-dashboard-test--fire retry)
+            (complete)
+            (hermes-dashboard-test--ready (car sockets)))
+          (should-not sent)
+          (when (memq ending '(manual exhausted))
+            (should (eq (hermes--promise-state ready) 'rejected)))
+          (when (eq ending 'exhausted)
+            (should (hermes-dashboard-transport-client-stopping-p client))))))))
+
+(ert-deftest hermes-dashboard-s5b-entry-reentry-owns-one-dial ()
+  "Each callback edge can replace a manual or automatic recovery exactly once."
+  (dolist (route '(manual automatic))
+    (dolist (edge '(startup idle heartbeat close reject status))
+      (unless (and (eq route 'automatic) (eq edge 'close))
+        (dolist (failure '(error quit))
+          (hermes-dashboard-test--with-auth
+            (let* ((old-ready (hermes-dashboard-transport-client-ready-promise client))
+                   (old-socket '(old-socket))
+                   (pending (hermes-dashboard-transport-client-pending client))
+                   (entered 0) log successor-ready escaped
+                   (effect
+                    (lambda (name)
+                      (push name log)
+                      (when (and (eq name edge) (= entered 0))
+                        (cl-incf entered)
+                        (hermes-dashboard-transport-reconnect client "inner")
+                        (setq successor-ready
+                              (hermes-dashboard-transport-client-ready-promise client))
+                        (signal failure '("old callback"))))))
+              (setf (hermes-dashboard-transport-client-websocket client) old-socket
+                    (hermes-dashboard-transport-client-ready-p client) t
+                    (hermes-dashboard-transport-client-startup-cancel client)
+                    (lambda () (funcall effect 'startup))
+                    (hermes-dashboard-transport-client-idle-timer client) 'idle
+                    (hermes-dashboard-transport-client-heartbeat-timer client) 'heartbeat)
+              (puthash "old" (list :timer 'request :reject
+                                   (lambda (_) (funcall effect 'reject))) pending)
+              (hermes-dashboard-transport-subscribe
+               client (lambda (event)
+                        (when (and (equal (plist-get event :content) "outer")
+                                   (memq (plist-get event :type) '(status)))
+                          (funcall effect 'status))))
+              (cl-letf (((symbol-function 'cancel-timer)
+                         (lambda (timer) (push timer cancelled) (funcall effect timer)))
+                        ((symbol-function 'websocket-close)
+                         (lambda (ws)
+                           (push ws closed)
+                           (when (eq ws old-socket) (funcall effect 'close)))))
+                (condition-case err
+                    (if (eq route 'manual)
+                        (hermes-dashboard-transport-reconnect client "outer")
+                      (hermes-dashboard-transport--handle-socket-down client "outer" old-socket))
+                  (quit (setq escaped err))))
+              (should-not escaped)
+              (should (= entered 1))
+              (should-not sockets)
+              (should (= (length requests) 1))
+              (should (functionp (hermes-dashboard-transport-client-startup-cancel client)))
+              (complete)
+              (should (= (length sockets) 1))
+              (should-not timers)
+              (should (eq successor-ready (hermes-dashboard-transport-client-ready-promise client)))
+              (should (eq (hermes--promise-state successor-ready) 'pending))
+              (should (eq (hermes--promise-state old-ready) 'rejected))
+              (should-not (hermes-dashboard-transport-client-ready-p client))
+              (should (= (hermes-dashboard-transport-client-reconnect-attempts client) 0))
+              (should (equal (cl-remove 'status (reverse log))
+                             (append '(startup idle heartbeat request)
+                                     (and (eq route 'manual) '(close)) '(reject)))))))))))
+
+(ert-deftest hermes-dashboard-s5b-browser-permission-and-bounded-failure ()
+  "Only first manual auth may browse; every rejected retry is headless and bounded."
+  (dolist (route '(manual automatic))
+    (hermes-dashboard-test--with-auth
+      (let ((browsed 0) permissions)
+        (setf (hermes-dashboard-transport-client-auth-method client) 'native)
+        (cl-letf (((symbol-function 'hermes-dashboard-transport--remote-status-async)
+                   (lambda (&rest _) (hermes--promise-resolved '(:auth_flows ("native_pkce")))))
+                  ((symbol-function 'hermes-dashboard-transport--native-token-load) (lambda (_) nil))
+                  ((symbol-function 'hermes-dashboard-transport--native-login-async)
+                   (lambda (&rest _)
+                     (hermes-dashboard-transport--browse-url "https://example.invalid/login")
+                     (hermes--promise-rejected "denied"))))
+          (let ((hermes-dashboard-transport-browse-url-function (lambda (_) (cl-incf browsed)))
+                (dispatch (symbol-function 'hermes-dashboard-transport--remote-auth-async)))
+            (cl-letf (((symbol-function 'hermes-dashboard-transport--remote-auth-async)
+                       (lambda (&rest args)
+                         (push (nth 5 args) permissions)
+                         (apply dispatch args))))
+              (if (eq route 'manual) (hermes-dashboard-transport-reconnect client)
+                (hermes-dashboard-transport--handle-socket-down client "lost")
+                (hermes-dashboard-test--fire (car timers)))
+              (dotimes (_ 3)
+                (let ((timer (car timers)))
+                  (hermes-dashboard-test--fire timer)
+                  (hermes-dashboard-test--fire timer)))
+              (should (= browsed (if (eq route 'manual) 1 0)))
+              (should (equal (reverse permissions) (list (eq route 'manual) nil nil)))
+              (should (hermes-dashboard-transport-client-stopping-p client))
+              (should-not sockets))))))))
+
+(ert-deftest hermes-dashboard-s5b-cancel-capabilities ()
+  "Validate capabilities and permit stale release only for the exact held handle."
+  (hermes-dashboard-test--with-auth
+    (let ((live t) setter old successor)
+      (cl-letf (((symbol-function 'hermes-dashboard-transport--remote-auth-async)
+                 (lambda (_h _p _b _m _t _i cancel owner)
+                   (setq setter cancel)
+                   (should (funcall owner))
+                   (hermes--promise-make))))
+        (hermes-dashboard-transport-reconnect client))
+      (setq old (lambda () live) successor (lambda () 'successor))
+      (should-not (funcall setter nil 'malformed))
+      (should-not (funcall setter nil nil))
+      (setf (hermes-dashboard-transport-client-startup-cancel client) 'malformed)
+      (should-not (funcall setter 'malformed old))
+      (should-not (funcall setter 'malformed nil))
+      (setf (hermes-dashboard-transport-client-startup-cancel client) nil)
+      (should (funcall setter nil old))
+      (should-not (funcall setter successor successor))
+      (cl-incf (hermes-dashboard-transport-client-generation client))
+      (should-not (funcall setter old successor))
+      (funcall setter old nil)
+      (should-not (hermes-dashboard-transport-client-startup-cancel client))
+      (setf (hermes-dashboard-transport-client-startup-cancel client) successor)
+      (funcall setter old nil)
+      (should (eq successor (hermes-dashboard-transport-client-startup-cancel client)))
+      (dolist (owner (list 'malformed (lambda () nil)))
+        (let ((promise (hermes-dashboard-transport--remote-auth-async
+                        "example.invalid" 443 "https://example.invalid" 'basic nil nil nil owner)))
+          (should (eq (hermes--promise-state promise) 'rejected))))
+      (should-not http-log))))
+
+(ert-deftest hermes-dashboard-s5b-default-http-reentry-completion ()
+  "Default HTTP reentry preserves exact readiness through all old opportunities."
+  (dolist (method '(basic auto))
+    (dolist (edge '(reject status))
+      (hermes-dashboard-test--with-auth
+        (setf (hermes-dashboard-transport-client-auth-method client) method)
+        (hermes-dashboard-transport-reconnect client)
+        (complete)
+        (hermes-dashboard-test--ready (car sockets))
+        (let ((a (car sockets)) (entered 0) b-ready b-slot old-http (resolved 0) q)
+          (cl-labels ((replace ()
+                        (when (= entered 0)
+                          (cl-incf entered)
+                          (hermes-dashboard-transport-reconnect client)
+                          (setq b-ready (hermes-dashboard-transport-client-ready-promise client)
+                                b-slot (hermes-dashboard-transport-client-startup-cancel client))
+                          (hermes--promise-then b-ready (lambda (_) (cl-incf resolved))))))
+            (if (eq edge 'reject)
+                (progn (setq q (hermes-dashboard-transport-call client "old.query"))
+                       (hermes--promise-catch q (lambda (_) (replace))))
+              (hermes-dashboard-transport-subscribe
+               client (lambda (event) (when (equal (plist-get event :status) "closed") (replace)))))
+            (hermes-dashboard-transport--handle-socket-down client "lost" a)
+            (setq old-http (car requests))
+            (should (= entered 1))
+            (should (eq b-slot (hermes-dashboard-transport-client-startup-cancel client)))
+            (should (functionp b-slot))
+            (complete)
+            (dolist (timer timers) (hermes-dashboard-test--fire timer))
+            (complete)
+            (should (= (length http-log) 6))
+            (should (= (length sockets) 2))
+            (should-not (hermes-dashboard-transport-client-startup-cancel client))
+            (should (eq b-ready (hermes-dashboard-transport-client-ready-promise client)))
+            (should (= resolved 0))
+            (should (eq (hermes--promise-state b-ready) 'pending))
+            (hermes-dashboard-test--ready a)
+            (funcall (plist-get (cadr a) :on-close) a)
+            (should (= resolved 0))
+            (should (eq b-ready (hermes-dashboard-transport-client-ready-promise client)))
+            (hermes-dashboard-test--ready (car sockets))
+            (hermes-dashboard-test--ready (car sockets))
+            (should (= resolved 1))
+            (respond nil old-http)
+            (respond t old-http)
+            (hermes-dashboard-test--ready a)
+            (funcall (plist-get (cadr a) :on-close) a)
+            (should (= resolved 1))
+            (should (eq b-ready (hermes-dashboard-transport-client-ready-promise client)))
+            (should (= (length http-log) 6))
+            (should (= (length sockets) 2))
+            (should-not (hermes-dashboard-transport-client-startup-cancel client))))))))
+
+(ert-deftest hermes-dashboard-s5b-http-timeout-and-ready-deadline ()
+  "HTTP failure consumes one attempt while original ready deadline survives."
+  (dolist (failure '(http-timeout reject sync-auth sync-open))
+    (hermes-dashboard-test--with-auth
+      (let ((hermes-dashboard-transport-ready-timeout 15)
+            (hermes-dashboard-transport-reconnect-max-attempts 2)
+            (dispatch (symbol-function 'hermes-dashboard-transport--remote-auth-async))
+            (open hermes-dashboard-transport-websocket-open-function)
+            (calls 0))
+        (cl-letf (((symbol-function 'hermes-dashboard-transport--remote-auth-async)
+                   (lambda (&rest args)
+                     (cl-incf calls)
+                     (if (eq failure 'sync-auth) (error "auth error") (apply dispatch args)))))
+          (let ((hermes-dashboard-transport-websocket-open-function
+                 (if (eq failure 'sync-open) (lambda (&rest _) (error "dial error")) open)))
+            (hermes-dashboard-transport-reconnect client)
+            (let ((deadline (car timers))
+                  (ready (hermes-dashboard-transport-client-ready-promise client)))
+              (should (equal (car (car (last timers))) 15))
+              (pcase failure
+                ('http-timeout (hermes-dashboard-test--fire (car http-timers)) (setq requests nil))
+                ('reject (respond t))
+                ('sync-open (complete)))
+              (let ((retry (car timers)))
+                (hermes-dashboard-test--fire retry)
+                (hermes-dashboard-test--fire retry))
+              (should (= calls 2))
+              (should (eq ready (hermes-dashboard-transport-client-ready-promise client)))
+              (should (= (cl-count 15 timers :key #'car) 1))
+              ;; Locate the originally armed deadline, not a retry timer in the
+              ;; synchronous-error case where it was already pushed at return.
+              (setq deadline (car (last timers)))
+              (hermes-dashboard-test--fire deadline)
+              (should (hermes-dashboard-transport-client-stopping-p client))
+              (should (eq (hermes--promise-state ready) 'rejected))
+              (dolist (request requests) (respond nil request))
+              (should-not sockets))))))))
+
+(ert-deftest hermes-dashboard-s5b-constructor-revocation ()
+  "Post-constructor validation closes only its returned socket on owner loss."
+  (dolist (action '(replace remove release reconnect))
+    (hermes-dashboard-test--with-auth
+      (let* ((hermes-dashboard-transport--clients (make-hash-table :test #'equal))
+             (key 'endpoint)
+             (replacement (make-hermes-dashboard-transport-client :refcount 1 :websocket 'successor))
+             (open hermes-dashboard-transport-websocket-open-function)
+             returned (entered 0))
+        (setf (hermes-dashboard-transport-client-endpoint-key client) key)
+        (puthash key client hermes-dashboard-transport--clients)
+        (let ((hermes-dashboard-transport-websocket-open-function
+               (lambda (url c)
+                 (let ((ws (funcall open url c)))
+                   (when (= entered 0)
+                     (cl-incf entered)
+                     (setq returned ws)
+                     (pcase action
+                       ('replace (puthash key replacement hermes-dashboard-transport--clients))
+                       ('remove (remhash key hermes-dashboard-transport--clients))
+                       ('release (setf (hermes-dashboard-transport-client-refcount client) 0))
+                       ('reconnect (hermes-dashboard-transport-reconnect client))))
+                   ws))))
+          (hermes-dashboard-transport-reconnect client)
+          (complete))
+        (should (= entered 1))
+        (should (memq returned closed))
+        (should-not (memq 'successor closed))
+        (should-not timers)
+        (pcase action
+          ('release (should (hermes-dashboard-transport-client-stopping-p client)))
+          ('reconnect
+           (should (= (length sockets) 2))
+           (should (eq (car sockets) (hermes-dashboard-transport-client-websocket client))))
+          (_ (should-not (hermes-dashboard-transport-client-websocket client))
+             (should-not (hermes-dashboard-transport-client-stopping-p replacement))))))))
+
+(ert-deftest hermes-dashboard-s5b-auto-both-providers-reentrant-selection ()
+  "Real auto selection revalidates after stored credential code replaces its owner."
+  (dolist (action '(stop manual))
+    (hermes-dashboard-test--with-auth
+      (let ((entered 0) b-slot)
+        (setf (hermes-dashboard-transport-client-auth-method client) 'auto)
+        (cl-letf (((symbol-function 'hermes-dashboard-transport--remote-status-async)
+                   (lambda (&rest _)
+                     (hermes--promise-resolved
+                      '(:auth_required t :auth_providers ("basic" "oauth")
+                        :auth_flows ("native_pkce")))))
+                  ((symbol-function 'hermes-dashboard-transport--stored-basic-credentials)
+                   (lambda (_)
+                     (when (= entered 0)
+                       (cl-incf entered)
+                       (if (eq action 'stop) (hermes-dashboard-transport-stop client)
+                         (hermes-dashboard-transport-reconnect client)
+                         (setq b-slot (hermes-dashboard-transport-client-startup-cancel client))))
+                     '(:username "fixture" :password "PASSWORD"))))
+          (hermes-dashboard-transport-reconnect client)
+          (should (= entered 1))
+          (should (= (length http-log) (if (eq action 'stop) 0 1)))
+          (should-not sockets)
+          (should-not timers)
+          (when (eq action 'manual)
+            (should (functionp b-slot))
+            (should (eq b-slot (hermes-dashboard-transport-client-startup-cancel client)))
+            (complete)
+            (should (= (length sockets) 1))))))))
+
+(ert-deftest hermes-dashboard-s5b-invalid-method-is-local ()
+  "Invalid methods reject before HTTP, retaining the old dispatcher contract."
+  (hermes-dashboard-test--with-auth
+    (let ((promise (hermes-dashboard-transport--remote-auth-async
+                    "example.invalid" 443 "https://example.invalid" 'invalid)))
+      (should (eq (hermes--promise-state promise) 'rejected))
+      (should-not http-log))))
+
+(ert-deftest hermes-dashboard-s5b-ready-final-recipient-reference-loss ()
+  "Retire immediately after the final normalized recipient releases its owner."
+  (hermes-dashboard-test--with-auth
+    (let ((hermes-dashboard-transport-idle-close-delay 30) (entered 0) idle)
+      (hermes-dashboard-transport-reconnect client)
+      (complete)
+      (let ((socket (car sockets)))
+        (hermes-dashboard-transport-subscribe
+         client (lambda (event)
+                  (when (equal (plist-get event :event) "gateway.ready")
+                    (cl-incf entered)
+                    (hermes-dashboard-transport-release client)
+                    (setq idle (hermes-dashboard-transport-client-idle-timer client)))))
+        (hermes-dashboard-test--ready socket)
+        (should (= entered 1))
+        (should (= (hermes-dashboard-transport-client-refcount client) 0))
+        (should (equal (car idle) 30))
+        (should (hermes-dashboard-transport-client-stopping-p client))
+        (should-not (hermes-dashboard-transport-client-websocket client))
+        (should (= (cl-count socket closed :test #'eq) 1))
+        (should-not (hermes-dashboard-transport-client-idle-timer client))
+        (should (= (cl-count idle cancelled :test #'eq) 1))
+        (hermes-dashboard-test--fire idle)
+        (hermes-dashboard-test--ready socket)
+        (should (= entered 1))
+        (should (= (cl-count socket closed :test #'eq) 1))))))
+
+(ert-deftest hermes-dashboard-s5b-ready-last-release-is-terminal ()
+  "An entered reconnect completion losing only its final reference stops now."
+  (hermes-dashboard-test--with-auth
+    (let ((hermes-dashboard-transport-idle-close-delay 30))
+      (hermes-dashboard-transport-reconnect client)
+      (complete)
+      (let ((ready (hermes-dashboard-transport-client-ready-promise client)))
+        (hermes-dashboard-transport-subscribe
+         client (lambda (event)
+                  (when (equal (plist-get event :status) "reconnected")
+                    (hermes-dashboard-transport-release client))))
+        (hermes-dashboard-test--ready (car sockets))
+        (should (hermes-dashboard-transport-client-stopping-p client))
+        (should (eq (hermes--promise-state ready) 'rejected))
+        (should (equal (mapcar #'car timers) '(30)))
+        (should (memq (car timers) cancelled))
+        (should-not (hermes-dashboard-transport-client-idle-timer client))))))
+
+(ert-deftest hermes-dashboard-s5b-ready-registry-loss-is-inert ()
+  "Registry loss before reference loss revokes completion without terminal effects."
+  (dolist (action '(replace remove))
+    (hermes-dashboard-test--with-auth
+      (let* ((hermes-dashboard-transport--clients (make-hash-table :test #'equal))
+             (key 'endpoint)
+             (replacement (make-hermes-dashboard-transport-client
+                           :refcount 1 :websocket 'successor))
+             (entered 0))
+        (setf (hermes-dashboard-transport-client-endpoint-key client) key)
+        (puthash key client hermes-dashboard-transport--clients)
+        (hermes-dashboard-transport-reconnect client)
+      (complete)
+        (let ((ready (hermes-dashboard-transport-client-ready-promise client))
+              (socket (car sockets)))
+          (hermes-dashboard-transport-subscribe
+           client (lambda (event)
+                    (when (equal (plist-get event :status) "reconnected")
+                      (cl-incf entered)
+                      (if (eq action 'replace)
+                          (puthash key replacement hermes-dashboard-transport--clients)
+                        (remhash key hermes-dashboard-transport--clients))
+                      (setf (hermes-dashboard-transport-client-refcount client) 0))))
+          (hermes-dashboard-test--ready socket)
+          (should (= entered 1))
+          (should (eq (hermes--promise-state ready) 'pending))
+          (should-not (hermes-dashboard-transport-client-stopping-p client))
+          (should-not (hermes-dashboard-transport-client-stopping-p replacement))
+          (should (eq (hermes-dashboard-transport-client-websocket replacement) 'successor))
+          (should-not closed)
+          (should-not timers)
+          (should (eq (gethash key hermes-dashboard-transport--clients)
+                      (and (eq action 'replace) replacement))))))))
+
+(ert-deftest hermes-dashboard-s5a-ready-final-recipient-reference-loss ()
+  "Retire immediately after the final normalized recipient releases its owner."
+  (hermes-dashboard-test--with-reconnect
+    (let ((hermes-dashboard-transport-idle-close-delay 30) (entered 0) idle)
+      (hermes-dashboard-transport-reconnect client)
+      (let ((socket (car sockets)))
+        (hermes-dashboard-transport-subscribe
+         client (lambda (event)
+                  (when (equal (plist-get event :event) "gateway.ready")
+                    (cl-incf entered)
+                    (hermes-dashboard-transport-release client)
+                    (setq idle (hermes-dashboard-transport-client-idle-timer client)))))
+        (hermes-dashboard-test--ready socket)
+        (should (= entered 1))
+        (should (= (hermes-dashboard-transport-client-refcount client) 0))
+        (should (equal (car idle) 30))
+        (should (hermes-dashboard-transport-client-stopping-p client))
+        (should-not (hermes-dashboard-transport-client-websocket client))
+        (should (= (cl-count socket closed :test #'eq) 1))
+        (should-not (hermes-dashboard-transport-client-idle-timer client))
+        (should (= (cl-count idle cancelled :test #'eq) 1))
+        (hermes-dashboard-test--fire idle)
+        (hermes-dashboard-test--ready socket)
+        (should (= entered 1))
+        (should (= (cl-count socket closed :test #'eq) 1))))))
+
+(ert-deftest hermes-dashboard-s5a-retry-scheduler-reference-loss ()
+  "Retire at scheduler return, not at a future retry or delayed idle callback."
+  (hermes-dashboard-test--with-reconnect
+    (let ((hermes-dashboard-transport-idle-close-delay 30)
+          (schedule hermes-dashboard-transport-schedule-function)
+          (entered 0) idle ready)
+      (hermes-dashboard-transport-reconnect client)
+      (hermes-dashboard-test--ready (car sockets))
+      (let ((hermes-dashboard-transport-schedule-function
+             (lambda (delay fn &rest args)
+               (when (= entered 0)
+                 (cl-incf entered)
+                 (setq ready (hermes-dashboard-transport-client-ready-promise client))
+                 (should (eq (hermes--promise-state ready) 'pending))
+                 (hermes-dashboard-transport-release client)
+                 (setq idle (hermes-dashboard-transport-client-idle-timer client)))
+               (apply schedule delay fn args))))
+        (funcall (plist-get (cadar sockets) :on-close) (car sockets)))
+      (should (= entered 1))
+      (should (= (hermes-dashboard-transport-client-refcount client) 0))
+      (should (equal (car idle) 30))
+      (should (hermes-dashboard-transport-client-stopping-p client))
+      (should (eq (hermes--promise-state ready) 'rejected))
+      (should-not (hermes-dashboard-transport-client-idle-timer client))
+      (should (= (cl-count idle cancelled :test #'eq) 1))
+      (dolist (timer timers) (hermes-dashboard-test--fire timer))
+      (should (= (length sockets) 1))
+      (should (= (cl-count idle cancelled :test #'eq) 1)))))
+
+(ert-deftest hermes-dashboard-s5a-post-effect-replacement-is-inert ()
+  "Final ready and retry effects cannot retire generation or registry successors."
+  (dolist (edge '(ready retry))
+    (dolist (replacement '(generation registry))
+      (hermes-dashboard-test--with-reconnect
+        (let* ((hermes-dashboard-transport-idle-close-delay 30)
+               (hermes-dashboard-transport--clients (make-hash-table :test #'equal))
+               (schedule hermes-dashboard-transport-schedule-function)
+               (entered 0) successor successor-ready successor-socket idle
+               (replace
+                (lambda ()
+                  (cl-incf entered)
+                  (if (eq replacement 'generation)
+                      (progn (hermes-dashboard-transport-reconnect client)
+                             (setq successor client))
+                    (setq successor (make-hermes-dashboard-transport-client
+                                     :endpoint-key "test" :refcount 1
+                                     :ready-promise (hermes--promise-make)
+                                     :websocket 'successor))
+                    (puthash "test" successor hermes-dashboard-transport--clients))
+                  (setq successor-ready (hermes-dashboard-transport-client-ready-promise successor)
+                        successor-socket (hermes-dashboard-transport-client-websocket successor))
+                  (hermes-dashboard-transport-release client)
+                  (setq idle (hermes-dashboard-transport-client-idle-timer client)))))
+          (setf (hermes-dashboard-transport-client-endpoint-key client) "test")
+          (puthash "test" client hermes-dashboard-transport--clients)
+          (hermes-dashboard-transport-reconnect client)
+          (if (eq edge 'ready)
+              (progn
+                (hermes-dashboard-transport-subscribe
+                 client (lambda (event)
+                          (when (and (= entered 0)
+                                     (equal (plist-get event :event) "gateway.ready"))
+                            (funcall replace))))
+                (hermes-dashboard-test--ready (car sockets)))
+            (hermes-dashboard-test--ready (car sockets))
+            (let ((hermes-dashboard-transport-schedule-function
+                   (lambda (delay fn &rest args)
+                     (when (= entered 0) (funcall replace))
+                     (apply schedule delay fn args))))
+              (funcall (plist-get (cadar sockets) :on-close) (car sockets))))
+          (should (= entered 1))
+          (should idle)
+          (should-not (memq idle cancelled))
+          (should-not (hermes-dashboard-transport-client-stopping-p client))
+          (should-not (hermes-dashboard-transport-client-stopping-p successor))
+          (should (eq (gethash "test" hermes-dashboard-transport--clients) successor))
+          (should (eq successor-ready (hermes-dashboard-transport-client-ready-promise successor)))
+          (should (eq (hermes--promise-state successor-ready) 'pending))
+          (should (eq successor-socket (hermes-dashboard-transport-client-websocket successor)))
+          (should-not (memq successor-socket closed))
+          ;; The old retry remains inert even if already queued.  Do not fire
+          ;; the successor's intentionally delayed public idle release.
+          (when (eq edge 'retry)
+            (let ((socket-count (length sockets)))
+              (hermes-dashboard-test--fire (car timers))
+              (should (= (length sockets) socket-count))
+              (should-not (hermes-dashboard-transport-client-stopping-p successor)))))))))
+
+(ert-deftest hermes-dashboard-s5a-public-request-survives-pre-ready-loss ()
+  "Keep the actual public request record and deadline until B can send it."
+  (hermes-dashboard-test--with-reconnect
+    (hermes-dashboard-transport-reconnect client)
+    (let* ((a (car sockets))
+           (ready (hermes-dashboard-transport-client-ready-promise client))
+           (response (hermes-dashboard-transport-call client "test.query"))
+           (pending (hermes-dashboard-transport-client-pending client))
+           (id (car (hash-table-keys pending)))
+           (record (gethash id pending))
+           (timer (plist-get record :timer))
+           (resolved 0) (readied 0))
+      (hermes--promise-then response (lambda (_) (cl-incf resolved)))
+      (hermes--promise-then ready (lambda (_) (cl-incf readied)))
+      (hermes-dashboard-transport--handle-socket-down client "pre-ready" a)
+      (should (eq pending (hermes-dashboard-transport-client-pending client)))
+      (should (eq record (gethash id pending)))
+      (should (eq timer (plist-get (gethash id pending) :timer)))
+      (should (eq ready (hermes-dashboard-transport-client-ready-promise client)))
+      (should (eq (hermes--promise-state response) 'pending))
+      (should (= readied 0))
+      (should-not (memq timer cancelled))
+      (should-not sent)
+      (hermes-dashboard-test--fire (car timers))
+      (let ((b (car sockets)))
+        (should-not (eq a b))
+        (hermes-dashboard-test--ready b)
+        (hermes-dashboard-test--ready b)
+        (should (= readied 1))
+        (should (= (length negotiated) 1))
+        (should (eq (caar negotiated) b))
+        (should (= (length sent) 1))
+        (should (eq (caar sent) b))
+        (hermes-dashboard-transport--handle-frame
+         client `((jsonrpc . "2.0") (id . ,id) (result . "ok")))
+        (hermes-dashboard-transport--handle-frame
+         client `((jsonrpc . "2.0") (id . ,id) (result . "ok")))
+        (should (= resolved 1))))))
+
+(ert-deftest hermes-dashboard-s5a-entered-ready-reconnect ()
+  "A reconnected recipient replaces A before A can resolve B readiness."
+  (hermes-dashboard-test--with-reconnect
+    (hermes-dashboard-transport-reconnect client)
+    (let ((a (car sockets)) b-ready q (entered 0))
+      (hermes-dashboard-transport-subscribe
+       client (lambda (event)
+                (when (and (equal (plist-get event :status) "reconnected")
+                           (= entered 0))
+                  (cl-incf entered)
+                  (hermes-dashboard-transport-reconnect client)
+                  (setq b-ready (hermes-dashboard-transport-client-ready-promise client)
+                        q (hermes-dashboard-transport-call client "successor.query")))))
+      (hermes-dashboard-test--ready a)
+      (should (= entered 1))
+      (should q)
+      (should (eq (hermes--promise-state b-ready) 'pending))
+      (should-not (hermes-dashboard-transport-client-ready-p client))
+      (should-not sent)
+      (hermes-dashboard-test--ready (car sockets))
+      (should (= (length sent) 1)))))
+
+(ert-deftest hermes-dashboard-s5a-entry-reentry-owns-one-dial ()
+  "Each callback edge can replace a manual or automatic recovery exactly once."
+  (dolist (route '(manual automatic))
+    (dolist (edge '(startup idle heartbeat close reject status))
+      (unless (and (eq route 'automatic) (eq edge 'close))
+        (dolist (failure '(error quit))
+          (hermes-dashboard-test--with-reconnect
+            (let* ((old-ready (hermes-dashboard-transport-client-ready-promise client))
+                   (old-socket '(old-socket))
+                   (pending (hermes-dashboard-transport-client-pending client))
+                   (entered 0) log successor-ready escaped
+                   (effect
+                    (lambda (name)
+                      (push name log)
+                      (when (and (eq name edge) (= entered 0))
+                        (cl-incf entered)
+                        (hermes-dashboard-transport-reconnect client "inner")
+                        (setq successor-ready
+                              (hermes-dashboard-transport-client-ready-promise client))
+                        (signal failure '("old callback"))))))
+              (setf (hermes-dashboard-transport-client-websocket client) old-socket
+                    (hermes-dashboard-transport-client-ready-p client) t
+                    (hermes-dashboard-transport-client-startup-cancel client)
+                    (lambda () (funcall effect 'startup))
+                    (hermes-dashboard-transport-client-idle-timer client) 'idle
+                    (hermes-dashboard-transport-client-heartbeat-timer client) 'heartbeat)
+              (puthash "old" (list :timer 'request :reject
+                                   (lambda (_) (funcall effect 'reject))) pending)
+              (hermes-dashboard-transport-subscribe
+               client (lambda (event)
+                        (when (and (equal (plist-get event :content) "outer")
+                                   (memq (plist-get event :type) '(status)))
+                          (funcall effect 'status))))
+              (cl-letf (((symbol-function 'cancel-timer)
+                         (lambda (timer) (push timer cancelled) (funcall effect timer)))
+                        ((symbol-function 'websocket-close)
+                         (lambda (ws)
+                           (push ws closed)
+                           (when (eq ws old-socket) (funcall effect 'close)))))
+                (condition-case err
+                    (if (eq route 'manual)
+                        (hermes-dashboard-transport-reconnect client "outer")
+                      (hermes-dashboard-transport--handle-socket-down client "outer" old-socket))
+                  (quit (setq escaped err))))
+              (should-not escaped)
+              (should (= entered 1))
+              (should (= (length sockets) 1))
+              (should-not timers)
+              (should (eq successor-ready (hermes-dashboard-transport-client-ready-promise client)))
+              (should (eq (hermes--promise-state successor-ready) 'pending))
+              (should (eq (hermes--promise-state old-ready) 'rejected))
+              (should-not (hermes-dashboard-transport-client-ready-p client))
+              (should (= (hermes-dashboard-transport-client-reconnect-attempts client) 0))
+              (should (equal (cl-remove 'status (reverse log))
+                             (append '(startup idle heartbeat request)
+                                     (and (eq route 'manual) '(close)) '(reject)))))))))))
+
+(ert-deftest hermes-dashboard-s5a-public-request-terminal-contrasts ()
+  "Timeout, cancellation, replacement and exhaustion prohibit a late send."
+  (dolist (ending '(timeout cancel manual exhausted))
+    (hermes-dashboard-test--with-reconnect
+      (hermes-dashboard-transport-reconnect client)
+      (let* ((hermes-dashboard-transport-request-owner 'owner)
+             (q (hermes-dashboard-transport-call client "test.query"))
+             (table (hermes-dashboard-transport-client-pending client))
+             (id (car (hash-table-keys table)))
+             (request-timer (plist-get (gethash id table) :timer))
+             (ready (hermes-dashboard-transport-client-ready-promise client))
+             (rejected 0))
+        (hermes--promise-catch q (lambda (_) (cl-incf rejected)))
+        (hermes-dashboard-transport--handle-socket-down client "drop" (car sockets))
+        (let ((retry (car timers)))
+          (pcase ending
+            ('timeout (hermes-dashboard-test--fire request-timer))
+            ('cancel (hermes-dashboard-transport-cancel-owner-requests client 'owner))
+            ('manual (hermes-dashboard-transport-reconnect client))
+            ('exhausted
+             (dotimes (_ 2)
+               (hermes-dashboard-test--fire (car timers))
+               (hermes-dashboard-transport--handle-socket-down client "drop" (car sockets)))
+             (hermes-dashboard-test--fire (car timers))))
+          (should-not (gethash id table))
+          (unless (eq ending 'cancel) (should (= rejected 1)))
+          (unless (eq ending 'exhausted)
+            (hermes-dashboard-test--fire retry)
+            (hermes-dashboard-test--ready (car sockets)))
+          (should-not sent)
+          (when (memq ending '(manual exhausted))
+            (should (eq (hermes--promise-state ready) 'rejected)))
+          (when (eq ending 'exhausted)
+            (should (hermes-dashboard-transport-client-stopping-p client))))))))
+
+(ert-deftest hermes-dashboard-s5a-ready-inner-reentry ()
+  "Cancellation, timer return, recipients and promise callbacks revoke A completion."
+  (dolist (edge '(cancel schedule recipient promise))
+    (hermes-dashboard-test--with-reconnect
+      (hermes-dashboard-transport-reconnect client)
+      (let* ((a (car sockets))
+             (old-ready (hermes-dashboard-transport-client-ready-promise client))
+             (hermes-dashboard-transport-heartbeat-interval 7)
+             (old-timer (list 'old-heartbeat))
+             (successor-timer (list 'successor-heartbeat))
+             stale-timer b-ready q delivery (entered 0)
+             (replace
+              (lambda ()
+                (when (= entered 0)
+                  (cl-incf entered)
+                  (hermes-dashboard-transport-reconnect client)
+                  (setq b-ready (hermes-dashboard-transport-client-ready-promise client)
+                        q (hermes-dashboard-transport-call client "successor.query"))
+                  (setf (hermes-dashboard-transport-client-heartbeat-timer client)
+                        successor-timer)))))
+        (setf (hermes-dashboard-transport-client-heartbeat-timer client) old-timer)
+        ;; The snapshot currently reverses hash traversal; the newest recipient
+        ;; reenters first, with a remaining old recipient still to visit.
+        (hermes-dashboard-transport-subscribe
+         client (lambda (event)
+                  (when (or (equal (plist-get event :status) "reconnected")
+                            (equal (plist-get event :event) "gateway.ready"))
+                    (push event delivery))))
+        (hermes-dashboard-transport-subscribe
+         client (lambda (event)
+                  (when (and (eq edge 'recipient)
+                             (equal (plist-get event :status) "reconnected"))
+                    (funcall replace))))
+        (when (eq edge 'promise)
+          (hermes--promise-then old-ready (lambda (_) (funcall replace))))
+        (let ((hermes-dashboard-transport-schedule-function
+               (lambda (delay fn &rest args)
+                 (let ((timer (list delay fn args)))
+                   (push timer timers)
+                   (when (and (eq edge 'schedule) (= delay 7) (= entered 0))
+                     (setq stale-timer timer)
+                     (funcall replace))
+                   timer))))
+          (cl-letf (((symbol-function 'cancel-timer)
+                     (lambda (timer)
+                       (push timer cancelled)
+                       (when (and (eq edge 'cancel) (eq timer old-timer))
+                         (funcall replace)))))
+            (hermes-dashboard-test--ready a)))
+        (should (= entered 1))
+        (should q)
+        (should (eq (hermes--promise-state b-ready) 'pending))
+        (should-not sent)
+        (should-not (hermes-dashboard-transport-client-ready-p client))
+        (should (eq successor-timer (hermes-dashboard-transport-client-heartbeat-timer client)))
+        (unless (eq edge 'promise) (should-not delivery))
+        (should-not (cl-find "gateway.ready" delivery :key (lambda (e) (plist-get e :event)) :test #'equal))
+        (when (eq edge 'schedule)
+          (should (memq stale-timer cancelled))
+          (let ((before (length timers)))
+            (hermes-dashboard-test--fire stale-timer)
+            (should (= before (length timers)))))
+        (hermes-dashboard-test--ready (car sockets))
+        (should (= (length sent) 1))))))
+
+(ert-deftest hermes-dashboard-s5a-constructor-revocation ()
+  "Post-constructor validation closes only its returned socket on owner loss."
+  (dolist (action '(replace remove release reconnect))
+    (hermes-dashboard-test--with-reconnect
+      (let* ((hermes-dashboard-transport--clients (make-hash-table :test #'equal))
+             (key 'endpoint)
+             (replacement (make-hermes-dashboard-transport-client :refcount 1 :websocket 'successor))
+             (open hermes-dashboard-transport-websocket-open-function)
+             returned (entered 0))
+        (setf (hermes-dashboard-transport-client-endpoint-key client) key)
+        (puthash key client hermes-dashboard-transport--clients)
+        (let ((hermes-dashboard-transport-websocket-open-function
+               (lambda (url c)
+                 (let ((ws (funcall open url c)))
+                   (when (= entered 0)
+                     (cl-incf entered)
+                     (setq returned ws)
+                     (pcase action
+                       ('replace (puthash key replacement hermes-dashboard-transport--clients))
+                       ('remove (remhash key hermes-dashboard-transport--clients))
+                       ('release (setf (hermes-dashboard-transport-client-refcount client) 0))
+                       ('reconnect (hermes-dashboard-transport-reconnect client))))
+                   ws))))
+          (hermes-dashboard-transport-reconnect client))
+        (should (= entered 1))
+        (should (memq returned closed))
+        (should-not (memq 'successor closed))
+        (should-not timers)
+        (pcase action
+          ('release (should (hermes-dashboard-transport-client-stopping-p client)))
+          ('reconnect
+           (should (= (length sockets) 2))
+           (should (eq (car sockets) (hermes-dashboard-transport-client-websocket client))))
+          (_ (should-not (hermes-dashboard-transport-client-websocket client))
+             (should-not (hermes-dashboard-transport-client-stopping-p replacement))))))))
+
+(ert-deftest hermes-dashboard-s5a-ready-last-release-is-terminal ()
+  "An entered reconnect completion losing only its final reference stops now."
+  (hermes-dashboard-test--with-reconnect
+    (let ((hermes-dashboard-transport-idle-close-delay 30))
+      (hermes-dashboard-transport-reconnect client)
+      (let ((ready (hermes-dashboard-transport-client-ready-promise client)))
+        (hermes-dashboard-transport-subscribe
+         client (lambda (event)
+                  (when (equal (plist-get event :status) "reconnected")
+                    (hermes-dashboard-transport-release client))))
+        (hermes-dashboard-test--ready (car sockets))
+        (should (hermes-dashboard-transport-client-stopping-p client))
+        (should (eq (hermes--promise-state ready) 'rejected))
+        (should (equal (mapcar #'car timers) '(30)))
+        (should (memq (car timers) cancelled))
+        (should-not (hermes-dashboard-transport-client-idle-timer client))))))
+
+(ert-deftest hermes-dashboard-s5a-retry-policy-and-deadline ()
+  "Capture retry policy and retain the original campaign's readiness timeout."
+  (hermes-dashboard-test--with-reconnect
+    (let ((hermes-dashboard-transport-ready-timeout 15)
+          (hermes-dashboard-transport-reconnect-max-attempts 10)
+          (hermes-dashboard-transport-reconnect-base-delay 1.0)
+          (hermes-dashboard-transport-reconnect-max-delay 30))
+      (hermes-dashboard-transport-reconnect client)
+      (should (equal (mapcar #'car timers) '(15)))
+      (let ((deadline (car timers))
+            (ready (hermes-dashboard-transport-client-ready-promise client)))
+        (hermes-dashboard-transport--handle-socket-down client "pre-ready" (car sockets))
+        (should (equal (mapcar #'car timers) '(2.0 15)))
+        (let ((retry (car timers)))
+          (hermes-dashboard-test--fire retry)
+          (hermes-dashboard-test--fire retry)
+          (should (= (length sockets) 2))
+          (should (= (length timers) 2)))
+        (hermes-dashboard-test--fire deadline)
+        (should (eq (hermes--promise-state ready) 'rejected))
+        (should (hermes-dashboard-transport-client-stopping-p client)))))
+  (dolist (maximum '(nil 0))
+    (dolist (failure '(nil t))
+      (hermes-dashboard-test--with-reconnect
+        (let ((hermes-dashboard-transport-reconnect-max-attempts maximum)
+              (open hermes-dashboard-transport-websocket-open-function)
+              (calls 0))
+          (let ((hermes-dashboard-transport-websocket-open-function
+                 (lambda (url c)
+                   (cl-incf calls)
+                   (if failure (error "open failed") (funcall open url c)))))
+            (hermes-dashboard-transport-reconnect client)
+            (should (= calls 1))
+            (if failure
+                (let ((retry (car timers)))
+                  ;; Configuration changes after return cannot increase the
+                  ;; captured manual one-shot budget.
+                  (let ((hermes-dashboard-transport-reconnect-max-attempts 10))
+                    (hermes-dashboard-test--fire retry)
+                    (hermes-dashboard-test--fire retry)))
+              (should-not timers)
+              (hermes-dashboard-transport--handle-socket-down client "drop" (car sockets)))
+            (should (= calls 1))
+            (should (hermes-dashboard-transport-client-stopping-p client)))))))
+  (hermes-dashboard-test--with-reconnect
+    (let ((hermes-dashboard-transport-reconnect-max-attempts 2)
+          (calls 0)
+          (hermes-dashboard-transport-websocket-open-function
+           (lambda (&rest _) (error "open failed"))))
+      (cl-letf (((symbol-function 'hermes-dashboard-transport--open-websocket-once)
+                 (lambda (&rest _) (cl-incf calls) (error "open failed"))))
+        (hermes-dashboard-transport-reconnect client)
+        (dotimes (_ 2) (hermes-dashboard-test--fire (car timers)))
+        (should (= calls 2))
+        (should (hermes-dashboard-transport-client-stopping-p client))))))
+
+(ert-deftest hermes-dashboard-s5a-stored-url-and-duplicate-ready ()
+  "Reusable and spawned URLs keep their existing dial topology."
+  (dolist (kind '(legacy-token spawn))
+    (hermes-dashboard-test--with-reconnect
+      (setf (hermes-dashboard-transport-client-credential-kind client) kind
+            (hermes-dashboard-transport-client-base-url client)
+            (unless (eq kind 'spawn) "https://example.invalid")
+            (hermes-dashboard-transport-client-credential-reusable-p client)
+            t)
+      (cl-letf (((symbol-function 'hermes-dashboard-transport--process-live-p)
+                 (lambda (_) t)))
+        (hermes-dashboard-transport-reconnect client)
+        (let ((resolved 0) (statuses 0)
+              (url (hermes-dashboard-transport-client-websocket-url client)))
+          (hermes--promise-then
+           (hermes-dashboard-transport-client-ready-promise client)
+           (lambda (_) (cl-incf resolved)))
+          (hermes-dashboard-transport-subscribe
+           client (lambda (e) (when (equal (plist-get e :status) "reconnected")
+                               (cl-incf statuses))))
+          (hermes-dashboard-test--ready (car sockets))
+          (hermes-dashboard-test--ready (car sockets))
+          (should (= resolved 1))
+          (should (= statuses 1))
+          (hermes-dashboard-transport--handle-socket-down client "established" (car sockets))
+          (let ((retry (car timers)))
+            (hermes-dashboard-test--fire retry)
+            (hermes-dashboard-test--fire retry))
+          (should (= (length sockets) 2))
+          (should (cl-every (lambda (s) (equal (car s) url)) sockets)))))))
+
+(ert-deftest hermes-dashboard-s5a-ready-registry-loss-is-inert ()
+  "Registry loss before reference loss revokes completion without terminal effects."
+  (dolist (action '(replace remove))
+    (hermes-dashboard-test--with-reconnect
+      (let* ((hermes-dashboard-transport--clients (make-hash-table :test #'equal))
+             (key 'endpoint)
+             (replacement (make-hermes-dashboard-transport-client
+                           :refcount 1 :websocket 'successor))
+             (entered 0))
+        (setf (hermes-dashboard-transport-client-endpoint-key client) key)
+        (puthash key client hermes-dashboard-transport--clients)
+        (hermes-dashboard-transport-reconnect client)
+        (let ((ready (hermes-dashboard-transport-client-ready-promise client))
+              (socket (car sockets)))
+          (hermes-dashboard-transport-subscribe
+           client (lambda (event)
+                    (when (equal (plist-get event :status) "reconnected")
+                      (cl-incf entered)
+                      (if (eq action 'replace)
+                          (puthash key replacement hermes-dashboard-transport--clients)
+                        (remhash key hermes-dashboard-transport--clients))
+                      (setf (hermes-dashboard-transport-client-refcount client) 0))))
+          (hermes-dashboard-test--ready socket)
+          (should (= entered 1))
+          (should (eq (hermes--promise-state ready) 'pending))
+          (should-not (hermes-dashboard-transport-client-stopping-p client))
+          (should-not (hermes-dashboard-transport-client-stopping-p replacement))
+          (should (eq (hermes-dashboard-transport-client-websocket replacement) 'successor))
+          (should-not closed)
+          (should-not timers)
+          (should (eq (gethash key hermes-dashboard-transport--clients)
+                      (and (eq action 'replace) replacement))))))))
+
+(ert-deftest hermes-dashboard-s5a-failed-open-keeps-stored-url ()
+  "Both entry paths retry reusable remote credentials without authentication."
+  (dolist (route '(manual automatic))
+    (hermes-dashboard-test--with-reconnect
+      (let ((open hermes-dashboard-transport-websocket-open-function)
+            urls)
+        (setf (hermes-dashboard-transport-client-base-url client) "https://example.invalid"
+              (hermes-dashboard-transport-client-credential-kind client) 'legacy-token
+              (hermes-dashboard-transport-client-credential-reusable-p client) t
+              (hermes-dashboard-transport-client-ready-p client) t)
+        (let ((hermes-dashboard-transport-websocket-open-function
+               (lambda (url c)
+                 (push url urls)
+                 (if (= (length urls) 1) (error "uncertain open")
+                   (funcall open url c)))))
+          (if (eq route 'manual)
+              (hermes-dashboard-transport-reconnect client)
+            (hermes-dashboard-transport--handle-socket-down client "lost")
+            (hermes-dashboard-test--fire (car timers)))
+          (let ((retry (car timers)))
+            (hermes-dashboard-test--fire retry)
+            (hermes-dashboard-test--fire retry))
+          (should (= (length urls) 2))
+          (should (equal urls (make-list 2 "ws://example.invalid/ws?token=stored")))
+          (should (= (length sockets) 1))
+          (should (eq (hermes--promise-state
+                       (hermes-dashboard-transport-client-ready-promise client)) 'pending)))))))
+
+(ert-deftest hermes-dashboard-s5a-retired-work-evidence-and-reference-loss ()
+  "Malformed old rejects report redacted evidence and reference loss is immediate."
+  (hermes-dashboard-test--with-reconnect
+    (let ((pending (hermes-dashboard-transport-client-pending client))
+          (hermes-dashboard-transport-idle-close-delay 30)
+          observed events)
+      (setf (hermes-dashboard-transport-client-secrets client) '("SECRET")
+            (hermes-dashboard-transport-client-startup-cancel client)
+            (lambda () (hermes-dashboard-transport-release client)))
+      (puthash "bad" '(:method "old.method" :reject malformed) pending)
+      (puthash "observer" (list :reject
+                                (lambda (_) (setq observed
+                                                  (hermes-dashboard-transport-client-stopping-p client))))
+               pending)
+      (hermes-dashboard-transport-subscribe client (lambda (e) (push e events)))
+      (hermes-dashboard-transport-reconnect client "lost SECRET")
+      (should observed)
+      (should-not sockets)
+      (should (memq (car timers) cancelled))
+      (let ((error-event (cl-find "old.method" events :key (lambda (e) (plist-get e :method)) :test #'equal)))
+        (should error-event)
+        (should-not (string-match-p "SECRET" (plist-get error-event :content)))))))
+
+(ert-deftest hermes-dashboard-transport-socket-down-without-reconnect-stops-before-callbacks ()
+  "Terminal socket loss detaches and closes before callback reentry."
+  (dolist (callback-kind '(reject subscriber fallback))
+    (let* ((hermes-dashboard-transport--clients
+            (make-hash-table :test #'equal))
+           (hermes-dashboard-transport-reconnect-max-attempts nil)
+           (key '(spawn "127.0.0.1" 9119))
+           (pending (make-hash-table :test #'equal))
+           closed deleted order facts replacement
+           (old (make-hermes-dashboard-transport-client
+                 :endpoint-key key :websocket 'old-ws :process 'old-process
+                 :refcount 1 :pending pending)))
+      (puthash key old hermes-dashboard-transport--clients)
+      (let ((reenter
+             (lambda (&rest _)
+               (push callback-kind order)
+               (setq facts
+                     (list (hermes-dashboard-transport-client-stopping-p old)
+                           (eq (gethash key hermes-dashboard-transport--clients)
+                               old)
+                           (hermes-dashboard-transport-client-websocket old)
+                           (hermes-dashboard-transport-client-process old)
+                           (copy-sequence closed) (copy-sequence deleted))
+                     replacement
+                     (hermes-dashboard-transport-acquire :start-mode 'spawn)))))
+        (puthash "request"
+                 (list :method "test.method"
+                       :reject (if (eq callback-kind 'reject)
+                                   reenter
+                                 (lambda (&rest _) (push 'pending order))))
+                 pending)
+        (pcase callback-kind
+          ('subscriber (hermes-dashboard-transport-subscribe old reenter))
+          ('fallback
+           (setf (hermes-dashboard-transport-client-callback old) reenter)))
+        (cl-letf (((symbol-function 'hermes-dashboard-transport-start)
+                   (lambda (&rest _)
+                     (make-hermes-dashboard-transport-client
+                      :websocket 'replacement-ws)))
+                  ((symbol-function 'websocket-close)
+                   (lambda (resource) (push resource closed)))
+                  ((symbol-function 'delete-process)
+                   (lambda (resource) (push resource deleted))))
+          (hermes-dashboard-transport--handle-socket-down
+           old "dropped" 'old-ws)
+          (hermes-dashboard-transport--handle-socket-down
+           old "late old close" 'old-ws))
+        (should (equal facts '(t nil nil nil (old-ws) (old-process))))
+        (should-not (eq replacement old))
+        (should (eq (gethash key hermes-dashboard-transport--clients)
+                    replacement))
+        (should (eq (hermes-dashboard-transport-client-websocket replacement)
+                    'replacement-ws))
+        (when (memq callback-kind '(subscriber fallback))
+          (should (equal (nreverse order) (list callback-kind 'pending))))))))
+
+(ert-deftest hermes-dashboard-transport-socket-down-stops-after-last-release ()
+  "A reconnect loses viability after rejection and stops without idle delay."
+  (let* ((hermes-dashboard-transport--clients
+          (make-hash-table :test #'equal))
+         (hermes-dashboard-transport-reconnect-max-attempts 3)
+         (hermes-dashboard-transport-idle-close-delay 30)
+         (key '(spawn "127.0.0.1" 9119))
+         (pending (make-hash-table :test #'equal))
+         scheduled cancelled deleted replacement
+         (hermes-dashboard-transport-schedule-function
+          (lambda (delay _fn &rest _args)
+            (push delay scheduled)
+            'idle-timer))
+         (old (make-hermes-dashboard-transport-client
+               :endpoint-key key :websocket 'old-ws :process 'old-process
+               :refcount 1 :pending pending)))
+    (puthash key old hermes-dashboard-transport--clients)
+    (puthash "request"
+             (list :method "test.method"
+                   :reject (lambda (&rest _)
+                             (hermes-dashboard-transport-release old)))
+             pending)
+    (cl-letf (((symbol-function 'hermes-dashboard-transport-start)
+               (lambda (&rest _)
+                 (make-hermes-dashboard-transport-client
+                  :websocket 'replacement-ws)))
+              ((symbol-function 'cancel-timer)
+               (lambda (timer) (push timer cancelled)))
+              ((symbol-function 'delete-process)
+               (lambda (process) (push process deleted))))
+      (hermes-dashboard-transport--handle-socket-down old "dropped" 'old-ws)
+      (setq replacement
+            (hermes-dashboard-transport-acquire :start-mode 'spawn)))
+    (should (hermes-dashboard-transport-client-stopping-p old))
+    (should-not (hermes-dashboard-transport-client-idle-timer old))
+    (should-not (hermes-dashboard-transport-client-process old))
+    (should (equal scheduled '(30)))
+    (should (equal cancelled '(idle-timer)))
+    (should (equal deleted '(old-process)))
+    (should-not (eq replacement old))
+    (should (eq (gethash key hermes-dashboard-transport--clients) replacement))))
+
+(ert-deftest hermes-dashboard-transport-socket-down-is-inert-after-callback-replacement ()
+  "A reject callback may stop and replace the old client without later effects."
+  (let* ((hermes-dashboard-transport--clients
+          (make-hash-table :test #'equal))
+         (hermes-dashboard-transport-reconnect-max-attempts 3)
+         (key '(spawn "127.0.0.1" 9119))
+         (pending (make-hash-table :test #'equal))
+         closed deleted scheduled replacement generation-after-stop
+         (hermes-dashboard-transport-schedule-function
+          (lambda (&rest _) (setq scheduled t) 'timer))
+         (old (make-hermes-dashboard-transport-client
+               :endpoint-key key :websocket 'old-ws :process 'old-process
+               :refcount 1 :pending pending)))
+    (puthash key old hermes-dashboard-transport--clients)
+    (puthash "request"
+             (list :method "test.method"
+                   :reject
+                   (lambda (&rest _)
+                     (hermes-dashboard-transport-stop old "callback stop")
+                     (setq generation-after-stop
+                           (hermes-dashboard-transport-client-generation old)
+                           replacement
+                           (hermes-dashboard-transport-acquire
+                            :start-mode 'spawn))))
+             pending)
+    (cl-letf (((symbol-function 'hermes-dashboard-transport-start)
+               (lambda (&rest _)
+                 (make-hermes-dashboard-transport-client
+                  :websocket 'replacement-ws)))
+              ((symbol-function 'websocket-close)
+               (lambda (websocket) (push websocket closed)))
+              ((symbol-function 'delete-process)
+               (lambda (process) (push process deleted))))
+      (hermes-dashboard-transport--handle-socket-down old "dropped" 'old-ws))
+    (should (= (hermes-dashboard-transport-client-generation old)
+               generation-after-stop))
+    (should-not scheduled)
+    (should (equal deleted '(old-process)))
+    (should-not (memq 'replacement-ws closed))
+    (should (eq (gethash key hermes-dashboard-transport--clients) replacement))
+    (should (eq (hermes-dashboard-transport-client-websocket replacement)
+                'replacement-ws))
+    (should-not (hermes-dashboard-transport-client-stopping-p replacement))))
+
+(ert-deftest hermes-dashboard-transport-socket-down-is-inert-after-registry-replacement ()
+  "A callback replacing the exact registry identity makes old continuation inert."
+  (let* ((hermes-dashboard-transport--clients
+          (make-hash-table :test #'equal))
+         (hermes-dashboard-transport-reconnect-max-attempts 3)
+         (key '(spawn "127.0.0.1" 9119))
+         (pending (make-hash-table :test #'equal))
+         scheduled
+         (hermes-dashboard-transport-schedule-function
+          (lambda (&rest _) (setq scheduled t) 'timer))
+         (old (make-hermes-dashboard-transport-client
+               :endpoint-key key :websocket 'old-ws :refcount 1
+               :pending pending))
+         (replacement (make-hermes-dashboard-transport-client
+                       :endpoint-key key :websocket 'replacement-ws :refcount 1)))
+    (puthash key old hermes-dashboard-transport--clients)
+    (puthash "request"
+             (list :method "test.method"
+                   :reject (lambda (&rest _)
+                             (puthash key replacement
+                                      hermes-dashboard-transport--clients)))
+             pending)
+    (hermes-dashboard-transport--handle-socket-down old "dropped" 'old-ws)
+    (should-not scheduled)
+    ;; Reservation precedes registry revocation; no later rollback is allowed.
+    (should (hermes-dashboard-transport-client-reconnecting-p old))
+    (should (eq (gethash key hermes-dashboard-transport--clients) replacement))
+    (should (eq (hermes-dashboard-transport-client-websocket replacement)
+                'replacement-ws))))
+
+(ert-deftest hermes-dashboard-transport-socket-down-is-inert-after-registry-removal ()
+  "A callback removing the old registry identity makes its continuation inert."
+  (let* ((hermes-dashboard-transport--clients (make-hash-table :test #'equal))
+         (hermes-dashboard-transport-reconnect-max-attempts 3)
+         (key '(spawn "127.0.0.1" 9119))
+         (pending (make-hash-table :test #'equal)) scheduled
+         (hermes-dashboard-transport-schedule-function
+          (lambda (&rest _) (setq scheduled t) 'timer))
+         (old (make-hermes-dashboard-transport-client
+               :endpoint-key key :websocket 'old-ws :refcount 1 :pending pending)))
+    (puthash key old hermes-dashboard-transport--clients)
+    (puthash "request"
+             (list :method "test.method"
+                   :reject (lambda (&rest _)
+                             (remhash key hermes-dashboard-transport--clients)))
+             pending)
+    (hermes-dashboard-transport--handle-socket-down old "dropped" 'old-ws)
+    (should-not scheduled)
+    ;; Reservation precedes registry revocation; no later rollback is allowed.
+    (should (hermes-dashboard-transport-client-reconnecting-p old))
+    (should-not (gethash key hermes-dashboard-transport--clients))))
+
+(ert-deftest hermes-dashboard-transport-closed-status-revalidates-before-reconnect ()
+  "Closed-status callbacks cannot continue a stale or unreferenced reconnect."
+  (dolist (callback-kind '(subscriber fallback))
+    (dolist (action '(remove replace release))
+      (let* ((hermes-dashboard-transport--clients
+              (make-hash-table :test #'equal))
+             (hermes-dashboard-transport-reconnect-max-attempts 3)
+             (hermes-dashboard-transport-idle-close-delay 30)
+             (key '(spawn "127.0.0.1" 9119))
+             scheduled cancelled opened
+             (old (make-hermes-dashboard-transport-client
+                   :endpoint-key key :websocket 'old-ws :refcount 1
+                   :pending (make-hash-table :test #'equal)))
+             (replacement
+              (make-hermes-dashboard-transport-client
+               :endpoint-key key :websocket 'replacement-ws :refcount 1))
+             (hermes-dashboard-transport-schedule-function
+              (lambda (delay fn &rest args)
+                (let ((timer (list delay fn args)))
+                  (push timer scheduled)
+                  timer)))
+             (callback
+              (lambda (event)
+                (when (equal (plist-get event :status) "closed")
+                  (pcase action
+                    ('remove (remhash key hermes-dashboard-transport--clients))
+                    ('replace (puthash key replacement
+                                       hermes-dashboard-transport--clients))
+                    ('release (hermes-dashboard-transport-release old)))))))
+        (puthash key old hermes-dashboard-transport--clients)
+        (if (eq callback-kind 'subscriber)
+            (hermes-dashboard-transport-subscribe old callback)
+          (setf (hermes-dashboard-transport-client-callback old) callback))
+        (cl-letf (((symbol-function 'cancel-timer)
+                   (lambda (timer) (push timer cancelled)))
+                  ((symbol-function 'hermes-dashboard-transport--open-websocket-once)
+                   (lambda (&rest _) (setq opened t) 'reopened-old)))
+          (hermes-dashboard-transport--handle-socket-down old "dropped" 'old-ws))
+        (should-not (cl-find 1 scheduled :key #'car :test #'=))
+        (should-not opened)
+        (pcase action
+          ('remove (should-not (gethash key hermes-dashboard-transport--clients)))
+          ('replace
+           (should (eq (gethash key hermes-dashboard-transport--clients)
+                       replacement)))
+          ('release
+           (should (hermes-dashboard-transport-client-stopping-p old))
+           (should-not (hermes-dashboard-transport-client-idle-timer old))
+           (should cancelled)))))))
+
+(ert-deftest hermes-dashboard-transport-reconnect-backoff-doubles-and-caps ()
+  "Reconnect backoff doubles per attempt and caps at the max delay."
+  (let ((hermes-dashboard-transport-reconnect-base-delay 1)
+        (hermes-dashboard-transport-reconnect-max-delay 8))
+    (should (= (hermes-dashboard-transport--reconnect-backoff 0) 1))
+    (should (= (hermes-dashboard-transport--reconnect-backoff 2) 4))
+    (should (= (hermes-dashboard-transport--reconnect-backoff 5) 8))))
+
+(ert-deftest hermes-dashboard-transport-unexpected-close-schedules-reconnect ()
+  "An unexpected close on a referenced client schedules a reconnect, staying registered."
+  (let* ((hermes-dashboard-transport--clients (make-hash-table :test #'equal))
+         (hermes-dashboard-transport-reconnect-max-attempts 3)
+         (hermes-dashboard-transport-reconnect-base-delay 1)
+         events scheduled
+         (hermes-dashboard-transport-schedule-function
+          (lambda (delay _fn &rest _args) (setq scheduled delay) 'timer)))
+    (cl-letf (((symbol-function 'hermes-dashboard-transport-start)
+               (lambda (&rest _)
+                 (make-hermes-dashboard-transport-client :websocket 'ws))))
+      (let ((c (hermes-dashboard-transport-acquire :start-mode 'spawn)))
+        (hermes-dashboard-transport-subscribe c (lambda (e) (push e events)))
+        (hermes-dashboard-transport--handle-socket-down c "dropped")
+        (should (hermes-dashboard-transport-client-reconnecting-p c))
+        (should (eq (gethash '(spawn "127.0.0.1" 9119)
+                             hermes-dashboard-transport--clients)
+                    c))
+        (should (equal scheduled 1))
+        (should (cl-find "closed" events
+                         :key (lambda (e) (plist-get e :status)) :test #'equal))))))
+
+(ert-deftest hermes-dashboard-transport-unreferenced-close-finalizes ()
+  "An unexpected close on an unreferenced client finalizes instead of reconnecting."
+  (let* ((hermes-dashboard-transport--clients (make-hash-table :test #'equal))
+         (hermes-dashboard-transport-reconnect-max-attempts 3)
+         scheduled
+         (hermes-dashboard-transport-schedule-function
+          (lambda (&rest _) (setq scheduled t) 'timer)))
+    (cl-letf (((symbol-function 'hermes-dashboard-transport-start)
+               (lambda (&rest _)
+                 (make-hermes-dashboard-transport-client :websocket 'ws))))
+      (let ((c (hermes-dashboard-transport-acquire :start-mode 'spawn)))
+        (setf (hermes-dashboard-transport-client-refcount c) 0)
+        (hermes-dashboard-transport--handle-socket-down c "dropped")
+        (should-not scheduled)
+        (should-not (gethash '(spawn "127.0.0.1" 9119)
+                             hermes-dashboard-transport--clients))))))
+
+(ert-deftest hermes-dashboard-transport-unreferenced-close-stops-before-reject ()
+  "A configured but unreferenced client terminalizes before pending callbacks."
+  (let* ((hermes-dashboard-transport--clients (make-hash-table :test #'equal))
+         (hermes-dashboard-transport-reconnect-max-attempts 3)
+         (key '(spawn "127.0.0.1" 9119))
+         (pending (make-hash-table :test #'equal)) observed-stopping replacement
+         (old (make-hermes-dashboard-transport-client
+               :endpoint-key key :websocket 'old-ws :refcount 0
+               :pending pending)))
+    (puthash key old hermes-dashboard-transport--clients)
+    (puthash "request"
+             (list :method "test.method"
+                   :reject (lambda (&rest _)
+                             (setq observed-stopping
+                                   (hermes-dashboard-transport-client-stopping-p old)
+                                   replacement
+                                   (hermes-dashboard-transport-acquire
+                                    :start-mode 'spawn))))
+             pending)
+    (cl-letf (((symbol-function 'hermes-dashboard-transport-start)
+               (lambda (&rest _)
+                 (make-hermes-dashboard-transport-client
+                  :websocket 'replacement-ws))))
+      (hermes-dashboard-transport--handle-socket-down old "dropped" 'old-ws))
+    (should observed-stopping)
+    (should replacement)
+    (should-not (eq replacement old))
+    (should (eq (gethash key hermes-dashboard-transport--clients) replacement))))
+
+(ert-deftest hermes-dashboard-transport-stop-suppresses-reconnect ()
+  "An intentional stop marks the socket closed without scheduling a reconnect."
+  (let* ((hermes-dashboard-transport--clients (make-hash-table :test #'equal))
+         (hermes-dashboard-transport-reconnect-max-attempts 3)
+         scheduled
+         (hermes-dashboard-transport-schedule-function
+          (lambda (&rest _) (setq scheduled t) 'timer)))
+    (cl-letf (((symbol-function 'hermes-dashboard-transport-start)
+               (lambda (&rest _)
+                 (make-hermes-dashboard-transport-client :websocket 'ws)))
+              ((symbol-function 'websocket-close) #'ignore))
+      (let ((c (hermes-dashboard-transport-acquire :start-mode 'spawn)))
+        (hermes-dashboard-transport-stop c "bye")
+        (hermes-dashboard-transport--handle-socket-down c "dropped")
+        (should-not scheduled)
+        (should-not (hermes-dashboard-transport-client-reconnecting-p c))))))
+
+(ert-deftest hermes-dashboard-transport-stale-scheduled-reconnect-is-dropped ()
+  "A reconnect attempt scheduled before a stop does not fire afterwards."
+  (let* ((hermes-dashboard-transport--clients (make-hash-table :test #'equal))
+         (hermes-dashboard-transport-reconnect-max-attempts 3)
+         (hermes-dashboard-transport-reconnect-base-delay 1)
+         fired
+         (hermes-dashboard-transport-schedule-function
+          (lambda (_delay fn &rest args) (push (cons fn args) fired) 'timer)))
+    (cl-letf (((symbol-function 'hermes-dashboard-transport-start)
+               (lambda (&rest _)
+                 (make-hermes-dashboard-transport-client :websocket 'ws)))
+              ((symbol-function 'websocket-close) #'ignore))
+      (let ((c (hermes-dashboard-transport-acquire :start-mode 'spawn))
+            attempted)
+        (cl-letf (((symbol-function
+                    'hermes-dashboard-transport--reconnect-attempt)
+                   (lambda (&rest args) (setq attempted args))))
+          (hermes-dashboard-transport--handle-socket-down c "dropped")
+          (should fired)
+          (hermes-dashboard-transport-stop c "bye")
+          (dolist (entry fired) (apply (car entry) (cdr entry)))
+          (should-not attempted))))))
+
+(ert-deftest hermes-dashboard-transport-stale-ready-timeout-is-dropped ()
+  "A ready timeout armed for an earlier generation does not fail the client."
+  (let* (fired failed
+         (hermes-dashboard-transport-ready-timeout 15)
+         (hermes-dashboard-transport-schedule-function
+          (lambda (_delay fn &rest args) (push (cons fn args) fired) 'timer))
+         (c (make-hermes-dashboard-transport-client)))
+    (cl-letf (((symbol-function 'hermes-dashboard-transport--fail-ready)
+               (lambda (&rest _) (setq failed t))))
+      (hermes-dashboard-transport--arm-ready-timeout c)
+      (cl-incf (hermes-dashboard-transport-client-generation c))
+      (dolist (entry fired) (apply (car entry) (cdr entry)))
+      (should-not failed))))
+
+(ert-deftest hermes-dashboard-transport-reconnect-reopens-socket ()
+  "A reconnect attempt reopens the socket through the open function."
+  (let* ((hermes-dashboard-transport-reconnect-max-attempts 3)
+         opened
+         (hermes-dashboard-transport-websocket-open-function
+          (lambda (_url _client) (setq opened t) 'new-ws))
+         (c (make-hermes-dashboard-transport-client
+             :reconnecting-p t :refcount 1 :websocket-url "ws://x")))
+    (hermes-dashboard-transport--reconnect-attempt c 0)
+    (should opened)
+    (should (eq (hermes-dashboard-transport-client-websocket c) 'new-ws))))
+
+(ert-deftest hermes-dashboard-transport-manual-reconnect-restarts-in-place ()
+  "Manual reconnect preserves the shared client while replacing its socket."
+  (let* ((hermes-dashboard-transport--clients (make-hash-table :test #'equal))
+         (hermes-dashboard-transport-ready-timeout nil)
+         closed opened rejected events
+         (hermes-dashboard-transport-websocket-open-function
+          (lambda (_url _client) (setq opened t) 'new-ws))
+         (pending (make-hash-table :test #'equal))
+         (c (make-hermes-dashboard-transport-client
+             :endpoint-key '(spawn "127.0.0.1" 8765)
+             :websocket 'old-ws
+             :websocket-url "ws://x"
+             :ready-p t
+             :ready-promise (hermes--promise-resolved 'ready)
+             :refcount 1
+             :pending pending)))
+    (puthash '(spawn "127.0.0.1" 8765)
+             c hermes-dashboard-transport--clients)
+    (puthash "req-1"
+             (list :method "prompt.submit"
+                   :reject (lambda (message) (setq rejected message)))
+             pending)
+    (hermes-dashboard-transport-subscribe c (lambda (event) (push event events)))
+    (cl-letf (((symbol-function 'websocket-close)
+               (lambda (websocket) (setq closed websocket))))
+      (hermes-dashboard-transport-reconnect c "manual reconnect"))
+    (should (eq closed 'old-ws))
+    (should opened)
+    (should (eq (hermes-dashboard-transport-client-websocket c) 'new-ws))
+    (should (eq (gethash '(spawn "127.0.0.1" 8765)
+                         hermes-dashboard-transport--clients)
+                c))
+    (should (hermes-dashboard-transport-client-reconnecting-p c))
+    (should-not (hermes-dashboard-transport-client-ready-p c))
+    (should (= (hash-table-count pending) 0))
+    (should (equal rejected "manual reconnect"))
+    (should (cl-find "reconnecting" events
+                     :key (lambda (event) (plist-get event :status))
+                     :test #'equal))))
+
+(ert-deftest hermes-dashboard-transport-manual-reconnect-works-when-auto-off ()
+  "Manual reconnect still opens once when proactive reconnect is disabled."
+  (let* ((hermes-dashboard-transport-reconnect-max-attempts nil)
+         (hermes-dashboard-transport-ready-timeout nil)
+         opened
+         (hermes-dashboard-transport-websocket-open-function
+          (lambda (_url _client) (setq opened t) 'new-ws))
+         (c (make-hermes-dashboard-transport-client
+             :websocket 'old-ws
+             :websocket-url "ws://x"
+             :refcount 1
+             :pending (make-hash-table :test #'equal))))
+    (cl-letf (((symbol-function 'websocket-close) #'ignore))
+      (hermes-dashboard-transport-reconnect c))
+    (should opened)
+    (should (eq (hermes-dashboard-transport-client-websocket c) 'new-ws))))
+
+(ert-deftest hermes-dashboard-transport-stale-websocket-close-is-ignored ()
+  "A delayed close from an old socket must not tear down the replacement socket."
+  (let* ((hermes-dashboard-transport-reconnect-max-attempts 3)
+         scheduled
+         (hermes-dashboard-transport-schedule-function
+          (lambda (_delay fn &rest args)
+            (setq scheduled (cons fn args))
+            'fake-timer))
+         (c (make-hermes-dashboard-transport-client
+             :websocket 'new-ws
+             :websocket-url "ws://x"
+             :reconnecting-p t
+             :reconnect-attempts 0
+             :refcount 1
+             :pending (make-hash-table :test #'equal))))
+    (hermes-dashboard-transport--handle-socket-down c "old closed" 'old-ws)
+    (should (eq (hermes-dashboard-transport-client-websocket c) 'new-ws))
+    (should (hermes-dashboard-transport-client-reconnecting-p c))
+    (should (= (hermes-dashboard-transport-client-reconnect-attempts c) 0))
+    (should-not scheduled)
+    (hermes-dashboard-transport--handle-socket-down c "new closed" 'new-ws)
+    (should-not (hermes-dashboard-transport-client-websocket c))
+    (should (= (hermes-dashboard-transport-client-reconnect-attempts c) 1))
+    (should scheduled)))
+
+(ert-deftest hermes-dashboard-transport-reconnect-gives-up-after-max ()
+  "Exhausting reconnect attempts finalizes the client and reports closed."
+  (let* ((hermes-dashboard-transport--clients (make-hash-table :test #'equal))
+         (hermes-dashboard-transport-reconnect-max-attempts 2)
+         events)
+    (cl-letf (((symbol-function 'hermes-dashboard-transport-start)
+               (lambda (&rest _)
+                 (make-hermes-dashboard-transport-client :websocket 'ws))))
+      (let ((c (hermes-dashboard-transport-acquire :start-mode 'spawn)))
+        (hermes-dashboard-transport-subscribe c (lambda (e) (push e events)))
+        (setf (hermes-dashboard-transport-client-reconnecting-p c) t
+              (hermes-dashboard-transport-client-reconnect-attempts c) 2)
+        (hermes-dashboard-transport--reconnect-attempt c 2)
+        (should-not (gethash '(spawn "127.0.0.1" 9119)
+                             hermes-dashboard-transport--clients))
+        (should-not (hermes-dashboard-transport-client-reconnecting-p c))
+        (should (cl-find "closed" events
+                         :key (lambda (e) (plist-get e :status)) :test #'equal))))))
+
+(ert-deftest hermes-dashboard-transport-reconnect-ready-emits-reconnected ()
+  "Ready broadcasts reconnected without immediately replenishing the budget."
+  (hermes-dashboard-test--with-reconnect
+    (let (events)
+      (hermes-dashboard-transport-subscribe client (lambda (e) (push e events)))
+      (hermes-dashboard-transport-reconnect client)
+      (setf (hermes-dashboard-transport-client-reconnect-attempts client) 2)
+      (hermes-dashboard-test--ready (car sockets))
+      (should-not (hermes-dashboard-transport-client-reconnecting-p client))
+      (should (= (hermes-dashboard-transport-client-reconnect-attempts client) 3))
+      (should (cl-find "reconnected" events
+                       :key (lambda (e) (plist-get e :status)) :test #'equal)))))
+
+(ert-deftest hermes-dashboard-transport-reconnect-defers-requests-until-new-gateway-ready ()
+  "A request issued during reconnect sends no frame until the new `gateway.ready'."
+  (let* ((hermes-dashboard-transport-reconnect-max-attempts 3)
+         (hermes-dashboard-transport-reconnect-base-delay 1)
+         (hermes-dashboard-transport-ready-timeout nil)
+         (sent-frames nil)
+         (reconnect-timer nil)
+         (hermes-dashboard-transport-websocket-open-function
+          (lambda (_url _client) 'new-ws))
+         (hermes-dashboard-transport-websocket-send-function
+          (lambda (_ws text) (push text sent-frames)))
+         (hermes-dashboard-transport-schedule-function
+          (lambda (_delay fn &rest args)
+            (setq reconnect-timer (lambda () (apply fn args)))
+            'fake-timer))
+         (old-ready (hermes--promise-resolved 'first-ready))
+         (c (make-hermes-dashboard-transport-client
+             :ready-p t :ready-promise old-ready
+             :websocket 'old-ws :refcount 1
+             :websocket-url "ws://x"
+             :pending (make-hash-table :test #'equal))))
+    ;; Socket drops unexpectedly: reconnect begins, readiness resets.
+    (hermes-dashboard-transport--handle-socket-down c "dropped")
+    (should (hermes-dashboard-transport-client-reconnecting-p c))
+    (should-not (hermes-dashboard-transport-client-ready-p c))
+    (let ((promise (hermes-dashboard-transport-client-ready-promise c)))
+      (should (hermes--promise-p promise))
+      (should (eq (hermes--promise-state promise) 'pending))
+      (should-not (eq promise old-ready)))
+    ;; Request before gateway.ready: must not send.
+    (hermes-dashboard-transport-request c "ping" nil #'ignore #'ignore)
+    (should-not sent-frames)
+    ;; Reconnect attempt installs the replacement socket; still no frame.
+    (when (functionp reconnect-timer) (funcall reconnect-timer))
+    (should (eq (hermes-dashboard-transport-client-websocket c) 'new-ws))
+    (should-not sent-frames)
+    ;; New gateway.ready resolves the fresh promise; the deferred frame sends.
+    (hermes-dashboard-transport--handle-frame
+     c '((jsonrpc . "2.0") (method . "event")
+         (params . ((type . "gateway.ready")))))
+    (should (hermes-dashboard-transport-client-ready-p c))
+    (should (equal (mapcar (lambda (text)
+                             (hermes-transport--get
+                              (hermes-dashboard-transport--decode-frame text) 'method))
+                           (reverse sent-frames))
+                   '("client.capabilities" "ping")))))
+
+;;; Group: heartbeat keepalive
+
+(ert-deftest hermes-dashboard-ready-heartbeat-precedes-recipients ()
+  "Arm before readiness recipients; resolve before ready events and budget reset."
+  (hermes-dashboard-test--with-reconnect
+    (hermes-dashboard-transport-reconnect client)
+    (let* ((hermes-dashboard-transport-heartbeat-interval 7)
+           (hermes-dashboard-transport-reconnect-stable-period 17)
+           (hermes-dashboard-transport-request-timeout 11)
+           (schedule hermes-dashboard-transport-schedule-function)
+           trace
+           (hermes-dashboard-transport-schedule-function
+            (lambda (delay fn &rest args)
+              (push delay trace)
+              (apply schedule delay fn args))))
+      (hermes-dashboard-transport-subscribe
+       client (lambda (event)
+                (push (list (or (plist-get event :event)
+                                (plist-get event :status))
+                            (not (null (hermes-dashboard-transport-client-heartbeat-timer client)))
+                            (hermes-dashboard-transport-client-reconnect-attempts client))
+                      trace)))
+      (hermes--promise-then
+       (hermes-dashboard-transport-client-ready-promise client)
+       (lambda (_) (push 'resolved trace)))
+      (hermes-dashboard-test--ready (car sockets))
+      (should (equal (nreverse trace)
+                     '(7 ("reconnected" t 1) 11 resolved ("gateway.ready" t 1) 17)))
+      (should (= (length negotiated) 1)))))
+
+(ert-deftest hermes-dashboard-transport-heartbeat-arms-on-ready-and-pings ()
+  "With an interval set, `gateway.ready' arms a heartbeat that sends pings."
+  (let* ((hermes-dashboard-transport-heartbeat-interval 30)
+         (schedules 0)
+         pings captured
+         (hermes-dashboard-transport-schedule-function
+          (lambda (delay fn &rest args)
+            (setq schedules (1+ schedules)
+                  captured (list delay fn args))
+            'fake-timer))
+         (hermes-dashboard-transport-ping-function
+          (lambda (ws) (push ws pings)))
+         (client (make-hermes-dashboard-transport-client
+                  :websocket 'fake-websocket)))
+    (hermes-dashboard-transport--handle-frame
+     client '((jsonrpc . "2.0") (method . "event")
+              (params . ((type . "gateway.ready")))))
+    (should (hermes-dashboard-transport-client-ready-p client))
+    (should (equal (nth 0 captured) 30))
+    (should (= schedules 1))
+    (should (eq (hermes-dashboard-transport-client-heartbeat-timer client)
+                'fake-timer))
+    (apply (nth 1 captured) (nth 2 captured))
+    (should (equal pings '(fake-websocket)))
+    (should (= schedules 2))))
+
+(ert-deftest hermes-dashboard-transport-heartbeat-disabled-when-nil ()
+  "A nil heartbeat interval arms no timer."
+  (let* ((hermes-dashboard-transport-heartbeat-interval nil)
+         armed
+         (hermes-dashboard-transport-schedule-function
+          (lambda (&rest _) (setq armed t) 'fake-timer))
+         (client (make-hermes-dashboard-transport-client
+                  :websocket 'fake-websocket)))
+    (hermes-dashboard-transport--arm-heartbeat client)
+    (should-not armed)
+    (should-not (hermes-dashboard-transport-client-heartbeat-timer client))))
+
+(ert-deftest hermes-dashboard-transport-heartbeat-cleared-on-close ()
+  "Actual socket loss cancels the heartbeat timer and clears live state."
+  (let* ((hermes-dashboard-transport-heartbeat-interval 30)
+         (hermes-dashboard-transport--clients (make-hash-table :test #'equal))
+         (hermes-dashboard-transport-schedule-function
+          (lambda (&rest _) 'fake-timer))
+         cancelled
+         (client (make-hermes-dashboard-transport-client
+                  :websocket 'fake-websocket :ready-p t)))
+    (hermes-dashboard-transport--arm-heartbeat client)
+    (should (hermes-dashboard-transport-client-heartbeat-timer client))
+    (cl-letf (((symbol-function 'cancel-timer)
+               (lambda (timer) (push timer cancelled)))
+              ((symbol-function 'websocket-close) #'ignore))
+      (hermes-dashboard-transport--handle-socket-down
+       client "Socket closed" 'fake-websocket))
+    (should (equal cancelled '(fake-timer)))
+    (should-not (hermes-dashboard-transport-client-websocket client))
+    (should-not (hermes-dashboard-transport-client-ready-p client))
+    (should-not (hermes-dashboard-transport-client-heartbeat-timer client))))
+
+(ert-deftest hermes-dashboard-transport-heartbeat-tick-stops-without-socket ()
+  "A heartbeat tick on a closed socket sends nothing and does not re-arm."
+  (let* ((hermes-dashboard-transport-heartbeat-interval 30)
+         armed pings
+         (hermes-dashboard-transport-schedule-function
+          (lambda (&rest _) (setq armed t) 'fake-timer))
+         (hermes-dashboard-transport-ping-function
+          (lambda (ws) (push ws pings)))
+         (client (make-hermes-dashboard-transport-client :websocket nil)))
+    (hermes-dashboard-transport--heartbeat-tick client)
+    (should-not pings)
+    (should-not armed)))
+
+;;; Group: subscriber registry + session demux
+
+(ert-deftest hermes-dashboard-transport-subscribe-routes-tagged-event-to-owner ()
+  "A tagged event reaches only the subscriber owning its session id."
+  (let* ((client (hermes-test--dashboard-client))
+         a-events b-events
+         (a (hermes-dashboard-transport-subscribe
+             client (lambda (e) (push e a-events))))
+         (b (hermes-dashboard-transport-subscribe
+             client (lambda (e) (push e b-events)))))
+    (hermes-dashboard-transport-subscribe-session client a "sid-a")
+    (hermes-dashboard-transport-subscribe-session client b "sid-b")
+    (hermes-dashboard-transport--dispatch-event
+     client (list :type 'delta :session-id "sid-a" :content "x"))
+    (should (equal (length a-events) 1))
+    (should-not b-events)))
+
+(ert-deftest hermes-dashboard-transport-untagged-event-broadcasts ()
+  "An untagged connection-level event reaches every subscriber."
+  (let* ((client (hermes-test--dashboard-client))
+         a-events b-events
+         (a (hermes-dashboard-transport-subscribe
+             client (lambda (e) (push e a-events))))
+         (b (hermes-dashboard-transport-subscribe
+             client (lambda (e) (push e b-events)))))
+    (hermes-dashboard-transport-subscribe-session client a "sid-a")
+    (hermes-dashboard-transport-subscribe-session client b "sid-b")
+    (hermes-dashboard-transport--dispatch-event
+     client (list :type 'status :status "closed"))
+    (should (equal (length a-events) 1))
+    (should (equal (length b-events) 1))))
+
+(ert-deftest hermes-dashboard-transport-unowned-tagged-event-is-ignored ()
+  "A tagged event with no registered owner reaches no subscriber."
+  (let* ((client (hermes-test--dashboard-client))
+         events
+         (token (hermes-dashboard-transport-subscribe
+                 client (lambda (e) (push e events)))))
+    (hermes-dashboard-transport-subscribe-session client token "sid-a")
+    (hermes-dashboard-transport--dispatch-event
+     client (list :type 'delta :session-id "other" :content "x"))
+    (should-not events)))
+
+(ert-deftest hermes-dashboard-transport-dispatch-falls-back-to-callback ()
+  "With no subscribers, dispatch uses the legacy single callback."
+  (let* (received
+         (client (make-hermes-dashboard-transport-client
+                  :callback (lambda (e) (setq received e)))))
+    (hermes-dashboard-transport--dispatch-event client (list :type 'done))
+    (should (equal received (list :type 'done)))))
+
+(ert-deftest hermes-dashboard-transport-unsubscribe-stops-delivery ()
+  "Unsubscribing a token stops delivery and clears the session index."
+  (let* ((client (hermes-test--dashboard-client))
+         events
+         (token (hermes-dashboard-transport-subscribe
+                 client (lambda (e) (push e events)))))
+    (hermes-dashboard-transport-subscribe-session client token "sid-a")
+    (hermes-dashboard-transport-unsubscribe client token)
+    (hermes-dashboard-transport--dispatch-event
+     client (list :type 'delta :session-id "sid-a"))
+    (hermes-dashboard-transport--dispatch-event client (list :type 'status))
+    (should-not events)
+    (should-not (hermes-dashboard-transport--session-subscriber-fns
+                 client "sid-a"))))
+
+(ert-deftest hermes-dashboard-transport-subscribe-session-rebinds-index ()
+  "Re-binding a token to a new session id moves it off the old id."
+  (let* ((client (hermes-test--dashboard-client))
+         events
+         (token (hermes-dashboard-transport-subscribe
+                 client (lambda (e) (push e events)))))
+    (hermes-dashboard-transport-subscribe-session client token "old")
+    (hermes-dashboard-transport-subscribe-session client token "new")
+    (should-not (hermes-dashboard-transport--session-subscriber-fns client "old"))
+    (should (hermes-dashboard-transport--session-subscriber-fns client "new"))
+    (hermes-dashboard-transport--dispatch-event
+     client (list :type 'delta :session-id "new"))
+    (should (equal (length events) 1))))
+
+(ert-deftest hermes-dashboard-transport-unsubscribe-preserves-other-owner ()
+  "Unsubscribing a stale token does not evict another token's session ownership."
+  (let* ((client (hermes-test--dashboard-client))
+         a-events b-events
+         (a (hermes-dashboard-transport-subscribe
+             client (lambda (e) (push e a-events))))
+         (b (hermes-dashboard-transport-subscribe
+             client (lambda (e) (push e b-events)))))
+    (hermes-dashboard-transport-subscribe-session client a "sid")
+    (hermes-dashboard-transport-subscribe-session client b "sid")
+    (hermes-dashboard-transport-unsubscribe client a)
+    (hermes-dashboard-transport--dispatch-event
+     client (list :type 'delta :session-id "sid"))
+    (should-not a-events)
+    (should (equal (length b-events) 1))))
+
+(ert-deftest hermes-dashboard-transport-handle-frame-demuxes-by-session ()
+  "An inbound event frame routes to the subscriber owning its session id."
+  (let* ((client (hermes-test--dashboard-client))
+         a-events b-events
+         (a (hermes-dashboard-transport-subscribe
+             client (lambda (e) (push e a-events))))
+         (b (hermes-dashboard-transport-subscribe
+             client (lambda (e) (push e b-events)))))
+    (hermes-dashboard-transport-subscribe-session client a "sid-a")
+    (hermes-dashboard-transport-subscribe-session client b "sid-b")
+    (hermes-dashboard-transport--handle-frame
+     client
+     '((jsonrpc . "2.0") (method . "event")
+       (params . ((type . "message.delta") (session_id . "sid-a")
+                  (payload . ((delta . "hi")))))))
+    (should (equal (length a-events) 1))
+    (should (equal (plist-get (car a-events) :session-id) "sid-a"))
+    (should-not b-events)))
+
+;;; Group: shared client registry
+
+(ert-deftest hermes-dashboard-transport-endpoint-key-spawn-is-local ()
+  "A spawn-mode target keys on its resolved host and port."
+  (should (equal (hermes-dashboard-transport--endpoint-key
+                  :host "127.0.0.1" :port 8765 :start-mode 'spawn)
+                 '(spawn "127.0.0.1" 8765))))
+
+(ert-deftest hermes-dashboard-transport-endpoint-key-remote-is-base-url ()
+  "A remote target keys on its normalized base URL."
+  (should (equal (hermes-dashboard-transport--endpoint-key
+                  :start-mode 'remote :remote-url "https://h.example/")
+                 "https://h.example")))
+
+(ert-deftest hermes-dashboard-transport-acquire-shares-client-by-endpoint ()
+  "Acquiring the same endpoint twice reuses one client and counts references."
+  (let ((hermes-dashboard-transport--clients (make-hash-table :test #'equal))
+        (made 0))
+    (cl-letf (((symbol-function 'hermes-dashboard-transport-start)
+               (lambda (&rest _)
+                 (cl-incf made)
+                 (make-hermes-dashboard-transport-client))))
+      (let ((c1 (hermes-dashboard-transport-acquire :start-mode 'spawn))
+            (c2 (hermes-dashboard-transport-acquire :start-mode 'spawn)))
+        (should (eq c1 c2))
+        (should (= made 1))
+        (should (= (hermes-dashboard-transport-client-refcount c1) 2))))))
+
+(ert-deftest hermes-dashboard-transport-acquire-replaces-stopping-registry-entry ()
+  "Acquire identity-removes a stopping entry and starts a fresh client."
+  (let* ((hermes-dashboard-transport--clients (make-hash-table :test #'equal))
+         (key '(spawn "127.0.0.1" 9119))
+         (old (make-hermes-dashboard-transport-client
+               :endpoint-key key :stopping-p t :refcount 7))
+         fresh)
+    (puthash key old hermes-dashboard-transport--clients)
+    (cl-letf (((symbol-function 'hermes-dashboard-transport-start)
+               (lambda (&rest _)
+                 (setq fresh (make-hermes-dashboard-transport-client)))))
+      (let ((client (hermes-dashboard-transport-acquire :start-mode 'spawn)))
+        (should (eq client fresh))
+        (should-not (eq client old))
+        (should (= (hermes-dashboard-transport-client-refcount old) 7))
+        (should (= (hermes-dashboard-transport-client-refcount fresh) 1))
+        (should (eq (gethash key hermes-dashboard-transport--clients) fresh))))))
+
+(ert-deftest hermes-dashboard-transport-acquire-distinct-endpoints ()
+  "Different remote endpoints get distinct clients."
+  (let ((hermes-dashboard-transport--clients (make-hash-table :test #'equal)))
+    (cl-letf (((symbol-function 'hermes-dashboard-transport-start)
+               (lambda (&rest _) (make-hermes-dashboard-transport-client))))
+      (let ((c1 (hermes-dashboard-transport-acquire
+                 :start-mode 'remote :remote-url "https://a.example"))
+            (c2 (hermes-dashboard-transport-acquire
+                 :start-mode 'remote :remote-url "https://b.example")))
+        (should-not (eq c1 c2))))))
+
+(ert-deftest hermes-dashboard-transport-acquire-distinct-spawn-ports ()
+  "Different local spawn ports get distinct clients."
+  (let ((hermes-dashboard-transport--clients (make-hash-table :test #'equal)))
+    (cl-letf (((symbol-function 'hermes-dashboard-transport-start)
+               (lambda (&rest _) (make-hermes-dashboard-transport-client))))
+      (let ((c1 (hermes-dashboard-transport-acquire
+                 :start-mode 'spawn :host "127.0.0.1" :port 8765))
+            (c2 (hermes-dashboard-transport-acquire
+                 :start-mode 'spawn :host "127.0.0.1" :port 8766)))
+        (should-not (eq c1 c2))))))
+
+(ert-deftest hermes-dashboard-transport-stop-all-stops-registered-clients ()
+  "Stop-all snapshots initial clients and preserves a reentrant replacement."
+  (let* ((hermes-dashboard-transport--clients (make-hash-table :test #'equal))
+         (pending (make-hash-table :test #'equal))
+         replacement
+         (first (make-hermes-dashboard-transport-client
+                 :endpoint-key 'first :pending pending))
+         (second (make-hermes-dashboard-transport-client :endpoint-key 'second)))
+    (puthash 'first first hermes-dashboard-transport--clients)
+    (puthash 'second second hermes-dashboard-transport--clients)
+    (puthash "request"
+             (list :reject
+                   (lambda (_reason)
+                     (setq replacement
+                           (hermes-dashboard-transport-acquire
+                            :start-mode 'spawn :host "127.0.0.1" :port 9120))))
+             pending)
+    (cl-letf (((symbol-function 'hermes-dashboard-transport-start)
+               (lambda (&rest _)
+                 (make-hermes-dashboard-transport-client
+                  :websocket 'replacement-ws))))
+      (should (= 2 (hermes-dashboard-transport-stop-all "Restarting Hermes"))))
+    (should (eq (gethash '(spawn "127.0.0.1" 9120)
+                         hermes-dashboard-transport--clients)
+                replacement))
+    (should (hermes-dashboard-transport-client-stopping-p first))
+    (should (hermes-dashboard-transport-client-stopping-p second))))
+
+(ert-deftest hermes-dashboard-transport-release-stops-and-unregisters-at-zero ()
+  "Release decrements references and tears the client down only at zero."
+  (let ((hermes-dashboard-transport--clients (make-hash-table :test #'equal)))
+    (cl-letf (((symbol-function 'hermes-dashboard-transport-start)
+               (lambda (&rest _) (make-hermes-dashboard-transport-client))))
+      (let ((c1 (hermes-dashboard-transport-acquire :start-mode 'spawn)))
+        (hermes-dashboard-transport-acquire :start-mode 'spawn)
+        (should (= (hermes-dashboard-transport-release c1) 1))
+        (should (eq (gethash '(spawn "127.0.0.1" 9119)
+                             hermes-dashboard-transport--clients)
+                    c1))
+        (should (= (hermes-dashboard-transport-release c1) 0))
+        (should-not (gethash '(spawn "127.0.0.1" 9119)
+                             hermes-dashboard-transport--clients))
+        (should-not (eq c1 (hermes-dashboard-transport-acquire
+                            :start-mode 'spawn)))))))
+
+(ert-deftest hermes-dashboard-transport-release-stopping-client-is-inert ()
+  "Releasing a stopped client returns zero without repeating terminal effects."
+  (let ((client (make-hermes-dashboard-transport-client
+                 :stopping-p t :refcount 0 :generation 4)))
+    (should (= (hermes-dashboard-transport-release client) 0))
+    (should (= (hermes-dashboard-transport-client-generation client) 4))))
+
+(ert-deftest hermes-dashboard-transport-release-schedules-idle-close ()
+  "With an idle delay, the last release keeps the client warm and re-acquire reuses it."
+  (let* ((hermes-dashboard-transport--clients (make-hash-table :test #'equal))
+         (hermes-dashboard-transport-idle-close-delay 30)
+         scheduled
+         (hermes-dashboard-transport-schedule-function
+          (lambda (delay _fn &rest _args) (setq scheduled delay) 'fake-timer)))
+    (cl-letf (((symbol-function 'hermes-dashboard-transport-start)
+               (lambda (&rest _) (make-hermes-dashboard-transport-client))))
+      (let ((c1 (hermes-dashboard-transport-acquire :start-mode 'spawn)))
+        (hermes-dashboard-transport-release c1)
+        (should (equal scheduled 30))
+        (should (eq (gethash '(spawn "127.0.0.1" 9119)
+                             hermes-dashboard-transport--clients)
+                    c1))
+        (should (eq c1 (hermes-dashboard-transport-acquire :start-mode 'spawn)))
+        (should (= (hermes-dashboard-transport-client-refcount c1) 1))
+        (should-not (hermes-dashboard-transport-client-idle-timer c1))))))
+
+(ert-deftest hermes-dashboard-transport-idle-close-stops-when-still-idle ()
+  "Firing the idle-close timer tears down a client that stayed idle."
+  (let* ((hermes-dashboard-transport--clients (make-hash-table :test #'equal))
+         (hermes-dashboard-transport-idle-close-delay 30)
+         captured
+         (hermes-dashboard-transport-schedule-function
+          (lambda (_delay fn &rest args) (setq captured (cons fn args)) 'fake-timer)))
+    (cl-letf (((symbol-function 'hermes-dashboard-transport-start)
+               (lambda (&rest _) (make-hermes-dashboard-transport-client))))
+      (let ((c1 (hermes-dashboard-transport-acquire :start-mode 'spawn)))
+        (hermes-dashboard-transport-release c1)
+        (apply (car captured) (cdr captured))
+        (should-not (gethash '(spawn "127.0.0.1" 9119)
+                             hermes-dashboard-transport--clients))))))
+
+(ert-deftest hermes-dashboard-transport-idle-timer-after-rebuild-is-harmless ()
+  "A stale idle timer firing after a drop and rebuild leaves the fresh client."
+  (let* ((hermes-dashboard-transport--clients (make-hash-table :test #'equal))
+         (hermes-dashboard-transport-idle-close-delay 30)
+         captured
+         (hermes-dashboard-transport-schedule-function
+          (lambda (_delay fn &rest args) (setq captured (cons fn args)) 'fake-timer)))
+    (cl-letf (((symbol-function 'hermes-dashboard-transport-start)
+               (lambda (&rest _)
+                 (make-hermes-dashboard-transport-client
+                  :websocket 'fake-websocket))))
+      (let ((c1 (hermes-dashboard-transport-acquire :start-mode 'spawn)))
+        (hermes-dashboard-transport-release c1)
+        (hermes-dashboard-transport--handle-socket-down c1 "dropped")
+        (let ((c2 (hermes-dashboard-transport-acquire :start-mode 'spawn)))
+          (apply (car captured) (cdr captured))
+          (should-not (eq c1 c2))
+          (should (eq (gethash '(spawn "127.0.0.1" 9119)
+                               hermes-dashboard-transport--clients)
+                      c2)))))))
+
+(ert-deftest hermes-dashboard-transport-acquire-rebuilds-after-close ()
+  "With reconnect off, a dropped socket finalizes so the next acquire rebuilds."
+  (let ((hermes-dashboard-transport--clients (make-hash-table :test #'equal))
+        (hermes-dashboard-transport-reconnect-max-attempts nil))
+    (cl-letf (((symbol-function 'hermes-dashboard-transport-start)
+               (lambda (&rest _)
+                 (make-hermes-dashboard-transport-client
+                  :websocket 'fake-websocket))))
+      (let ((c1 (hermes-dashboard-transport-acquire :start-mode 'spawn)))
+        (hermes-dashboard-transport-acquire :start-mode 'spawn)
+        (hermes-dashboard-transport--handle-socket-down c1 "dropped")
+        (should-not (gethash '(spawn "127.0.0.1" 9119)
+                             hermes-dashboard-transport--clients))
+        (should-not (eq c1 (hermes-dashboard-transport-acquire :start-mode 'spawn)))))))
+
+(ert-deftest hermes-dashboard-transport-unregister-keeps-replacement ()
+  "Stopping a stale client does not evict a replacement under the same key."
+  (let ((hermes-dashboard-transport--clients (make-hash-table :test #'equal)))
+    (cl-letf (((symbol-function 'hermes-dashboard-transport-start)
+               (lambda (&rest _) (make-hermes-dashboard-transport-client))))
+      (let ((c1 (hermes-dashboard-transport-acquire :start-mode 'spawn)))
+        (hermes-dashboard-transport-release c1)
+        (let ((c2 (hermes-dashboard-transport-acquire :start-mode 'spawn)))
+          (should-not (eq c1 c2))
+          (hermes-dashboard-transport-stop c1)
+          (should (eq (gethash '(spawn "127.0.0.1" 9119)
+                               hermes-dashboard-transport--clients)
+                      c2)))))))
+
+
+;;; Shared-socket session param isolation
+
+(ert-deftest hermes-dashboard-transport-session-param-is-explicit-only ()
+  "`--session-param' returns the explicit id and never reads the client."
+  :tags '(shared-socket-isolation)
+  (let ((client (make-hermes-dashboard-transport-client
+                 :session-id "stale-sid")))
+    (should (equal (hermes-dashboard-transport--session-param client "live-sid")
+                   "live-sid"))
+    (should-not (hermes-dashboard-transport--session-param client nil))))
+
+(ert-deftest hermes-dashboard-transport-session-response-does-not-store-client-session ()
+  "A `session.create' response must not mutate the shared client."
+  :tags '(shared-socket-isolation)
+  (let ((client (hermes-test--dashboard-client)))
+    (hermes-dashboard-transport--store-session-result
+     client "session.create"
+     '((session_id . "sid-live") (stored_session_id . "sid-stored")))
+    (should-not (hermes-dashboard-transport-client-session-id client))
+    (should-not (hermes-dashboard-transport-client-stored-session-id client))))
+
+(ert-deftest hermes-dashboard-transport-session-rpc-omits-session-when-not-explicit ()
+  "A `:session t' RPC that omits `:session-id' sends no session_id param."
+  :tags '(shared-socket-isolation)
+  (let (params)
+    (cl-letf (((symbol-function 'hermes-dashboard-transport-request)
+               (lambda (_client _method p resolve _reject)
+                 (setq params p)
+                 (funcall resolve '((ok . t))))))
+      (let ((client (make-hermes-dashboard-transport-client
+                     :session-id "ambient-sid")))
+        (hermes-dashboard-transport-tools-configure
+         client '("terminal") "disable" :resolve #'ignore :reject #'ignore))
+      (should-not (assq 'session_id params)))))
+
+(ert-deftest hermes-dashboard-transport-session-rpc-forwards-explicit-session ()
+  "A `:session t' RPC with explicit `:session-id' forwards it."
+  :tags '(shared-socket-isolation)
+  (let (params)
+    (cl-letf (((symbol-function 'hermes-dashboard-transport-request)
+               (lambda (_client _method p resolve _reject)
+                 (setq params p)
+                 (funcall resolve '((ok . t))))))
+      (let ((client (hermes-test--dashboard-client)))
+        (hermes-dashboard-transport-tools-configure
+         client '("terminal") "disable"
+         :session-id "explicit-sid" :resolve #'ignore :reject #'ignore))
+      (should (equal (cdr (assq 'session_id params)) "explicit-sid")))))
+
+(ert-deftest hermes-dashboard-not-shown-negotiation-and-reset ()
+  "Only negotiated window-owned requests decline without settling peers."
+  (dolist (flag '(t :false nil))
+    (let ((client (make-hermes-dashboard-transport-client :websocket 'socket))
+          frames success)
+      (puthash "session" 'subscriber
+               (hermes-dashboard-transport-client-session-index client))
+      (cl-letf (((symbol-function 'hermes-dashboard-transport-request)
+                 (lambda (_client _method _params resolve &rest _) (setq success resolve)))
+                ((symbol-function 'hermes-dashboard-transport--dispatch-event) #'ignore))
+        (hermes-dashboard-transport--negotiate-server-requests client #'always)
+        (funcall success `((declines_not_shown . ,flag)))
+        (let ((hermes-dashboard-transport-websocket-send-function
+               (lambda (_socket text) (push (hermes-dashboard-transport--decode-frame text) frames))))
+          (dolist (method '("preview.read" "preview.act" "terminal.read" "window.read" "tour" "mcp.setup"))
+            (hermes-dashboard-transport--handle-server-request
+             client `((id . ,method) (method . ,method) (params . ((session_id . "session")))))
+            (should (eql (hermes-transport--get (hermes-transport--get (car frames) 'error) 'code)
+                         (if (and (eq flag t) (not (equal method "mcp.setup"))) 4404 -32601))))
+          (hermes-dashboard-transport-stop client)
+          (setf (hermes-dashboard-transport-client-stopping-p client) nil
+                (hermes-dashboard-transport-client-websocket client) 'new-socket)
+          (puthash "session" 'subscriber
+                   (hermes-dashboard-transport-client-session-index client))
+          (hermes-dashboard-transport--handle-server-request
+           client '((id . "after-stop") (method . "preview.read")
+                    (params . ((session_id . "session")))))
+          (should (equal (hermes-transport--get (car frames) 'id) "after-stop"))
+          (should (eql (hermes-transport--get (hermes-transport--get (car frames) 'error) 'code)
+                       -32601)))))))
+
+(provide 'hermes-dashboard-tests)
+;;; hermes-dashboard-tests.el ends here

@@ -1,0 +1,384 @@
+;;; jabber-xml.el --- XML functions  -*- lexical-binding: t; -*-
+
+;; Copyright (C) 2003, 2004, 2007, 2008 - Magnus Henoch - mange@freemail.hu
+;; Copyright (C) 2002, 2003, 2004 - tom berger - object@intelectronica.net
+;; Copyright (C) 2026  Thanos Apollo
+
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
+
+;; This file is a part of jabber.el.
+
+;; This program is free software; you can redistribute it and/or modify
+;; it under the terms of the GNU General Public License as published by
+;; the Free Software Foundation; either version 2 of the License, or
+;; (at your option) any later version.
+
+;; This program is distributed in the hope that it will be useful,
+;; but WITHOUT ANY WARRANTY; without even the implied warranty of
+;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+;; GNU General Public License for more details.
+
+;; You should have received a copy of the GNU General Public License
+;; along with this program; if not, write to the Free Software
+;; Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+
+;;; Commentary:
+;;
+
+;;; Code:
+
+(require 'xml)
+(require 'seq)
+(eval-when-compile
+  (require 'cl-lib))
+
+(defsubst jabber-replace-in-string (string regexp newtext)
+  "Return STRING with all matches for REGEXP replaced with NEWTEXT.
+NEWTEXT is inserted literally, without changing its case or treating \"\\\"
+specially."
+  (replace-regexp-in-string regexp newtext string t t))
+
+(defun jabber-escape-xml (string)
+  "Escape STRING for XML."
+  (if (stringp string)
+      (let ((newstr (concat string)))
+	;; Form feeds might appear in code you copy, etc.  Nevertheless,
+	;; it's invalid XML.
+	(setq newstr (jabber-replace-in-string newstr "\f" "\n"))
+	;; Other control characters are also illegal, except for
+	;; tab, CR, and LF.
+	(setq newstr (jabber-replace-in-string newstr "[\000-\010\013\014\016-\037]" " "))
+	(setq newstr (jabber-replace-in-string newstr "&" "&amp;"))
+	(setq newstr (jabber-replace-in-string newstr "<" "&lt;"))
+	(setq newstr (jabber-replace-in-string newstr ">" "&gt;"))
+	(setq newstr (jabber-replace-in-string newstr "'" "&apos;"))
+	(setq newstr (jabber-replace-in-string newstr "\"" "&quot;"))
+	newstr)
+    string))
+
+(defun jabber-unescape-xml (string)
+  "Unescape STRING for XML."
+  (if (stringp string)
+      (let ((newstr string))
+	(setq newstr (jabber-replace-in-string newstr "&quot;" "\""))
+	(setq newstr (jabber-replace-in-string newstr "&apos;" "'"))
+	(setq newstr (jabber-replace-in-string newstr "&gt;" ">"))
+	(setq newstr (jabber-replace-in-string newstr "&lt;" "<"))
+	(setq newstr (jabber-replace-in-string newstr "&amp;" "&"))
+	newstr)
+    string))
+
+(defun jabber-sexp2xml (sexp)
+  "Return SEXP as well-formatted XML.
+SEXP should be in the form:
+ (tagname ((attribute-name . attribute-value)...) children...)"
+  (cond
+   ((stringp sexp)
+    (jabber-escape-xml sexp))
+   ((listp (car sexp))
+    (let ((xml ""))
+      (dolist (tag sexp)
+	(setq xml (concat xml (jabber-sexp2xml tag))))
+      xml))
+   ;; work around bug in old versions of xml.el, where ("") can appear
+   ;; as children of a node
+   ((and (consp sexp)
+	 (stringp (car sexp))
+	 (zerop (length (car sexp))))
+    "")
+   (t
+    (let ((xml ""))
+      (setq xml (concat "<"
+			(symbol-name (car sexp))))
+      (dolist (attr (cadr sexp))
+	(if (consp attr)
+	    (setq xml (concat xml
+			      (format " %s='%s'"
+				      (symbol-name (car attr))
+				      (jabber-escape-xml (cdr attr)))))))
+      (if (cddr sexp)
+	  (progn
+	    (setq xml (concat xml ">"))
+	    (dolist (child (cddr sexp))
+	      (setq xml (concat xml
+				(jabber-sexp2xml child))))
+	    (setq xml (concat xml
+			      "</"
+			      (symbol-name (car sexp))
+			      ">")))
+	(setq xml (concat xml
+			  "/>")))
+      xml))))
+
+(defun jabber-xml-skip-tag-forward (&optional dont-recurse-into-stream)
+  "Skip to end of tag or matching closing tag if present.
+Return t iff after a closing tag, otherwise throws an `unfinished'
+tag with value nil.
+If DONT-RECURSE-INTO-STREAM is non-nil, stop after an opening
+<stream:stream> tag.
+
+Uses a custom parser instead of `sgml-skip-tag-forward'."
+  (skip-chars-forward "^<")
+  (cond
+   ((looking-at "<!\\[CDATA\\[")
+    (if (search-forward "]]>" nil t)
+	(goto-char (match-end 0))
+      (throw 'unfinished nil)))
+   ((looking-at "<\\([^[:space:]/>]+\\)\\([[:space:]]+[^=>]+=[[:space:]]*'[^']*'\\|[[:space:]]+[^=>]+=[[:space:]]*\"[^\"]*\"\\)*")
+    (let ((node-name (match-string 1)))
+      (goto-char (match-end 0))
+      (skip-syntax-forward " ") ; Skip over trailing white space.
+      (cond
+       ((looking-at "/>")
+	(goto-char (match-end 0))
+	t)
+       ((looking-at ">")
+	(goto-char (match-end 0))
+	(unless (and dont-recurse-into-stream (equal node-name "stream:stream"))
+	  (cl-loop
+	   do (skip-chars-forward "^<")
+	   until (looking-at (concat "</" (regexp-quote node-name) "[ \t\r\n]*>"))
+	   do (jabber-xml-skip-tag-forward))
+	  (goto-char (match-end 0)))
+	t)
+       (t
+	(throw 'unfinished nil)))))
+   (t
+    (throw 'unfinished nil))))
+
+(defun jabber-xml-parse-next-stanza ()
+  "Parse the first XML stanza in the current buffer.
+Parse and return the first complete XML element in the buffer,
+leaving point at the end of it.  If there is no complete XML
+element, return nil."
+  (and (catch 'unfinished
+	 (goto-char (point-min))
+	 (jabber-xml-skip-tag-forward)
+	 (> (point) (point-min)))
+       (xml-parse-region (point-min) (point))))
+
+(defsubst jabber-xml-node-name (node)
+  "Return the tag associated with NODE.
+The tag is a lower-case symbol."
+  (if (listp node) (car node)))
+
+(defsubst jabber-xml-node-attributes (node)
+  "Return the list of attributes of NODE.
+The list can be nil."
+  (if (listp node) (nth 1 node)))
+
+(defsubst jabber-xml-node-children (node)
+  "Return the list of children of NODE.
+This is a list of nodes, and it can be nil."
+  (let ((children (cddr node)))
+    ;; Work around a bug in early versions of xml.el
+    (if (equal children '(("")))
+	nil
+      children)))
+
+(defun jabber-xml-get-children (node child-name)
+  "Return the children of NODE whose tag is CHILD-NAME.
+CHILD-NAME should be a lower case symbol."
+  (let ((match ()))
+    (dolist (child (jabber-xml-node-children node))
+      (if child
+	  (if (equal (jabber-xml-node-name child) child-name)
+	      (push child match))))
+    (nreverse match)))
+
+;; `xml-get-attribute' returns "" if the attribute is not found, which
+;; is not very useful.  Therefore, we use `xml-get-attribute-or-nil'.
+(defsubst jabber-xml-get-attribute (node attribute)
+  "Get from NODE the value of ATTRIBUTE.
+Return nil if the attribute was not found."
+  (when (consp node)
+    (xml-get-attribute-or-nil node attribute)))
+
+(defsubst jabber-xml-get-xmlns (node)
+  "Get \"xmlns\" attribute of NODE, or nil if not present."
+  (jabber-xml-get-attribute node 'xmlns))
+
+(defun jabber-xml-child-with-xmlns (node xmlns)
+  "Return the first child element of NODE whose xmlns equals XMLNS."
+  (let ((children (jabber-xml-node-children node))
+        result)
+    (while (and children (not result))
+      (let ((child (car children)))
+        (when (and (listp child)
+                   (string= (jabber-xml-get-xmlns child) xmlns))
+          (setq result child)))
+      (setq children (cdr children)))
+    result))
+
+(defun jabber-xml-reply-fallback-range (xml-data)
+  "Return the XEP-0428 reply fallback range in XML-DATA.
+Use the first exact <fallback/> in urn:xmpp:fallback:0 whose `for'
+is urn:xmpp:reply:0, and its first <body/> child.  Return `all' when
+that child is absent or has neither offset.  Partial or nonnumeric
+offsets yield nil; two non-negative decimal offsets yield (START END).
+Do not validate ordering or body bounds here: consumers must check
+those before using these code-point offsets to modify body text."
+  (when-let* ((fallback
+              (seq-find
+               (lambda (child)
+                 (and (eq (jabber-xml-node-name child) 'fallback)
+                      (equal (jabber-xml-get-xmlns child) "urn:xmpp:fallback:0")
+                      (equal (jabber-xml-get-attribute child 'for)
+                             "urn:xmpp:reply:0")))
+               (jabber-xml-node-children xml-data))))
+    (let* ((body (car (jabber-xml-get-children fallback 'body)))
+           (start (jabber-xml-get-attribute body 'start))
+           (end (jabber-xml-get-attribute body 'end)))
+      (if (or start end)
+          (and (stringp start) (stringp end)
+               (string-match-p "\\`[0-9]+\\'" start)
+               (string-match-p "\\`[0-9]+\\'" end)
+               (list (string-to-number start) (string-to-number end)))
+        'all))))
+
+(defun jabber-xml-reply-fields (xml-data)
+  "Return XEP-0461 reply fields in XML-DATA as a plist, or nil.
+Require the exact <reply/> name and urn:xmpp:reply:0 namespace.
+Use the first matching child, even when its ID is absent or empty;
+later duplicates do not replace it.  Preserve absent attributes as
+nil and empty attributes as empty strings without validating JIDs.
+Return :reply-to-id, :reply-to-jid and :fallback-range, where the
+range is nil, `all', or (START END); see `jabber-xml-reply-fallback-range'.
+Do not modify XML-DATA, encode SQL values, or strip body text."
+  (when-let* ((reply
+              (seq-find
+               (lambda (child)
+                 (and (eq (jabber-xml-node-name child) 'reply)
+                      (equal (jabber-xml-get-xmlns child) "urn:xmpp:reply:0")))
+               (jabber-xml-node-children xml-data))))
+    (list :reply-to-id (jabber-xml-get-attribute reply 'id)
+          :reply-to-jid (jabber-xml-get-attribute reply 'to)
+          :fallback-range (jabber-xml-reply-fallback-range xml-data))))
+
+(defun jabber-xml-encrypted-p (xml-data)
+  "Return non-nil when XML-DATA carries an encryption child element.
+Check for OMEMO, legacy OpenPGP, and OX namespaces."
+  (and (or (jabber-xml-child-with-xmlns
+            xml-data "eu.siacs.conversations.axolotl")
+           (jabber-xml-child-with-xmlns
+            xml-data "jabber:x:encrypted")
+           (jabber-xml-child-with-xmlns
+            xml-data "urn:xmpp:openpgp:0"))
+       t))
+
+(defun jabber-xml-path (xml-data path)
+  "Find sub-node of XML-DATA according to PATH.
+PATH is a vaguely XPath-inspired list.  Each element can be:
+  a symbol     go to first child node with this node name
+  cons cell    car is string containing namespace URI,
+               cdr is string containing node name.  Find
+               first matching child node.
+  any string   character data of this node."
+  (let ((node xml-data))
+    (while (and path node)
+      (let ((step (car path)))
+	(cond
+	 ((symbolp step)
+	  (setq node (car (jabber-xml-get-children node step))))
+	 ((consp step)
+	  ;; This will be easier with namespace-aware use
+	  ;; of xml.el.  It will also be more correct.
+	  ;; Now, it only matches explicit namespace declarations.
+	  (setq node
+		(cl-dolist (x (jabber-xml-get-children node (intern (cdr step))))
+		  (when (string= (jabber-xml-get-attribute x 'xmlns)
+				 (car step))
+		    (cl-return x)))))
+	 ((stringp step)
+	  (setq node (car (jabber-xml-node-children node)))
+	  (unless (stringp node)
+	    (setq node nil)))
+	 (t
+	  (error "Unknown path step: %s" step))))
+      (setq path (cdr path)))
+    node))
+
+(defmacro jabber-xml-let-attributes (attributes xml-data &rest body)
+  "Evaluate BODY with ATTRIBUTES bound to their values in XML-DATA.
+ATTRIBUTES must be a list of symbols, as present in XML-DATA."
+  (declare (indent 2) (debug (sexp form body)))
+  `(let ,(mapcar #'(lambda (attr)
+		     (list attr `(jabber-xml-get-attribute ,xml-data ',attr)))
+		 attributes)
+     ,@body))
+
+(defun jabber-xml-resolve-namespace-prefixes (xml-data &optional default-ns prefixes)
+  "Rewrite namespace prefixes in XML-DATA to xmlns attributes.
+DEFAULT-NS is the inherited default namespace; PREFIXES is the alist
+of declared prefixes."
+  (let ((node-name (jabber-xml-node-name xml-data))
+	(attrs (jabber-xml-node-attributes xml-data)))
+    (setq prefixes (jabber-xml-merge-namespace-declarations attrs prefixes))
+
+    ;; If there is an xmlns attribute, it is the new default
+    ;; namespace.
+    (let ((xmlns (jabber-xml-get-xmlns xml-data)))
+      (when xmlns
+	(setq default-ns xmlns)))
+    ;; Now, if the node name has a prefix, replace it and add an
+    ;; "xmlns" attribute.  Slightly ugly, but avoids the need to
+    ;; change all the rest of jabber.el at once.
+    (let ((node-name-string (symbol-name node-name)))
+      (when (string-match "\\(.*\\):\\(.*\\)" node-name-string)
+	(let* ((prefix (match-string 1 node-name-string))
+	       (unprefixed (match-string 2 node-name-string))
+	       (ns (assoc prefix prefixes)))
+	  (if (null ns)
+	      ;; This is not supposed to happen...
+	      (message "jabber-xml-resolve-namespace-prefixes: Unknown prefix in %s" node-name-string)
+	    (setf (car xml-data) (intern unprefixed))
+	    (setf (cadr xml-data) (cons (cons 'xmlns (cdr ns)) (delq 'xmlns attrs)))))))
+    ;; And iterate through all child elements.
+    (mapc (lambda (x)
+	    (when (listp x)
+	      (jabber-xml-resolve-namespace-prefixes x default-ns prefixes)))
+	  (jabber-xml-node-children xml-data))
+    xml-data))
+
+(defun jabber-xml-merge-namespace-declarations (attrs prefixes)
+  "Return PREFIXES extended with any xmlns:* declarations found in ATTRS."
+  ;; First find any xmlns:foo attributes..
+  (dolist (attr attrs)
+    (let ((attr-name (symbol-name (car attr))))
+      (when (string-match "xmlns:" attr-name)
+	(let ((prefix (substring attr-name (match-end 0)))
+	      (ns-uri (cdr attr)))
+	  ;; A slightly complicated dance to never change the
+	  ;; original value of prefixes (since the caller depends on
+	  ;; it), but also to avoid excessive copying (which remove
+	  ;; always does).  Might need to profile and tweak this for
+	  ;; performance.
+	  (setq prefixes
+		(cons (cons prefix ns-uri)
+		      (if (assoc prefix prefixes)
+			  (remove (assoc prefix prefixes) prefixes)
+			prefixes)))))))
+  prefixes)
+
+;;; Shared xmlns constants
+
+(defconst jabber-xdata-xmlns "jabber:x:data"
+  "XEP-0004: Data Forms.")
+
+(defconst jabber-oob-xmlns "jabber:x:oob"
+  "XEP-0066: Out of Band Data.")
+
+(defconst jabber-delay-xmlns "urn:xmpp:delay"
+  "XEP-0203: Delayed Delivery.")
+
+(defconst jabber-delay-legacy-xmlns "jabber:x:delay"
+  "XEP-0091: Legacy Delayed Delivery.")
+
+(defconst jabber-roster-xmlns "jabber:iq:roster"
+  "RFC 6121: Roster Management.")
+
+(defconst jabber-stanzas-xmlns "urn:ietf:params:xml:ns:xmpp-stanzas"
+  "RFC 6120: XMPP Stanza Errors.")
+
+(provide 'jabber-xml)
+;;; jabber-xml.el ends here.

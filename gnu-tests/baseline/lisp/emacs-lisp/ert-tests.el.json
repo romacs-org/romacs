@@ -1,0 +1,1614 @@
+{
+ "blob": "0e7989f661b427110ed5091b7f0c8e787afc094e",
+ "compiled": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": true,
+  "results": {
+   "ert--pp-with-indentation-and-newline": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":causes-redisplay"
+    ]
+   },
+   "ert-test-abbreviate-string": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-body-runs": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-deftest": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-deftest-lexical-binding-t": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-error": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-erts-fail": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-erts-file-test-output-mismatch": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-erts-pass": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-erts-skip-last": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-erts-skip-one": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-explain-equal": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-explain-equal-improper-list": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-explain-equal-keymaps": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-explain-equal-string-properties": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-explain-equal-strings": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-explain-time-equal-p": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-fail": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-fail-debug-nested-with-debugger": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-fail-debug-with-debugger-1": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-fail-debug-with-debugger-2": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-fail-inside-should": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-get-explainer": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-list-of-erts-file-tests": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-list-of-should-forms": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-list-of-should-forms-no-deep-copy": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-list-of-should-forms-observers-should-not-stack": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-messages": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":causes-redisplay"
+    ]
+   },
+   "ert-test-nested-test-body-runs": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-parse-keys-and-body": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-pass": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-plist-difference-explanation": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-record-backtrace": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-run-tests-batch": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-run-tests-batch-expensive": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":unstable"
+    ]
+   },
+   "ert-test-run-tests-interactively": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":causes-redisplay"
+    ]
+   },
+   "ert-test-running-tests": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-select-and": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-select-member": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-select-regexp": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-select-symbol": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-select-tag": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-select-test": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-select-undefined": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-should": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-should-error": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-should-error-argument": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-should-error-macroexpansion": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-should-error-subtypes": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-should-failure-debugging": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-should-not": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-should-value": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-should-with-macrolet": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-significant-plist-keys": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-skip-unless": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-skip-when": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-special-operator-p": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-stats-set-test-and-result": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-string-first-line": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-test-boundp": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-test-buffers": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-test-result-expected-p": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-with-buffer-selected/current": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-with-buffer-selected/modification-hooks": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-with-buffer-selected/nil-buffer": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-with-buffer-selected/read-only": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-with-buffer-selected/return-value": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-with-buffer-selected/selected": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-with-demoted-errors": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-with-test-buffer-selected/buffer-name": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-with-test-buffer-selected/modification-hooks": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-with-test-buffer-selected/read-only": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-with-test-buffer-selected/return-value": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-with-test-buffer-selected/selected": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   }
+  },
+  "timed_out": false
+ },
+ "file": "lisp/emacs-lisp/ert-tests.el",
+ "gnu": {
+  "emacs": "<recording-path-redacted>/emacs-32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+  "version": "32.0.50"
+ },
+ "harness_sha256": "78c20850429a08af22faadf73b5d164c560230e83d7eb88ef60cb995670703ef",
+ "mini": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": null,
+  "results": {
+   "ert--pp-with-indentation-and-newline": {
+    "as_expected": null,
+    "detail": "(void-function make-ert-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ert-test-abbreviate-string": {
+    "as_expected": null,
+    "detail": "(void-function ert--abbreviate-string)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ert-test-body-runs": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "ert-test-deftest": {
+    "as_expected": null,
+    "detail": "(void-function ert-get-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ert-test-deftest-lexical-binding-t": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "ert-test-error": {
+    "as_expected": null,
+    "detail": "(void-function make-ert-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ert-test-erts-fail": {
+    "as_expected": null,
+    "detail": "((should-error (ert-test-erts-file (ert-resource-file \"erts-fail.erts\") (lambda nil nil)) :condition (void-function ert-test-erts-file) :fail-reason \"the error signaled did not have the expected type\"))",
+    "expected": ":passed",
+    "outcome": "failed",
+    "tags": null
+   },
+   "ert-test-erts-file-test-output-mismatch": {
+    "as_expected": null,
+    "detail": "(void-function make-ert-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ert-test-erts-pass": {
+    "as_expected": null,
+    "detail": "(void-function ert-test-erts-file)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ert-test-erts-skip-last": {
+    "as_expected": null,
+    "detail": "(void-function ert-test-erts-file)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ert-test-erts-skip-one": {
+    "as_expected": null,
+    "detail": "((should-error (ert-test-erts-file (ert-resource-file \"erts-skip-one.erts\") (lambda nil nil)) :condition (void-function ert-test-erts-file) :fail-reason \"the error signaled did not have the expected type\"))",
+    "expected": ":passed",
+    "outcome": "failed",
+    "tags": null
+   },
+   "ert-test-explain-equal": {
+    "as_expected": null,
+    "detail": "(void-function ert--explain-equal)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ert-test-explain-equal-improper-list": {
+    "as_expected": null,
+    "detail": "(void-function ert--explain-equal)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ert-test-explain-equal-keymaps": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "ert-test-explain-equal-string-properties": {
+    "as_expected": null,
+    "detail": "(void-function ert--explain-equal-including-properties-rec)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ert-test-explain-equal-strings": {
+    "as_expected": null,
+    "detail": "(void-function ert--explain-equal)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ert-test-explain-time-equal-p": {
+    "as_expected": null,
+    "detail": "(void-function ert--explain-time-equal-p)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ert-test-fail": {
+    "as_expected": null,
+    "detail": "(void-function make-ert-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ert-test-fail-debug-nested-with-debugger": {
+    "as_expected": null,
+    "detail": "(void-function make-ert-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ert-test-fail-debug-with-debugger-1": {
+    "as_expected": null,
+    "detail": "(void-function make-ert-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ert-test-fail-debug-with-debugger-2": {
+    "as_expected": null,
+    "detail": "(void-function make-ert-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ert-test-fail-inside-should": {
+    "as_expected": null,
+    "detail": "(void-function ert-run-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ert-test-get-explainer": {
+    "as_expected": null,
+    "detail": "(void-function ert--get-explainer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ert-test-list-of-erts-file-tests": {
+    "as_expected": null,
+    "detail": "(void-function make-ert-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ert-test-list-of-should-forms": {
+    "as_expected": null,
+    "detail": "(void-function make-ert-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ert-test-list-of-should-forms-no-deep-copy": {
+    "as_expected": null,
+    "detail": "(void-function make-ert-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ert-test-list-of-should-forms-observers-should-not-stack": {
+    "as_expected": null,
+    "detail": "(void-function make-ert-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ert-test-messages": {
+    "as_expected": null,
+    "detail": "(void-function make-ert-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ert-test-nested-test-body-runs": {
+    "as_expected": null,
+    "detail": "(void-function make-ert-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ert-test-parse-keys-and-body": {
+    "as_expected": null,
+    "detail": "(void-function ert--parse-keys-and-body)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ert-test-pass": {
+    "as_expected": null,
+    "detail": "(void-function make-ert-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ert-test-plist-difference-explanation": {
+    "as_expected": null,
+    "detail": "(void-function ert--plist-difference-explanation)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ert-test-record-backtrace": {
+    "as_expected": null,
+    "detail": "(void-function make-ert-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ert-test-run-tests-batch": {
+    "as_expected": null,
+    "detail": "(void-function make-ert-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ert-test-run-tests-batch-expensive": {
+    "as_expected": null,
+    "detail": "(void-function make-ert-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ert-test-run-tests-interactively": {
+    "as_expected": null,
+    "detail": "(void-function make-ert-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ert-test-running-tests": {
+    "as_expected": null,
+    "detail": "(void-function ert-get-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ert-test-select-and": {
+    "as_expected": null,
+    "detail": "(void-function make-ert-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ert-test-select-member": {
+    "as_expected": null,
+    "detail": "(void-function ert-select-tests)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ert-test-select-regexp": {
+    "as_expected": null,
+    "detail": "(void-function ert-select-tests)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ert-test-select-symbol": {
+    "as_expected": null,
+    "detail": "(void-function ert-select-tests)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ert-test-select-tag": {
+    "as_expected": null,
+    "detail": "(void-function make-ert-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ert-test-select-test": {
+    "as_expected": null,
+    "detail": "(void-function ert-select-tests)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ert-test-select-undefined": {
+    "as_expected": null,
+    "detail": "((should-error (ert-select-tests symbol t) :condition (void-function ert-select-tests) :fail-reason \"the error signaled did not have the expected type\"))",
+    "expected": ":passed",
+    "outcome": "failed",
+    "tags": null
+   },
+   "ert-test-should": {
+    "as_expected": null,
+    "detail": "(void-function make-ert-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ert-test-should-error": {
+    "as_expected": null,
+    "detail": "(void-function make-ert-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ert-test-should-error-argument": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "ert-test-should-error-macroexpansion": {
+    "as_expected": null,
+    "detail": "(error \"Foo\")",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ert-test-should-error-subtypes": {
+    "as_expected": null,
+    "detail": "(void-function make-ert-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ert-test-should-failure-debugging": {
+    "as_expected": null,
+    "detail": "(void-function make-ert-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ert-test-should-not": {
+    "as_expected": null,
+    "detail": "(void-function make-ert-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ert-test-should-value": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "ert-test-should-with-macrolet": {
+    "as_expected": null,
+    "detail": "(void-function make-ert-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ert-test-significant-plist-keys": {
+    "as_expected": null,
+    "detail": "(void-function ert--significant-plist-keys)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ert-test-skip-unless": {
+    "as_expected": null,
+    "detail": "(void-function make-ert-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ert-test-skip-when": {
+    "as_expected": null,
+    "detail": "(void-function make-ert-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ert-test-special-operator-p": {
+    "as_expected": null,
+    "detail": "(void-function ert--special-operator-p)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ert-test-stats-set-test-and-result": {
+    "as_expected": null,
+    "detail": "(void-function make-ert-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ert-test-string-first-line": {
+    "as_expected": null,
+    "detail": "(void-function ert--string-first-line)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ert-test-test-boundp": {
+    "as_expected": null,
+    "detail": "(void-function ert-test-boundp)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ert-test-test-buffers": {
+    "as_expected": null,
+    "detail": "(void-function make-ert-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ert-test-test-result-expected-p": {
+    "as_expected": null,
+    "detail": "(void-function make-ert-test)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ert-test-with-buffer-selected/current": {
+    "as_expected": null,
+    "detail": "(void-function ert-with-test-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ert-test-with-buffer-selected/modification-hooks": {
+    "as_expected": null,
+    "detail": "(void-function ert-with-test-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ert-test-with-buffer-selected/nil-buffer": {
+    "as_expected": null,
+    "detail": "(void-function ert-with-test-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ert-test-with-buffer-selected/read-only": {
+    "as_expected": null,
+    "detail": "(void-function ert-with-test-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ert-test-with-buffer-selected/return-value": {
+    "as_expected": null,
+    "detail": "(void-function ert-with-buffer-selected)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ert-test-with-buffer-selected/selected": {
+    "as_expected": null,
+    "detail": "(void-function ert-with-test-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ert-test-with-demoted-errors": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "ert-test-with-test-buffer-selected/buffer-name": {
+    "as_expected": null,
+    "detail": "(void-function ert-with-test-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ert-test-with-test-buffer-selected/modification-hooks": {
+    "as_expected": null,
+    "detail": "(void-function ert-with-test-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ert-test-with-test-buffer-selected/read-only": {
+    "as_expected": null,
+    "detail": "(void-function ert-with-test-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ert-test-with-test-buffer-selected/return-value": {
+    "as_expected": null,
+    "detail": "(void-function ert-with-test-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "ert-test-with-test-buffer-selected/selected": {
+    "as_expected": null,
+    "detail": "(void-function ert-with-test-buffer)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   }
+  },
+  "timed_out": false
+ },
+ "read_error": null,
+ "real": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": true,
+  "results": {
+   "ert--pp-with-indentation-and-newline": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":causes-redisplay"
+    ]
+   },
+   "ert-test-abbreviate-string": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-body-runs": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-deftest": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-deftest-lexical-binding-t": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-error": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-erts-fail": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-erts-file-test-output-mismatch": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-erts-pass": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-erts-skip-last": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-erts-skip-one": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-explain-equal": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-explain-equal-improper-list": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-explain-equal-keymaps": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-explain-equal-string-properties": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-explain-equal-strings": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-explain-time-equal-p": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-fail": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-fail-debug-nested-with-debugger": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-fail-debug-with-debugger-1": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-fail-debug-with-debugger-2": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-fail-inside-should": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-get-explainer": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-list-of-erts-file-tests": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-list-of-should-forms": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-list-of-should-forms-no-deep-copy": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-list-of-should-forms-observers-should-not-stack": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-messages": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":causes-redisplay"
+    ]
+   },
+   "ert-test-nested-test-body-runs": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-parse-keys-and-body": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-pass": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-plist-difference-explanation": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-record-backtrace": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-run-tests-batch": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-run-tests-batch-expensive": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":unstable"
+    ]
+   },
+   "ert-test-run-tests-interactively": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": [
+     ":causes-redisplay"
+    ]
+   },
+   "ert-test-running-tests": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-select-and": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-select-member": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-select-regexp": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-select-symbol": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-select-tag": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-select-test": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-select-undefined": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-should": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-should-error": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-should-error-argument": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-should-error-macroexpansion": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-should-error-subtypes": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-should-failure-debugging": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-should-not": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-should-value": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-should-with-macrolet": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-significant-plist-keys": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-skip-unless": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-skip-when": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-special-operator-p": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-stats-set-test-and-result": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-string-first-line": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-test-boundp": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-test-buffers": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-test-result-expected-p": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-with-buffer-selected/current": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-with-buffer-selected/modification-hooks": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-with-buffer-selected/nil-buffer": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-with-buffer-selected/read-only": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-with-buffer-selected/return-value": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-with-buffer-selected/selected": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-with-demoted-errors": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-with-test-buffer-selected/buffer-name": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-with-test-buffer-selected/modification-hooks": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-with-test-buffer-selected/read-only": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-with-test-buffer-selected/return-value": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "ert-test-with-test-buffer-selected/selected": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   }
+  },
+  "timed_out": false
+ },
+ "schema": 1,
+ "toplevel_deftests": 74
+}

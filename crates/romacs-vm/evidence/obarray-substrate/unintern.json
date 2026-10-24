@@ -1,0 +1,199 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "unintern",
+ "spec_sha256": "9c9c37989b504c8088d0f311910dea03a258a30e2c9eeb770d697fbacad1dff3",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "unintern",
+    "subr",
+    2,
+    2
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "lread.c": "f343ea2619bd35d4a0a41c15d3143045acd0cecc06ea0e449c65141b4f146c53"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "unintern/0000",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (unintern \"absent\" (obarray-make))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "unintern/0001",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (unintern \"absent\" (vector 0))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "unintern/0002",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (unintern \"absent\" [])) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument obarrayp []))"
+  },
+  {
+   "id": "unintern/0003",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (unintern \"absent\" 42)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument obarrayp 42))"
+  },
+  {
+   "id": "unintern/0004",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (unintern 'absent (obarray-make))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "unintern/0005",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (unintern 'absent (vector 0))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "unintern/0006",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (unintern 'absent [])) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument obarrayp []))"
+  },
+  {
+   "id": "unintern/0007",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (unintern 'absent 42)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument obarrayp 42))"
+  },
+  {
+   "id": "unintern/0008",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (unintern 42 (obarray-make))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 42))"
+  },
+  {
+   "id": "unintern/0009",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (unintern 42 (vector 0))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 42))"
+  },
+  {
+   "id": "unintern/0010",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (unintern 42 [])) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument obarrayp []))"
+  },
+  {
+   "id": "unintern/0011",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (unintern 42 42)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument obarrayp 42))"
+  },
+  {
+   "id": "unintern/0012",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'unintern '(1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr unintern> 1))"
+  },
+  {
+   "id": "unintern/0013",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'unintern '(1 1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr unintern> 3))"
+  },
+  {
+   "id": "unintern/0014",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 \"absent\") (a1 (obarray-make))) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (unintern a0 a1))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "unintern/0015",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 \"absent\") (a1 (obarray-make))) (let ((r (unintern a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "unintern/0016",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 \"absent\") (a1 42)) (let ((r (unintern a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument obarrayp 42))"
+  },
+  {
+   "id": "unintern/0017",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'absent) (a1 [])) (let ((r (unintern a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument obarrayp []))"
+  },
+  {
+   "id": "unintern/0018",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 42) (a1 (vector 0))) (let ((r (unintern a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 42))"
+  },
+  {
+   "id": "unintern/0019",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((a (obarray-make)) (b (obarray-make)) (x (intern \"remove-private\" a)) (y (intern \"remove-private\" b))) (list (unintern y a) (eq x (intern-soft \"remove-private\" a)) (unintern x a) (intern-soft \"remove-private\" a) (unintern x a) (eq x (intern \"remove-private\" a))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t t nil nil nil))"
+  },
+  {
+   "id": "unintern/0020",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a (obarray-make))) (intern \"x\" a) (list (unintern \"x\" a) (unintern \"x\" a)))) (error (list 'sig e))))",
+   "expected": "(ok (t nil))"
+  },
+  {
+   "id": "unintern/0021",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (fboundp 'unintern) (functionp 'unintern))) (error (list 'sig e))))",
+   "expected": "(ok (t t))"
+  },
+  {
+   "id": "unintern/0022",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"absent\") (error (list 'sig e))))",
+   "expected": "(ok \"absent\")"
+  },
+  {
+   "id": "unintern/0023",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 'absent) (error (list 'sig e))))",
+   "expected": "(ok absent)"
+  },
+  {
+   "id": "unintern/0024",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (obarray-make)) (error (list 'sig e))))",
+   "expected": "(ok #<obarray n=0>)"
+  },
+  {
+   "id": "unintern/0025",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vector 0)) (error (list 'sig e))))",
+   "expected": "(ok [0])"
+  },
+  {
+   "id": "unintern/0026",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 42) (error (list 'sig e))))",
+   "expected": "(ok 42)"
+  },
+  {
+   "id": "unintern/0027",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok []) (error (list 'sig e))))",
+   "expected": "(ok [])"
+  }
+ ]
+}

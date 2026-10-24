@@ -1,0 +1,25 @@
+{
+  "name": "set-char-table-extra-slot",
+  "arity": [
+    3,
+    3
+  ],
+  "effect": "mutatesargs",
+  "gnu_files": [
+    "chartab.c"
+  ],
+  "gnu_def": "chartab.c:562",
+  "rust": "src/prims/char_table.rs:14",
+  "args": [
+    "none",
+    "none",
+    "none"
+  ],
+  "probes": [
+    "(set-char-table-extra-slot nil 'bad 1)",
+    "(let ((ct (make-char-table nil))) (condition-case e (set-char-table-extra-slot ct 'bad 1) (error (list (car e) (if (eq (car e) 'args-out-of-range) (eq (car (cdr e)) ct) (car (cdr e))) (car (cdr (cdr e)))))))",
+    "(let ((ct (make-char-table nil))) (condition-case e (set-char-table-extra-slot ct 0 1) (error (list (car e) (if (eq (car e) 'args-out-of-range) (eq (car (cdr e)) ct) (car (cdr e))) (car (cdr (cdr e)))))))",
+    "(let ((p (make-symbol \"purpose\"))) (put p 'char-table-extra-slots 3) (let* ((ct (make-char-table p)) (payload (list 42)) (copy nil)) (set-char-table-extra-slot ct 1 payload) (setq copy (copy-sequence ct)) (list (eq payload (funcall 'set-char-table-extra-slot copy 2 payload)) (eq payload (char-table-extra-slot copy 1)) (char-table-extra-slot ct 2) (not (eq copy ct)))))",
+    "(let ((p (make-symbol \"purpose\"))) (put p 'char-table-extra-slots 3) (let ((ct (make-char-table p))) (set-char-table-extra-slot ct 0 ct) (eq ct (char-table-extra-slot ct 0))))"
+  ]
+}

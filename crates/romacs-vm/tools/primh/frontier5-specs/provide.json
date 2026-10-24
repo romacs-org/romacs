@@ -1,0 +1,36 @@
+{
+  "name": "provide",
+  "arity": [
+    1,
+    2
+  ],
+  "effect": "writes",
+  "gnu_files": [
+    "fns.c"
+  ],
+  "gnu_def": "fns.c:3742",
+  "rust": "src/loader.rs:104",
+  "args": [
+    "nil",
+    "nil"
+  ],
+  "probes": [
+    "(progn (provide 'ps '(display syntax-table field)) (list (get 'ps 'subfeatures) (featurep 'ps) (featurep 'ps nil) (featurep 'ps 'display) (featurep 'ps 'missing)))",
+    "(progn (provide 'plain) (list (featurep 'plain) (featurep 'plain 'x) (get 'plain 'subfeatures)))",
+    "(progn (provide 'ps '(x)) (provide 'ps) (provide 'ps nil) (list (get 'ps 'subfeatures) (featurep 'ps 'x)))",
+    "(progn (provide 'ps '(x)) (provide 'ps '(y)) (list (get 'ps 'subfeatures) (featurep 'ps 'x) (featurep 'ps 'y)))",
+    "(progn (provide 'ps '((a b) \"same\")) (list (featurep 'ps (list 'a 'b)) (featurep 'ps (copy-sequence \"same\"))))",
+    "(progn (put 'absent 'subfeatures '(x)) (featurep 'absent 'x))",
+    "(provide 'ps '(x . bad))",
+    "(provide 1 '(x))",
+    "(provide 'ps 1)",
+    "(featurep 1)",
+    "(provide)",
+    "(provide 'ps nil nil)",
+    "(featurep)",
+    "(featurep 'ps nil nil)",
+    "(progn (provide 'ps '(x . bad)) (condition-case e (featurep 'ps 'y) (error e)))",
+    "(progn (provide 'ps) (put 'ps 'subfeatures 1) (condition-case e (featurep 'ps 'y) (error e)))",
+    "(let ((xs (list 'x))) (setcdr xs xs) (provide 'ps xs) (condition-case e (featurep 'ps 'y) (error (list (car e) (eq (car (cdr e)) xs)))))"
+  ]
+}

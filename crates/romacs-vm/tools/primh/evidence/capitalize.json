@@ -1,0 +1,578 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "capitalize",
+ "spec_sha256": "12c4aa33bd7b82f8bef02ccebee5c0ca453b60d2dff082658cefaf406bec8ee5",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "capitalize",
+    "subr",
+    1,
+    1
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "casefiddle.c": "685be812f321138b21dac9a6273e103b15b18307ea793f53d6c5fd03fcd549fb"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "capitalize/0000",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (capitalize nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument char-or-string-p nil))"
+  },
+  {
+   "id": "capitalize/0001",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (capitalize t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument char-or-string-p t))"
+  },
+  {
+   "id": "capitalize/0002",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (capitalize 0)) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "capitalize/0003",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (capitalize 1)) (error (list 'sig e))))",
+   "expected": "(ok 1)"
+  },
+  {
+   "id": "capitalize/0004",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (capitalize 2)) (error (list 'sig e))))",
+   "expected": "(ok 2)"
+  },
+  {
+   "id": "capitalize/0005",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (capitalize -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument char-or-string-p -1))"
+  },
+  {
+   "id": "capitalize/0006",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (capitalize most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(ok 2305843009213693951)"
+  },
+  {
+   "id": "capitalize/0007",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (capitalize 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument char-or-string-p 1.5))"
+  },
+  {
+   "id": "capitalize/0008",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (capitalize 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument char-or-string-p sym))"
+  },
+  {
+   "id": "capitalize/0009",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (capitalize :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument char-or-string-p :kw))"
+  },
+  {
+   "id": "capitalize/0010",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (capitalize (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(ok \"\")"
+  },
+  {
+   "id": "capitalize/0011",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (capitalize (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(ok \"Abc\")"
+  },
+  {
+   "id": "capitalize/0012",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (capitalize (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(ok \"Λx\")"
+  },
+  {
+   "id": "capitalize/0013",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (capitalize (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument char-or-string-p (1 2 3)))"
+  },
+  {
+   "id": "capitalize/0014",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (capitalize (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument char-or-string-p (a (b))))"
+  },
+  {
+   "id": "capitalize/0015",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (capitalize (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument char-or-string-p (1 . 2)))"
+  },
+  {
+   "id": "capitalize/0016",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (capitalize (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument char-or-string-p (1 2 . 3)))"
+  },
+  {
+   "id": "capitalize/0017",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (capitalize (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument char-or-string-p [1 2]))"
+  },
+  {
+   "id": "capitalize/0018",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (capitalize (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument char-or-string-p (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "capitalize/0019",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (capitalize 97)) (error (list 'sig e))))",
+   "expected": "(ok 65)"
+  },
+  {
+   "id": "capitalize/0020",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (capitalize 453)) (error (list 'sig e))))",
+   "expected": "(ok 453)"
+  },
+  {
+   "id": "capitalize/0021",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (capitalize 454)) (error (list 'sig e))))",
+   "expected": "(ok 453)"
+  },
+  {
+   "id": "capitalize/0022",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (capitalize 64257)) (error (list 'sig e))))",
+   "expected": "(ok 64257)"
+  },
+  {
+   "id": "capitalize/0023",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (capitalize 134217825)) (error (list 'sig e))))",
+   "expected": "(ok 134217793)"
+  },
+  {
+   "id": "capitalize/0024",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (capitalize 536871009)) (error (list 'sig e))))",
+   "expected": "(ok 536871009)"
+  },
+  {
+   "id": "capitalize/0025",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (capitalize 9999999999)) (error (list 'sig e))))",
+   "expected": "(ok 9999999999)"
+  },
+  {
+   "id": "capitalize/0026",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (capitalize (unibyte-string 255 97 66))) (error (list 'sig e))))",
+   "expected": "(ok \"\\377ab\")"
+  },
+  {
+   "id": "capitalize/0027",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (capitalize (string-to-multibyte \"aBC\"))) (error (list 'sig e))))",
+   "expected": "(ok \"Abc\")"
+  },
+  {
+   "id": "capitalize/0028",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (capitalize \"hELLO-world 123ABC foo_BAR don't\")) (error (list 'sig e))))",
+   "expected": "(ok \"Hello-World 123abc Foo_Bar Don'T\")"
+  },
+  {
+   "id": "capitalize/0029",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (capitalize \"ßABC ﬃXYZ ǆABC ΟΣ ΟΣΑ İX\")) (error (list 'sig e))))",
+   "expected": "(ok \"Ssabc Ffixyz ǅabc Ος Οσα İx\")"
+  },
+  {
+   "id": "capitalize/0030",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'capitalize '())) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr capitalize> 0))"
+  },
+  {
+   "id": "capitalize/0031",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'capitalize '(1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr capitalize> 2))"
+  },
+  {
+   "id": "capitalize/0032",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (capitalize a0))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument char-or-string-p nil))"
+  },
+  {
+   "id": "capitalize/0033",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil)) (let ((r (capitalize a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument char-or-string-p nil))"
+  },
+  {
+   "id": "capitalize/0034",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1)) (let ((r (capitalize a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (t))"
+  },
+  {
+   "id": "capitalize/0035",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-positive-fixnum)) (let ((r (capitalize a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (t))"
+  },
+  {
+   "id": "capitalize/0036",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :kw)) (let ((r (capitalize a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument char-or-string-p :kw))"
+  },
+  {
+   "id": "capitalize/0037",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\"))) (let ((r (capitalize a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "capitalize/0038",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 2))) (let ((r (capitalize a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument char-or-string-p (1 . 2)))"
+  },
+  {
+   "id": "capitalize/0039",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (capitalize a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument char-or-string-p (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "capitalize/0040",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 454)) (let ((r (capitalize a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "capitalize/0041",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 536871009)) (let ((r (capitalize a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (t))"
+  },
+  {
+   "id": "capitalize/0042",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (string-to-multibyte \"aBC\"))) (let ((r (capitalize a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "capitalize/0043",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (fboundp 'capitalize) (functionp #'capitalize) (funcall #'capitalize \"aBC\"))) (error (list 'sig e))))",
+   "expected": "(ok (t t \"Abc\"))"
+  },
+  {
+   "id": "capitalize/0044",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (set-syntax-table (copy-syntax-table)) (modify-syntax-entry 45 \"w\") (capitalize \"a-B_C\"))) (error (list 'sig e))))",
+   "expected": "(ok \"A-b_C\")"
+  },
+  {
+   "id": "capitalize/0045",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((case-symbols-as-words t)) (capitalize \"foo_BAR\"))) (error (list 'sig e))))",
+   "expected": "(ok \"Foo_bar\")"
+  },
+  {
+   "id": "capitalize/0046",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((s (propertize (unibyte-string 97 66) 'face 'bold)) (r (capitalize s))) (list (eq s r) (append s nil) (append r nil) (get-text-property 0 'face r) (multibyte-string-p r)))) (error (list 'sig e))))",
+   "expected": "(ok (nil (97 66) (65 98) bold nil))"
+  },
+  {
+   "id": "capitalize/0047",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((s (propertize (string-to-multibyte \"aBC\") 'face 'bold)) (r (capitalize s))) (list (eq s r) (append s nil) (append r nil) (get-text-property 0 'face r) (multibyte-string-p r)))) (error (list 'sig e))))",
+   "expected": "(ok (nil (97 66 67) (65 98 99) nil t))"
+  },
+  {
+   "id": "capitalize/0048",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((s (unibyte-string))) (eq s (capitalize s)))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "capitalize/0049",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((s (string-to-multibyte \"\"))) (eq s (capitalize s)))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "capitalize/0050",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (set-buffer-multibyte nil) (list (capitalize 224) (capitalize 97) (capitalize 454)))) (error (list 'sig e))))",
+   "expected": "(ok (224 65 453))"
+  },
+  {
+   "id": "capitalize/0051",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((s (string-to-multibyte \"ab-CD\"))) (put-text-property 2 3 'syntax-table '(2) s) (capitalize s))) (error (list 'sig e))))",
+   "expected": "(ok \"Ab-Cd\")"
+  },
+  {
+   "id": "capitalize/0052",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (capitalize \"ΟΣΑ ΟΣ ΑΣ!\") (capitalize \"áBC ǳABC\"))) (error (list 'sig e))))",
+   "expected": "(ok (\"Οσα Ος Ας!\" \"Ábc ǲabc\"))"
+  },
+  {
+   "id": "capitalize/0053",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (append (capitalize (string 4194303 97 66)) nil) (append (capitalize (string 55296 97 66)) nil))) (error (list 'sig e))))",
+   "expected": "(ok ((4194303 97 98) (55296 97 98)))"
+  },
+  {
+   "id": "capitalize/0054",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((table (copy-case-table (current-case-table)))) (set-char-table-range table 97 120) (set-case-table table) (capitalize \"abc\"))) (error (list 'sig e))))",
+   "expected": "(ok \"Abc\")"
+  },
+  {
+   "id": "capitalize/0055",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (capitalize \"a—b «ab» a×b ΑΣ»\")) (error (list 'sig e))))",
+   "expected": "(ok \"A—B «Ab» A×B Ας»\")"
+  },
+  {
+   "id": "capitalize/0056",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (set (make-local-variable 'case-symbols-as-words) t) (capitalize \"foo_BAR\"))) (error (list 'sig e))))",
+   "expected": "(ok \"Foo_bar\")"
+  },
+  {
+   "id": "capitalize/0057",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (local-variable-if-set-p 'case-symbols-as-words))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "capitalize/0058",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (setq case-symbols-as-words 7) (list case-symbols-as-words (capitalize \"foo_BAR\")))) (error (list 'sig e))))",
+   "expected": "(ok (t \"Foo_bar\"))"
+  },
+  {
+   "id": "capitalize/0059",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (capitalize 4294967393) (capitalize 4294967361))) (error (list 'sig e))))",
+   "expected": "(ok (65 4294967361))"
+  },
+  {
+   "id": "capitalize/0060",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"hELLO-world 123ABC foo_BAR don't\") (error (list 'sig e))))",
+   "expected": "(ok \"hELLO-world 123ABC foo_BAR don't\")"
+  },
+  {
+   "id": "capitalize/0061",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"ßABC ﬃXYZ ǆABC ΟΣ ΟΣΑ İX\") (error (list 'sig e))))",
+   "expected": "(ok \"ßABC ﬃXYZ ǆABC ΟΣ ΟΣΑ İX\")"
+  },
+  {
+   "id": "capitalize/0062",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 'sym) (error (list 'sig e))))",
+   "expected": "(ok sym)"
+  },
+  {
+   "id": "capitalize/0063",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (cons 1 (cons 2 3))) (error (list 'sig e))))",
+   "expected": "(ok (1 2 . 3))"
+  },
+  {
+   "id": "capitalize/0064",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (cons 1 2)) (error (list 'sig e))))",
+   "expected": "(ok (1 . 2))"
+  },
+  {
+   "id": "capitalize/0065",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"\")) (error (list 'sig e))))",
+   "expected": "(ok \"\")"
+  },
+  {
+   "id": "capitalize/0066",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"abc\")) (error (list 'sig e))))",
+   "expected": "(ok \"abc\")"
+  },
+  {
+   "id": "capitalize/0067",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"λx\")) (error (list 'sig e))))",
+   "expected": "(ok \"λx\")"
+  },
+  {
+   "id": "capitalize/0068",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (error (list 'sig e))))",
+   "expected": "(ok (1 2 1 2 . #2))"
+  },
+  {
+   "id": "capitalize/0069",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list 'a (list 'b))) (error (list 'sig e))))",
+   "expected": "(ok (a (b)))"
+  },
+  {
+   "id": "capitalize/0070",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list 1 2 3)) (error (list 'sig e))))",
+   "expected": "(ok (1 2 3))"
+  },
+  {
+   "id": "capitalize/0071",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-to-multibyte \"aBC\")) (error (list 'sig e))))",
+   "expected": "(ok \"aBC\")"
+  },
+  {
+   "id": "capitalize/0072",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (unibyte-string 255 97 66)) (error (list 'sig e))))",
+   "expected": "(ok \"\\377aB\")"
+  },
+  {
+   "id": "capitalize/0073",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vector 1 2)) (error (list 'sig e))))",
+   "expected": "(ok [1 2])"
+  },
+  {
+   "id": "capitalize/0074",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok -1) (error (list 'sig e))))",
+   "expected": "(ok -1)"
+  },
+  {
+   "id": "capitalize/0075",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 0) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "capitalize/0076",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1) (error (list 'sig e))))",
+   "expected": "(ok 1)"
+  },
+  {
+   "id": "capitalize/0077",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1.5) (error (list 'sig e))))",
+   "expected": "(ok 1.5)"
+  },
+  {
+   "id": "capitalize/0078",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 134217825) (error (list 'sig e))))",
+   "expected": "(ok 134217825)"
+  },
+  {
+   "id": "capitalize/0079",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 2) (error (list 'sig e))))",
+   "expected": "(ok 2)"
+  },
+  {
+   "id": "capitalize/0080",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 453) (error (list 'sig e))))",
+   "expected": "(ok 453)"
+  },
+  {
+   "id": "capitalize/0081",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 454) (error (list 'sig e))))",
+   "expected": "(ok 454)"
+  },
+  {
+   "id": "capitalize/0082",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 536871009) (error (list 'sig e))))",
+   "expected": "(ok 536871009)"
+  },
+  {
+   "id": "capitalize/0083",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 64257) (error (list 'sig e))))",
+   "expected": "(ok 64257)"
+  },
+  {
+   "id": "capitalize/0084",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 97) (error (list 'sig e))))",
+   "expected": "(ok 97)"
+  },
+  {
+   "id": "capitalize/0085",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 9999999999) (error (list 'sig e))))",
+   "expected": "(ok 9999999999)"
+  },
+  {
+   "id": "capitalize/0086",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok :kw) (error (list 'sig e))))",
+   "expected": "(ok :kw)"
+  },
+  {
+   "id": "capitalize/0087",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok most-positive-fixnum) (error (list 'sig e))))",
+   "expected": "(ok 2305843009213693951)"
+  },
+  {
+   "id": "capitalize/0088",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok nil) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "capitalize/0089",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok t) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  }
+ ],
+ "pinned": {
+  "capitalize/0018": "PRINTER",
+  "capitalize/0039": "PRINTER",
+  "capitalize/0054": "MISSING",
+  "capitalize/0058": "VALUE",
+  "capitalize/0068": "PRINTER"
+ }
+}

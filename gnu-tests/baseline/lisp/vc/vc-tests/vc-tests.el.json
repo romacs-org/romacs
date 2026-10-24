@@ -1,0 +1,197 @@
+{
+ "blob": "3201434ab78e6747c231e461035f0a3c010087d5",
+ "compiled": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": true,
+  "results": {},
+  "timed_out": false
+ },
+ "file": "lisp/vc/vc-tests/vc-tests.el",
+ "gnu": {
+  "emacs": "<recording-path-redacted>/emacs-32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+  "version": "32.0.50"
+ },
+ "harness_sha256": "78c20850429a08af22faadf73b5d164c560230e83d7eb88ef60cb995670703ef",
+ "mini": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": null,
+  "results": {
+   "vc-test-git00-create-repo": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "vc-test-git01-register": {
+    "as_expected": null,
+    "detail": "(void-function ert-test-passed-p)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "vc-test-git02-state": {
+    "as_expected": null,
+    "detail": "(void-function ert-test-passed-p)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "vc-test-git03-working-revision": {
+    "as_expected": null,
+    "detail": "(void-function ert-test-passed-p)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "vc-test-git04-checkout-model": {
+    "as_expected": null,
+    "detail": "(void-function ert-test-passed-p)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "vc-test-git05-rename-file": {
+    "as_expected": null,
+    "detail": "(void-function ert-test-passed-p)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "vc-test-git06-version-diff": {
+    "as_expected": null,
+    "detail": "(void-function ert-test-passed-p)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "vc-test-git07-other-working-trees": {
+    "as_expected": null,
+    "detail": "(void-function ert-test-passed-p)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "vc-test-git08-apply-to-other-working-tree": {
+    "as_expected": null,
+    "detail": "(void-function ert-test-skipped-p)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "vc-test-git09-checkin-patch": {
+    "as_expected": null,
+    "detail": "(void-function ert-test-passed-p)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "vc-test-git10-rename-directory": {
+    "as_expected": null,
+    "detail": "(void-function ert-test-passed-p)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   }
+  },
+  "timed_out": false
+ },
+ "read_error": null,
+ "real": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": true,
+  "results": {
+   "vc-test-git00-create-repo": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "vc-test-git01-register": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "vc-test-git02-state": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "vc-test-git03-working-revision": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "vc-test-git04-checkout-model": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "vc-test-git05-rename-file": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "vc-test-git06-version-diff": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "vc-test-git07-other-working-trees": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "vc-test-git08-apply-to-other-working-tree": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "vc-test-git09-checkin-patch": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "vc-test-git10-rename-directory": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   }
+  },
+  "timed_out": false
+ },
+ "schema": 1,
+ "toplevel_deftests": 0
+}

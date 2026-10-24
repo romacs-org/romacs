@@ -1,0 +1,27 @@
+{
+  "name": "define-coding-system-alias",
+  "arity": [
+    2,
+    2
+  ],
+  "effect": "global",
+  "gnu_files": [
+    "coding.c"
+  ],
+  "gnu_def": "coding.c:11575",
+  "rust": "src/prims/coding.rs:73",
+  "args": [
+    "no-generated-domain",
+    "no-generated-domain"
+  ],
+  "probes": [
+    "(define-coding-system-alias 17 'no-conversion)",
+    "(define-coding-system-alias 'oracle-a 'oracle-missing)",
+    "(define-coding-system-alias 'oracle-a nil)",
+    "(define-coding-system-alias 17 17)",
+    "(progn (define-coding-system-internal 'oracle-cod 67 'raw-text nil t nil nil nil nil nil nil '(:probe 7) nil) (list (define-coding-system-alias 'oracle-a 'oracle-cod) (coding-system-aliases 'oracle-cod) (coding-system-aliases 'oracle-cod-unix) (coding-system-base 'oracle-a-mac) (coding-system-eol-type 'oracle-a-dos) (eq (coding-system-plist 'oracle-a) (coding-system-plist 'oracle-cod))))",
+    "(progn (define-coding-system-internal 'oracle-cod 67 'raw-text nil t nil nil nil nil nil nil '(:probe 7) nil) (define-coding-system-alias 'oracle-a 'oracle-cod) (define-coding-system-internal 'oracle-other 67 'raw-text nil t nil nil nil nil nil nil '(:probe 7) 'dos) (define-coding-system-alias 'oracle-a 'oracle-other) (list (coding-system-base 'oracle-a) (coding-system-aliases 'oracle-cod) (coding-system-aliases 'oracle-other) (coding-system-base 'oracle-a-unix)))",
+    "(progn (setq oracle-count 0) (put 'oracle-lazy 'coding-system-define-form '(progn (setq oracle-count (1+ oracle-count)) (define-coding-system-internal 'oracle-lazy 67 'raw-text nil t nil nil nil nil nil nil '(:probe 7) nil))) (list (define-coding-system-alias 'oracle-a 'oracle-lazy) oracle-count (coding-system-base 'oracle-a)))",
+    "(progn (coding-system-p 'no-conversion) (setq coding-system-alist 5) (condition-case e (define-coding-system-alias 'oracle-alist 'no-conversion) (error (list e (coding-system-p 'oracle-alist) (car coding-system-list)))))"
+  ]
+}

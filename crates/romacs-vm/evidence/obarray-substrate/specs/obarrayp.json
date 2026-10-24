@@ -1,0 +1,30 @@
+{
+  "name": "obarrayp",
+  "arity": [
+    1,
+    1
+  ],
+  "effect": "pure",
+  "gnu_files": [
+    "lread.c"
+  ],
+  "gnu_def": "lread.c:5072",
+  "rust": "src/prims/obarray.rs:4",
+  "args": [
+    "none"
+  ],
+  "extra": {
+    "0": [
+      "(obarray-make)",
+      "[0]",
+      "[]",
+      "nil",
+      "42",
+      "\"x\""
+    ]
+  },
+  "probes": [
+    "(list (obarrayp (obarray-make)) (obarrayp [0]) (obarrayp []) (obarrayp nil))",
+    "(list (fboundp 'obarrayp) (functionp 'obarrayp))"
+  ]
+}

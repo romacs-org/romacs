@@ -1,0 +1,1293 @@
+;;; hermes-capabilities-tests.el --- ERT tests for hermes-capabilities  -*- lexical-binding: t; -*-
+
+;;; Commentary:
+;; Tests for the native capability provider.  Pure registry, dispatch, and
+;; response-writer tests avoid external state.  Most transport tests use mock
+;; sockets; registration rejection also runs over disposable loopback sockets.
+
+;;; Code:
+
+(require 'ert)
+(require 'cl-lib)
+(require 'subr-x)
+
+(let ((root (expand-file-name "../../.." (file-name-directory (or load-file-name buffer-file-name)))))
+  (add-to-list 'load-path (expand-file-name "lisp-bundled/hermes" root)))
+
+(require 'hermes-capabilities)
+
+(defmacro hermes-capabilities-test--with-clean-registry (&rest body)
+  "Run BODY with an empty capability registry, restoring it afterward."
+  (declare (indent 0))
+  `(let ((saved hermes-capabilities--registry))
+     (setq hermes-capabilities--registry nil)
+     (unwind-protect
+         (progn ,@body)
+       (setq hermes-capabilities--registry saved))))
+
+(cl-defmacro hermes-capabilities-test--with-mock-transport
+    (url-plist &rest body)
+  "Run BODY with the capability URL and socket openers mocked to URL-PLIST.
+The socket opener captures the :on-message callback into the variable
+`on-msg' and returns a fake socket symbol.  No real network or websocket.el is
+touched."
+  (declare (indent 1))
+  `(let* ((on-msg nil)
+          (fake-socket (gensym "fake-ws-"))
+          (sent-frames nil)
+          (hermes-capabilities--url-function
+           (lambda (&rest _args) (hermes--promise-resolved ,url-plist)))
+          (hermes-capabilities--open-function
+           (cl-function
+            (lambda (_url _red _sec &key on-message &allow-other-keys)
+              (setq on-msg on-message)
+              fake-socket)))
+          (hermes-capabilities--send-function
+           (lambda (_socket text) (push text sent-frames))))
+     ,@body))
+
+
+;;;; Registry tests
+
+(ert-deftest hermes-capabilities-register-and-lookup ()
+  "Registering a method stores a handler retrievable by `--lookup'."
+  (let ((handler (lambda (_params) '((ok . t)))))
+    (hermes-capabilities-test--with-clean-registry
+      (hermes-capabilities--register "buffer.list" handler :doc "List buffers")
+      (should (equal (aref (hermes-capabilities--methods) 0) "buffer.list"))
+      (should (eq (plist-get (hermes-capabilities--lookup "buffer.list") :handler)
+                  handler))
+      (should (equal (plist-get (hermes-capabilities--lookup "buffer.list") :doc)
+                     "List buffers")))))
+
+(ert-deftest hermes-capabilities-lookup-unknown-returns-nil ()
+  "`--lookup' returns nil for a method that was never registered."
+  (hermes-capabilities-test--with-clean-registry
+    (should (null (hermes-capabilities--lookup "nope")))))
+
+(ert-deftest hermes-capabilities-duplicate-register-errors ()
+  "Registering an existing method signals unless :replace is set."
+  (hermes-capabilities-test--with-clean-registry
+    (hermes-capabilities--register "buffer.list" #'ignore)
+    (should-error (hermes-capabilities--register "buffer.list" #'ignore))
+    ;; :replace overwrites silently.
+    (let ((new-handler (lambda (_) "new")))
+      (hermes-capabilities--register "buffer.list" new-handler :replace t)
+      (should (eq (plist-get (hermes-capabilities--lookup "buffer.list") :handler)
+                  new-handler)))))
+
+(ert-deftest hermes-capabilities-define-registers-method ()
+  "The `hermes-capabilities-define' macro registers the method at load time."
+  (hermes-capabilities-test--with-clean-registry
+    (hermes-capabilities-define hermes-capabilities-method-buffer-current
+      "buffer.current" "Return the current buffer."
+      (lambda (_params) (buffer-name)))
+    (should (seq-contains-p (hermes-capabilities--methods) "buffer.current"))
+    (should (equal hermes-capabilities-method-buffer-current "buffer.current"))
+    (should (functionp (plist-get (hermes-capabilities--lookup "buffer.current")
+                                  :handler)))))
+
+
+;;;; Dispatch tests
+
+(ert-deftest hermes-capabilities-dispatch-calls-handler ()
+  "A registered handler receives params and its return value surfaces as ok."
+  (hermes-capabilities-test--with-clean-registry
+    (hermes-capabilities--register
+      "buffer.current"
+      (lambda (_params) "my-buffer"))
+    (let* ((request (list :id "req-1" :method "buffer.current" :params nil))
+           (outcome (hermes-capabilities--dispatch request)))
+      (should (eq (car outcome) 'ok))
+      (should (equal (cdr outcome) "my-buffer")))))
+
+(ert-deftest hermes-capabilities-dispatch-unknown-method-error ()
+  "An unregistered method dispatches to a method_not_supported error."
+  (hermes-capabilities-test--with-clean-registry
+    (let* ((request (list :id "req-2" :method "frobnicate" :params nil))
+           (outcome (hermes-capabilities--dispatch request)))
+      (should (eq (car outcome) 'error))
+      (should (eq (plist-get (cdr outcome) :code) 'method_not_supported))
+      (should (equal (plist-get (plist-get (cdr outcome) :data) :method)
+                     "frobnicate")))))
+
+(ert-deftest hermes-capabilities-dispatch-handler-error ()
+  "A signaling handler dispatches to an invalid_params error."
+  (hermes-capabilities-test--with-clean-registry
+    (hermes-capabilities--register
+      "buffer.current"
+      (lambda (_params) (error "nope")))
+    (let* ((request (list :id "req-3" :method "buffer.current" :params nil))
+           (outcome (hermes-capabilities--dispatch request)))
+      (should (eq (car outcome) 'error))
+      (should (eq (plist-get (cdr outcome) :code) 'invalid_params))
+      (should (string-match-p "nope" (plist-get (cdr outcome) :message))))))
+
+
+;;;; Normalization tests
+
+(ert-deftest hermes-capabilities-normalize-request-alist ()
+  "An alist `emacs.request' frame normalizes to a request plist."
+  (let* ((frame '((jsonrpc . "2.0")
+                  (id . "req-abc")
+                  (method . "emacs.request")
+                  (params . ((request_id . "req-abc")
+                             (target . "emacs-pair")
+                             (instance_id . "emacs-30.1:pi:123:abcd1234")
+                             (method . "buffer.read")
+                             (params . ((buffer . "*scratch*")))
+                             (timeout_ms . 30000)))))
+         (request (hermes-capabilities--normalize-request frame)))
+    (should (equal (plist-get request :id) "req-abc"))
+    (should (equal (plist-get request :request-id) "req-abc"))
+    (should (equal (plist-get request :target) "emacs-pair"))
+    (should (equal (plist-get request :instance-id) "emacs-30.1:pi:123:abcd1234"))
+    (should (equal (plist-get request :method) "buffer.read"))
+    (should (equal (plist-get request :timeout-ms) 30000))
+    (should (equal (alist-get 'buffer (plist-get request :params)) "*scratch*"))))
+
+(ert-deftest hermes-capabilities-normalize-request-non-emacs-request-is-nil ()
+  "A frame whose method is not `emacs.request' does not normalize."
+  (should (null (hermes-capabilities--normalize-request
+                 '((method . "session.create"))))))
+
+
+;;;; Response writer tests
+
+(ert-deftest hermes-capabilities-result-response-shape ()
+  "A successful dispatch produces a JSON-RPC result frame with matching id."
+  (hermes-capabilities-test--with-clean-registry
+    (hermes-capabilities--register "buffer.current"
+      (lambda (_) "content-here"))
+    (let* ((request (list :id "req-xyz" :method "buffer.current" :params nil))
+           (frame (hermes-capabilities--response-for request)))
+      (should (equal (alist-get 'jsonrpc frame) "2.0"))
+      (should (equal (alist-get 'id frame) "req-xyz"))
+      (should (equal (alist-get 'ok (alist-get 'result frame)) t))
+      (should (equal (alist-get 'content (alist-get 'result frame))
+                     "content-here")))))
+
+(ert-deftest hermes-capabilities-error-response-shape ()
+  "An unknown method produces a JSON-RPC error frame with matching id."
+  (hermes-capabilities-test--with-clean-registry
+    (let* ((request (list :id "req-err" :method "ghost" :params nil))
+           (frame (hermes-capabilities--response-for request)))
+      (should (equal (alist-get 'jsonrpc frame) "2.0"))
+      (should (equal (alist-get 'id frame) "req-err"))
+      (should (equal (alist-get 'code (alist-get 'error frame)) -32601))
+      (should (string-match-p "ghost" (alist-get 'message (alist-get 'error frame))))
+      (should (equal (alist-get 'method
+                                (alist-get 'data (alist-get 'error frame)))
+                     "ghost")))))
+
+(ert-deftest hermes-capabilities-plist-to-alist ()
+  "Keyword plists convert to alists with bare symbol keys."
+  (should (equal (hermes-capabilities--plist-to-alist
+                  '(:ok t :content "hi" :method "buffer.read"))
+                 '((ok . t) (content . "hi") (method . "buffer.read")))))
+
+
+;;;; handle-message roundtrip test
+
+(ert-deftest hermes-capabilities-handle-message-roundtrip ()
+  "An inbound `emacs.request' produces a matching JSON-RPC response on the wire."
+  (hermes-capabilities-test--with-clean-registry
+    (hermes-capabilities--register "buffer.current"
+      (lambda (_) "the-buffer"))
+    (hermes-capabilities-test--with-mock-transport
+        (list :url "ws://x" :redacted-url "ws://x" :secrets nil)
+      (let ((provider (hermes-capabilities--provider-create
+                       :active t :socket 'fake-socket :buffer (current-buffer)
+                       :target "emacs-pair" :instance-id "inst-1"
+                       :display-name "PiHome" :role "pair")))
+        (hermes-capabilities--handle-message
+         provider
+         (json-serialize
+          '((jsonrpc . "2.0")
+            (id . "live-1")
+            (method . "emacs.request")
+            (params . ((request_id . "live-1")
+                       (target . "emacs-pair")
+                       (instance_id . "inst-1")
+                       (method . "buffer.current")
+                       (params . nil))))))
+        (should sent-frames)
+        (let* ((frame (json-parse-string (car sent-frames)
+                                         :object-type 'alist
+                                         :array-type 'list))
+               (result (alist-get 'result frame)))
+          (should (equal (alist-get 'id frame) "live-1"))
+          (should (equal (alist-get 'ok result) t))
+          (should (equal (alist-get 'content result) "the-buffer")))))))
+
+(ert-deftest hermes-capabilities-handle-message-unknown-method-sends-error ()
+  "An `emacs.request' for an unknown method sends a JSON-RPC error response."
+  (hermes-capabilities-test--with-clean-registry
+    (hermes-capabilities-test--with-mock-transport
+        (list :url "ws://x" :redacted-url "ws://x" :secrets nil)
+      (let ((provider (hermes-capabilities--provider-create
+                       :active t :socket 'fake-socket :buffer (current-buffer)
+                       :target "emacs-pair" :instance-id "inst-1"
+                       :display-name "PiHome" :role "pair")))
+        (hermes-capabilities--handle-message
+         provider
+         (json-serialize
+          '((jsonrpc . "2.0")
+            (id . "live-2")
+            (method . "emacs.request")
+            (params . ((method . "ghost"))))))
+        (should sent-frames)
+        (let* ((frame (json-parse-string (car sent-frames)
+                                         :object-type 'alist
+                                         :array-type 'list))
+               (error (alist-get 'error frame)))
+          (should (equal (alist-get 'id frame) "live-2"))
+          (should (equal (alist-get 'code error) -32601)))))))
+
+
+;;;; Registration-on-ready with mocked transport
+
+(ert-deftest hermes-capabilities-default-target-is-public-and-portable ()
+  "A clean install identifies its capability pair with a generic target."
+  (should (equal hermes-capabilities-target "emacs-pair")))
+
+(ert-deftest hermes-capabilities-register-on-ready ()
+  "A `gateway.ready' event triggers an `emacs.register' request on the socket."
+  (hermes-capabilities-test--with-clean-registry
+    (hermes-capabilities--register "buffer.list" (lambda (_) "ok"))
+    (hermes-capabilities-test--with-mock-transport
+        (list :url "ws://127.0.0.1:9119/api/ws?token=x"
+              :redacted-url "ws://127.0.0.1:9119/api/ws?token=<redacted>"
+              :secrets '("x"))
+      (let ((provider (hermes-capabilities--provider-create
+                       :active t
+                       :buffer (current-buffer)
+                       :target "emacs-pair"
+                       :instance-id "inst-1"
+                       :display-name "PiHome"
+                       :role 'pair)))
+        (hermes-capabilities--connect provider)
+        ;; Simulate gateway.ready arriving on the socket.
+        (funcall on-msg
+                 (json-serialize
+                  '((jsonrpc . "2.0")
+                    (method . "event")
+                    (params . ((type . "gateway.ready"))))))
+        ;; The registration frame should now have been sent.
+        (should sent-frames)
+        (let* ((frame (json-parse-string (car sent-frames)
+                                         :object-type 'alist
+                                         :array-type 'list)))
+          (should (equal (alist-get 'method frame) "emacs.register"))
+          (let ((params (alist-get 'params frame)))
+            (should (equal (alist-get 'target params) "emacs-pair"))
+            (should (equal (alist-get 'instance_id params) "inst-1"))
+            (should (seq-contains-p (alist-get 'capabilities params) "buffer.list"))))))))
+
+(ert-deftest hermes-capabilities-reregister-on-reconnect ()
+  "A second `gateway.ready' after reconnect re-registers with a fresh seq."
+  (hermes-capabilities-test--with-clean-registry
+    (hermes-capabilities--register "buffer.list" (lambda (_) "ok"))
+    (hermes-capabilities-test--with-mock-transport
+        (list :url "ws://x" :redacted-url "ws://x" :secrets nil)
+      (let ((provider (hermes-capabilities--provider-create
+                       :active t
+                       :buffer (current-buffer)
+                       :target "emacs-pair"
+                       :instance-id "inst-1"
+                       :display-name "PiHome"
+                       :role 'pair))
+            sent-ids)
+        (setq hermes-capabilities--send-function
+              (lambda (_socket text)
+                (let ((frame (json-parse-string text
+                                                :object-type 'alist
+                                                :array-type 'list)))
+                  (when (equal (alist-get 'method frame) "emacs.register")
+                    (push (alist-get 'id frame) sent-ids)))))
+        (hermes-capabilities--connect provider)
+        (funcall on-msg
+                 (json-serialize
+                  '((jsonrpc . "2.0")
+                    (method . "event")
+                    (params . ((type . "gateway.ready"))))))
+        (funcall on-msg
+                 (json-serialize
+                  '((jsonrpc . "2.0")
+                    (method . "event")
+                    (params . ((type . "gateway.ready"))))))
+        (should (= (length sent-ids) 2))
+        (should (not (equal (nth 0 sent-ids) (nth 1 sent-ids))))))))
+
+(ert-deftest hermes-capabilities-late-close-keeps-current-socket ()
+  "A replaced socket's close callback must not tear down its successor."
+  (let* ((callbacks nil)
+         (sockets '(socket-a socket-b))
+         (reconnects 0)
+         (hermes-capabilities--url-function
+         (lambda (&rest _args)
+           (hermes--promise-resolved
+            (list :url "ws://x" :redacted-url "ws://x" :secrets nil))))
+         (hermes-capabilities--open-function
+         (cl-function
+          (lambda (_url _redacted _secrets &key on-close &allow-other-keys)
+            (let ((socket (pop sockets)))
+              (setq callbacks (append callbacks (list on-close)))
+              socket)))))
+    (let ((provider (hermes-capabilities--provider-create
+                     :active t :buffer (current-buffer))))
+      (cl-letf (((symbol-function 'hermes-capabilities--reconnect)
+                 (lambda (_provider) (cl-incf reconnects))))
+        (hermes-capabilities--connect provider)
+        (hermes-capabilities--connect provider)
+        (should (eq (hermes-capabilities--provider-socket provider) 'socket-b))
+        (funcall (car callbacks))
+        (should (eq (hermes-capabilities--provider-socket provider) 'socket-b))
+        (should (zerop reconnects))))))
+
+(ert-deftest hermes-capabilities-down-retires-callbacks-during-backoff ()
+  "Retired socket callbacks cannot dispatch during backoff or touch a successor."
+  (let* ((provider (hermes-capabilities--provider-create
+                    :buffer (current-buffer)))
+         callbacks closed scheduled
+         (dispatches 0)
+         (hermes-capabilities--url-function
+          (lambda () (hermes--promise-resolved '(:url "ws://example.test"))))
+         (hermes-capabilities--open-function
+          (lambda (_url _redacted _secrets &rest handlers)
+            (push handlers callbacks)
+            (if (cdr callbacks) 'socket-b 'socket-a))))
+    (cl-letf (((symbol-function 'run-at-time)
+               (lambda (&rest args) (push args scheduled) 'retry-timer))
+              ((symbol-function 'websocket-close)
+               (lambda (socket)
+                 (push socket closed)
+                 (should-not (hermes-capabilities--provider-socket provider))
+                 ;; websocket.el can deliver close inline during retirement.
+                 (funcall (plist-get (car callbacks) :on-close))))
+              ((symbol-function 'hermes-capabilities--handle-message)
+               (lambda (&rest _) (cl-incf dispatches))))
+      (hermes-capabilities--connect provider)
+      (let ((old (car callbacks))
+            (generation (hermes-capabilities--provider-generation provider)))
+        (funcall (plist-get old :on-error) "Disconnected")
+        (should (> (hermes-capabilities--provider-generation provider) generation))
+        (should (equal closed '(socket-a)))
+        (should (= (length scheduled) 1))
+        (dolist (phase '(backoff successor))
+          (when (eq phase 'successor)
+            (hermes-capabilities--do-reconnect provider))
+          (let ((current-generation
+                 (hermes-capabilities--provider-generation provider))
+                (backoff (hermes-capabilities--provider-backoff provider)))
+            ;; Exercise stale request ingress as well as terminal callbacks.
+            (funcall (plist-get old :on-message) "{}")
+            (funcall (plist-get old :on-error) "Late error")
+            (funcall (plist-get old :on-close))
+            (should (= dispatches 0))
+            (should (= current-generation
+                       (hermes-capabilities--provider-generation provider)))
+            (should (= backoff (hermes-capabilities--provider-backoff provider)))
+            (should (= (length scheduled) 1))
+            (should (equal closed '(socket-a)))))
+        (should (eq (hermes-capabilities--provider-socket provider) 'socket-b))
+        (funcall (plist-get (car callbacks) :on-message) "{}")
+        (should (= dispatches 1))))))
+
+(ert-deftest hermes-capabilities-inline-open-down-does-not-publish-socket ()
+  "A socket returned after an inline down callback is closed, never published."
+  (dolist (event '(:on-error :on-close))
+    (let* ((provider (hermes-capabilities--provider-create
+                      :buffer (current-buffer)))
+           handlers closed scheduled
+           (hermes-capabilities--url-function
+            (lambda () (hermes--promise-resolved '(:url "ws://example.test"))))
+           (hermes-capabilities--open-function
+            (lambda (_url _redacted _secrets &rest callbacks)
+              (setq handlers callbacks)
+              (if (eq event :on-error)
+                  (funcall (plist-get callbacks event) "Inline failure")
+                (funcall (plist-get callbacks event)))
+              'failed-socket)))
+      (cl-letf (((symbol-function 'run-at-time)
+                 (lambda (&rest args) (push args scheduled) 'retry-timer))
+                ((symbol-function 'websocket-close)
+                 (lambda (socket)
+                   (push socket closed)
+                   (funcall (plist-get handlers :on-close)))))
+        (hermes-capabilities--connect provider)
+        (should-not (hermes-capabilities--provider-socket provider))
+        (should (equal closed '(failed-socket)))
+        (should (= (length scheduled) 1))
+        (should (eq (hermes-capabilities--provider-reconnect-timer provider)
+                    'retry-timer))))))
+
+(ert-deftest hermes-capabilities-deferred-auth-publishes-exact-socket ()
+  "Deferred authentication passes its exact values to the current socket opener."
+  (let* ((provider (hermes-capabilities--provider-create
+                    :buffer (current-buffer)))
+         (auth (hermes--promise-make))
+         (resolved '(:url "ws://example.test/api/ws?token=test-token"
+                     :redacted-url "ws://example.test/api/ws?token=<redacted>"
+                     :secrets ("test-token")))
+         received
+         (hermes-capabilities--url-function (lambda () auth))
+         (hermes-capabilities--open-function
+          (lambda (url redacted secrets &rest _handlers)
+            (setq received (list url redacted secrets))
+            'current-socket)))
+    (hermes-capabilities--connect provider)
+    (should-not received)
+    (should-not (hermes-capabilities--provider-socket provider))
+    (hermes--promise-resolve auth resolved)
+    (should (equal received (list (plist-get resolved :url)
+                                 (plist-get resolved :redacted-url)
+                                 (plist-get resolved :secrets))))
+    (should (eq (hermes-capabilities--provider-socket provider) 'current-socket))
+    (should (hermes-capabilities--provider-active provider))
+    (should-not (hermes-capabilities--provider-reconnect-timer provider))))
+
+(ert-deftest hermes-capabilities-returned-socket-respects-reentrant-retirement ()
+  "A socket returned after replacement or teardown closes without new effects."
+  (dolist (invalidation '(replacement teardown))
+    (let* ((provider (hermes-capabilities--provider-create
+                      :buffer (current-buffer)))
+           (opens 0)
+           old-handlers closed retries
+           (hermes-capabilities--url-function
+            (lambda () (hermes--promise-resolved '(:url "ws://example.test"))))
+           (hermes-capabilities--open-function
+            (lambda (_url _redacted _secrets &rest handlers)
+              (if (> (cl-incf opens) 1)
+                  'successor-socket
+                (setq old-handlers handlers)
+                (if (eq invalidation 'replacement)
+                    (hermes-capabilities--connect provider)
+                  (hermes-capabilities--teardown provider))
+                'retired-socket))))
+      (cl-letf (((symbol-function 'websocket-close)
+                 (lambda (socket)
+                   (push socket closed)
+                   (funcall (plist-get old-handlers :on-close))))
+                ((symbol-function 'hermes-capabilities--reconnect)
+                 (lambda (owner) (push owner retries))))
+        (hermes-capabilities--connect provider)
+        (should (equal closed '(retired-socket)))
+        (should-not retries)
+        (should-not (hermes-capabilities--provider-reconnect-timer provider))
+        (if (eq invalidation 'replacement)
+            (progn
+              (should (= opens 2))
+              (should (hermes-capabilities--provider-active provider))
+              (should (eq (hermes-capabilities--provider-socket provider)
+                          'successor-socket)))
+          (should (= opens 1))
+          (should-not (hermes-capabilities--provider-active provider))
+          (should-not (hermes-capabilities--provider-socket provider)))))))
+
+(ert-deftest hermes-capabilities-deferred-connect-failure-retries ()
+  "Deferred auth and socket-open failures retry with capped backoff."
+  (dolist (failure '(auth open))
+    (let* ((provider (hermes-capabilities--provider-create
+                      :buffer (current-buffer)))
+           (hermes-capabilities-backoff-base 1)
+           (hermes-capabilities-backoff-max 3)
+           (opens 0)
+           auth scheduled
+           (hermes-capabilities--url-function
+            (lambda (&rest _) (setq auth (hermes--promise-make))))
+           (hermes-capabilities--open-function
+            (lambda (&rest _) (cl-incf opens) (error "Open failed"))))
+      (cl-letf (((symbol-function 'run-at-time)
+                 (lambda (delay repeat function &rest args)
+                   (push (list delay repeat function args) scheduled)
+                   'retry-timer)))
+        (hermes-capabilities--connect provider)
+        (dolist (delay '(1 2 3 3))
+          ;; Resolve only after connect returned: its setup stack is gone.
+          (should (eq (hermes--promise-state auth) 'pending))
+          (if (eq failure 'auth)
+              (hermes--promise-reject auth "Auth failed")
+            (hermes--promise-resolve auth '(:url "ws://example.test")))
+          (should (hermes-capabilities--provider-active provider))
+          (should-not (hermes-capabilities--provider-socket provider))
+          (should (eq (hermes-capabilities--provider-reconnect-timer provider)
+                      'retry-timer))
+          (should (= (length scheduled) 1))
+          (pcase-let ((`(,actual ,repeat ,function ,args) (pop scheduled)))
+            (should (= actual delay))
+            (should-not repeat)
+            (apply function args)))
+        (should (= opens (if (eq failure 'open) 4 0)))))))
+
+(ert-deftest hermes-capabilities-deferred-failure-respects-owner ()
+  "Late auth and reentrant open failures cannot retry obsolete owners."
+  (dolist (boundary '(auth-success auth-failure open-failure))
+    (dolist (invalidation '(replacement teardown))
+      (let* ((provider (hermes-capabilities--provider-create
+                        :buffer (current-buffer)))
+             (opens 0)
+             auth timers
+             (hermes-capabilities--url-function
+              (lambda (&rest _) (setq auth (hermes--promise-make)))))
+        (cl-labels ((invalidate ()
+                     (if (eq invalidation 'teardown)
+                         (hermes-capabilities--teardown provider)
+                       (hermes-capabilities--connect provider))))
+          (let ((hermes-capabilities--open-function
+                 (lambda (&rest _)
+                   (cl-incf opens)
+                   (invalidate)
+                   (error "Obsolete open failed"))))
+            (cl-letf (((symbol-function 'run-at-time)
+                       (lambda (&rest args) (push args timers) 'retry-timer)))
+              (hermes-capabilities--connect provider)
+              (let ((old-auth auth))
+                (unless (eq boundary 'open-failure) (invalidate))
+                (if (eq boundary 'auth-failure)
+                    (hermes--promise-reject old-auth "Obsolete auth failed")
+                  (hermes--promise-resolve
+                   old-auth '(:url "ws://example.test"))))
+              (should (= opens (if (eq boundary 'open-failure) 1 0)))
+              (should-not timers)
+              (should-not (hermes-capabilities--provider-reconnect-timer provider))
+              (should-not (hermes-capabilities--provider-socket provider))
+              (if (eq invalidation 'replacement)
+                  (progn
+                    (should (hermes-capabilities--provider-active provider))
+                    (should (eq (hermes--promise-state auth) 'pending)))
+                (should-not (hermes-capabilities--provider-active provider))))))))))
+
+(ert-deftest hermes-capabilities-connect-uses-owner-instance-url ()
+  "Connect resolves the owner buffer's instance URL, not the current buffer's."
+  (let ((owner (generate-new-buffer " hermes-cap-owner"))
+        (other (generate-new-buffer " hermes-cap-current"))
+        (remote '("remote" . "https://hermes.example.test"))
+        (local '("local" . "http://127.0.0.1:9119"))
+        (hermes-instances
+         '(("local" . "http://127.0.0.1:9119")
+           ("remote" . "https://hermes.example.test")))
+        (hermes-dashboard-transport-url "http://127.0.0.1:9119")
+        seen-url
+        provider)
+    (unwind-protect
+        (cl-letf (((symbol-function 'hermes-capabilities--reconnect) #'ignore))
+          (with-current-buffer owner
+            (setq hermes-instance remote))
+          (with-current-buffer other
+            (setq hermes-instance local)
+            (let ((hermes-capabilities--url-function
+                   (lambda (&rest _)
+                     (setq seen-url hermes-dashboard-transport-url)
+                     (hermes--promise-rejected "stop"))))
+              (setq provider
+                    (hermes-capabilities--provider-create
+                     :active t :buffer owner :target "emacs-pair"))
+              (hermes-capabilities--connect provider)))
+          (should (equal seen-url (hermes-instance-url remote)))
+          (should-not (hermes-capabilities--provider-reconnect-timer provider))
+          (should-not
+           (cl-find-if (lambda (timer)
+                         (eq (timer--function timer)
+                             #'hermes-capabilities--do-reconnect))
+                       timer-list)))
+      (when (buffer-live-p owner) (kill-buffer owner))
+      (when (buffer-live-p other) (kill-buffer other)))))
+
+(ert-deftest hermes-capabilities-method-not-found-graceful ()
+  "A `method not found' registration rejection deactivates the provider."
+  (hermes-capabilities-test--with-clean-registry
+    (hermes-capabilities-test--with-mock-transport
+        (list :url "ws://x" :redacted-url "ws://x" :secrets nil)
+      (let ((provider (hermes-capabilities--provider-create
+                       :active t
+                       :buffer (current-buffer)
+                       :target "emacs-pair"
+                       :instance-id "inst-1"
+                       :display-name "PiHome"
+                       :role 'pair)))
+        (hermes-capabilities--connect provider)
+        (funcall on-msg
+                 (json-serialize
+                  '((jsonrpc . "2.0")
+                    (method . "event")
+                    (params . ((type . "gateway.ready"))))))
+        (let ((reg-id (hermes-capabilities--pending-request-id provider)))
+          (funcall on-msg
+                   (json-serialize
+                    `((jsonrpc . "2.0")
+                      (id . ,reg-id)
+                      (error . ((code . -32601)
+                                (message . "method not found"))))))
+          (should (null (hermes-capabilities--provider-active provider))))))))
+
+(defun hermes-capabilities-test--await (predicate)
+  "Pump disposable socket events until PREDICATE succeeds, at most two seconds."
+  (let ((deadline (+ (float-time) 2)))
+    (while (and (not (funcall predicate)) (< (float-time) deadline))
+      (accept-process-output nil 0.01))
+    (should (funcall predicate))))
+
+(ert-deftest hermes-capabilities-numeric-rejection-closes-real-socket ()
+  "Released and localized -32601 replies close the provider without retrying."
+  (require 'websocket)
+  (dolist (text '("unknown method: emacs.register" "Μη διαθέσιμη μέθοδος"))
+    (with-temp-buffer
+      (let ((provider (hermes-capabilities--provider-create
+                       :buffer (current-buffer) :target "test"
+                       :instance-id "test" :display-name "Test" :role 'pair))
+            server peer socket registration)
+        (unwind-protect
+            (progn
+              (setq server
+                    (websocket-server
+                     0 :host "127.0.0.1"
+                     :on-open (lambda (ws)
+                                (setq peer ws)
+                                (websocket-send-text
+                                 ws "{\"method\":\"event\",\"params\":{\"type\":\"gateway.ready\"}}"))
+                     :on-message
+                     (lambda (ws frame)
+                       (setq registration (json-parse-string
+                                           (websocket-frame-payload frame)
+                                           :object-type 'alist))
+                       (websocket-send-text
+                        ws (json-serialize
+                            `((jsonrpc . "2.0")
+                              (id . ,(alist-get 'id registration))
+                              (error . ((code . -32601) (message . ,text)))))))))
+              (let* ((url (format "ws://127.0.0.1:%d"
+                                  (process-contact server :service)))
+                     (hermes-capabilities--url-function
+                      (lambda (&rest _)
+                        (hermes--promise-resolved
+                         (list :url url :redacted-url url :secrets nil)))))
+                (hermes-capabilities--connect provider))
+              (setq socket (hermes-capabilities--provider-socket provider))
+              (hermes-capabilities-test--await
+               (lambda () (not (hermes-capabilities--provider-active provider))))
+              (should (equal (alist-get 'method registration) "emacs.register"))
+              (should-not (hermes-capabilities--provider-socket provider))
+              (should-not (websocket-openp socket))
+              (hermes-capabilities-test--await
+               (lambda () (and peer (not (websocket-openp peer)))))
+              (should-not (hermes-capabilities--provider-reconnect-timer provider)))
+          (hermes-capabilities--teardown provider)
+          (when server (websocket-server-close server)))))))
+
+(ert-deftest hermes-capabilities-other-error-not-unsupported ()
+  "Error codes, not incidental diagnostic words, determine unsupported methods."
+  (let ((provider (hermes-capabilities--provider-create)))
+    (dolist (text '("permission denied" "method not found" "error mentioning -32601"))
+      (hermes-capabilities--handle-registration-response
+       provider `((error . ((code . -32000) (message . ,text)))))
+      (should (hermes-capabilities--provider-active provider)))))
+
+(ert-deftest hermes-capabilities-no-session-on-shared-client ()
+  "The provider struct carries no session identity slots.
+This pins the architectural decision that the dedicated capability connection
+never stores session id on the shared chat client.  The struct fields are
+checked to exclude session-id-bearing slots."
+  (let* ((provider (hermes-capabilities--provider-create))
+         (slots (mapcar #'car (cl-struct-slot-info 'hermes-capabilities--provider))))
+    (dolist (slot slots)
+      (should-not (string-match-p (rx "session") (symbol-name slot))))
+    ;; The required transport fields are present.
+    (should (memq 'socket slots))
+    (should (memq 'target slots))
+    (should (memq 'instance-id slots))
+    (should (memq 'active slots))))
+
+
+;;;; Registration params test
+
+(ert-deftest hermes-capabilities-registration-params-shape ()
+  "Registration params include target, instance, capabilities, and client info."
+  (hermes-capabilities-test--with-clean-registry
+    (hermes-capabilities--register "buffer.list" (lambda (_) "ok"))
+    (hermes-capabilities--register "buffer.current" (lambda (_) "ok"))
+    (let ((params (hermes-capabilities--registration-params
+                   "emacs-pair" "inst-1" "PiHome" 'pair)))
+      (should (equal (alist-get 'target params) "emacs-pair"))
+      (should (equal (alist-get 'instance_id params) "inst-1"))
+      (should (equal (alist-get 'display_name params) "PiHome"))
+      (should (equal (alist-get 'role params) "pair"))
+      (should (seq-contains-p (alist-get 'capabilities params) "buffer.list"))
+      (should (seq-contains-p (alist-get 'capabilities params) "buffer.current"))
+      (let ((client (alist-get 'client params)))
+        (should (equal (alist-get 'name client) "emacs-hermes"))))))
+
+(ert-deftest hermes-capabilities-instance-id-is-volatile ()
+  "Two calls with different fingerprints produce distinct instance ids."
+  (let ((a (hermes-capabilities--instance-id "emacs-pair")))
+    (should (string-match-p
+             (rx "emacs-" (+ nonl) ":" (+ nonl) ":" (+ digit) ":" (+ hex))
+             a))))
+
+
+
+;;;; C5 read-only method tests
+
+(defmacro hermes-capabilities-test--with-temp-buffer (name content &rest body)
+  "Run BODY with a temp buffer named NAME holding CONTENT, then kill it."
+  (declare (indent 2))
+  (let ((buf (make-symbol "buf")))
+    `(let ((,buf (generate-new-buffer ,name)))
+       (with-current-buffer ,buf
+         (insert ,content))
+       (unwind-protect
+           (progn ,@body)
+         (when (buffer-live-p ,buf)
+           (kill-buffer ,buf))))))
+
+(ert-deftest hermes-capabilities-c5-methods-registered ()
+  "The default registry advertises all five C5 read-only methods."
+  (dolist (m '("buffer.list" "buffer.current" "project.current"
+               "buffer.read" "capabilities.list"))
+    (should (hermes-capabilities--lookup m))))
+
+(ert-deftest hermes-capabilities-json-bool ()
+  "Truthiness maps to JSON true; nil maps to the :false keyword."
+  (should (eq (hermes-capabilities--json-bool t) t))
+  (should (eq (hermes-capabilities--json-bool nil) :false)))
+
+(ert-deftest hermes-capabilities-listable-buffer-p-filters-internal ()
+  "Space-prefixed and empty names are not listable."
+  (should (hermes-capabilities--listable-buffer-p "*scratch*"))
+  (should-not (hermes-capabilities--listable-buffer-p " *temp*"))
+  (should-not (hermes-capabilities--listable-buffer-p "")))
+
+(ert-deftest hermes-capabilities-remote-path-p ()
+  "TRAMP-style paths are detected as remote; local paths are not."
+  (should (hermes-capabilities--remote-path-p "/ssh:host:/tmp/x"))
+  (should-not (hermes-capabilities--remote-path-p "/tmp/x"))
+  (should-not (hermes-capabilities--remote-path-p nil)))
+
+(ert-deftest hermes-capabilities-buffer-list-basic ()
+  "`buffer.list' includes known live buffers and reports count/total."
+  (hermes-capabilities-test--with-temp-buffer "cap-test-list-1" "hi"
+    (hermes-capabilities-test--with-temp-buffer "cap-test-list-2" "there"
+      (let ((res (hermes-capabilities--handle-buffer-list nil)))
+        (let ((names (mapcar (lambda (e) (alist-get 'name e))
+                             (append (alist-get 'buffers res) nil))))
+          (should (member "cap-test-list-1" names))
+          (should (member "cap-test-list-2" names)))
+        (should (>= (alist-get 'count res) 2))
+        (should (>= (alist-get 'total res) 2))))))
+
+(ert-deftest hermes-capabilities-buffer-list-truncation ()
+  "`buffer.list' caps the entries and reports truncation when over the limit."
+  (let ((hermes-capabilities-buffer-list-max 1))
+    (hermes-capabilities-test--with-temp-buffer " cap-trunc-a" "a"
+      (hermes-capabilities-test--with-temp-buffer " cap-trunc-b" "b"
+        (let ((res (hermes-capabilities--handle-buffer-list nil)))
+          (should (= (alist-get 'count res) 1))
+          (should (> (alist-get 'total res) 1))
+          (should (eq (alist-get 'truncated res) t)))))))
+
+(ert-deftest hermes-capabilities-buffer-list-filters-internal ()
+  "`buffer.list' excludes internal (space-prefixed) buffers."
+  (hermes-capabilities-test--with-temp-buffer " cap-internal-filter" "x"
+    (let ((res (hermes-capabilities--handle-buffer-list nil)))
+      (let ((names (mapcar (lambda (e) (alist-get 'name e))
+                           (append (alist-get 'buffers res) nil))))
+        (should-not (member " cap-internal-filter" names))))))
+
+(ert-deftest hermes-capabilities-buffer-current-shape ()
+  "`buffer.current' returns the entry of the selected window's buffer."
+  (let ((name "cap-test-current"))
+    (hermes-capabilities-test--with-temp-buffer name "content"
+      (save-window-excursion
+        (set-window-buffer (selected-window) (get-buffer name))
+        (let ((res (hermes-capabilities--handle-buffer-current nil)))
+          (should (equal (alist-get 'name res) name))
+          (should (stringp (alist-get 'mode res)))
+          (should (integerp (alist-get 'point res))))))))
+
+(ert-deftest hermes-capabilities-project-current-without-project ()
+  "`project-entry' returns nulls for a nil project (no active project)."
+  (let ((res (hermes-capabilities--project-entry nil)))
+    (should (eq (alist-get 'root res) :null))
+    (should (eq (alist-get 'name res) :null))))
+
+(ert-deftest hermes-capabilities-project-entry-shape ()
+  "A non-nil project yields an absolute root and a name basename."
+  (let ((root (expand-file-name "proj/" temporary-file-directory)))
+    (cl-letf* ((fake-project (vector 'project root))
+               ((symbol-function 'project-root)
+                (lambda (_p) root)))
+      (let ((res (hermes-capabilities--project-entry fake-project)))
+        (should (equal (alist-get 'root res) root))
+        (should (equal (alist-get 'name res) "proj"))))))
+
+(ert-deftest hermes-capabilities-buffer-read-full ()
+  "`buffer.read' returns the full content of a small buffer."
+  (hermes-capabilities-test--with-temp-buffer " cap-read-full" "alpha\nbeta\n"
+    (let ((res (hermes-capabilities--handle-buffer-read
+                `((buffer . " cap-read-full")))))
+      (should (equal (alist-get 'ok res) t))
+      (should (equal (alist-get 'content res) "alpha\nbeta\n"))
+      (let ((metadata (alist-get 'metadata res)))
+        (should (eq (alist-get 'truncated metadata) :false))))))
+
+(ert-deftest hermes-capabilities-buffer-read-narrowed-whole-buffer ()
+  "Default and explicit reads use absolute lines, preserving editor state."
+  (with-temp-buffer
+    (insert "one\ntwo\nthree\nfour")
+    (goto-char (point-min))
+    (forward-line 2)
+    (narrow-to-region (point) (point-max))
+    (forward-char 2)
+    (let ((before (list (point) (point-min) (point-max))))
+      (dolist (case '((nil "one\ntwo\nthree\nfour" 1 4 4 :false)
+                      (((start_line . 3) (end_line . 4)) "three\nfour" 3 4 2 :false)
+                      (((start . 9)) "" 9 8 0 :false)))
+        (let* ((res (hermes-capabilities--handle-buffer-read
+                     (cons (cons 'buffer (buffer-name)) (car case))))
+               (meta (alist-get 'metadata res)))
+          (should (equal (alist-get 'content res) (nth 1 case)))
+          (should (= (alist-get 'total_lines meta) 4))
+          (should (= (alist-get 'start_line meta) (nth 2 case)))
+          (should (= (alist-get 'end_line meta) (nth 3 case)))
+          (should (= (alist-get 'line_count meta) (nth 4 case)))
+          (should (eq (alist-get 'truncated meta) (nth 5 case)))
+          (should (equal before (list (point) (point-min) (point-max))))))
+      (let* ((hermes-capabilities-buffer-read-max-lines 2)
+             (res (hermes-capabilities--handle-buffer-read
+                   `((buffer . ,(buffer-name)))))
+             (meta (alist-get 'metadata res)))
+        (should (equal (alist-get 'content res) "one\ntwo"))
+        (should (= (alist-get 'total_lines meta) 4))
+        (should (eq (alist-get 'truncated meta) t))
+        (should (equal before (list (point) (point-min) (point-max))))))))
+
+(ert-deftest hermes-capabilities-buffer-read-empty-and-final-newline ()
+  "Empty buffers and final empty lines keep Emacs absolute-line semantics."
+  (dolist (case '(("" 1) ("one\ntwo" 2) ("one\ntwo\n" 3)))
+    (with-temp-buffer
+      (insert (car case))
+      ;; Even a zero-width restriction does not change the read coordinates.
+      (narrow-to-region (point-max) (point-max))
+      (let* ((before (list (point) (point-min) (point-max)))
+             (res (hermes-capabilities--handle-buffer-read
+                   `((buffer . ,(buffer-name)))))
+             (meta (alist-get 'metadata res)))
+        (should (equal (alist-get 'content res) (car case)))
+        (should (= (alist-get 'total_lines meta) (cadr case)))
+        (should (= (alist-get 'line_count meta) (cadr case)))
+        (should (= (alist-get 'end_line meta) (cadr case)))
+        (should (eq (alist-get 'truncated meta) :false))
+        (should (equal before (list (point) (point-min) (point-max))))))))
+
+(ert-deftest hermes-capabilities-buffer-read-line-range ()
+  "`buffer.read' honors start_line/end_line aliases."
+  (hermes-capabilities-test--with-temp-buffer " cap-read-range"
+      "one\ntwo\nthree\nfour\n"
+    (let ((res (hermes-capabilities--handle-buffer-read
+                `((buffer . " cap-read-range")
+                  (start_line . 2) (end_line . 3)))))
+      (should (equal (alist-get 'content res) "two\nthree"))
+      (let ((metadata (alist-get 'metadata res)))
+        (should (= (alist-get 'start_line metadata) 2))
+        (should (= (alist-get 'end_line metadata) 3))))))
+
+(ert-deftest hermes-capabilities-buffer-read-honors-start-end ()
+  "`buffer.read' honors the roadmap §2.2 `start'/`end' wire names."
+  (hermes-capabilities-test--with-temp-buffer " cap-read-se"
+      "one\ntwo\nthree\nfour\n"
+    (let ((res (hermes-capabilities--handle-buffer-read
+                `((buffer . " cap-read-se")
+                  (start . 2) (end . 3)))))
+      (should (equal (alist-get 'content res) "two\nthree"))
+      (let ((metadata (alist-get 'metadata res)))
+        (should (= (alist-get 'start_line metadata) 2))
+        (should (= (alist-get 'end_line metadata) 3))))))
+
+(ert-deftest hermes-capabilities-buffer-read-start-preferred-over-alias ()
+  "`start'/`end' take precedence over `start_line'/`end_line'."
+  (hermes-capabilities-test--with-temp-buffer " cap-read-pref"
+      "a\nb\nc\nd\n"
+    (let ((res (hermes-capabilities--handle-buffer-read
+                `((buffer . " cap-read-pref")
+                  (start . 2) (end . 2)
+                  (start_line . 1) (end_line . 4)))))
+      (should (equal (alist-get 'content res) "b"))
+      (let ((metadata (alist-get 'metadata res)))
+        (should (= (alist-get 'start_line metadata) 2))
+        (should (= (alist-get 'end_line metadata) 2))))))
+
+(ert-deftest hermes-capabilities-buffer-read-truncated-by-line-cap ()
+  "`buffer.read' caps the returned line range and reports truncation."
+  (hermes-capabilities-test--with-temp-buffer "cap-test-read-linecap"
+      "l1\nl2\nl3\nl4\nl5\n"
+    (let ((hermes-capabilities-buffer-read-max-lines 2))
+      (let ((res (hermes-capabilities--handle-buffer-read
+                  `((buffer . "cap-test-read-linecap") (end . 5)))))
+        (let ((metadata (alist-get 'metadata res)))
+          ;; Requested end 5 is capped to 2 by the line cap.
+          (should (= (alist-get 'end_line metadata) 2))
+          (should (< (alist-get 'end_line metadata) 5))
+          (should (eq (alist-get 'truncated metadata) t)))))))
+
+(ert-deftest hermes-capabilities-buffer-read-start-beyond-end ()
+  "`buffer.read' returns empty content when start exceeds total lines."
+  (hermes-capabilities-test--with-temp-buffer "cap-test-read-beyond" "only\n"
+    (let ((res (hermes-capabilities--handle-buffer-read
+                `((buffer . "cap-test-read-beyond") (start . 99)))))
+      (should (equal (alist-get 'content res) ""))
+      (let ((metadata (alist-get 'metadata res)))
+        (should (eq (alist-get 'truncated metadata) :false))
+        (should (= (alist-get 'total_lines metadata) 2))))))
+
+(ert-deftest hermes-capabilities-buffer-read-truncated-by-char-cap ()
+  "`buffer.read' caps content length and reports truncation."
+  (hermes-capabilities-test--with-temp-buffer " cap-read-charcap"
+      (make-string 100 ?x)
+    (let ((hermes-capabilities-buffer-read-max-chars 10))
+      (let ((res (hermes-capabilities--handle-buffer-read
+                  `((buffer . " cap-read-charcap")))))
+        (should (= (length (alist-get 'content res)) 10))
+        (let ((metadata (alist-get 'metadata res)))
+          (should (eq (alist-get 'truncated metadata) t)))))))
+
+(defun hermes-capabilities-test--read-frame (params)
+  "Return the serialized provider response to a `buffer.read' with PARAMS."
+  (let* (frames
+         (provider (hermes-capabilities--provider-create
+                    :active t :socket 'test-socket :buffer (current-buffer)))
+         (hermes-capabilities--send-function
+          (lambda (_socket text)
+            (push (json-parse-string text :object-type 'alist
+                                     :false-object :false)
+                  frames))))
+    (hermes-capabilities--handle-message
+     provider (json-serialize
+               `((jsonrpc . "2.0") (id . "bounded-read")
+                 (method . "emacs.request")
+                 (params . ((method . "buffer.read") (params . ,params))))))
+    (should (= (length frames) 1))
+    (should (equal (alist-get 'id (car frames)) "bounded-read"))
+    (car frames)))
+
+(ert-deftest hermes-capabilities-buffer-read-bounds-extraction ()
+  "The registered provider extracts only the cap from a multi-megabyte line."
+  (with-temp-buffer
+    (insert (make-string 4000000 ?λ))
+    (dolist (cap '(20000 nil))
+      (let* ((hermes-capabilities-buffer-read-max-chars cap)
+             (source (current-buffer))
+             (native-substring (symbol-function 'buffer-substring-no-properties))
+             (expected-length (or cap 4000000))
+             lengths frame)
+        (cl-letf (((symbol-function 'buffer-substring-no-properties)
+                   (lambda (beg end)
+                     (when (eq source (current-buffer))
+                       (push (abs (- end beg)) lengths))
+                     (funcall native-substring beg end))))
+          (setq frame (hermes-capabilities-test--read-frame
+                       `((buffer . ,(buffer-name))))))
+        (should (equal lengths (list expected-length)))
+        (should (equal (alist-get 'result frame)
+                       `((ok . t) (content . ,(make-string expected-length ?λ))
+                         (metadata . ((buffer . ,(buffer-name))
+                                      (truncated . ,(if cap t :false))
+                                      (line_count . 1) (total_lines . 1)
+                                      (start_line . 1) (end_line . 1))))))))))
+
+(ert-deftest hermes-capabilities-buffer-read-preserves-capped-envelope ()
+  "Character bounds preserve literal text, line metadata and editor state."
+  ;; TEXT CHAR-CAP LINE-CAP PARAMS CONTENT START END TOTAL TRUNCATED.
+  (dolist (case '(("ab" 3 1000 nil "ab" 1 1 1 :false)
+                  ("abc" 3 1000 nil "abc" 1 1 1 :false)
+                  ("abcd" 3 1000 nil "abc" 1 1 1 t)
+                  ("αλ😀z" 3 1000 nil "αλ😀" 1 1 1 t)
+                  ("αλ😀z" nil 1000 nil "αλ😀z" 1 1 1 :false)
+                  ("abc" 0 1000 nil "" 1 1 1 t)
+                  ("" 0 1000 nil "" 1 1 1 :false)
+                  ("" nil 1000 nil "" 1 1 1 :false)
+                  ("a\nb\n" 4 1000 nil "a\nb\n" 1 3 3 :false)
+                  ("a\nb\n" 3 1000 nil "a\nb" 1 3 3 t)
+                  ("a\nb\n" 3 1000 ((start . 3)) "" 3 3 3 :false)
+                  ("a\nb\n" 3 1000 ((start . 9)) "" 9 8 3 :false)
+                  ("a\nb\n" 3 1000 ((end . 9)) "a\nb" 1 3 3 t)
+                  ("a\nb\nc" 3 2 nil "a\nb" 1 2 3 t)
+                  ("a\nb\nc" 2 2 nil "a\n" 1 2 3 t)
+                  ("a\nb\nc" nil 2 nil "a\nb" 1 2 3 t)
+                  ("a\nbb\nc" 1 1000 ((start_line . 2) (end_line . 2))
+                   "b" 2 2 3 t)
+                  ("a\nbb\nc" 1 1000 ((start . 2) (end . 2)
+                                       (start_line . 1) (end_line . 3))
+                   "b" 2 2 3 t)))
+    (pcase-let ((`(,text ,cap ,line-cap ,params ,content ,start ,end ,total
+                        ,truncated) case))
+      (with-temp-buffer
+        (insert (propertize text 'face 'bold))
+        ;; Force a whole-buffer read from a zero-width restriction.
+        (narrow-to-region (point-max) (point-max))
+        (let* ((before (list (point) (point-min) (point-max)))
+               (hermes-capabilities-buffer-read-max-chars cap)
+               (hermes-capabilities-buffer-read-max-lines line-cap)
+               (result (alist-get 'result
+                                  (hermes-capabilities-test--read-frame
+                                   (cons (cons 'buffer (buffer-name)) params)))))
+          (should (equal result
+                         `((ok . t) (content . ,content)
+                           (metadata . ((buffer . ,(buffer-name))
+                                        (truncated . ,truncated)
+                                        (line_count . ,(1+ (- end start)))
+                                        (total_lines . ,total)
+                                        (start_line . ,start) (end_line . ,end))))))
+          (should (equal before (list (point) (point-min) (point-max)))))))))
+
+(ert-deftest hermes-capabilities-buffer-read-refuses-before-extraction ()
+  "Denied, remote and unknown names never reach content extraction."
+  (dolist (kind '(denied remote-file remote-directory unknown))
+    (with-temp-buffer
+      (insert "synthetic canary")
+      (pcase kind
+        ('denied (setq buffer-file-name "/fixture/.authinfo"))
+        ('remote-file (setq buffer-file-name "/ssh:fixture:/note"))
+        ('remote-directory (setq default-directory "/ssh:fixture:/")))
+      (unwind-protect
+          (let* ((source (current-buffer))
+                 (native-substring
+                  (symbol-function 'buffer-substring-no-properties))
+                 extracted frame)
+            (cl-letf (((symbol-function 'buffer-substring-no-properties)
+                       (lambda (beg end)
+                         (when (eq source (current-buffer)) (setq extracted t))
+                         (funcall native-substring beg end))))
+              (setq frame (hermes-capabilities-test--read-frame
+                           `((buffer . ,(if (eq kind 'unknown)
+                                            "cap-unknown-fixture"
+                                          (buffer-name)))))))
+            (should (= (alist-get 'code (alist-get 'error frame)) -32602))
+            (should-not extracted))
+        (setq buffer-file-name nil)))))
+
+(ert-deftest hermes-capabilities-buffer-read-missing-param ()
+  "`buffer.read' errors when the `buffer' parameter is absent."
+  (should-error (hermes-capabilities--handle-buffer-read nil)
+                :type 'error)
+  (should-error (hermes-capabilities--handle-buffer-read '((other . "x")))
+                :type 'error))
+
+(ert-deftest hermes-capabilities-buffer-read-unknown-buffer ()
+  "`buffer.read' errors when the named buffer does not exist."
+  (should-error (hermes-capabilities--handle-buffer-read
+                 '((buffer . "no-such-buffer-zzz")))
+                :type 'error))
+
+(ert-deftest hermes-capabilities-buffer-read-remote-rejected ()
+  "`buffer.read' rejects a buffer visiting a TRAMP remote file."
+  (let ((name "cap-test-read-remote"))
+    (hermes-capabilities-test--with-temp-buffer name "x"
+      (let ((buf (get-buffer name)))
+        (with-current-buffer buf
+          (setq buffer-file-name "/ssh:host:/tmp/remote"))
+        (unwind-protect
+            (should-error (hermes-capabilities--handle-buffer-read
+                           `((buffer . ,name)))
+                          :type 'error)
+          ;; Restore so kill-buffer does not choke on the fake TRAMP name.
+          (when (buffer-live-p buf)
+            (with-current-buffer buf
+              (setq buffer-file-name nil))))))))
+
+(ert-deftest hermes-capabilities-buffer-read-remote-directory-rejected ()
+  "`buffer.read' rejects non-file buffers rooted in a remote directory."
+  (let ((name "cap-test-read-remote-directory"))
+    (hermes-capabilities-test--with-temp-buffer name "secret"
+      (let ((buf (get-buffer name)))
+        (with-current-buffer buf
+          (setq default-directory "/ssh:host:/tmp/"))
+        (should-error (hermes-capabilities--handle-buffer-read
+                       `((buffer . ,name)))
+                      :type 'error)))))
+
+(ert-deftest hermes-capabilities-capabilities-list-shape ()
+  "`capabilities.list' reports registered method descriptors and a count."
+  (let ((res (hermes-capabilities--handle-capabilities-list nil)))
+    (should (>= (alist-get 'count res) 5))
+    (let ((methods (alist-get 'methods res)))
+      (should (hash-table-p methods))
+      (dolist (m '("buffer.list" "buffer.read" "buffer.current"
+                   "project.current" "capabilities.list"))
+        (should (gethash m methods)))
+      (maphash (lambda (_name descriptor)
+                 (should (assoc 'params_schema_version descriptor)))
+               methods))))
+
+(ert-deftest hermes-capabilities-registration-methods-are-object ()
+  "`methods' serializes as a JSON object keyed by method name, not an array."
+  (hermes-capabilities-test--with-clean-registry
+    (hermes-capabilities--register "buffer.list" (lambda (_) "ok"))
+    (hermes-capabilities--register "buffer.read" (lambda (_) "ok"))
+    (let* ((params (hermes-capabilities--registration-params
+                    "emacs-pair" "inst-1" "PiHome" 'pair))
+           (frame `((jsonrpc . "2.0")
+                    (id . "reg-1")
+                    (method . "emacs.register")
+                    (params . ,params)))
+           (json (json-serialize frame))
+           ;; Parse with hash-table objects so method names stay as strings,
+           ;; mirroring how the Python backend reads them with dict(...).
+           (parsed (json-parse-string json :object-type 'hash-table))
+           (wire-methods (gethash "methods"
+                                  (gethash "params" parsed))))
+      ;; Must be a JSON object (hash table), not an array.
+      (should (hash-table-p wire-methods))
+      (should (gethash "buffer.list" wire-methods))
+      (should (gethash "buffer.read" wire-methods))
+      (should (equal (gethash "params_schema_version"
+                              (gethash "buffer.read" wire-methods))
+                     1)))))
+
+(ert-deftest hermes-capabilities-buffer-read-response-envelope ()
+  "`buffer.read' response serializes as roadmap §2.3 {ok, content, metadata}."
+  (hermes-capabilities-test--with-temp-buffer " cap-read-env" "hello\n"
+    (let* ((request (list :id "req-env" :method "buffer.read"
+                          :params `((buffer . " cap-read-env"))))
+           (frame (hermes-capabilities--response-for request))
+           (json (json-serialize frame))
+           (parsed (json-parse-string json
+                                      :object-type 'alist
+                                      :array-type 'list))
+           (result (alist-get 'result parsed)))
+      (should (equal (alist-get 'id parsed) "req-env"))
+      (should (equal (alist-get 'ok result) t))
+      (should (equal (alist-get 'content result) "hello\n"))
+      (let ((metadata (alist-get 'metadata result)))
+        (should (equal (alist-get 'buffer metadata) " cap-read-env"))
+        (should (member (alist-get 'truncated metadata) '(nil :false)))
+        (should (integerp (alist-get 'line_count metadata)))
+        (should (integerp (alist-get 'total_lines metadata)))
+        (should (integerp (alist-get 'start_line metadata)))
+        (should (integerp (alist-get 'end_line metadata)))))))
+
+(ert-deftest hermes-capabilities-current-context-uses-selected-window-buffer ()
+  "Wire handlers resolve buffer and project context outside the process buffer."
+  (let ((visible (generate-new-buffer " cap-visible"))
+        (process-buffer (generate-new-buffer " cap-process"))
+        project-directory current-entry project-entry)
+    (unwind-protect
+        (progn
+          (set-window-buffer (selected-window) visible)
+          (with-current-buffer visible
+            (setq default-directory "/tmp/cap-project/"))
+          (cl-letf (((symbol-function 'project-current)
+                     (lambda (_prompt directory)
+                       (setq project-directory directory)
+                       nil)))
+            (with-current-buffer process-buffer
+              (setq current-entry
+                    (hermes-capabilities--handle-buffer-current nil)
+                    project-entry
+                    (hermes-capabilities--handle-project-current nil))))
+          (should (equal (alist-get 'name current-entry) " cap-visible"))
+          (should (equal project-directory "/tmp/cap-project/"))
+          (should (eq (alist-get 'root project-entry) :null)))
+      (when (eq (window-buffer (selected-window)) visible)
+        (set-window-buffer (selected-window) (other-buffer visible t)))
+      (kill-buffer visible)
+      (kill-buffer process-buffer))))
+
+(ert-deftest hermes-capabilities-sensitive-buffers-denied ()
+  "Synthetic credentials are neither enumerated nor readable by guessed name."
+  (dolist (path '("/fixture/.authinfo" "/fixture/.authinfo.gpg"
+                  "/fixture/.netrc" "/fixture/_netrc"
+                  "/fixture/.password-store/site.gpg"))
+    (with-temp-buffer
+      (rename-buffer "cap-sensitive-fixture" t)
+      (insert "synthetic credential canary")
+      (setq buffer-file-name path)
+      (unwind-protect
+          (let ((name (buffer-name)) sliced)
+            (should-not (memq (current-buffer)
+                              (hermes-capabilities--listable-buffers)))
+            (cl-letf (((symbol-function 'hermes-capabilities--buffer-slice)
+                       (lambda (&rest _)
+                         (setq sliced t)
+                         (error "Denied buffer was sliced"))))
+              (should (alist-get 'error
+                                (hermes-capabilities--response-for
+                                 (list :id "deny" :method "buffer.read"
+                                       :params `((buffer . ,name)))))))
+            (should-not sliced))
+        (setq buffer-file-name nil)))))
+
+(ert-deftest hermes-capabilities-sensitive-approval-and-indirect-buffers ()
+  "Approval modes and indirect views cannot bypass the default denial."
+  (require 'hermes-exec)
+  (with-temp-buffer
+    (hermes-exec-approval-mode)
+    (rename-buffer "renamed-approval-fixture" t)
+    (should (hermes-capabilities-sensitive-buffer-p (current-buffer)))
+    (should-error (hermes-capabilities--handle-buffer-read
+                   `((buffer . ,(buffer-name))))))
+  (with-temp-buffer
+    (setq buffer-file-name "/fixture/.authinfo.gpg")
+    (let ((indirect (make-indirect-buffer (current-buffer) "indirect-fixture")))
+      (unwind-protect
+          (progn
+            (should (hermes-capabilities-sensitive-buffer-p indirect))
+            (should-not (memq indirect (hermes-capabilities--listable-buffers))))
+        (kill-buffer indirect)
+        (setq buffer-file-name nil)))))
+
+(ert-deftest hermes-capabilities-buffer-deny-policy-customizable ()
+  "A user predicate can extend or explicitly relax the default metadata policy."
+  (with-temp-buffer
+    (rename-buffer "cap-policy-fixture" t)
+    (insert "ordinary text")
+    (let* ((buffer (current-buffer))
+           (params `((buffer . ,(buffer-name))))
+           (hermes-capabilities-buffer-deny-predicate
+            (lambda (candidate)
+              (or (eq candidate buffer)
+                  (hermes-capabilities-sensitive-buffer-p candidate)))))
+      (should-not (memq buffer (hermes-capabilities--listable-buffers)))
+      (should-error (hermes-capabilities--handle-buffer-read params))
+      (let ((hermes-capabilities-buffer-deny-predicate nil))
+        (setq buffer-file-name "/fixture/.netrc")
+        (unwind-protect
+            (progn
+              (should (memq buffer (hermes-capabilities--listable-buffers)))
+              (should (equal "ordinary text"
+                             (alist-get 'content
+                                        (hermes-capabilities--handle-buffer-read
+                                         params)))))
+          (setq buffer-file-name nil))))))
+
+(ert-deftest hermes-capabilities-credential-metadata-without-io ()
+  "Names and known truenames are checked without file or content reads."
+  (with-temp-buffer
+    (rename-buffer ".authinfo.gpg<2>" t)
+    (should (hermes-capabilities-sensitive-buffer-p (current-buffer)))
+    (rename-buffer "ordinary-fixture" t)
+    (should-not (hermes-capabilities-sensitive-buffer-p (current-buffer)))
+    (setq buffer-file-truename "/fixture/.password-store/mail.gpg")
+    (cl-letf (((symbol-function 'file-truename)
+               (lambda (&rest _) (ert-fail "Unexpected filesystem resolution")))
+              ((symbol-function 'insert-file-contents)
+               (lambda (&rest _) (ert-fail "Unexpected file read"))))
+      (should (hermes-capabilities-sensitive-buffer-p (current-buffer)))
+      (should-error (hermes-capabilities--handle-buffer-read
+                     `((buffer . ,(buffer-name))))))))
+
+(ert-deftest hermes-capabilities-pending-approval-not-disclosed ()
+  "The real approval constructor is denied, including after a buffer rename."
+  (require 'hermes-exec)
+  (let ((buffer (hermes-exec--approval-buffer
+                 '(:id synthetic-request :code "\"synthetic canary\""))))
+    (unwind-protect
+        (with-current-buffer buffer
+          (rename-buffer "renamed-real-approval-fixture" t)
+          (should-not (memq buffer (hermes-capabilities--listable-buffers)))
+          (should-error (hermes-capabilities--handle-buffer-read
+                         `((buffer . ,(buffer-name)))))
+          (should (string-match-p "synthetic canary" (buffer-string))))
+      (kill-buffer buffer))))
+
+(provide 'hermes-capabilities-tests)
+;;; hermes-capabilities-tests.el ends here

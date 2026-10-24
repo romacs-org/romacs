@@ -1,0 +1,21 @@
+{
+ "name": "frame-list",
+ "arity": [
+  0,
+  0
+ ],
+ "effect": "reads",
+ "gnu_files": [
+  "frame.c"
+ ],
+ "gnu_def": "frame.c:2161",
+ "args": [],
+ "extra": {},
+ "probes": [
+  "(fboundp 'frame-list)",
+  "(equal (frame-list) (list (selected-frame)))",
+  "(eq (frame-list) (frame-list))",
+  "(equal (funcall #'frame-list) (frame-list))"
+ ],
+ "rust": "src/prims/frame.rs:6"
+}

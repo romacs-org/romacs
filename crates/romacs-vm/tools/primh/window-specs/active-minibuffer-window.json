@@ -1,0 +1,19 @@
+{
+ "name": "active-minibuffer-window",
+ "arity": [
+  0,
+  0
+ ],
+ "effect": "reads",
+ "gnu_files": [
+  "minibuf.c"
+ ],
+ "gnu_def": "minibuf.c:215",
+ "rust": "src/prims/window.rs:207",
+ "args": [],
+ "probes": [
+  "(active-minibuffer-window)",
+  "(funcall #'active-minibuffer-window)",
+  "(progn (defvar romacs-amw-seen 'unset) (defun romacs-amw-spy () (interactive) (setq romacs-amw-seen (eq (active-minibuffer-window) (minibuffer-window)))) (defvar romacs-amw-map (let ((m (make-sparse-keymap))) (set-keymap-parent m minibuffer-local-map) (define-key m [f5] 'romacs-amw-spy) m)) (let ((unread-command-events (append [f5 ?\\r] nil)) (executing-kbd-macro t)) (list (read-from-minibuffer \"P: \" nil romacs-amw-map) romacs-amw-seen (active-minibuffer-window))))"
+ ]
+}

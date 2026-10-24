@@ -1,0 +1,322 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "safe-length",
+ "spec_sha256": "6721ddfd4102ced6cfda8fe377cc6cb85768b2aa54f43fd902528ee31ef2e99c",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "safe-length",
+    "subr",
+    1,
+    1
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "fns.c": "db81c235d7c63f312128ad84c11d55ae4665a2599099be1229dbaa329afdb3bf"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "safe-length/0000",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (safe-length nil)) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "safe-length/0001",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (safe-length t)) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "safe-length/0002",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (safe-length 0)) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "safe-length/0003",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (safe-length 1)) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "safe-length/0004",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (safe-length 2)) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "safe-length/0005",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (safe-length -1)) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "safe-length/0006",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (safe-length most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "safe-length/0007",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (safe-length 1.5)) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "safe-length/0008",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (safe-length 'sym)) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "safe-length/0009",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (safe-length :kw)) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "safe-length/0010",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (safe-length (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "safe-length/0011",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (safe-length (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "safe-length/0012",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (safe-length (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "safe-length/0013",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (safe-length (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "safe-length/0014",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (safe-length (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok 2)"
+  },
+  {
+   "id": "safe-length/0015",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (safe-length (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(ok 1)"
+  },
+  {
+   "id": "safe-length/0016",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (safe-length (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(ok 2)"
+  },
+  {
+   "id": "safe-length/0017",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (safe-length (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "safe-length/0018",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (safe-length (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(ok 2)"
+  },
+  {
+   "id": "safe-length/0019",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'safe-length '())) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr safe-length> 0))"
+  },
+  {
+   "id": "safe-length/0020",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'safe-length '(1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr safe-length> 2))"
+  },
+  {
+   "id": "safe-length/0021",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (safe-length a0))) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "safe-length/0022",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil)) (let ((r (safe-length a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "safe-length/0023",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1)) (let ((r (safe-length a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "safe-length/0024",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-positive-fixnum)) (let ((r (safe-length a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "safe-length/0025",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :kw)) (let ((r (safe-length a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "safe-length/0026",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\"))) (let ((r (safe-length a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "safe-length/0027",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 2))) (let ((r (safe-length a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "safe-length/0028",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (safe-length a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "safe-length/0029",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 'sym) (error (list 'sig e))))",
+   "expected": "(ok sym)"
+  },
+  {
+   "id": "safe-length/0030",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (cons 1 (cons 2 3))) (error (list 'sig e))))",
+   "expected": "(ok (1 2 . 3))"
+  },
+  {
+   "id": "safe-length/0031",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (cons 1 2)) (error (list 'sig e))))",
+   "expected": "(ok (1 . 2))"
+  },
+  {
+   "id": "safe-length/0032",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"\")) (error (list 'sig e))))",
+   "expected": "(ok \"\")"
+  },
+  {
+   "id": "safe-length/0033",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"abc\")) (error (list 'sig e))))",
+   "expected": "(ok \"abc\")"
+  },
+  {
+   "id": "safe-length/0034",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"λx\")) (error (list 'sig e))))",
+   "expected": "(ok \"λx\")"
+  },
+  {
+   "id": "safe-length/0035",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (error (list 'sig e))))",
+   "expected": "(ok (1 2 1 2 . #2))"
+  },
+  {
+   "id": "safe-length/0036",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list 'a (list 'b))) (error (list 'sig e))))",
+   "expected": "(ok (a (b)))"
+  },
+  {
+   "id": "safe-length/0037",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list 1 2 3)) (error (list 'sig e))))",
+   "expected": "(ok (1 2 3))"
+  },
+  {
+   "id": "safe-length/0038",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vector 1 2)) (error (list 'sig e))))",
+   "expected": "(ok [1 2])"
+  },
+  {
+   "id": "safe-length/0039",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok -1) (error (list 'sig e))))",
+   "expected": "(ok -1)"
+  },
+  {
+   "id": "safe-length/0040",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 0) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "safe-length/0041",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1) (error (list 'sig e))))",
+   "expected": "(ok 1)"
+  },
+  {
+   "id": "safe-length/0042",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1.5) (error (list 'sig e))))",
+   "expected": "(ok 1.5)"
+  },
+  {
+   "id": "safe-length/0043",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 2) (error (list 'sig e))))",
+   "expected": "(ok 2)"
+  },
+  {
+   "id": "safe-length/0044",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok :kw) (error (list 'sig e))))",
+   "expected": "(ok :kw)"
+  },
+  {
+   "id": "safe-length/0045",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok most-positive-fixnum) (error (list 'sig e))))",
+   "expected": "(ok 2305843009213693951)"
+  },
+  {
+   "id": "safe-length/0046",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok nil) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "safe-length/0047",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok t) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  }
+ ],
+ "pinned": {
+  "safe-length/0035": "PRINTER"
+ }
+}

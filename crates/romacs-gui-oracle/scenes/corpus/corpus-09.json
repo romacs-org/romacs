@@ -1,0 +1,290 @@
+{
+ "name": "corpus-09",
+ "frame": {
+  "width": 480,
+  "height": 168,
+  "bg": "#ffffff",
+  "fg": "#000000"
+ },
+ "font": {
+  "family": "Liberation Mono",
+  "pixel_size": 20,
+  "regular": "/usr/share/fonts/liberation/LiberationMono-Regular.ttf",
+  "bold": "/usr/share/fonts/liberation/LiberationMono-Bold.ttf",
+  "italic": "/usr/share/fonts/liberation/LiberationMono-Italic.ttf"
+ },
+ "cursor_color": "#00a000",
+ "buffer": [
+  {
+   "text": "50%"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "lazy",
+   "fg": "#1e90ff",
+   "bg": "#ffe4e1"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "ήλιος",
+   "fg": "#ff0000",
+   "italic": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "ψυχή",
+   "fg": "#008000"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "(car)"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "καλημέρα",
+   "bg": "#ffff00"
+  },
+  {
+   "text": "\n"
+  },
+  {
+   "text": "Emacs"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "jumps",
+   "fg": "#ff0000"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "50%"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "ξένος",
+   "fg": "#ff8c00",
+   "italic": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "ξένος",
+   "underline": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "cursor",
+   "fg": "#008000"
+  },
+  {
+   "text": "\n"
+  },
+  {
+   "text": "jumps"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "#if",
+   "bg": "#ffff00"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "ψυχή"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "καλημέρα",
+   "bold": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "buffer"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "50%",
+   "fg": "#008000",
+   "underline": true
+  },
+  {
+   "text": "\n"
+  },
+  {
+   "text": "world",
+   "bg": "#d0ffd0"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "Emacs",
+   "bg": "#ffff00"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "world",
+   "fg": "#b8860b"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "buffer"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "window",
+   "bold": true,
+   "underline": true
+  },
+  {
+   "text": "\n"
+  }
+ ],
+ "point": 82,
+ "expect": {
+  "origin": [
+   0,
+   0
+  ],
+  "rows": [
+   {
+    "text": "50% lazy ήλιος ψυχή (car) καλημέρα",
+    "runs": [
+     {
+      "start": 4,
+      "end": 8,
+      "fg": "#1e90ff",
+      "bg": "#ffe4e1"
+     },
+     {
+      "start": 9,
+      "end": 14,
+      "fg": "#ff0000",
+      "italic": true
+     },
+     {
+      "start": 15,
+      "end": 19,
+      "fg": "#008000"
+     },
+     {
+      "start": 26,
+      "end": 34,
+      "bg": "#ffff00"
+     }
+    ]
+   },
+   {
+    "text": "Emacs jumps 50% ξένος ξένος cursor",
+    "runs": [
+     {
+      "start": 6,
+      "end": 11,
+      "fg": "#ff0000"
+     },
+     {
+      "start": 16,
+      "end": 21,
+      "fg": "#ff8c00",
+      "italic": true
+     },
+     {
+      "start": 22,
+      "end": 27,
+      "underline": true
+     },
+     {
+      "start": 28,
+      "end": 34,
+      "fg": "#008000"
+     }
+    ]
+   },
+   {
+    "text": "jumps #if ψυχή καλημέρα buffer 50%",
+    "runs": [
+     {
+      "start": 6,
+      "end": 9,
+      "bg": "#ffff00"
+     },
+     {
+      "start": 15,
+      "end": 23,
+      "bold": true
+     },
+     {
+      "start": 31,
+      "end": 34,
+      "fg": "#008000",
+      "underline": true
+     }
+    ]
+   },
+   {
+    "text": "world Emacs world buffer window",
+    "runs": [
+     {
+      "start": 0,
+      "end": 5,
+      "bg": "#d0ffd0"
+     },
+     {
+      "start": 6,
+      "end": 11,
+      "bg": "#ffff00"
+     },
+     {
+      "start": 12,
+      "end": 17,
+      "fg": "#b8860b"
+     },
+     {
+      "start": 25,
+      "end": 31,
+      "bold": true,
+      "underline": true
+     }
+    ]
+   }
+  ],
+  "cursor": {
+   "row": 2,
+   "col": 11
+  }
+ }
+}

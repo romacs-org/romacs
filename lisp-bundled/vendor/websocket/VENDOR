@@ -1,0 +1,6 @@
+Upstream: https://github.com/ahyatt/emacs-websocket
+Version: 1.16
+Commit: 2195e1247ecb04c30321702aa5f5618a51c329c5
+License: GPL-2.0-or-later
+Local changes:
+- Preserve executable permission on the loopback functional test server.

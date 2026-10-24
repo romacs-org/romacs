@@ -1,0 +1,13 @@
+{
+  "version": "GNU Emacs 32.0.50",
+  "gnu_binary_sha256": "20a94ee7abc04960e3296deead030a37866d1d1e1522f3efd818838af7fffbe4",
+  "xdisp_sha256": "1f2a3df29de9047bfa4b507528c98868cda4d964cbd13711c60ae47d4cbeb346",
+  "fixture_sha256": "9b03b43426a2f67731b3d9bd401ae63b754da55077c529fbd40af1c22528d193",
+  "record_sha256": "4d58a62a91e1fe2191d2bcd82e917f3ac2e3ba506d917a941e5738b9fe9195ac",
+  "cases": [
+    "props-fontlock-backslash-reader",
+    "props-fontlock-backslash",
+    "props-fontlock-org",
+    "props-fontlock-c-xdisp"
+  ]
+}

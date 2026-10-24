@@ -1,0 +1,2460 @@
+{
+ "pinned": {
+ "mapcan/0018": "PRINTER",
+ "mapcan/0025": "DATA",
+ "mapcan/0026": "PRINTER",
+ "mapcan/0045": "PRINTER",
+ "mapcan/0052": "SIGNAL-VS-VALUE",
+ "mapcan/0053": "PRINTER",
+ "mapcan/0072": "PRINTER",
+ "mapcan/0079": "SIGNAL-VS-VALUE",
+ "mapcan/0080": "PRINTER",
+ "mapcan/0099": "PRINTER",
+ "mapcan/0106": "DATA",
+ "mapcan/0107": "PRINTER",
+ "mapcan/0126": "PRINTER",
+ "mapcan/0133": "DATA",
+ "mapcan/0134": "PRINTER",
+ "mapcan/0153": "PRINTER",
+ "mapcan/0160": "CONDITION",
+ "mapcan/0161": "PRINTER",
+ "mapcan/0180": "PRINTER",
+ "mapcan/0187": "CONDITION",
+ "mapcan/0188": "PRINTER",
+ "mapcan/0207": "PRINTER",
+ "mapcan/0214": "CONDITION",
+ "mapcan/0215": "PRINTER",
+ "mapcan/0234": "PRINTER",
+ "mapcan/0241": "CONDITION",
+ "mapcan/0242": "PRINTER",
+ "mapcan/0258": "PRINTER",
+ "mapcan/0267": "PRINTER",
+ "mapcan/0276": "PRINTER",
+ "mapcan/0285": "PRINTER",
+ "mapcan/0294": "PRINTER",
+ "mapcan/0303": "PRINTER",
+ "mapcan/0312": "PRINTER",
+ "mapcan/0321": "PRINTER",
+ "mapcan/0330": "PRINTER",
+ "mapcan/0370": "PRINTER",
+ "mapcan/0371": "PRINTER",
+ "mapcan/0372": "PRINTER",
+ "mapcan/0373": "PRINTER",
+ "mapcan/0374": "PRINTER"
+},
+ "protocol": "primh-v1",
+ "primitive": "mapcan",
+ "spec_sha256": "e4e9944dde588cfd78ef50332a7441151bd1deeef56aa9ad5c324dcfd93102ee",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "mapcan",
+    "subr",
+    2,
+    2
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "fns.c": "db81c235d7c63f312128ad84c11d55ae4665a2599099be1229dbaa329afdb3bf"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "mapcan/0000",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda (x) x) nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "mapcan/0001",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda (x) x) t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep t))"
+  },
+  {
+   "id": "mapcan/0002",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda (x) x) 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 0))"
+  },
+  {
+   "id": "mapcan/0003",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda (x) x) 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 1))"
+  },
+  {
+   "id": "mapcan/0004",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda (x) x) 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 2))"
+  },
+  {
+   "id": "mapcan/0005",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda (x) x) -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep -1))"
+  },
+  {
+   "id": "mapcan/0006",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda (x) x) most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 2305843009213693951))"
+  },
+  {
+   "id": "mapcan/0007",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda (x) x) 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 1.5))"
+  },
+  {
+   "id": "mapcan/0008",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda (x) x) 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep sym))"
+  },
+  {
+   "id": "mapcan/0009",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda (x) x) :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep :kw))"
+  },
+  {
+   "id": "mapcan/0010",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda (x) x) (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "mapcan/0011",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda (x) x) (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument consp 97))"
+  },
+  {
+   "id": "mapcan/0012",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda (x) x) (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument consp 955))"
+  },
+  {
+   "id": "mapcan/0013",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda (x) x) (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument consp 1))"
+  },
+  {
+   "id": "mapcan/0014",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda (x) x) (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument consp a))"
+  },
+  {
+   "id": "mapcan/0015",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda (x) x) (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "mapcan/0016",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda (x) x) (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 3))"
+  },
+  {
+   "id": "mapcan/0017",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda (x) x) (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument consp 1))"
+  },
+  {
+   "id": "mapcan/0018",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda (x) x) (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "mapcan/0019",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda (x) x) (vector))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "mapcan/0020",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda (x) x) (list (list 1) (list 2 3)))) (error (list 'sig e))))",
+   "expected": "(ok (1 2 3))"
+  },
+  {
+   "id": "mapcan/0021",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda (x) x) (vector \"a\" (list ?b)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument consp \"a\"))"
+  },
+  {
+   "id": "mapcan/0022",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda (x) x) (list \"ab\" \"\" \"c\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument consp \"ab\"))"
+  },
+  {
+   "id": "mapcan/0023",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda (x) x) (unibyte-string 255 65))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument consp 255))"
+  },
+  {
+   "id": "mapcan/0024",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda (x) x) (string ?λ ?雪 ?x))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument consp 955))"
+  },
+  {
+   "id": "mapcan/0025",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda (x) x) (lambda (x) x))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument consp 257))",
+   "gnu_regime_variant": "(ok (x x t))"
+  },
+  {
+   "id": "mapcan/0026",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda (x) x) (let ((x (list 1 2 3 4 5 6 7 8))) (setcdr (nthcdr 7 x) (nthcdr 3 x)) x))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (7 8 4 5 6 7 8 4 5 6 7 . #6)))"
+  },
+  {
+   "id": "mapcan/0027",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda (x) (list x)) nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "mapcan/0028",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda (x) (list x)) t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep t))"
+  },
+  {
+   "id": "mapcan/0029",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda (x) (list x)) 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 0))"
+  },
+  {
+   "id": "mapcan/0030",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda (x) (list x)) 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 1))"
+  },
+  {
+   "id": "mapcan/0031",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda (x) (list x)) 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 2))"
+  },
+  {
+   "id": "mapcan/0032",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda (x) (list x)) -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep -1))"
+  },
+  {
+   "id": "mapcan/0033",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda (x) (list x)) most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 2305843009213693951))"
+  },
+  {
+   "id": "mapcan/0034",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda (x) (list x)) 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 1.5))"
+  },
+  {
+   "id": "mapcan/0035",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda (x) (list x)) 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep sym))"
+  },
+  {
+   "id": "mapcan/0036",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda (x) (list x)) :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep :kw))"
+  },
+  {
+   "id": "mapcan/0037",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda (x) (list x)) (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "mapcan/0038",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda (x) (list x)) (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(ok (97 98 99))"
+  },
+  {
+   "id": "mapcan/0039",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda (x) (list x)) (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(ok (955 120))"
+  },
+  {
+   "id": "mapcan/0040",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda (x) (list x)) (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok (1 2 3))"
+  },
+  {
+   "id": "mapcan/0041",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda (x) (list x)) (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok (a (b)))"
+  },
+  {
+   "id": "mapcan/0042",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda (x) (list x)) (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "mapcan/0043",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda (x) (list x)) (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 3))"
+  },
+  {
+   "id": "mapcan/0044",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda (x) (list x)) (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(ok (1 2))"
+  },
+  {
+   "id": "mapcan/0045",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda (x) (list x)) (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "mapcan/0046",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda (x) (list x)) (vector))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "mapcan/0047",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda (x) (list x)) (list (list 1) (list 2 3)))) (error (list 'sig e))))",
+   "expected": "(ok ((1) (2 3)))"
+  },
+  {
+   "id": "mapcan/0048",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda (x) (list x)) (vector \"a\" (list ?b)))) (error (list 'sig e))))",
+   "expected": "(ok (\"a\" (98)))"
+  },
+  {
+   "id": "mapcan/0049",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda (x) (list x)) (list \"ab\" \"\" \"c\"))) (error (list 'sig e))))",
+   "expected": "(ok (\"ab\" \"\" \"c\"))"
+  },
+  {
+   "id": "mapcan/0050",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda (x) (list x)) (unibyte-string 255 65))) (error (list 'sig e))))",
+   "expected": "(ok (255 65))"
+  },
+  {
+   "id": "mapcan/0051",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda (x) (list x)) (string ?λ ?雪 ?x))) (error (list 'sig e))))",
+   "expected": "(ok (955 38634 120))"
+  },
+  {
+   "id": "mapcan/0052",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda (x) (list x)) (lambda (x) x))) (error (list 'sig e))))",
+   "expected": "(ok (257 \"\\207\" [] 2 \"\n\n(fn X)\"))",
+   "gnu_regime_variant": "(ok ((x) (x) (t)))"
+  },
+  {
+   "id": "mapcan/0053",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda (x) (list x)) (let ((x (list 1 2 3 4 5 6 7 8))) (setcdr (nthcdr 7 x) (nthcdr 3 x)) x))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (7 8 4 5 6 7 8 4 5 6 7 . #6)))"
+  },
+  {
+   "id": "mapcan/0054",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan #'list nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "mapcan/0055",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan #'list t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep t))"
+  },
+  {
+   "id": "mapcan/0056",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan #'list 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 0))"
+  },
+  {
+   "id": "mapcan/0057",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan #'list 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 1))"
+  },
+  {
+   "id": "mapcan/0058",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan #'list 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 2))"
+  },
+  {
+   "id": "mapcan/0059",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan #'list -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep -1))"
+  },
+  {
+   "id": "mapcan/0060",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan #'list most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 2305843009213693951))"
+  },
+  {
+   "id": "mapcan/0061",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan #'list 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 1.5))"
+  },
+  {
+   "id": "mapcan/0062",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan #'list 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep sym))"
+  },
+  {
+   "id": "mapcan/0063",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan #'list :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep :kw))"
+  },
+  {
+   "id": "mapcan/0064",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan #'list (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "mapcan/0065",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan #'list (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(ok (97 98 99))"
+  },
+  {
+   "id": "mapcan/0066",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan #'list (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(ok (955 120))"
+  },
+  {
+   "id": "mapcan/0067",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan #'list (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok (1 2 3))"
+  },
+  {
+   "id": "mapcan/0068",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan #'list (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok (a (b)))"
+  },
+  {
+   "id": "mapcan/0069",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan #'list (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "mapcan/0070",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan #'list (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 3))"
+  },
+  {
+   "id": "mapcan/0071",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan #'list (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(ok (1 2))"
+  },
+  {
+   "id": "mapcan/0072",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan #'list (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "mapcan/0073",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan #'list (vector))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "mapcan/0074",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan #'list (list (list 1) (list 2 3)))) (error (list 'sig e))))",
+   "expected": "(ok ((1) (2 3)))"
+  },
+  {
+   "id": "mapcan/0075",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan #'list (vector \"a\" (list ?b)))) (error (list 'sig e))))",
+   "expected": "(ok (\"a\" (98)))"
+  },
+  {
+   "id": "mapcan/0076",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan #'list (list \"ab\" \"\" \"c\"))) (error (list 'sig e))))",
+   "expected": "(ok (\"ab\" \"\" \"c\"))"
+  },
+  {
+   "id": "mapcan/0077",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan #'list (unibyte-string 255 65))) (error (list 'sig e))))",
+   "expected": "(ok (255 65))"
+  },
+  {
+   "id": "mapcan/0078",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan #'list (string ?λ ?雪 ?x))) (error (list 'sig e))))",
+   "expected": "(ok (955 38634 120))"
+  },
+  {
+   "id": "mapcan/0079",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan #'list (lambda (x) x))) (error (list 'sig e))))",
+   "expected": "(ok (257 \"\\207\" [] 2 \"\n\n(fn X)\"))",
+   "gnu_regime_variant": "(ok ((x) (x) (t)))"
+  },
+  {
+   "id": "mapcan/0080",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan #'list (let ((x (list 1 2 3 4 5 6 7 8))) (setcdr (nthcdr 7 x) (nthcdr 3 x)) x))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (7 8 4 5 6 7 8 4 5 6 7 . #6)))"
+  },
+  {
+   "id": "mapcan/0081",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 'car nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "mapcan/0082",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 'car t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep t))"
+  },
+  {
+   "id": "mapcan/0083",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 'car 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 0))"
+  },
+  {
+   "id": "mapcan/0084",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 'car 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 1))"
+  },
+  {
+   "id": "mapcan/0085",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 'car 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 2))"
+  },
+  {
+   "id": "mapcan/0086",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 'car -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep -1))"
+  },
+  {
+   "id": "mapcan/0087",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 'car most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 2305843009213693951))"
+  },
+  {
+   "id": "mapcan/0088",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 'car 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 1.5))"
+  },
+  {
+   "id": "mapcan/0089",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 'car 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep sym))"
+  },
+  {
+   "id": "mapcan/0090",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 'car :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep :kw))"
+  },
+  {
+   "id": "mapcan/0091",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 'car (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "mapcan/0092",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 'car (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 97))"
+  },
+  {
+   "id": "mapcan/0093",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 'car (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 955))"
+  },
+  {
+   "id": "mapcan/0094",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 'car (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "mapcan/0095",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 'car (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp a))"
+  },
+  {
+   "id": "mapcan/0096",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 'car (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "mapcan/0097",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 'car (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 3))"
+  },
+  {
+   "id": "mapcan/0098",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 'car (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "mapcan/0099",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 'car (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "mapcan/0100",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 'car (vector))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "mapcan/0101",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 'car (list (list 1) (list 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument consp 1))"
+  },
+  {
+   "id": "mapcan/0102",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 'car (vector \"a\" (list ?b)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"a\"))"
+  },
+  {
+   "id": "mapcan/0103",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 'car (list \"ab\" \"\" \"c\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"ab\"))"
+  },
+  {
+   "id": "mapcan/0104",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 'car (unibyte-string 255 65))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 255))"
+  },
+  {
+   "id": "mapcan/0105",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 'car (string ?λ ?雪 ?x))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 955))"
+  },
+  {
+   "id": "mapcan/0106",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 'car (lambda (x) x))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 257))",
+   "gnu_regime_variant": "(sig (wrong-type-argument consp x))"
+  },
+  {
+   "id": "mapcan/0107",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 'car (let ((x (list 1 2 3 4 5 6 7 8))) (setcdr (nthcdr 7 x) (nthcdr 3 x)) x))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (7 8 4 5 6 7 8 4 5 6 7 . #6)))"
+  },
+  {
+   "id": "mapcan/0108",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan #'1+ nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "mapcan/0109",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan #'1+ t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep t))"
+  },
+  {
+   "id": "mapcan/0110",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan #'1+ 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 0))"
+  },
+  {
+   "id": "mapcan/0111",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan #'1+ 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 1))"
+  },
+  {
+   "id": "mapcan/0112",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan #'1+ 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 2))"
+  },
+  {
+   "id": "mapcan/0113",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan #'1+ -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep -1))"
+  },
+  {
+   "id": "mapcan/0114",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan #'1+ most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 2305843009213693951))"
+  },
+  {
+   "id": "mapcan/0115",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan #'1+ 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 1.5))"
+  },
+  {
+   "id": "mapcan/0116",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan #'1+ 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep sym))"
+  },
+  {
+   "id": "mapcan/0117",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan #'1+ :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep :kw))"
+  },
+  {
+   "id": "mapcan/0118",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan #'1+ (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "mapcan/0119",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan #'1+ (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument consp 98))"
+  },
+  {
+   "id": "mapcan/0120",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan #'1+ (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument consp 956))"
+  },
+  {
+   "id": "mapcan/0121",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan #'1+ (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument consp 2))"
+  },
+  {
+   "id": "mapcan/0122",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan #'1+ (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p a))"
+  },
+  {
+   "id": "mapcan/0123",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan #'1+ (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "mapcan/0124",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan #'1+ (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 3))"
+  },
+  {
+   "id": "mapcan/0125",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan #'1+ (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument consp 2))"
+  },
+  {
+   "id": "mapcan/0126",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan #'1+ (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "mapcan/0127",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan #'1+ (vector))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "mapcan/0128",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan #'1+ (list (list 1) (list 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p (1)))"
+  },
+  {
+   "id": "mapcan/0129",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan #'1+ (vector \"a\" (list ?b)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"a\"))"
+  },
+  {
+   "id": "mapcan/0130",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan #'1+ (list \"ab\" \"\" \"c\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"ab\"))"
+  },
+  {
+   "id": "mapcan/0131",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan #'1+ (unibyte-string 255 65))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument consp 256))"
+  },
+  {
+   "id": "mapcan/0132",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan #'1+ (string ?λ ?雪 ?x))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument consp 956))"
+  },
+  {
+   "id": "mapcan/0133",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan #'1+ (lambda (x) x))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"\\207\"))",
+   "gnu_regime_variant": "(sig (wrong-type-argument number-or-marker-p (x)))"
+  },
+  {
+   "id": "mapcan/0134",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan #'1+ (let ((x (list 1 2 3 4 5 6 7 8))) (setcdr (nthcdr 7 x) (nthcdr 3 x)) x))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (7 8 4 5 6 7 8 4 5 6 7 . #6)))"
+  },
+  {
+   "id": "mapcan/0135",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan nil nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "mapcan/0136",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan nil t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep t))"
+  },
+  {
+   "id": "mapcan/0137",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan nil 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 0))"
+  },
+  {
+   "id": "mapcan/0138",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan nil 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 1))"
+  },
+  {
+   "id": "mapcan/0139",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan nil 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 2))"
+  },
+  {
+   "id": "mapcan/0140",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan nil -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep -1))"
+  },
+  {
+   "id": "mapcan/0141",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan nil most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 2305843009213693951))"
+  },
+  {
+   "id": "mapcan/0142",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan nil 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 1.5))"
+  },
+  {
+   "id": "mapcan/0143",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan nil 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep sym))"
+  },
+  {
+   "id": "mapcan/0144",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan nil :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep :kw))"
+  },
+  {
+   "id": "mapcan/0145",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan nil (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "mapcan/0146",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan nil (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (void-function nil))"
+  },
+  {
+   "id": "mapcan/0147",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan nil (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (void-function nil))"
+  },
+  {
+   "id": "mapcan/0148",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan nil (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(sig (void-function nil))"
+  },
+  {
+   "id": "mapcan/0149",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan nil (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(sig (void-function nil))"
+  },
+  {
+   "id": "mapcan/0150",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan nil (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "mapcan/0151",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan nil (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 3))"
+  },
+  {
+   "id": "mapcan/0152",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan nil (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (void-function nil))"
+  },
+  {
+   "id": "mapcan/0153",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan nil (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "mapcan/0154",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan nil (vector))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "mapcan/0155",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan nil (list (list 1) (list 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (void-function nil))"
+  },
+  {
+   "id": "mapcan/0156",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan nil (vector \"a\" (list ?b)))) (error (list 'sig e))))",
+   "expected": "(sig (void-function nil))"
+  },
+  {
+   "id": "mapcan/0157",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan nil (list \"ab\" \"\" \"c\"))) (error (list 'sig e))))",
+   "expected": "(sig (void-function nil))"
+  },
+  {
+   "id": "mapcan/0158",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan nil (unibyte-string 255 65))) (error (list 'sig e))))",
+   "expected": "(sig (void-function nil))"
+  },
+  {
+   "id": "mapcan/0159",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan nil (string ?λ ?雪 ?x))) (error (list 'sig e))))",
+   "expected": "(sig (void-function nil))"
+  },
+  {
+   "id": "mapcan/0160",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan nil (lambda (x) x))) (error (list 'sig e))))",
+   "expected": "(sig (void-function nil))"
+  },
+  {
+   "id": "mapcan/0161",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan nil (let ((x (list 1 2 3 4 5 6 7 8))) (setcdr (nthcdr 7 x) (nthcdr 3 x)) x))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (7 8 4 5 6 7 8 4 5 6 7 . #6)))"
+  },
+  {
+   "id": "mapcan/0162",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 'primh-map-no-such-fn nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "mapcan/0163",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 'primh-map-no-such-fn t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep t))"
+  },
+  {
+   "id": "mapcan/0164",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 'primh-map-no-such-fn 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 0))"
+  },
+  {
+   "id": "mapcan/0165",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 'primh-map-no-such-fn 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 1))"
+  },
+  {
+   "id": "mapcan/0166",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 'primh-map-no-such-fn 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 2))"
+  },
+  {
+   "id": "mapcan/0167",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 'primh-map-no-such-fn -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep -1))"
+  },
+  {
+   "id": "mapcan/0168",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 'primh-map-no-such-fn most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 2305843009213693951))"
+  },
+  {
+   "id": "mapcan/0169",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 'primh-map-no-such-fn 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 1.5))"
+  },
+  {
+   "id": "mapcan/0170",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 'primh-map-no-such-fn 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep sym))"
+  },
+  {
+   "id": "mapcan/0171",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 'primh-map-no-such-fn :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep :kw))"
+  },
+  {
+   "id": "mapcan/0172",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 'primh-map-no-such-fn (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "mapcan/0173",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 'primh-map-no-such-fn (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (void-function primh-map-no-such-fn))"
+  },
+  {
+   "id": "mapcan/0174",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 'primh-map-no-such-fn (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (void-function primh-map-no-such-fn))"
+  },
+  {
+   "id": "mapcan/0175",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 'primh-map-no-such-fn (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(sig (void-function primh-map-no-such-fn))"
+  },
+  {
+   "id": "mapcan/0176",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 'primh-map-no-such-fn (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(sig (void-function primh-map-no-such-fn))"
+  },
+  {
+   "id": "mapcan/0177",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 'primh-map-no-such-fn (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "mapcan/0178",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 'primh-map-no-such-fn (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 3))"
+  },
+  {
+   "id": "mapcan/0179",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 'primh-map-no-such-fn (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (void-function primh-map-no-such-fn))"
+  },
+  {
+   "id": "mapcan/0180",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 'primh-map-no-such-fn (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "mapcan/0181",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 'primh-map-no-such-fn (vector))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "mapcan/0182",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 'primh-map-no-such-fn (list (list 1) (list 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (void-function primh-map-no-such-fn))"
+  },
+  {
+   "id": "mapcan/0183",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 'primh-map-no-such-fn (vector \"a\" (list ?b)))) (error (list 'sig e))))",
+   "expected": "(sig (void-function primh-map-no-such-fn))"
+  },
+  {
+   "id": "mapcan/0184",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 'primh-map-no-such-fn (list \"ab\" \"\" \"c\"))) (error (list 'sig e))))",
+   "expected": "(sig (void-function primh-map-no-such-fn))"
+  },
+  {
+   "id": "mapcan/0185",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 'primh-map-no-such-fn (unibyte-string 255 65))) (error (list 'sig e))))",
+   "expected": "(sig (void-function primh-map-no-such-fn))"
+  },
+  {
+   "id": "mapcan/0186",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 'primh-map-no-such-fn (string ?λ ?雪 ?x))) (error (list 'sig e))))",
+   "expected": "(sig (void-function primh-map-no-such-fn))"
+  },
+  {
+   "id": "mapcan/0187",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 'primh-map-no-such-fn (lambda (x) x))) (error (list 'sig e))))",
+   "expected": "(sig (void-function primh-map-no-such-fn))"
+  },
+  {
+   "id": "mapcan/0188",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 'primh-map-no-such-fn (let ((x (list 1 2 3 4 5 6 7 8))) (setcdr (nthcdr 7 x) (nthcdr 3 x)) x))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (7 8 4 5 6 7 8 4 5 6 7 . #6)))"
+  },
+  {
+   "id": "mapcan/0189",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda () 1) nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "mapcan/0190",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda () 1) t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep t))"
+  },
+  {
+   "id": "mapcan/0191",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda () 1) 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 0))"
+  },
+  {
+   "id": "mapcan/0192",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda () 1) 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 1))"
+  },
+  {
+   "id": "mapcan/0193",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda () 1) 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 2))"
+  },
+  {
+   "id": "mapcan/0194",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda () 1) -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep -1))"
+  },
+  {
+   "id": "mapcan/0195",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda () 1) most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 2305843009213693951))"
+  },
+  {
+   "id": "mapcan/0196",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda () 1) 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 1.5))"
+  },
+  {
+   "id": "mapcan/0197",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda () 1) 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep sym))"
+  },
+  {
+   "id": "mapcan/0198",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda () 1) :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep :kw))"
+  },
+  {
+   "id": "mapcan/0199",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda () 1) (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "mapcan/0200",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda () 1) (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments (0 . 0) 1))",
+   "gnu_regime_variant": "(sig (wrong-number-of-arguments #[nil (1) (t)] 1))"
+  },
+  {
+   "id": "mapcan/0201",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda () 1) (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments (0 . 0) 1))",
+   "gnu_regime_variant": "(sig (wrong-number-of-arguments #[nil (1) (t)] 1))"
+  },
+  {
+   "id": "mapcan/0202",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda () 1) (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments (0 . 0) 1))",
+   "gnu_regime_variant": "(sig (wrong-number-of-arguments #[nil (1) (t)] 1))"
+  },
+  {
+   "id": "mapcan/0203",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda () 1) (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments (0 . 0) 1))",
+   "gnu_regime_variant": "(sig (wrong-number-of-arguments #[nil (1) (t)] 1))"
+  },
+  {
+   "id": "mapcan/0204",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda () 1) (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "mapcan/0205",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda () 1) (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 3))"
+  },
+  {
+   "id": "mapcan/0206",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda () 1) (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments (0 . 0) 1))",
+   "gnu_regime_variant": "(sig (wrong-number-of-arguments #[nil (1) (t)] 1))"
+  },
+  {
+   "id": "mapcan/0207",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda () 1) (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "mapcan/0208",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda () 1) (vector))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "mapcan/0209",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda () 1) (list (list 1) (list 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments (0 . 0) 1))",
+   "gnu_regime_variant": "(sig (wrong-number-of-arguments #[nil (1) (t)] 1))"
+  },
+  {
+   "id": "mapcan/0210",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda () 1) (vector \"a\" (list ?b)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments (0 . 0) 1))",
+   "gnu_regime_variant": "(sig (wrong-number-of-arguments #[nil (1) (t)] 1))"
+  },
+  {
+   "id": "mapcan/0211",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda () 1) (list \"ab\" \"\" \"c\"))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments (0 . 0) 1))",
+   "gnu_regime_variant": "(sig (wrong-number-of-arguments #[nil (1) (t)] 1))"
+  },
+  {
+   "id": "mapcan/0212",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda () 1) (unibyte-string 255 65))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments (0 . 0) 1))",
+   "gnu_regime_variant": "(sig (wrong-number-of-arguments #[nil (1) (t)] 1))"
+  },
+  {
+   "id": "mapcan/0213",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda () 1) (string ?λ ?雪 ?x))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments (0 . 0) 1))",
+   "gnu_regime_variant": "(sig (wrong-number-of-arguments #[nil (1) (t)] 1))"
+  },
+  {
+   "id": "mapcan/0214",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda () 1) (lambda (x) x))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments (0 . 0) 1))",
+   "gnu_regime_variant": "(sig (wrong-number-of-arguments #[nil (1) (t)] 1))"
+  },
+  {
+   "id": "mapcan/0215",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda () 1) (let ((x (list 1 2 3 4 5 6 7 8))) (setcdr (nthcdr 7 x) (nthcdr 3 x)) x))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (7 8 4 5 6 7 8 4 5 6 7 . #6)))"
+  },
+  {
+   "id": "mapcan/0216",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 5 nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "mapcan/0217",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 5 t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep t))"
+  },
+  {
+   "id": "mapcan/0218",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 5 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 0))"
+  },
+  {
+   "id": "mapcan/0219",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 5 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 1))"
+  },
+  {
+   "id": "mapcan/0220",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 5 2)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 2))"
+  },
+  {
+   "id": "mapcan/0221",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 5 -1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep -1))"
+  },
+  {
+   "id": "mapcan/0222",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 5 most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 2305843009213693951))"
+  },
+  {
+   "id": "mapcan/0223",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 5 1.5)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 1.5))"
+  },
+  {
+   "id": "mapcan/0224",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 5 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep sym))"
+  },
+  {
+   "id": "mapcan/0225",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 5 :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep :kw))"
+  },
+  {
+   "id": "mapcan/0226",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 5 (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "mapcan/0227",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 5 (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(sig (invalid-function 5))"
+  },
+  {
+   "id": "mapcan/0228",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 5 (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(sig (invalid-function 5))"
+  },
+  {
+   "id": "mapcan/0229",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 5 (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(sig (invalid-function 5))"
+  },
+  {
+   "id": "mapcan/0230",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 5 (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(sig (invalid-function 5))"
+  },
+  {
+   "id": "mapcan/0231",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 5 (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "mapcan/0232",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 5 (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 3))"
+  },
+  {
+   "id": "mapcan/0233",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 5 (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(sig (invalid-function 5))"
+  },
+  {
+   "id": "mapcan/0234",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 5 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "mapcan/0235",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 5 (vector))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "mapcan/0236",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 5 (list (list 1) (list 2 3)))) (error (list 'sig e))))",
+   "expected": "(sig (invalid-function 5))"
+  },
+  {
+   "id": "mapcan/0237",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 5 (vector \"a\" (list ?b)))) (error (list 'sig e))))",
+   "expected": "(sig (invalid-function 5))"
+  },
+  {
+   "id": "mapcan/0238",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 5 (list \"ab\" \"\" \"c\"))) (error (list 'sig e))))",
+   "expected": "(sig (invalid-function 5))"
+  },
+  {
+   "id": "mapcan/0239",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 5 (unibyte-string 255 65))) (error (list 'sig e))))",
+   "expected": "(sig (invalid-function 5))"
+  },
+  {
+   "id": "mapcan/0240",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 5 (string ?λ ?雪 ?x))) (error (list 'sig e))))",
+   "expected": "(sig (invalid-function 5))"
+  },
+  {
+   "id": "mapcan/0241",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 5 (lambda (x) x))) (error (list 'sig e))))",
+   "expected": "(sig (invalid-function 5))"
+  },
+  {
+   "id": "mapcan/0242",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 5 (let ((x (list 1 2 3 4 5 6 7 8))) (setcdr (nthcdr 7 x) (nthcdr 3 x)) x))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (7 8 4 5 6 7 8 4 5 6 7 . #6)))"
+  },
+  {
+   "id": "mapcan/0243",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'mapcan '(1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr mapcan> 1))"
+  },
+  {
+   "id": "mapcan/0244",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'mapcan '(1 1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr mapcan> 3))"
+  },
+  {
+   "id": "mapcan/0245",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (lambda (x) x)) (a1 nil)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (mapcan a0 a1))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "mapcan/0246",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (lambda (x) (list x))) (a1 (copy-sequence \"\"))) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (mapcan a0 a1))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "mapcan/0247",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 #'list) (a1 (list (list 1) (list 2 3)))) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (mapcan a0 a1))) (error (list 'sig e))))",
+   "expected": "(ok ((1) (2 3)))"
+  },
+  {
+   "id": "mapcan/0248",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 #'1+) (a1 1)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (mapcan a0 a1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 1))"
+  },
+  {
+   "id": "mapcan/0249",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 (list 1 2 3))) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (mapcan a0 a1))) (error (list 'sig e))))",
+   "expected": "(sig (void-function nil))"
+  },
+  {
+   "id": "mapcan/0250",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'primh-map-no-such-fn) (a1 (unibyte-string 255 65))) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (mapcan a0 a1))) (error (list 'sig e))))",
+   "expected": "(sig (void-function primh-map-no-such-fn))"
+  },
+  {
+   "id": "mapcan/0251",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 5) (a1 most-positive-fixnum)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (mapcan a0 a1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 2305843009213693951))"
+  },
+  {
+   "id": "mapcan/0252",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (lambda (x) x)) (a1 nil)) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "mapcan/0253",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (lambda (x) x)) (a1 1)) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 1))"
+  },
+  {
+   "id": "mapcan/0254",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (lambda (x) x)) (a1 most-positive-fixnum)) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 2305843009213693951))"
+  },
+  {
+   "id": "mapcan/0255",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (lambda (x) x)) (a1 :kw)) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep :kw))"
+  },
+  {
+   "id": "mapcan/0256",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (lambda (x) x)) (a1 (copy-sequence \"λx\"))) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument consp 955))"
+  },
+  {
+   "id": "mapcan/0257",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (lambda (x) x)) (a1 (cons 1 2))) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "mapcan/0258",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (lambda (x) x)) (a1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "mapcan/0259",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (lambda (x) x)) (a1 (vector \"a\" (list ?b)))) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument consp \"a\"))"
+  },
+  {
+   "id": "mapcan/0260",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (lambda (x) x)) (a1 (string ?λ ?雪 ?x))) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument consp 955))"
+  },
+  {
+   "id": "mapcan/0261",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (lambda (x) (list x))) (a1 nil)) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "mapcan/0262",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (lambda (x) (list x))) (a1 1)) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 1))"
+  },
+  {
+   "id": "mapcan/0263",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (lambda (x) (list x))) (a1 most-positive-fixnum)) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 2305843009213693951))"
+  },
+  {
+   "id": "mapcan/0264",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (lambda (x) (list x))) (a1 :kw)) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep :kw))"
+  },
+  {
+   "id": "mapcan/0265",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (lambda (x) (list x))) (a1 (copy-sequence \"λx\"))) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "mapcan/0266",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (lambda (x) (list x))) (a1 (cons 1 2))) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "mapcan/0267",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (lambda (x) (list x))) (a1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "mapcan/0268",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (lambda (x) (list x))) (a1 (vector \"a\" (list ?b)))) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "mapcan/0269",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (lambda (x) (list x))) (a1 (string ?λ ?雪 ?x))) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "mapcan/0270",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 #'list) (a1 nil)) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "mapcan/0271",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 #'list) (a1 1)) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 1))"
+  },
+  {
+   "id": "mapcan/0272",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 #'list) (a1 most-positive-fixnum)) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 2305843009213693951))"
+  },
+  {
+   "id": "mapcan/0273",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 #'list) (a1 :kw)) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep :kw))"
+  },
+  {
+   "id": "mapcan/0274",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 #'list) (a1 (copy-sequence \"λx\"))) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "mapcan/0275",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 #'list) (a1 (cons 1 2))) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "mapcan/0276",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 #'list) (a1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "mapcan/0277",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 #'list) (a1 (vector \"a\" (list ?b)))) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "mapcan/0278",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 #'list) (a1 (string ?λ ?雪 ?x))) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "mapcan/0279",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'car) (a1 nil)) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "mapcan/0280",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'car) (a1 1)) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 1))"
+  },
+  {
+   "id": "mapcan/0281",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'car) (a1 most-positive-fixnum)) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 2305843009213693951))"
+  },
+  {
+   "id": "mapcan/0282",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'car) (a1 :kw)) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep :kw))"
+  },
+  {
+   "id": "mapcan/0283",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'car) (a1 (copy-sequence \"λx\"))) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 955))"
+  },
+  {
+   "id": "mapcan/0284",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'car) (a1 (cons 1 2))) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "mapcan/0285",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'car) (a1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "mapcan/0286",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'car) (a1 (vector \"a\" (list ?b)))) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"a\"))"
+  },
+  {
+   "id": "mapcan/0287",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'car) (a1 (string ?λ ?雪 ?x))) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 955))"
+  },
+  {
+   "id": "mapcan/0288",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 #'1+) (a1 nil)) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "mapcan/0289",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 #'1+) (a1 1)) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 1))"
+  },
+  {
+   "id": "mapcan/0290",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 #'1+) (a1 most-positive-fixnum)) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 2305843009213693951))"
+  },
+  {
+   "id": "mapcan/0291",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 #'1+) (a1 :kw)) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep :kw))"
+  },
+  {
+   "id": "mapcan/0292",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 #'1+) (a1 (copy-sequence \"λx\"))) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument consp 956))"
+  },
+  {
+   "id": "mapcan/0293",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 #'1+) (a1 (cons 1 2))) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "mapcan/0294",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 #'1+) (a1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "mapcan/0295",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 #'1+) (a1 (vector \"a\" (list ?b)))) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument number-or-marker-p \"a\"))"
+  },
+  {
+   "id": "mapcan/0296",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 #'1+) (a1 (string ?λ ?雪 ?x))) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument consp 956))"
+  },
+  {
+   "id": "mapcan/0297",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 nil)) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (t t))"
+  },
+  {
+   "id": "mapcan/0298",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 1)) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 1))"
+  },
+  {
+   "id": "mapcan/0299",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 most-positive-fixnum)) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 2305843009213693951))"
+  },
+  {
+   "id": "mapcan/0300",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 :kw)) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep :kw))"
+  },
+  {
+   "id": "mapcan/0301",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 (copy-sequence \"λx\"))) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (void-function nil))"
+  },
+  {
+   "id": "mapcan/0302",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 (cons 1 2))) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "mapcan/0303",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "mapcan/0304",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 (vector \"a\" (list ?b)))) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (void-function nil))"
+  },
+  {
+   "id": "mapcan/0305",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 (string ?λ ?雪 ?x))) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (void-function nil))"
+  },
+  {
+   "id": "mapcan/0306",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'primh-map-no-such-fn) (a1 nil)) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "mapcan/0307",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'primh-map-no-such-fn) (a1 1)) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 1))"
+  },
+  {
+   "id": "mapcan/0308",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'primh-map-no-such-fn) (a1 most-positive-fixnum)) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 2305843009213693951))"
+  },
+  {
+   "id": "mapcan/0309",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'primh-map-no-such-fn) (a1 :kw)) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep :kw))"
+  },
+  {
+   "id": "mapcan/0310",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'primh-map-no-such-fn) (a1 (copy-sequence \"λx\"))) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (void-function primh-map-no-such-fn))"
+  },
+  {
+   "id": "mapcan/0311",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'primh-map-no-such-fn) (a1 (cons 1 2))) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "mapcan/0312",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'primh-map-no-such-fn) (a1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "mapcan/0313",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'primh-map-no-such-fn) (a1 (vector \"a\" (list ?b)))) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (void-function primh-map-no-such-fn))"
+  },
+  {
+   "id": "mapcan/0314",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'primh-map-no-such-fn) (a1 (string ?λ ?雪 ?x))) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (void-function primh-map-no-such-fn))"
+  },
+  {
+   "id": "mapcan/0315",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (lambda () 1)) (a1 nil)) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "mapcan/0316",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (lambda () 1)) (a1 1)) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 1))"
+  },
+  {
+   "id": "mapcan/0317",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (lambda () 1)) (a1 most-positive-fixnum)) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 2305843009213693951))"
+  },
+  {
+   "id": "mapcan/0318",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (lambda () 1)) (a1 :kw)) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep :kw))"
+  },
+  {
+   "id": "mapcan/0319",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (lambda () 1)) (a1 (copy-sequence \"λx\"))) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments (0 . 0) 1))",
+   "gnu_regime_variant": "(sig (wrong-number-of-arguments #[nil (1) (t)] 1))"
+  },
+  {
+   "id": "mapcan/0320",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (lambda () 1)) (a1 (cons 1 2))) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "mapcan/0321",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (lambda () 1)) (a1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "mapcan/0322",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (lambda () 1)) (a1 (vector \"a\" (list ?b)))) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments (0 . 0) 1))",
+   "gnu_regime_variant": "(sig (wrong-number-of-arguments #[nil (1) (t)] 1))"
+  },
+  {
+   "id": "mapcan/0323",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (lambda () 1)) (a1 (string ?λ ?雪 ?x))) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments (0 . 0) 1))",
+   "gnu_regime_variant": "(sig (wrong-number-of-arguments #[nil (1) (t)] 1))"
+  },
+  {
+   "id": "mapcan/0324",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 5) (a1 nil)) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "mapcan/0325",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 5) (a1 1)) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 1))"
+  },
+  {
+   "id": "mapcan/0326",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 5) (a1 most-positive-fixnum)) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 2305843009213693951))"
+  },
+  {
+   "id": "mapcan/0327",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 5) (a1 :kw)) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep :kw))"
+  },
+  {
+   "id": "mapcan/0328",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 5) (a1 (copy-sequence \"λx\"))) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (invalid-function 5))"
+  },
+  {
+   "id": "mapcan/0329",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 5) (a1 (cons 1 2))) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 2))"
+  },
+  {
+   "id": "mapcan/0330",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 5) (a1 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (1 2 1 2 . #2)))"
+  },
+  {
+   "id": "mapcan/0331",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 5) (a1 (vector \"a\" (list ?b)))) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (invalid-function 5))"
+  },
+  {
+   "id": "mapcan/0332",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 5) (a1 (string ?λ ?雪 ?x))) (let ((r (mapcan a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (invalid-function 5))"
+  },
+  {
+   "id": "mapcan/0333",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let (calls) (list (mapcan (lambda (x) (push x calls) (list x)) (list 'a 'b 'c)) (nreverse calls)))) (error (list 'sig e))))",
+   "expected": "(ok ((a b c) (a b c)))"
+  },
+  {
+   "id": "mapcan/0334",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let (calls) (list (mapcan (lambda (x) (push x calls) (list x)) (vector 1 \"s\" 'q)) (nreverse calls)))) (error (list 'sig e))))",
+   "expected": "(ok ((1 \"s\" q) (1 \"s\" q)))"
+  },
+  {
+   "id": "mapcan/0335",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let (calls) (list (mapcan (lambda (x) (push x calls) (list x)) (string ?a ?λ ?雪 ?b)) (nreverse calls)))) (error (list 'sig e))))",
+   "expected": "(ok ((97 955 38634 98) (97 955 38634 98)))"
+  },
+  {
+   "id": "mapcan/0336",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let (calls) (list (mapcan (lambda (x) (push x calls) (list x)) (unibyte-string 0 127 128 255)) (nreverse calls)))) (error (list 'sig e))))",
+   "expected": "(ok ((0 127 128 255) (0 127 128 255)))"
+  },
+  {
+   "id": "mapcan/0337",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let (calls) (list (mapcan (lambda (x) (push x calls) (list x)) (string-to-multibyte (unibyte-string 200 65))) (nreverse calls)))) (error (list 'sig e))))",
+   "expected": "(ok ((4194248 65) (4194248 65)))"
+  },
+  {
+   "id": "mapcan/0338",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((l (list 1 2 3 4)) (calls nil)) (list (mapcan (lambda (x) (push x calls) (when (eq x 2) (setcdr (cdr l) nil)) (list x)) l) (nreverse calls)))) (error (list 'sig e))))",
+   "expected": "(ok ((1 2) (1 2)))"
+  },
+  {
+   "id": "mapcan/0339",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((l (list 1 2 3)) (calls nil)) (list (mapcan (lambda (x) (push x calls) (when (eq x 1) (setcdr (cdr l) (list 9 9))) (list x)) l) (nreverse calls)))) (error (list 'sig e))))",
+   "expected": "(ok ((1 2 9) (1 2 9)))"
+  },
+  {
+   "id": "mapcan/0340",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((l (list 1 2 3)) (calls nil)) (list (mapcan (lambda (x) (push x calls) (when (eq x 1) (setcar (cdr l) 'z)) (list x)) l) (nreverse calls)))) (error (list 'sig e))))",
+   "expected": "(ok ((1 z 3) (1 z 3)))"
+  },
+  {
+   "id": "mapcan/0341",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((v (vector 1 2 3)) (calls nil)) (list (mapcan (lambda (x) (push x calls) (aset v 2 'z) (list x)) v) (nreverse calls)))) (error (list 'sig e))))",
+   "expected": "(ok ((1 2 z) (1 2 z)))"
+  },
+  {
+   "id": "mapcan/0342",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (catch 'out (mapcan (lambda (x) (if (eq x 2) (throw 'out (list 'thrown x)) (list x))) (list 1 2 3)))) (error (list 'sig e))))",
+   "expected": "(ok (thrown 2))"
+  },
+  {
+   "id": "mapcan/0343",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (condition-case e (mapcan (lambda (x) (if (eq x 2) (error \"boom %s\" x) (list x))) (list 1 2 3)) (error e))) (error (list 'sig e))))",
+   "expected": "(ok (error \"boom 2\"))"
+  },
+  {
+   "id": "mapcan/0344",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let (calls) (list (condition-case e (mapcan (lambda (x) (push x calls) (list x)) (cons 1 (cons 2 3))) (error e)) calls))) (error (list 'sig e))))",
+   "expected": "(ok ((wrong-type-argument listp 3) nil))"
+  },
+  {
+   "id": "mapcan/0345",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let (calls) (list (condition-case e (mapcan (lambda (x) (push x calls) (list x)) (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (error (car e))) calls))) (error (list 'sig e))))",
+   "expected": "(ok (circular-list nil))"
+  },
+  {
+   "id": "mapcan/0346",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((l (list (list 1) (list 2) (list 3)))) (list (mapcan (lambda (x) (let ((i 0)) (while (< i 12000) (setq i (1+ i)) (cons i i))) (list (car x))) l) l))) (error (list 'sig e))))",
+   "expected": "(ok ((1 2 3) ((1) (2) (3))))"
+  },
+  {
+   "id": "mapcan/0347",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((v (vector (list 1) (list 2)))) (list (mapcan (lambda (x) (let ((i 0)) (while (< i 12000) (setq i (1+ i)) (cons i i))) (list (car x))) v) v))) (error (list 'sig e))))",
+   "expected": "(ok ((1 2) [(1) (2)]))"
+  },
+  {
+   "id": "mapcan/0348",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda (x) (mapcan (lambda (y) (list (+ x y))) (list 10 20))) (list 1 2))) (error (list 'sig e))))",
+   "expected": "(ok (11 21 12 22))"
+  },
+  {
+   "id": "mapcan/0349",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((l nil) (i 0)) (while (< i 5000) (setq l (cons i l) i (1+ i))) (length (mapcan (lambda (x) (list x)) l)))) (error (list 'sig e))))",
+   "expected": "(ok 5000)"
+  },
+  {
+   "id": "mapcan/0350",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan 'list (list 1 2))) (error (list 'sig e))))",
+   "expected": "(ok (1 2))"
+  },
+  {
+   "id": "mapcan/0351",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (condition-case e (mapcan (lambda (a b) (list a b)) (list 1)) (error (car e)))) (error (list 'sig e))))",
+   "expected": "(ok wrong-number-of-arguments)"
+  },
+  {
+   "id": "mapcan/0352",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (condition-case e (mapcan 'primh-map-no-such-fn (list 1)) (error e))) (error (list 'sig e))))",
+   "expected": "(ok (void-function primh-map-no-such-fn))"
+  },
+  {
+   "id": "mapcan/0353",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a (list 1)) (b (list 2)) (c (list 3))) (list (mapcan (lambda (x) x) (list a nil b c)) a b c))) (error (list 'sig e))))",
+   "expected": "(ok ((1 2 3) (1 2 3) (2 3) (3)))"
+  },
+  {
+   "id": "mapcan/0354",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda (x) x) (list (list 1) (list 2) 3))) (error (list 'sig e))))",
+   "expected": "(ok (1 2 . 3))"
+  },
+  {
+   "id": "mapcan/0355",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (condition-case e (mapcan (lambda (x) x) (list (list 1) 2 (list 3))) (error e))) (error (list 'sig e))))",
+   "expected": "(ok (wrong-type-argument consp 2))"
+  },
+  {
+   "id": "mapcan/0356",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a (list 1 2))) (setcdr (cdr a) a) (condition-case e (mapcan (lambda (x) x) (list a (list 3))) (error (car e))))) (error (list 'sig e))))",
+   "expected": "(ok circular-list)"
+  },
+  {
+   "id": "mapcan/0357",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a (list 1))) (mapcan (lambda (x) x) (list a a)) (eq (cdr a) a))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "mapcan/0358",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda (x) nil) (list 1 2))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "mapcan/0359",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapcan (lambda (x) (if (eq x 2) nil (list x))) (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok (1 3))"
+  },
+  {
+   "id": "mapcan/0360",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok #'1+) (error (list 'sig e))))",
+   "expected": "(ok 1+)"
+  },
+  {
+   "id": "mapcan/0361",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok #'list) (error (list 'sig e))))",
+   "expected": "(ok list)"
+  },
+  {
+   "id": "mapcan/0362",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 'car) (error (list 'sig e))))",
+   "expected": "(ok car)"
+  },
+  {
+   "id": "mapcan/0363",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 'primh-map-no-such-fn) (error (list 'sig e))))",
+   "expected": "(ok primh-map-no-such-fn)"
+  },
+  {
+   "id": "mapcan/0364",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 'sym) (error (list 'sig e))))",
+   "expected": "(ok sym)"
+  },
+  {
+   "id": "mapcan/0365",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (cons 1 (cons 2 3))) (error (list 'sig e))))",
+   "expected": "(ok (1 2 . 3))"
+  },
+  {
+   "id": "mapcan/0366",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (cons 1 2)) (error (list 'sig e))))",
+   "expected": "(ok (1 . 2))"
+  },
+  {
+   "id": "mapcan/0367",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"\")) (error (list 'sig e))))",
+   "expected": "(ok \"\")"
+  },
+  {
+   "id": "mapcan/0368",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"abc\")) (error (list 'sig e))))",
+   "expected": "(ok \"abc\")"
+  },
+  {
+   "id": "mapcan/0369",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"λx\")) (error (list 'sig e))))",
+   "expected": "(ok \"λx\")"
+  },
+  {
+   "id": "mapcan/0370",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (lambda () 1)) (error (list 'sig e))))",
+   "expected": "(ok #[0 \"\\300\\207\" [1] 1])",
+   "gnu_regime_variant": "(ok #[nil (1) (t)])"
+  },
+  {
+   "id": "mapcan/0371",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (lambda (x) (list x))) (error (list 'sig e))))",
+   "expected": "(ok #[257 \"C\\207\" [] 2 \"\n\n(fn X)\"])",
+   "gnu_regime_variant": "(ok #[(x) ((list x)) (t)])"
+  },
+  {
+   "id": "mapcan/0372",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (lambda (x) x)) (error (list 'sig e))))",
+   "expected": "(ok #[257 \"\\207\" [] 2 \"\n\n(fn X)\"])",
+   "gnu_regime_variant": "(ok #[(x) (x) (t)])"
+  },
+  {
+   "id": "mapcan/0373",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((x (list 1 2 3 4 5 6 7 8))) (setcdr (nthcdr 7 x) (nthcdr 3 x)) x)) (error (list 'sig e))))",
+   "expected": "(ok (1 2 3 4 5 6 7 8 4 5 6 . #6))"
+  },
+  {
+   "id": "mapcan/0374",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (error (list 'sig e))))",
+   "expected": "(ok (1 2 1 2 . #2))"
+  },
+  {
+   "id": "mapcan/0375",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list \"ab\" \"\" \"c\")) (error (list 'sig e))))",
+   "expected": "(ok (\"ab\" \"\" \"c\"))"
+  },
+  {
+   "id": "mapcan/0376",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list 'a (list 'b))) (error (list 'sig e))))",
+   "expected": "(ok (a (b)))"
+  },
+  {
+   "id": "mapcan/0377",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (list 1) (list 2 3))) (error (list 'sig e))))",
+   "expected": "(ok ((1) (2 3)))"
+  },
+  {
+   "id": "mapcan/0378",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list 1 2 3)) (error (list 'sig e))))",
+   "expected": "(ok (1 2 3))"
+  },
+  {
+   "id": "mapcan/0379",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string ?λ ?雪 ?x)) (error (list 'sig e))))",
+   "expected": "(ok \"λ雪x\")"
+  },
+  {
+   "id": "mapcan/0380",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (unibyte-string 255 65)) (error (list 'sig e))))",
+   "expected": "(ok \"\\377A\")"
+  },
+  {
+   "id": "mapcan/0381",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vector \"a\" (list ?b))) (error (list 'sig e))))",
+   "expected": "(ok [\"a\" (98)])"
+  },
+  {
+   "id": "mapcan/0382",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vector 1 2)) (error (list 'sig e))))",
+   "expected": "(ok [1 2])"
+  },
+  {
+   "id": "mapcan/0383",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vector)) (error (list 'sig e))))",
+   "expected": "(ok [])"
+  },
+  {
+   "id": "mapcan/0384",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok -1) (error (list 'sig e))))",
+   "expected": "(ok -1)"
+  },
+  {
+   "id": "mapcan/0385",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 0) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "mapcan/0386",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1) (error (list 'sig e))))",
+   "expected": "(ok 1)"
+  },
+  {
+   "id": "mapcan/0387",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1.5) (error (list 'sig e))))",
+   "expected": "(ok 1.5)"
+  },
+  {
+   "id": "mapcan/0388",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 2) (error (list 'sig e))))",
+   "expected": "(ok 2)"
+  },
+  {
+   "id": "mapcan/0389",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 5) (error (list 'sig e))))",
+   "expected": "(ok 5)"
+  },
+  {
+   "id": "mapcan/0390",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok :kw) (error (list 'sig e))))",
+   "expected": "(ok :kw)"
+  },
+  {
+   "id": "mapcan/0391",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok most-positive-fixnum) (error (list 'sig e))))",
+   "expected": "(ok 2305843009213693951)"
+  },
+  {
+   "id": "mapcan/0392",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok nil) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "mapcan/0393",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok t) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  }
+ ]
+}

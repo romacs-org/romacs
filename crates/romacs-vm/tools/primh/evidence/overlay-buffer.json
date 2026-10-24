@@ -1,0 +1,115 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "overlay-buffer",
+ "spec_sha256": "9ef3d9c309ef92a0cf5918f2d38f9390f40ece495b3f7e4b132e5318291bd480",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "overlay-buffer",
+    "subr",
+    1,
+    1
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "buffer.c": "bb93b33042953fab31294645204d46c48c3a3d7b8516f7b923c7d86b9766b91d"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "overlay-buffer/0000",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'overlay-buffer '())) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr overlay-buffer> 0))"
+  },
+  {
+   "id": "overlay-buffer/0001",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'overlay-buffer '(1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr overlay-buffer> 2))"
+  },
+  {
+   "id": "overlay-buffer/0002",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((o (make-overlay 1 1))) (eq (overlay-buffer o) (current-buffer)))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "overlay-buffer/0003",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((o (make-overlay 1 1))) (delete-overlay o) (overlay-buffer o))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "overlay-buffer/0004",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (insert \"abc\") (let ((o (make-overlay 1 2))) (overlay-put o 'tag 7) (list (delete-all-overlays) (overlay-buffer o) (overlay-start o) (overlay-get o 'tag) (overlays-in 1 4))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil nil 7 nil))"
+  },
+  {
+   "id": "overlay-buffer/0005",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (insert \"abc\") (let ((a (make-overlay 1 2)) (b (make-overlay 4 4))) (narrow-to-region 2 3) (delete-all-overlays nil) (list (overlay-buffer a) (overlay-buffer b))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "overlay-buffer/0006",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((b (get-buffer-create \"overlay-other\")) (o (make-overlay 1 1))) (unwind-protect (let ((p (make-overlay 1 1 b))) (list (delete-all-overlays b) (overlay-buffer p) (eq (overlay-buffer o) (current-buffer)))) (kill-buffer b)))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil t))"
+  },
+  {
+   "id": "overlay-buffer/0007",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((b (get-buffer-create \"overlay-killed\"))) (let ((o (make-overlay 1 1 b))) (kill-buffer b) (list (overlay-buffer o) (delete-all-overlays b))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "overlay-buffer/0008",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (condition-case e (overlay-buffer nil) (error (car e)))) (error (list 'sig e))))",
+   "expected": "(ok wrong-type-argument)"
+  },
+  {
+   "id": "overlay-buffer/0009",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (condition-case e (overlay-buffer 1) (error (car e)))) (error (list 'sig e))))",
+   "expected": "(ok wrong-type-argument)"
+  },
+  {
+   "id": "overlay-buffer/0010",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (condition-case e (apply #'overlay-buffer '()) (error (car e)))) (error (list 'sig e))))",
+   "expected": "(ok wrong-number-of-arguments)"
+  },
+  {
+   "id": "overlay-buffer/0011",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (condition-case e (apply #'overlay-buffer '(1 2)) (error (car e)))) (error (list 'sig e))))",
+   "expected": "(ok wrong-number-of-arguments)"
+  },
+  {
+   "id": "overlay-buffer/0012",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (fboundp 'overlay-buffer) (functionp 'overlay-buffer))) (error (list 'sig e))))",
+   "expected": "(ok (t t))"
+  },
+  {
+   "id": "overlay-buffer/0013",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (eq (current-buffer) (funcall 'overlay-buffer (make-overlay 1 1))))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  }
+ ]
+}

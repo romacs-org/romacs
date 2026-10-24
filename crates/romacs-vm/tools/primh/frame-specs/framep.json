@@ -1,0 +1,38 @@
+{
+ "name": "framep",
+ "arity": [
+  1,
+  1
+ ],
+ "effect": "reads",
+ "gnu_files": [
+  "frame.c"
+ ],
+ "gnu_def": "frame.c:286",
+ "args": [
+  "none"
+ ],
+ "extra": {
+  "0": [
+   "nil",
+   "t",
+   "1",
+   "'symbol",
+   "\"string\"",
+   "(selected-window)"
+  ]
+ },
+ "probes": [
+  "(fboundp 'framep)",
+  "(framep (selected-frame))",
+  "(framep (frame-terminal))",
+  "(framep nil)",
+  "(framep t)",
+  "(framep 1)",
+  "(framep 'symbol)",
+  "(framep \"string\")",
+  "(framep (selected-window))",
+  "(funcall #'framep (selected-frame))"
+ ],
+ "rust": "src/prims/frame.rs:4"
+}

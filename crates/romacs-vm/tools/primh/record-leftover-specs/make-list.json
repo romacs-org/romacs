@@ -1,0 +1,39 @@
+{
+  "name": "make-list",
+  "arity": [
+    2,
+    2
+  ],
+  "effect": "pure",
+  "gnu_files": [
+    "alloc.c"
+  ],
+  "gnu_def": "alloc.c:2743",
+  "rust": "src/prims/record_leftovers.rs:4",
+  "args": [
+    "record-leftover-fixture",
+    "record-leftover-fixture"
+  ],
+  "extra": {
+    "0": [
+      "0",
+      "1",
+      "2",
+      "-1",
+      "1.0",
+      "'bad"
+    ],
+    "1": [
+      "nil",
+      "'fill",
+      "(list 7)",
+      "[9]",
+      "\"x\""
+    ]
+  },
+  "probes": [
+    "(let* ((x (list 7)) (a (make-list 3 x)) (b (make-list 3 x))) (list (make-list 0 x) (make-list 1 'fill) (length a) (eq (car a) x) (eq (car a) (car (cdr a))) (eq a b) (eq a (cdr a)) (progn (setcar x 9) a) (progn (setcar a 'changed) (car b))))",
+    "(list (fboundp 'make-list) (functionp #'make-list) (funcall #'make-list 2 'x) (condition-case e (make-list -1 nil) (error e)) (condition-case e (make-list 1.0 nil) (error e)) (condition-case e (make-list 'bad nil) (error e)) (condition-case e (apply #'make-list '(1)) (error (list (car e) (nth 2 e)))) (condition-case e (apply #'make-list '(1 nil extra)) (error (list (car e) (nth 2 e)))))",
+    "(let ((r (apply #'record 'tag (make-list 4094 'fill)))) (list (length r) (aref r 0) (aref r 4094)))"
+  ]
+}

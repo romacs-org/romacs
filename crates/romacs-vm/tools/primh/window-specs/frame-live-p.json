@@ -1,0 +1,32 @@
+{
+ "name": "frame-live-p",
+ "arity": [
+  1,
+  1
+ ],
+ "effect": "reads",
+ "gnu_files": [
+  "frame.c"
+ ],
+ "gnu_def": "frame.c:326",
+ "rust": "src/prims/window.rs:182",
+ "args": [
+  "none"
+ ],
+ "extra": {
+  "0": [
+   "nil",
+   "t",
+   "1",
+   "'sym",
+   "(copy-sequence \"s\")"
+  ]
+ },
+ "probes": [
+  "(frame-live-p (selected-frame))",
+  "(frame-live-p (window-frame (minibuffer-window)))",
+  "(frame-live-p (selected-window))",
+  "(funcall #'frame-live-p (selected-frame))",
+  "(list (frame-live-p (selected-frame)) (frame-char-height) (frame-char-width))"
+ ]
+}

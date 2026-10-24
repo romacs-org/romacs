@@ -1,0 +1,217 @@
+#!/usr/bin/env python3
+"""Export the V0 workloads as lexical Elisp SOURCE forms with checked GNU answers.
+
+Amendments 9-11: `.el` source is the only Elisp input, lexically scoped, with no
+cookie or binding-mode switch. The default fixture therefore carries the exact
+source text of every top-level form the V0 rows need, sliced verbatim from
+bench/core-bench.el, plus GNU's independently checked answers as the oracle.
+GNU is used only as a reader (to locate form boundaries) and as the oracle; no
+GNU bytecode, .elc or native code enters the fixture.
+
+`--diagnostic-gnu-bytecode` keeps the pre-amendment GNU bytecode export as an
+explicitly labelled diagnostic arm for the temporary romacs-eval engine (which
+cannot read source). It is never Elisp input and never acceptance evidence.
+
+This is a benchmark fixture format, not the replacement VM's admission/IR API.
+"""
+import json
+import hashlib
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import tempfile
+
+ROOT = Path(__file__).resolve().parent.parent
+SOURCE_INPUT = 'elisp-source'
+BYTECODE_DIAGNOSTIC_INPUT = 'gnu-bytecode-diagnostic'
+ROWS = ['eval-fib-interp', 'bc-fib-recursive', 'bc-while-loop', 'bc-specbind-loop',
+        'bc-funcall-closure', 'bc-mapcar-list', 'bc-funcall-dynamic', 'bc-seq-filter',
+        'bc-make-closure-1e6', 'bc-condition-case-loop', 'bc-catch-throw-1e5',
+        'bc-varref-global', 'bc-call-optional-rest', 'bc-closure-counter',
+        'bc-error-backtrace-1e4']
+HELPERS = ['core-bench--fib', 'core-bench--loop', 'core-bench--dyn',
+           'core-bench--funcall', 'core-bench--funcall-dynamic',
+           'core-bench--handler-step', 'core-bench--optional-rest',
+           'core-bench--make-counter', 'core-bench--bt-recur', 'core-bench--bt-count']
+# Every top-level source form the rows need, as (operator, name). The row
+# macro and its registry are included verbatim instead of synthesizing defuns.
+SOURCE_FORMS = ([('require', 'seq'), ('defvar', 'core-bench--all'), ('defmacro', 'core-bench--def'),
+                 ('defvar', 'core-bench--special'), ('defvar', 'core-bench--global'),
+                 ('define-error', 'core-bench-signal')]
+                + [('defun', name) for name in HELPERS]
+                + [('core-bench--def', row) for row in ROWS])
+CONSUMER_CONTRACT = ('Evaluate source.forms in order as lexically scoped Elisp source, then call '
+                     'rows[ROW].entry with no arguments and compare the result with rows[ROW].expected '
+                     '(JSON arrays are proper lists).')
+
+EXTRACT = r''';;; -*- lexical-binding: t -*-
+(require 'json)
+(require 'seq)
+(let ((wanted (json-read-file (getenv "V0_WANTED"))) (out nil))
+  (with-temp-buffer
+    (insert-file-contents (getenv "V0_SOURCE"))
+    (set-syntax-table emacs-lisp-mode-syntax-table)
+    (goto-char (point-min))
+    (while (progn (forward-comment (buffer-size)) (not (eobp)))
+      (let* ((start (point)) (form (read (current-buffer))) (end (point))
+             (name (and (consp form) (consp (cdr form))
+                        (let ((n (cadr form))) (if (eq (car-safe n) 'quote) (cadr n) n)))))
+        (when (and (consp form) (symbolp (car form)) name (symbolp name))
+          (let ((key (vector (symbol-name (car form)) (symbol-name name))))
+            (when (seq-contains-p wanted key)
+              (push `((operator . ,(aref key 0)) (name . ,(aref key 1))
+                      (line . ,(line-number-at-pos start))
+                      (text . ,(buffer-substring-no-properties start end)))
+                    out)))))))
+  (princ (json-encode (vconcat (nreverse out)))))
+'''
+
+# Fresh -Q process: evaluate ONLY the fixture's source forms (never load the
+# harness first), prove every row entry is an uncompiled interpreted closure,
+# compute answers, and only then load core-bench.el to apply its independent
+# core-bench--check table to the already computed answers.
+ORACLE = r''';;; -*- lexical-binding: t -*-
+(require 'json)
+(let* ((json-array-type 'list)
+       (fixture (json-read-file (getenv "V0_FIXTURE")))
+       (forms (alist-get 'forms (alist-get 'source fixture)))
+       (answers nil))
+  (dolist (form forms)
+    (let* ((text (alist-get 'text form)) (read (read-from-string text)))
+      (unless (= (cdr read) (length text)) (error "Trailing text after form %s" (alist-get 'name form)))
+      (eval (car read) t)))
+  (dolist (row (split-string (getenv "V0_ROWS")))
+    (let ((entry (intern (concat "core-bench-row-" row))))
+      (unless (interpreted-function-p (symbol-function entry))
+        (error "Row %s entry is not an interpreted source closure" row))
+      (push (cons row (funcall entry)) answers)))
+  (when (getenv "V0_CHECK")
+    (load (getenv "V0_CHECK") nil t)
+    (dolist (answer answers) (core-bench--check (car answer) (cdr answer))))
+  (princ (json-encode `((emacs . ,emacs-version)
+                        (answers . ,(mapcar (lambda (a) (cons (car a) (if (listp (cdr a)) (vconcat (cdr a)) (cdr a))))
+                                            (nreverse answers)))))))
+'''
+
+BYTECODE_DRIVER = r''';;; -*- lexical-binding: t -*-
+(require 'json)
+(defun v0-encode (v)
+  (cond ((byte-code-function-p v)
+         `((closure . ,(vector (aref v 0)
+          (mapconcat (lambda (b) (format "%02x" b)) (aref v 1) "")
+          (vconcat (mapcar #'v0-encode (aref v 2))) (aref v 3)))))
+        ((integerp v) v)
+        ((symbolp v) `((symbol . ,(symbol-name v))))
+        ((consp v) `((cons . ,(vector (v0-encode (car v)) (v0-encode (cdr v))))))
+        ((stringp v) `((string . ,v)))
+        ((vectorp v) `((vector . ,(vconcat (mapcar #'v0-encode v)))))
+        (t (error "Unsupported V0 constant %S" v))))
+(load (getenv "V0_ELC") nil t)
+(let ((rows nil) (functions nil))
+  (dolist (r (split-string (getenv "V0_ROWS")))
+    (let ((answer (funcall (intern (concat "core-bench-row-" r)))))
+      (core-bench--check r answer)
+      (push (cons r `((expected . ,(if (listp answer) (vconcat answer) answer))
+                     (tier . "A") (native_bar . 1.20))) rows)))
+  (dolist (name (split-string (getenv "V0_FUNCTIONS")))
+    (push (cons name (v0-encode (symbol-function (intern name)))) functions))
+  (princ (json-encode `((rows . ,(nreverse rows)) (functions . ,(nreverse functions))
+                        (globals . ((core-bench--special . 0) (core-bench--global . 7)))))))
+'''
+
+
+def emacs(gnu, directory, env, *args):
+    result = subprocess.run([gnu, '-Q', '--batch', *args], env=dict(os.environ, HOME=str(directory),
+                            TMPDIR=str(directory), **env), text=True, capture_output=True, timeout=900)
+    if result.returncode:
+        raise ValueError(result.stderr[-4000:])
+    return result.stdout
+
+
+def extract_forms(bench, wanted, directory, gnu='/usr/bin/emacs'):
+    """Verbatim top-level form texts for the (operator, name) pairs WANTED, in file order."""
+    directory = Path(directory)
+    (directory / 'wanted.json').write_text(json.dumps([list(key) for key in wanted]))
+    (directory / 'extract.el').write_text(EXTRACT)
+    forms = json.loads(emacs(gnu, directory, {'V0_WANTED': str(directory / 'wanted.json'),
+                                              'V0_SOURCE': str(bench)}, '-l', str(directory / 'extract.el')))
+    found = [(form['operator'], form['name']) for form in forms]
+    if sorted(found) != sorted(wanted) or len(set(found)) != len(found):
+        missing = sorted(set(wanted) - set(found))
+        raise ValueError(f'source forms missing or duplicated in {bench}: {missing or found}')
+    text = Path(bench).read_text()
+    for form in forms:
+        if text.count(form['text']) != 1:
+            raise ValueError(f'source form is not a unique verbatim slice: {form["name"]}')
+    return forms
+
+
+def source_oracle(fixture_path, rows, directory, check=None, gnu='/usr/bin/emacs'):
+    """Answers from evaluating ONLY the fixture's source forms in a fresh GNU."""
+    directory = Path(directory)
+    (directory / 'oracle.el').write_text(ORACLE)
+    env = {'V0_FIXTURE': str(fixture_path), 'V0_ROWS': ' '.join(rows)}
+    if check:
+        env['V0_CHECK'] = str(check)
+    return json.loads(emacs(gnu, directory, env, '-l', str(directory / 'oracle.el')))
+
+
+def source_fixture(bench, rows, wanted, directory, check=None, gnu='/usr/bin/emacs'):
+    bench = Path(bench)
+    forms = extract_forms(bench, wanted, directory, gnu)
+    data = {'schema': 2, 'input': SOURCE_INPUT,
+            'source': {'file': 'bench/core-bench.el', 'sha256': hashlib.sha256(bench.read_bytes()).hexdigest(),
+                       'forms': forms},
+            'consumer_contract': CONSUMER_CONTRACT,
+            'rows': {row: {'entry': 'core-bench-row-' + row, 'tier': 'A', 'native_bar': 1.20} for row in rows}}
+    candidate = Path(directory) / 'fixture-without-answers.json'
+    candidate.write_text(json.dumps(data))
+    oracle = source_oracle(candidate, rows, directory, check, gnu)
+    answers = dict(oracle['answers'])
+    if list(answers) != list(rows):
+        raise ValueError('GNU source oracle did not answer every row')
+    for row in rows:
+        data['rows'][row]['expected'] = answers[row]
+    data['oracle'] = {'engine': 'GNU Emacs ' + oracle['emacs'],
+                      'method': ('fresh -Q process evaluated only source.forms lexically (row entries proven '
+                                 'interpreted, never compiled)' + (', then checked every answer with '
+                                                                   'core-bench--check' if check else ''))}
+    return data
+
+
+def bytecode_diagnostic_fixture(bench, directory, gnu='/usr/bin/emacs'):
+    directory = Path(directory)
+    source = directory / 'core-bench.el'
+    shutil.copy2(bench, source)
+    driver = directory / 'dump.el'
+    driver.write_text(BYTECODE_DRIVER)
+    env = {'V0_ELC': str(source.with_suffix('.elc')), 'V0_ROWS': ' '.join(ROWS),
+           'V0_FUNCTIONS': ' '.join(HELPERS + ['core-bench-row-' + r for r in ROWS])}
+    emacs(gnu, directory, env, '-f', 'batch-byte-compile', str(source))
+    data = json.loads(emacs(gnu, directory, env, '-l', str(driver)))
+    return {'schema': 2, 'input': BYTECODE_DIAGNOSTIC_INPUT,
+            'diagnostic': ('GNU bytecode is NOT an Elisp input (amendments 9 and 10). This arm exists only '
+                           'so the temporary romacs-eval engine can exercise the measurement machinery; it '
+                           'is never source evidence and never acceptance.'), **data}
+
+
+def generate(output, gnu='/usr/bin/emacs', diagnostic=False):
+    output = Path(output).resolve()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    bench = ROOT / 'bench/core-bench.el'
+    with tempfile.TemporaryDirectory(prefix='v0-fixture-', dir=output.parent) as directory:
+        data = (bytecode_diagnostic_fixture(bench, directory, gnu) if diagnostic else
+                source_fixture(bench, ROWS, SOURCE_FORMS, directory, check=bench, gnu=gnu))
+    data['bench_sha256'] = hashlib.sha256(bench.read_bytes()).hexdigest()
+    output.write_text(json.dumps(data, indent=2) + '\n')
+    print(f'{output}: {data["input"]}; {len(data["rows"])} checked GNU answers')
+
+
+if __name__ == '__main__':
+    import argparse
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument('output')
+    parser.add_argument('--diagnostic-gnu-bytecode', action='store_true')
+    args = parser.parse_args()
+    generate(args.output, diagnostic=args.diagnostic_gnu_bytecode)

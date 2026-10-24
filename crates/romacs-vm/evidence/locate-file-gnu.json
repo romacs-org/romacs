@@ -1,0 +1,60 @@
+{
+  "oracle": "<recording-path-redacted>/emacs",
+  "sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+  "cases": [
+    {
+      "source": "(locate-file \"library\" '(\"first\" \"second\") '(\".el\" \".elc\"))",
+      "expected": "nil",
+      "gnu_stdout": "nil",
+      "status": 0
+    },
+    {
+      "source": "(locate-file \"plain\" nil)",
+      "expected": "\"<fixture-root>/first/plain\"",
+      "gnu_stdout": "\"<fixture-root>/first/plain\"",
+      "status": 0
+    },
+    {
+      "source": "(locate-file \"library\" '(nil) '(\".elc\" \".el\"))",
+      "expected": "\"<fixture-root>/first/library.elc\"",
+      "gnu_stdout": "\"<fixture-root>/first/library.elc\"",
+      "status": 0
+    },
+    {
+      "source": "(locate-file \"library\" '(\"<fixture-root>/first\" \"<fixture-root>/second\") '(\".el\" \".elc\"))",
+      "expected": "\"<fixture-root>/first/library.el\"",
+      "gnu_stdout": "\"<fixture-root>/first/library.el\"",
+      "status": 0
+    },
+    {
+      "source": "(funcall 'locate-file \"plain\" '(nil))",
+      "expected": "\"<fixture-root>/first/plain\"",
+      "gnu_stdout": "\"<fixture-root>/first/plain\"",
+      "status": 0
+    },
+    {
+      "source": "(locate-file-internal \"plain\" '(nil 1))",
+      "expected": "\"<fixture-root>/first/plain\"",
+      "gnu_stdout": "\"<fixture-root>/first/plain\"",
+      "status": 0
+    },
+    {
+      "source": "(locate-file \"directory\" '(nil) '(\".el\"))",
+      "expected": "nil",
+      "gnu_stdout": "nil",
+      "status": 0
+    },
+    {
+      "source": "(locate-file \"absent\" '(nil))",
+      "expected": "nil",
+      "gnu_stdout": "nil",
+      "status": 0
+    },
+    {
+      "source": "(locate-file \"<fixture-root>/first/./plain\" nil)",
+      "expected": "\"<fixture-root>/first/./plain\"",
+      "gnu_stdout": "\"<fixture-root>/first/./plain\"",
+      "status": 0
+    }
+  ]
+}

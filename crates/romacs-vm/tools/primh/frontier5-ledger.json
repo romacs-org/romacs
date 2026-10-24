@@ -1,0 +1,365 @@
+{
+  "comment": "Every primh pin in the five frontier5 evidence files, with the /DIVERGENCES.md row that explains it. tests/frontier5.rs requires this map to equal the union of the evidence files' `pinned` maps exactly (ids and classes) and every row to exist in the ledger.",
+  "pins": {
+    "make-vector/0075": {
+      "class": "PRINTER",
+      "row": "VM2-EV2"
+    },
+    "make-vector/0094": {
+      "class": "PRINTER",
+      "row": "VM2-EV2"
+    },
+    "make-vector/0114": {
+      "class": "DATA",
+      "row": "VM2-FR5-2"
+    },
+    "make-vector/0115": {
+      "class": "DATA",
+      "row": "VM2-FR5-2"
+    },
+    "make-vector/0116": {
+      "class": "DATA",
+      "row": "VM2-FR5-2"
+    },
+    "make-vector/0117": {
+      "class": "DATA",
+      "row": "VM2-FR5-2"
+    },
+    "make-vector/0118": {
+      "class": "DATA",
+      "row": "VM2-FR5-2"
+    },
+    "make-vector/0119": {
+      "class": "DATA",
+      "row": "VM2-FR5-2"
+    },
+    "make-vector/0120": {
+      "class": "DATA",
+      "row": "VM2-FR5-2"
+    },
+    "make-vector/0121": {
+      "class": "DATA",
+      "row": "VM2-FR5-2"
+    },
+    "make-vector/0122": {
+      "class": "DATA",
+      "row": "VM2-FR5-2"
+    },
+    "make-vector/0123": {
+      "class": "DATA",
+      "row": "VM2-FR5-2"
+    },
+    "make-vector/0124": {
+      "class": "DATA",
+      "row": "VM2-FR5-2"
+    },
+    "make-vector/0125": {
+      "class": "DATA",
+      "row": "VM2-FR5-2"
+    },
+    "make-vector/0126": {
+      "class": "DATA",
+      "row": "VM2-FR5-2"
+    },
+    "make-vector/0127": {
+      "class": "DATA",
+      "row": "VM2-FR5-2"
+    },
+    "make-vector/0128": {
+      "class": "DATA",
+      "row": "VM2-FR5-2"
+    },
+    "make-vector/0129": {
+      "class": "DATA",
+      "row": "VM2-FR5-2"
+    },
+    "make-vector/0130": {
+      "class": "DATA",
+      "row": "VM2-FR5-2"
+    },
+    "make-vector/0131": {
+      "class": "DATA",
+      "row": "VM2-FR5-2"
+    },
+    "make-vector/0132": {
+      "class": "DATA",
+      "row": "VM2-FR5-2"
+    },
+    "make-vector/0342": {
+      "class": "PRINTER",
+      "row": "VM2-EV2"
+    },
+    "make-vector/0343": {
+      "class": "PRINTER",
+      "row": "VM2-EV2"
+    },
+    "make-vector/0344": {
+      "class": "PRINTER",
+      "row": "VM2-EV2"
+    },
+    "make-vector/0345": {
+      "class": "PRINTER",
+      "row": "VM2-EV2"
+    },
+    "make-vector/0346": {
+      "class": "PRINTER",
+      "row": "VM2-EV2"
+    },
+    "make-vector/0347": {
+      "class": "PRINTER",
+      "row": "VM2-EV2"
+    },
+    "make-vector/0348": {
+      "class": "PRINTER",
+      "row": "VM2-EV2"
+    },
+    "make-vector/0349": {
+      "class": "PRINTER",
+      "row": "VM2-EV2"
+    },
+    "make-vector/0350": {
+      "class": "PRINTER",
+      "row": "VM2-EV2"
+    },
+    "make-vector/0351": {
+      "class": "PRINTER",
+      "row": "VM2-EV2"
+    },
+    "make-vector/0352": {
+      "class": "PRINTER",
+      "row": "VM2-EV2"
+    },
+    "make-vector/0353": {
+      "class": "PRINTER",
+      "row": "VM2-EV2"
+    },
+    "make-vector/0354": {
+      "class": "PRINTER",
+      "row": "VM2-EV2"
+    },
+    "make-vector/0355": {
+      "class": "PRINTER",
+      "row": "VM2-EV2"
+    },
+    "make-vector/0356": {
+      "class": "PRINTER",
+      "row": "VM2-EV2"
+    },
+    "make-vector/0357": {
+      "class": "PRINTER",
+      "row": "VM2-EV2"
+    },
+    "make-vector/0358": {
+      "class": "PRINTER",
+      "row": "VM2-EV2"
+    },
+    "make-vector/0359": {
+      "class": "PRINTER",
+      "row": "VM2-EV2"
+    },
+    "make-vector/0360": {
+      "class": "PRINTER",
+      "row": "VM2-EV2"
+    },
+    "make-vector/0411": {
+      "class": "DATA",
+      "row": "VM2-FR5-2"
+    },
+    "make-vector/0412": {
+      "class": "DATA",
+      "row": "VM2-FR5-2"
+    },
+    "make-vector/0413": {
+      "class": "DATA",
+      "row": "VM2-FR5-2"
+    },
+    "make-vector/0414": {
+      "class": "DATA",
+      "row": "VM2-FR5-2"
+    },
+    "make-vector/0415": {
+      "class": "DATA",
+      "row": "VM2-FR5-2"
+    },
+    "make-vector/0416": {
+      "class": "DATA",
+      "row": "VM2-FR5-2"
+    },
+    "make-vector/0417": {
+      "class": "DATA",
+      "row": "VM2-FR5-2"
+    },
+    "make-vector/0487": {
+      "class": "PRINTER",
+      "row": "VM2-EV2"
+    },
+    "make-vector/0488": {
+      "class": "PRINTER",
+      "row": "VM2-EV2"
+    },
+    "make-vector/0489": {
+      "class": "PRINTER",
+      "row": "VM2-EV2"
+    },
+    "make-vector/0490": {
+      "class": "PRINTER",
+      "row": "VM2-EV2"
+    },
+    "make-vector/0491": {
+      "class": "PRINTER",
+      "row": "VM2-EV2"
+    },
+    "make-vector/0492": {
+      "class": "PRINTER",
+      "row": "VM2-EV2"
+    },
+    "make-vector/0493": {
+      "class": "PRINTER",
+      "row": "VM2-EV2"
+    },
+    "make-vector/0499": {
+      "class": "VALUE",
+      "row": "VM2-EMPTY1"
+    },
+    "make-vector/0501": {
+      "class": "VALUE",
+      "row": "VM2-FR5-2"
+    },
+    "make-vector/0512": {
+      "class": "PRINTER",
+      "row": "VM2-EV2"
+    },
+    "propertize/0511": {
+      "class": "PRINTER",
+      "row": "VM2-EV2"
+    },
+    "propertize/0514": {
+      "class": "SIGNAL-VS-VALUE",
+      "row": "VM2-FR5-3"
+    },
+    "propertize/0515": {
+      "class": "SIGNAL-VS-VALUE",
+      "row": "VM2-FR5-3"
+    },
+    "propertize/0516": {
+      "class": "SIGNAL-VS-VALUE",
+      "row": "VM2-FR5-3"
+    },
+    "propertize/0517": {
+      "class": "SIGNAL-VS-VALUE",
+      "row": "VM2-FR5-3"
+    },
+    "propertize/0518": {
+      "class": "SIGNAL-VS-VALUE",
+      "row": "VM2-FR5-3"
+    },
+    "propertize/0519": {
+      "class": "SIGNAL-VS-VALUE",
+      "row": "VM2-FR5-3"
+    },
+    "propertize/0522": {
+      "class": "SIGNAL-VS-VALUE",
+      "row": "VM2-FR5-3"
+    },
+    "propertize/0523": {
+      "class": "SIGNAL-VS-VALUE",
+      "row": "VM2-FR5-3"
+    },
+    "propertize/0524": {
+      "class": "SIGNAL-VS-VALUE",
+      "row": "VM2-FR5-3"
+    },
+    "propertize/0525": {
+      "class": "SIGNAL-VS-VALUE",
+      "row": "VM2-FR5-3"
+    },
+    "propertize/0526": {
+      "class": "SIGNAL-VS-VALUE",
+      "row": "VM2-FR5-3"
+    },
+    "propertize/0527": {
+      "class": "SIGNAL-VS-VALUE",
+      "row": "VM2-FR5-3"
+    },
+    "propertize/0528": {
+      "class": "SIGNAL-VS-VALUE",
+      "row": "VM2-FR5-3"
+    },
+    "propertize/0529": {
+      "class": "SIGNAL-VS-VALUE",
+      "row": "VM2-FR5-3"
+    },
+    "propertize/0530": {
+      "class": "PRINTER",
+      "row": "VM2-EV2"
+    },
+    "propertize/0549": {
+      "class": "PRINTER",
+      "row": "VM2-EV2"
+    },
+    "propertize/0552": {
+      "class": "VALUE",
+      "row": "VM2-EMPTY1"
+    },
+    "propertize/0570": {
+      "class": "SIGNAL-VS-VALUE",
+      "row": "VM2-FR5-3"
+    },
+    "propertize/0572": {
+      "class": "SIGNAL-VS-VALUE",
+      "row": "VM2-FR5-3"
+    },
+    "propertize/0573": {
+      "class": "SIGNAL-VS-VALUE",
+      "row": "VM2-FR5-3"
+    },
+    "propertize/0584": {
+      "class": "PRINTER",
+      "row": "VM2-EV2"
+    },
+    "reverse/0018": {
+      "class": "PRINTER",
+      "row": "VM2-EV2"
+    },
+    "reverse/0028": {
+      "class": "PRINTER",
+      "row": "VM2-EV2"
+    },
+    "reverse/0043": {
+      "class": "VALUE",
+      "row": "VM2-EMPTY1"
+    },
+    "reverse/0049": {
+      "class": "DATA",
+      "row": "VM2-FR5-1"
+    },
+    "reverse/0061": {
+      "class": "PRINTER",
+      "row": "VM2-EV2"
+    },
+    "vconcat/0018": {
+      "class": "PRINTER",
+      "row": "VM2-EV2"
+    },
+    "vconcat/0026": {
+      "class": "PRINTER",
+      "row": "VM2-EV2"
+    },
+    "vconcat/0040": {
+      "class": "VALUE",
+      "row": "VM2-EMPTY1"
+    },
+    "vconcat/0043": {
+      "class": "SIGNAL-VS-VALUE",
+      "row": "VM2-FR5-1"
+    },
+    "vconcat/0044": {
+      "class": "MISSING",
+      "row": "VM2-FR5-1"
+    },
+    "vconcat/0075": {
+      "class": "PRINTER",
+      "row": "VM2-EV2"
+    }
+  }
+}

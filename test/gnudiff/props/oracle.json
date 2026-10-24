@@ -1,0 +1,35 @@
+{
+  "sha256": "20a94ee7abc04960e3296deead030a37866d1d1e1522f3efd818838af7fffbe4",
+  "version": "GNU Emacs 32.0.50",
+  "cases": [
+    "props-inheritance",
+    "props-string-insert",
+    "props-modification-protocol",
+    "props-inhibit-hooks",
+    "props-plist-order",
+    "props-boundary-limits",
+    "props-equal-adjacent-plists",
+    "props-read-only-matrix",
+    "props-marker-edits",
+    "props-marker-lifetimes",
+    "props-marker-copy-detach",
+    "props-marker-save-excursion",
+    "props-marker-undo-redo",
+    "props-d1-gnu-observation",
+    "props-m6-string-semantics",
+    "props-overlay-combination"
+  ],
+  "record_sha256": "f7b71261f211aab40f13717de0048c686a02ec5d66b928f1765e1c1b18ef046e",
+  "fixtures": {
+    "01-inheritance.el": "2d85b25661eca0b7042995155a0ce17c21de15ab75051639d37b5da4e10167a2",
+    "02-string-insert.el": "4e72350d1c0d46ccf288feb5247edb959e512eb427768ea3312478c6373d3685",
+    "03-modification.el": "f4b3ef910c1f50e295a0bdbbee5f7bb4b84f7497ea86ead52d9bb1667b34ee13",
+    "04-plist-order.el": "7f2f1f796be1e1dd5f9d8c48997d60b92fc782173794431d64f52bbaff2bffc4",
+    "05-boundaries.el": "e35321c7a9b667b19d2ea545c45b7d601578e93cfb220696acf53accf9c2e4b7",
+    "06-read-only.el": "d24f04b0cf3a5bbfd88e1ea8fa44e7326faca016b89e7acee2a2a7d94d338bed",
+    "07-markers.el": "f99f210c9c77594f8f71e104146da2cbf36f2218b62421b359faca2236367469",
+    "08-plist-identity.el": "0ffe5bc5b2d3d01a1301fc7ac3cff6f49e9e8bea0d235c51a9b6f98509701d4b",
+    "09-string-runs.el": "9d4bfa658f767feaeaa58030c7087c1ce166f54523d7a1d797d27cb7e1b4d758",
+    "10-overlay-properties.el": "b4ef5e64fb20a3995bf4a66e529dabb63798bbcda2962dcf0726cb83d61cc7ff"
+  }
+}

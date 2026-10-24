@@ -1,0 +1,1495 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "write-region",
+ "spec_sha256": "eb89dcbb3067b127e6db16debcc7f61f366ea809a95089d85a4292928af23ec7",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "write-region",
+    "subr",
+    3,
+    7
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "fileio.c": "0705ed5b4f93c71a45937d7de737bb54d4ae3c5cef1e565da779f4875f560c92"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "write-region/0000",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") nil) nil \"/tmp/romacs-primh-fio-wr-dom\" nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "write-region/0001",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") nil) nil \"/tmp/romacs-primh-fio-wr-dom\" nil t nil nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "write-region/0002",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") nil) nil \"/tmp/romacs-primh-fio-wr-dom\" t nil nil nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "write-region/0003",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") nil) nil \"/tmp/romacs-primh-fio-wr-dom\" t t nil nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "write-region/0004",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") nil) nil nil nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "write-region/0005",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") nil) nil nil nil t nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "write-region/0006",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") nil) nil nil t nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "write-region/0007",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") nil) nil nil t t nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "write-region/0008",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") nil) nil \"/tmp/romacs-primh-fio-wr-no-such-dir/x\" nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (file-missing \"Opening output file\" \"No such file or directory\" \"/tmp/romacs-primh-fio-wr-no-such-dir/x\"))"
+  },
+  {
+   "id": "write-region/0009",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") nil) nil \"/tmp/romacs-primh-fio-wr-no-such-dir/x\" nil t nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (file-missing \"Opening output file\" \"No such file or directory\" \"/tmp/romacs-primh-fio-wr-no-such-dir/x\"))"
+  },
+  {
+   "id": "write-region/0010",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") nil) nil \"/tmp/romacs-primh-fio-wr-no-such-dir/x\" t nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (file-missing \"Opening output file\" \"No such file or directory\" \"/tmp/romacs-primh-fio-wr-no-such-dir/x\"))"
+  },
+  {
+   "id": "write-region/0011",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") nil) nil \"/tmp/romacs-primh-fio-wr-no-such-dir/x\" t t nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (file-missing \"Opening output file\" \"No such file or directory\" \"/tmp/romacs-primh-fio-wr-no-such-dir/x\"))"
+  },
+  {
+   "id": "write-region/0012",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") nil) 4 \"/tmp/romacs-primh-fio-wr-dom\" nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "write-region/0013",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") nil) 4 \"/tmp/romacs-primh-fio-wr-dom\" nil t nil nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "write-region/0014",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") nil) 4 \"/tmp/romacs-primh-fio-wr-dom\" t nil nil nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "write-region/0015",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") nil) 4 \"/tmp/romacs-primh-fio-wr-dom\" t t nil nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "write-region/0016",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") nil) 4 nil nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "write-region/0017",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") nil) 4 nil nil t nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "write-region/0018",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") nil) 4 nil t nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "write-region/0019",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") nil) 4 nil t t nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "write-region/0020",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") nil) 4 \"/tmp/romacs-primh-fio-wr-no-such-dir/x\" nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (file-missing \"Opening output file\" \"No such file or directory\" \"/tmp/romacs-primh-fio-wr-no-such-dir/x\"))"
+  },
+  {
+   "id": "write-region/0021",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") nil) 4 \"/tmp/romacs-primh-fio-wr-no-such-dir/x\" nil t nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (file-missing \"Opening output file\" \"No such file or directory\" \"/tmp/romacs-primh-fio-wr-no-such-dir/x\"))"
+  },
+  {
+   "id": "write-region/0022",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") nil) 4 \"/tmp/romacs-primh-fio-wr-no-such-dir/x\" t nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (file-missing \"Opening output file\" \"No such file or directory\" \"/tmp/romacs-primh-fio-wr-no-such-dir/x\"))"
+  },
+  {
+   "id": "write-region/0023",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") nil) 4 \"/tmp/romacs-primh-fio-wr-no-such-dir/x\" t t nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (file-missing \"Opening output file\" \"No such file or directory\" \"/tmp/romacs-primh-fio-wr-no-such-dir/x\"))"
+  },
+  {
+   "id": "write-region/0024",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") nil) 'sym \"/tmp/romacs-primh-fio-wr-dom\" nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "write-region/0025",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") nil) 'sym \"/tmp/romacs-primh-fio-wr-dom\" nil t nil nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "write-region/0026",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") nil) 'sym \"/tmp/romacs-primh-fio-wr-dom\" t nil nil nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "write-region/0027",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") nil) 'sym \"/tmp/romacs-primh-fio-wr-dom\" t t nil nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "write-region/0028",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") nil) 'sym nil nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "write-region/0029",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") nil) 'sym nil nil t nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "write-region/0030",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") nil) 'sym nil t nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "write-region/0031",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") nil) 'sym nil t t nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "write-region/0032",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") nil) 'sym \"/tmp/romacs-primh-fio-wr-no-such-dir/x\" nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (file-missing \"Opening output file\" \"No such file or directory\" \"/tmp/romacs-primh-fio-wr-no-such-dir/x\"))"
+  },
+  {
+   "id": "write-region/0033",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") nil) 'sym \"/tmp/romacs-primh-fio-wr-no-such-dir/x\" nil t nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (file-missing \"Opening output file\" \"No such file or directory\" \"/tmp/romacs-primh-fio-wr-no-such-dir/x\"))"
+  },
+  {
+   "id": "write-region/0034",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") nil) 'sym \"/tmp/romacs-primh-fio-wr-no-such-dir/x\" t nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (file-missing \"Opening output file\" \"No such file or directory\" \"/tmp/romacs-primh-fio-wr-no-such-dir/x\"))"
+  },
+  {
+   "id": "write-region/0035",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") nil) 'sym \"/tmp/romacs-primh-fio-wr-no-such-dir/x\" t t nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (file-missing \"Opening output file\" \"No such file or directory\" \"/tmp/romacs-primh-fio-wr-no-such-dir/x\"))"
+  },
+  {
+   "id": "write-region/0036",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") 2) nil \"/tmp/romacs-primh-fio-wr-dom\" nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p nil))"
+  },
+  {
+   "id": "write-region/0037",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") 2) nil \"/tmp/romacs-primh-fio-wr-dom\" nil t nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p nil))"
+  },
+  {
+   "id": "write-region/0038",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") 2) nil \"/tmp/romacs-primh-fio-wr-dom\" t nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p nil))"
+  },
+  {
+   "id": "write-region/0039",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") 2) nil \"/tmp/romacs-primh-fio-wr-dom\" t t nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p nil))"
+  },
+  {
+   "id": "write-region/0040",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") 2) nil nil nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p nil))"
+  },
+  {
+   "id": "write-region/0041",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") 2) nil nil nil t nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p nil))"
+  },
+  {
+   "id": "write-region/0042",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") 2) nil nil t nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p nil))"
+  },
+  {
+   "id": "write-region/0043",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") 2) nil nil t t nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p nil))"
+  },
+  {
+   "id": "write-region/0044",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") 2) nil \"/tmp/romacs-primh-fio-wr-no-such-dir/x\" nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p nil))"
+  },
+  {
+   "id": "write-region/0045",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") 2) nil \"/tmp/romacs-primh-fio-wr-no-such-dir/x\" nil t nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p nil))"
+  },
+  {
+   "id": "write-region/0046",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") 2) nil \"/tmp/romacs-primh-fio-wr-no-such-dir/x\" t nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p nil))"
+  },
+  {
+   "id": "write-region/0047",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") 2) nil \"/tmp/romacs-primh-fio-wr-no-such-dir/x\" t t nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p nil))"
+  },
+  {
+   "id": "write-region/0048",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") 2) 4 \"/tmp/romacs-primh-fio-wr-dom\" nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "write-region/0049",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") 2) 4 \"/tmp/romacs-primh-fio-wr-dom\" nil t nil nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "write-region/0050",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") 2) 4 \"/tmp/romacs-primh-fio-wr-dom\" t nil nil nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "write-region/0051",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") 2) 4 \"/tmp/romacs-primh-fio-wr-dom\" t t nil nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "write-region/0052",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") 2) 4 nil nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "write-region/0053",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") 2) 4 nil nil t nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "write-region/0054",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") 2) 4 nil t nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "write-region/0055",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") 2) 4 nil t t nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "write-region/0056",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") 2) 4 \"/tmp/romacs-primh-fio-wr-no-such-dir/x\" nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (file-missing \"Opening output file\" \"No such file or directory\" \"/tmp/romacs-primh-fio-wr-no-such-dir/x\"))"
+  },
+  {
+   "id": "write-region/0057",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") 2) 4 \"/tmp/romacs-primh-fio-wr-no-such-dir/x\" nil t nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (file-missing \"Opening output file\" \"No such file or directory\" \"/tmp/romacs-primh-fio-wr-no-such-dir/x\"))"
+  },
+  {
+   "id": "write-region/0058",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") 2) 4 \"/tmp/romacs-primh-fio-wr-no-such-dir/x\" t nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (file-missing \"Opening output file\" \"No such file or directory\" \"/tmp/romacs-primh-fio-wr-no-such-dir/x\"))"
+  },
+  {
+   "id": "write-region/0059",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") 2) 4 \"/tmp/romacs-primh-fio-wr-no-such-dir/x\" t t nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (file-missing \"Opening output file\" \"No such file or directory\" \"/tmp/romacs-primh-fio-wr-no-such-dir/x\"))"
+  },
+  {
+   "id": "write-region/0060",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") 2) 'sym \"/tmp/romacs-primh-fio-wr-dom\" nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p sym))"
+  },
+  {
+   "id": "write-region/0061",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") 2) 'sym \"/tmp/romacs-primh-fio-wr-dom\" nil t nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p sym))"
+  },
+  {
+   "id": "write-region/0062",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") 2) 'sym \"/tmp/romacs-primh-fio-wr-dom\" t nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p sym))"
+  },
+  {
+   "id": "write-region/0063",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") 2) 'sym \"/tmp/romacs-primh-fio-wr-dom\" t t nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p sym))"
+  },
+  {
+   "id": "write-region/0064",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") 2) 'sym nil nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p sym))"
+  },
+  {
+   "id": "write-region/0065",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") 2) 'sym nil nil t nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p sym))"
+  },
+  {
+   "id": "write-region/0066",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") 2) 'sym nil t nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p sym))"
+  },
+  {
+   "id": "write-region/0067",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") 2) 'sym nil t t nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p sym))"
+  },
+  {
+   "id": "write-region/0068",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") 2) 'sym \"/tmp/romacs-primh-fio-wr-no-such-dir/x\" nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p sym))"
+  },
+  {
+   "id": "write-region/0069",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") 2) 'sym \"/tmp/romacs-primh-fio-wr-no-such-dir/x\" nil t nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p sym))"
+  },
+  {
+   "id": "write-region/0070",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") 2) 'sym \"/tmp/romacs-primh-fio-wr-no-such-dir/x\" t nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p sym))"
+  },
+  {
+   "id": "write-region/0071",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") 2) 'sym \"/tmp/romacs-primh-fio-wr-no-such-dir/x\" t t nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p sym))"
+  },
+  {
+   "id": "write-region/0072",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\") \"strλ\\n\") nil \"/tmp/romacs-primh-fio-wr-dom\" nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "write-region/0073",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\") \"strλ\\n\") nil \"/tmp/romacs-primh-fio-wr-dom\" nil t nil nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "write-region/0074",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\") \"strλ\\n\") nil \"/tmp/romacs-primh-fio-wr-dom\" t nil nil nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "write-region/0075",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\") \"strλ\\n\") nil \"/tmp/romacs-primh-fio-wr-dom\" t t nil nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "write-region/0076",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\") \"strλ\\n\") nil nil nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "write-region/0077",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\") \"strλ\\n\") nil nil nil t nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "write-region/0078",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\") \"strλ\\n\") nil nil t nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "write-region/0079",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\") \"strλ\\n\") nil nil t t nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "write-region/0080",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\") \"strλ\\n\") nil \"/tmp/romacs-primh-fio-wr-no-such-dir/x\" nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (file-missing \"Opening output file\" \"No such file or directory\" \"/tmp/romacs-primh-fio-wr-no-such-dir/x\"))"
+  },
+  {
+   "id": "write-region/0081",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\") \"strλ\\n\") nil \"/tmp/romacs-primh-fio-wr-no-such-dir/x\" nil t nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (file-missing \"Opening output file\" \"No such file or directory\" \"/tmp/romacs-primh-fio-wr-no-such-dir/x\"))"
+  },
+  {
+   "id": "write-region/0082",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\") \"strλ\\n\") nil \"/tmp/romacs-primh-fio-wr-no-such-dir/x\" t nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (file-missing \"Opening output file\" \"No such file or directory\" \"/tmp/romacs-primh-fio-wr-no-such-dir/x\"))"
+  },
+  {
+   "id": "write-region/0083",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\") \"strλ\\n\") nil \"/tmp/romacs-primh-fio-wr-no-such-dir/x\" t t nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (file-missing \"Opening output file\" \"No such file or directory\" \"/tmp/romacs-primh-fio-wr-no-such-dir/x\"))"
+  },
+  {
+   "id": "write-region/0084",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\") \"strλ\\n\") 4 \"/tmp/romacs-primh-fio-wr-dom\" nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "write-region/0085",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\") \"strλ\\n\") 4 \"/tmp/romacs-primh-fio-wr-dom\" nil t nil nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "write-region/0086",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\") \"strλ\\n\") 4 \"/tmp/romacs-primh-fio-wr-dom\" t nil nil nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "write-region/0087",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\") \"strλ\\n\") 4 \"/tmp/romacs-primh-fio-wr-dom\" t t nil nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "write-region/0088",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\") \"strλ\\n\") 4 nil nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "write-region/0089",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\") \"strλ\\n\") 4 nil nil t nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "write-region/0090",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\") \"strλ\\n\") 4 nil t nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "write-region/0091",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\") \"strλ\\n\") 4 nil t t nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "write-region/0092",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\") \"strλ\\n\") 4 \"/tmp/romacs-primh-fio-wr-no-such-dir/x\" nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (file-missing \"Opening output file\" \"No such file or directory\" \"/tmp/romacs-primh-fio-wr-no-such-dir/x\"))"
+  },
+  {
+   "id": "write-region/0093",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\") \"strλ\\n\") 4 \"/tmp/romacs-primh-fio-wr-no-such-dir/x\" nil t nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (file-missing \"Opening output file\" \"No such file or directory\" \"/tmp/romacs-primh-fio-wr-no-such-dir/x\"))"
+  },
+  {
+   "id": "write-region/0094",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\") \"strλ\\n\") 4 \"/tmp/romacs-primh-fio-wr-no-such-dir/x\" t nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (file-missing \"Opening output file\" \"No such file or directory\" \"/tmp/romacs-primh-fio-wr-no-such-dir/x\"))"
+  },
+  {
+   "id": "write-region/0095",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\") \"strλ\\n\") 4 \"/tmp/romacs-primh-fio-wr-no-such-dir/x\" t t nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (file-missing \"Opening output file\" \"No such file or directory\" \"/tmp/romacs-primh-fio-wr-no-such-dir/x\"))"
+  },
+  {
+   "id": "write-region/0096",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\") \"strλ\\n\") 'sym \"/tmp/romacs-primh-fio-wr-dom\" nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "write-region/0097",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\") \"strλ\\n\") 'sym \"/tmp/romacs-primh-fio-wr-dom\" nil t nil nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "write-region/0098",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\") \"strλ\\n\") 'sym \"/tmp/romacs-primh-fio-wr-dom\" t nil nil nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "write-region/0099",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\") \"strλ\\n\") 'sym \"/tmp/romacs-primh-fio-wr-dom\" t t nil nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "write-region/0100",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\") \"strλ\\n\") 'sym nil nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "write-region/0101",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\") \"strλ\\n\") 'sym nil nil t nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "write-region/0102",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\") \"strλ\\n\") 'sym nil t nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "write-region/0103",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\") \"strλ\\n\") 'sym nil t t nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "write-region/0104",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\") \"strλ\\n\") 'sym \"/tmp/romacs-primh-fio-wr-no-such-dir/x\" nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (file-missing \"Opening output file\" \"No such file or directory\" \"/tmp/romacs-primh-fio-wr-no-such-dir/x\"))"
+  },
+  {
+   "id": "write-region/0105",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\") \"strλ\\n\") 'sym \"/tmp/romacs-primh-fio-wr-no-such-dir/x\" nil t nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (file-missing \"Opening output file\" \"No such file or directory\" \"/tmp/romacs-primh-fio-wr-no-such-dir/x\"))"
+  },
+  {
+   "id": "write-region/0106",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\") \"strλ\\n\") 'sym \"/tmp/romacs-primh-fio-wr-no-such-dir/x\" t nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (file-missing \"Opening output file\" \"No such file or directory\" \"/tmp/romacs-primh-fio-wr-no-such-dir/x\"))"
+  },
+  {
+   "id": "write-region/0107",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\") \"strλ\\n\") 'sym \"/tmp/romacs-primh-fio-wr-no-such-dir/x\" t t nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (file-missing \"Opening output file\" \"No such file or directory\" \"/tmp/romacs-primh-fio-wr-no-such-dir/x\"))"
+  },
+  {
+   "id": "write-region/0108",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"x\") 'sym) nil \"/tmp/romacs-primh-fio-wr-dom\" nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p sym))"
+  },
+  {
+   "id": "write-region/0109",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"x\") 'sym) nil \"/tmp/romacs-primh-fio-wr-dom\" nil t nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p sym))"
+  },
+  {
+   "id": "write-region/0110",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"x\") 'sym) nil \"/tmp/romacs-primh-fio-wr-dom\" t nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p sym))"
+  },
+  {
+   "id": "write-region/0111",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"x\") 'sym) nil \"/tmp/romacs-primh-fio-wr-dom\" t t nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p sym))"
+  },
+  {
+   "id": "write-region/0112",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"x\") 'sym) nil nil nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p sym))"
+  },
+  {
+   "id": "write-region/0113",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"x\") 'sym) nil nil nil t nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p sym))"
+  },
+  {
+   "id": "write-region/0114",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"x\") 'sym) nil nil t nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p sym))"
+  },
+  {
+   "id": "write-region/0115",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"x\") 'sym) nil nil t t nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p sym))"
+  },
+  {
+   "id": "write-region/0116",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"x\") 'sym) nil \"/tmp/romacs-primh-fio-wr-no-such-dir/x\" nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p sym))"
+  },
+  {
+   "id": "write-region/0117",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"x\") 'sym) nil \"/tmp/romacs-primh-fio-wr-no-such-dir/x\" nil t nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p sym))"
+  },
+  {
+   "id": "write-region/0118",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"x\") 'sym) nil \"/tmp/romacs-primh-fio-wr-no-such-dir/x\" t nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p sym))"
+  },
+  {
+   "id": "write-region/0119",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"x\") 'sym) nil \"/tmp/romacs-primh-fio-wr-no-such-dir/x\" t t nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p sym))"
+  },
+  {
+   "id": "write-region/0120",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"x\") 'sym) 4 \"/tmp/romacs-primh-fio-wr-dom\" nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p sym))"
+  },
+  {
+   "id": "write-region/0121",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"x\") 'sym) 4 \"/tmp/romacs-primh-fio-wr-dom\" nil t nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p sym))"
+  },
+  {
+   "id": "write-region/0122",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"x\") 'sym) 4 \"/tmp/romacs-primh-fio-wr-dom\" t nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p sym))"
+  },
+  {
+   "id": "write-region/0123",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"x\") 'sym) 4 \"/tmp/romacs-primh-fio-wr-dom\" t t nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p sym))"
+  },
+  {
+   "id": "write-region/0124",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"x\") 'sym) 4 nil nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p sym))"
+  },
+  {
+   "id": "write-region/0125",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"x\") 'sym) 4 nil nil t nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p sym))"
+  },
+  {
+   "id": "write-region/0126",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"x\") 'sym) 4 nil t nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p sym))"
+  },
+  {
+   "id": "write-region/0127",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"x\") 'sym) 4 nil t t nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p sym))"
+  },
+  {
+   "id": "write-region/0128",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"x\") 'sym) 4 \"/tmp/romacs-primh-fio-wr-no-such-dir/x\" nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p sym))"
+  },
+  {
+   "id": "write-region/0129",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"x\") 'sym) 4 \"/tmp/romacs-primh-fio-wr-no-such-dir/x\" nil t nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p sym))"
+  },
+  {
+   "id": "write-region/0130",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"x\") 'sym) 4 \"/tmp/romacs-primh-fio-wr-no-such-dir/x\" t nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p sym))"
+  },
+  {
+   "id": "write-region/0131",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"x\") 'sym) 4 \"/tmp/romacs-primh-fio-wr-no-such-dir/x\" t t nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p sym))"
+  },
+  {
+   "id": "write-region/0132",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"x\") 'sym) 'sym \"/tmp/romacs-primh-fio-wr-dom\" nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p sym))"
+  },
+  {
+   "id": "write-region/0133",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"x\") 'sym) 'sym \"/tmp/romacs-primh-fio-wr-dom\" nil t nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p sym))"
+  },
+  {
+   "id": "write-region/0134",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"x\") 'sym) 'sym \"/tmp/romacs-primh-fio-wr-dom\" t nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p sym))"
+  },
+  {
+   "id": "write-region/0135",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"x\") 'sym) 'sym \"/tmp/romacs-primh-fio-wr-dom\" t t nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p sym))"
+  },
+  {
+   "id": "write-region/0136",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"x\") 'sym) 'sym nil nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p sym))"
+  },
+  {
+   "id": "write-region/0137",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"x\") 'sym) 'sym nil nil t nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p sym))"
+  },
+  {
+   "id": "write-region/0138",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"x\") 'sym) 'sym nil t nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p sym))"
+  },
+  {
+   "id": "write-region/0139",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"x\") 'sym) 'sym nil t t nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p sym))"
+  },
+  {
+   "id": "write-region/0140",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"x\") 'sym) 'sym \"/tmp/romacs-primh-fio-wr-no-such-dir/x\" nil nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p sym))"
+  },
+  {
+   "id": "write-region/0141",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"x\") 'sym) 'sym \"/tmp/romacs-primh-fio-wr-no-such-dir/x\" nil t nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p sym))"
+  },
+  {
+   "id": "write-region/0142",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"x\") 'sym) 'sym \"/tmp/romacs-primh-fio-wr-no-such-dir/x\" t nil nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p sym))"
+  },
+  {
+   "id": "write-region/0143",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (write-region (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"x\") 'sym) 'sym \"/tmp/romacs-primh-fio-wr-no-such-dir/x\" t t nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p sym))"
+  },
+  {
+   "id": "write-region/0144",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'write-region '(1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr write-region> 2))"
+  },
+  {
+   "id": "write-region/0145",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'write-region '(1 1 1 1 1 1 1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr write-region> 8))"
+  },
+  {
+   "id": "write-region/0146",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") nil)) (a1 nil) (a2 \"/tmp/romacs-primh-fio-wr-dom\") (a3 nil) (a4 nil) (a5 nil) (a6 nil)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (write-region a0 a1 a2 a3 a4 a5 a6))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "write-region/0147",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") 2)) (a1 nil) (a2 \"/tmp/romacs-primh-fio-wr-dom\") (a3 nil) (a4 t) (a5 nil) (a6 nil)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (write-region a0 a1 a2 a3 a4 a5 a6))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p nil))"
+  },
+  {
+   "id": "write-region/0148",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\") \"strλ\\n\")) (a1 nil) (a2 \"/tmp/romacs-primh-fio-wr-dom\") (a3 t) (a4 nil) (a5 nil) (a6 nil)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (write-region a0 a1 a2 a3 a4 a5 a6))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "write-region/0149",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"x\") 'sym)) (a1 nil) (a2 \"/tmp/romacs-primh-fio-wr-dom\") (a3 t) (a4 t) (a5 nil) (a6 nil)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (write-region a0 a1 a2 a3 a4 a5 a6))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p sym))"
+  },
+  {
+   "id": "write-region/0150",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") nil)) (a1 nil) (a2 \"/tmp/romacs-primh-fio-wr-dom\") (a3 nil) (a4 nil) (a5 nil) (a6 nil)) (let ((r (write-region a0 a1 a2 a3 a4 a5 a6))) (list (eq r a0) (eq r a1) (eq r a2) (eq r a3) (eq r a4) (eq r a5) (eq r a6))))) (error (list 'sig e))))",
+   "expected": "(ok (t t nil t t t t))"
+  },
+  {
+   "id": "write-region/0151",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") nil)) (a1 nil) (a2 \"/tmp/romacs-primh-fio-wr-dom\") (a3 t) (a4 t) (a5 nil) (a6 nil)) (let ((r (write-region a0 a1 a2 a3 a4 a5 a6))) (list (eq r a0) (eq r a1) (eq r a2) (eq r a3) (eq r a4) (eq r a5) (eq r a6))))) (error (list 'sig e))))",
+   "expected": "(ok (t t nil nil nil t t))"
+  },
+  {
+   "id": "write-region/0152",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") nil)) (a1 nil) (a2 nil) (a3 t) (a4 nil) (a5 nil) (a6 nil)) (let ((r (write-region a0 a1 a2 a3 a4 a5 a6))) (list (eq r a0) (eq r a1) (eq r a2) (eq r a3) (eq r a4) (eq r a5) (eq r a6))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "write-region/0153",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") nil)) (a1 nil) (a2 \"/tmp/romacs-primh-fio-wr-no-such-dir/x\") (a3 nil) (a4 t) (a5 nil) (a6 nil)) (let ((r (write-region a0 a1 a2 a3 a4 a5 a6))) (list (eq r a0) (eq r a1) (eq r a2) (eq r a3) (eq r a4) (eq r a5) (eq r a6))))) (error (list 'sig e))))",
+   "expected": "(sig (file-missing \"Opening output file\" \"No such file or directory\" \"/tmp/romacs-primh-fio-wr-no-such-dir/x\"))"
+  },
+  {
+   "id": "write-region/0154",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") nil)) (a1 4) (a2 \"/tmp/romacs-primh-fio-wr-dom\") (a3 nil) (a4 nil) (a5 nil) (a6 nil)) (let ((r (write-region a0 a1 a2 a3 a4 a5 a6))) (list (eq r a0) (eq r a1) (eq r a2) (eq r a3) (eq r a4) (eq r a5) (eq r a6))))) (error (list 'sig e))))",
+   "expected": "(ok (t nil nil t t t t))"
+  },
+  {
+   "id": "write-region/0155",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") nil)) (a1 4) (a2 \"/tmp/romacs-primh-fio-wr-dom\") (a3 t) (a4 t) (a5 nil) (a6 nil)) (let ((r (write-region a0 a1 a2 a3 a4 a5 a6))) (list (eq r a0) (eq r a1) (eq r a2) (eq r a3) (eq r a4) (eq r a5) (eq r a6))))) (error (list 'sig e))))",
+   "expected": "(ok (t nil nil nil nil t t))"
+  },
+  {
+   "id": "write-region/0156",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") nil)) (a1 4) (a2 nil) (a3 t) (a4 nil) (a5 nil) (a6 nil)) (let ((r (write-region a0 a1 a2 a3 a4 a5 a6))) (list (eq r a0) (eq r a1) (eq r a2) (eq r a3) (eq r a4) (eq r a5) (eq r a6))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "write-region/0157",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") nil)) (a1 4) (a2 \"/tmp/romacs-primh-fio-wr-no-such-dir/x\") (a3 nil) (a4 t) (a5 nil) (a6 nil)) (let ((r (write-region a0 a1 a2 a3 a4 a5 a6))) (list (eq r a0) (eq r a1) (eq r a2) (eq r a3) (eq r a4) (eq r a5) (eq r a6))))) (error (list 'sig e))))",
+   "expected": "(sig (file-missing \"Opening output file\" \"No such file or directory\" \"/tmp/romacs-primh-fio-wr-no-such-dir/x\"))"
+  },
+  {
+   "id": "write-region/0158",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") nil)) (a1 'sym) (a2 \"/tmp/romacs-primh-fio-wr-dom\") (a3 nil) (a4 nil) (a5 nil) (a6 nil)) (let ((r (write-region a0 a1 a2 a3 a4 a5 a6))) (list (eq r a0) (eq r a1) (eq r a2) (eq r a3) (eq r a4) (eq r a5) (eq r a6))))) (error (list 'sig e))))",
+   "expected": "(ok (t nil nil t t t t))"
+  },
+  {
+   "id": "write-region/0159",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") nil)) (a1 'sym) (a2 \"/tmp/romacs-primh-fio-wr-dom\") (a3 t) (a4 t) (a5 nil) (a6 nil)) (let ((r (write-region a0 a1 a2 a3 a4 a5 a6))) (list (eq r a0) (eq r a1) (eq r a2) (eq r a3) (eq r a4) (eq r a5) (eq r a6))))) (error (list 'sig e))))",
+   "expected": "(ok (t nil nil nil nil t t))"
+  },
+  {
+   "id": "write-region/0160",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") nil)) (a1 'sym) (a2 nil) (a3 t) (a4 nil) (a5 nil) (a6 nil)) (let ((r (write-region a0 a1 a2 a3 a4 a5 a6))) (list (eq r a0) (eq r a1) (eq r a2) (eq r a3) (eq r a4) (eq r a5) (eq r a6))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "write-region/0161",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") nil)) (a1 'sym) (a2 \"/tmp/romacs-primh-fio-wr-no-such-dir/x\") (a3 nil) (a4 t) (a5 nil) (a6 nil)) (let ((r (write-region a0 a1 a2 a3 a4 a5 a6))) (list (eq r a0) (eq r a1) (eq r a2) (eq r a3) (eq r a4) (eq r a5) (eq r a6))))) (error (list 'sig e))))",
+   "expected": "(sig (file-missing \"Opening output file\" \"No such file or directory\" \"/tmp/romacs-primh-fio-wr-no-such-dir/x\"))"
+  },
+  {
+   "id": "write-region/0162",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") 2)) (a1 nil) (a2 \"/tmp/romacs-primh-fio-wr-dom\") (a3 nil) (a4 nil) (a5 nil) (a6 nil)) (let ((r (write-region a0 a1 a2 a3 a4 a5 a6))) (list (eq r a0) (eq r a1) (eq r a2) (eq r a3) (eq r a4) (eq r a5) (eq r a6))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p nil))"
+  },
+  {
+   "id": "write-region/0163",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") 2)) (a1 nil) (a2 \"/tmp/romacs-primh-fio-wr-dom\") (a3 t) (a4 t) (a5 nil) (a6 nil)) (let ((r (write-region a0 a1 a2 a3 a4 a5 a6))) (list (eq r a0) (eq r a1) (eq r a2) (eq r a3) (eq r a4) (eq r a5) (eq r a6))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p nil))"
+  },
+  {
+   "id": "write-region/0164",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") 2)) (a1 nil) (a2 nil) (a3 t) (a4 nil) (a5 nil) (a6 nil)) (let ((r (write-region a0 a1 a2 a3 a4 a5 a6))) (list (eq r a0) (eq r a1) (eq r a2) (eq r a3) (eq r a4) (eq r a5) (eq r a6))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p nil))"
+  },
+  {
+   "id": "write-region/0165",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") 2)) (a1 nil) (a2 \"/tmp/romacs-primh-fio-wr-no-such-dir/x\") (a3 nil) (a4 t) (a5 nil) (a6 nil)) (let ((r (write-region a0 a1 a2 a3 a4 a5 a6))) (list (eq r a0) (eq r a1) (eq r a2) (eq r a3) (eq r a4) (eq r a5) (eq r a6))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p nil))"
+  },
+  {
+   "id": "write-region/0166",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") 2)) (a1 4) (a2 \"/tmp/romacs-primh-fio-wr-dom\") (a3 nil) (a4 nil) (a5 nil) (a6 nil)) (let ((r (write-region a0 a1 a2 a3 a4 a5 a6))) (list (eq r a0) (eq r a1) (eq r a2) (eq r a3) (eq r a4) (eq r a5) (eq r a6))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil nil t t t t))"
+  },
+  {
+   "id": "write-region/0167",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") 2)) (a1 4) (a2 \"/tmp/romacs-primh-fio-wr-dom\") (a3 t) (a4 t) (a5 nil) (a6 nil)) (let ((r (write-region a0 a1 a2 a3 a4 a5 a6))) (list (eq r a0) (eq r a1) (eq r a2) (eq r a3) (eq r a4) (eq r a5) (eq r a6))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil nil nil nil t t))"
+  },
+  {
+   "id": "write-region/0168",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") 2)) (a1 4) (a2 nil) (a3 t) (a4 nil) (a5 nil) (a6 nil)) (let ((r (write-region a0 a1 a2 a3 a4 a5 a6))) (list (eq r a0) (eq r a1) (eq r a2) (eq r a3) (eq r a4) (eq r a5) (eq r a6))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "write-region/0169",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") 2)) (a1 4) (a2 \"/tmp/romacs-primh-fio-wr-no-such-dir/x\") (a3 nil) (a4 t) (a5 nil) (a6 nil)) (let ((r (write-region a0 a1 a2 a3 a4 a5 a6))) (list (eq r a0) (eq r a1) (eq r a2) (eq r a3) (eq r a4) (eq r a5) (eq r a6))))) (error (list 'sig e))))",
+   "expected": "(sig (file-missing \"Opening output file\" \"No such file or directory\" \"/tmp/romacs-primh-fio-wr-no-such-dir/x\"))"
+  },
+  {
+   "id": "write-region/0170",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") 2)) (a1 'sym) (a2 \"/tmp/romacs-primh-fio-wr-dom\") (a3 nil) (a4 nil) (a5 nil) (a6 nil)) (let ((r (write-region a0 a1 a2 a3 a4 a5 a6))) (list (eq r a0) (eq r a1) (eq r a2) (eq r a3) (eq r a4) (eq r a5) (eq r a6))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p sym))"
+  },
+  {
+   "id": "write-region/0171",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") 2)) (a1 'sym) (a2 \"/tmp/romacs-primh-fio-wr-dom\") (a3 t) (a4 t) (a5 nil) (a6 nil)) (let ((r (write-region a0 a1 a2 a3 a4 a5 a6))) (list (eq r a0) (eq r a1) (eq r a2) (eq r a3) (eq r a4) (eq r a5) (eq r a6))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p sym))"
+  },
+  {
+   "id": "write-region/0172",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") 2)) (a1 'sym) (a2 nil) (a3 t) (a4 nil) (a5 nil) (a6 nil)) (let ((r (write-region a0 a1 a2 a3 a4 a5 a6))) (list (eq r a0) (eq r a1) (eq r a2) (eq r a3) (eq r a4) (eq r a5) (eq r a6))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p sym))"
+  },
+  {
+   "id": "write-region/0173",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") 2)) (a1 'sym) (a2 \"/tmp/romacs-primh-fio-wr-no-such-dir/x\") (a3 nil) (a4 t) (a5 nil) (a6 nil)) (let ((r (write-region a0 a1 a2 a3 a4 a5 a6))) (list (eq r a0) (eq r a1) (eq r a2) (eq r a3) (eq r a4) (eq r a5) (eq r a6))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p sym))"
+  },
+  {
+   "id": "write-region/0174",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\") \"strλ\\n\")) (a1 nil) (a2 \"/tmp/romacs-primh-fio-wr-dom\") (a3 nil) (a4 nil) (a5 nil) (a6 nil)) (let ((r (write-region a0 a1 a2 a3 a4 a5 a6))) (list (eq r a0) (eq r a1) (eq r a2) (eq r a3) (eq r a4) (eq r a5) (eq r a6))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t nil t t t t))"
+  },
+  {
+   "id": "write-region/0175",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\") \"strλ\\n\")) (a1 nil) (a2 \"/tmp/romacs-primh-fio-wr-dom\") (a3 t) (a4 t) (a5 nil) (a6 nil)) (let ((r (write-region a0 a1 a2 a3 a4 a5 a6))) (list (eq r a0) (eq r a1) (eq r a2) (eq r a3) (eq r a4) (eq r a5) (eq r a6))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t nil nil nil t t))"
+  },
+  {
+   "id": "write-region/0176",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\") \"strλ\\n\")) (a1 nil) (a2 nil) (a3 t) (a4 nil) (a5 nil) (a6 nil)) (let ((r (write-region a0 a1 a2 a3 a4 a5 a6))) (list (eq r a0) (eq r a1) (eq r a2) (eq r a3) (eq r a4) (eq r a5) (eq r a6))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "write-region/0177",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\") \"strλ\\n\")) (a1 nil) (a2 \"/tmp/romacs-primh-fio-wr-no-such-dir/x\") (a3 nil) (a4 t) (a5 nil) (a6 nil)) (let ((r (write-region a0 a1 a2 a3 a4 a5 a6))) (list (eq r a0) (eq r a1) (eq r a2) (eq r a3) (eq r a4) (eq r a5) (eq r a6))))) (error (list 'sig e))))",
+   "expected": "(sig (file-missing \"Opening output file\" \"No such file or directory\" \"/tmp/romacs-primh-fio-wr-no-such-dir/x\"))"
+  },
+  {
+   "id": "write-region/0178",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\") \"strλ\\n\")) (a1 4) (a2 \"/tmp/romacs-primh-fio-wr-dom\") (a3 nil) (a4 nil) (a5 nil) (a6 nil)) (let ((r (write-region a0 a1 a2 a3 a4 a5 a6))) (list (eq r a0) (eq r a1) (eq r a2) (eq r a3) (eq r a4) (eq r a5) (eq r a6))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil nil t t t t))"
+  },
+  {
+   "id": "write-region/0179",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\") \"strλ\\n\")) (a1 4) (a2 \"/tmp/romacs-primh-fio-wr-dom\") (a3 t) (a4 t) (a5 nil) (a6 nil)) (let ((r (write-region a0 a1 a2 a3 a4 a5 a6))) (list (eq r a0) (eq r a1) (eq r a2) (eq r a3) (eq r a4) (eq r a5) (eq r a6))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil nil nil nil t t))"
+  },
+  {
+   "id": "write-region/0180",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\") \"strλ\\n\")) (a1 4) (a2 nil) (a3 t) (a4 nil) (a5 nil) (a6 nil)) (let ((r (write-region a0 a1 a2 a3 a4 a5 a6))) (list (eq r a0) (eq r a1) (eq r a2) (eq r a3) (eq r a4) (eq r a5) (eq r a6))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "write-region/0181",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\") \"strλ\\n\")) (a1 4) (a2 \"/tmp/romacs-primh-fio-wr-no-such-dir/x\") (a3 nil) (a4 t) (a5 nil) (a6 nil)) (let ((r (write-region a0 a1 a2 a3 a4 a5 a6))) (list (eq r a0) (eq r a1) (eq r a2) (eq r a3) (eq r a4) (eq r a5) (eq r a6))))) (error (list 'sig e))))",
+   "expected": "(sig (file-missing \"Opening output file\" \"No such file or directory\" \"/tmp/romacs-primh-fio-wr-no-such-dir/x\"))"
+  },
+  {
+   "id": "write-region/0182",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\") \"strλ\\n\")) (a1 'sym) (a2 \"/tmp/romacs-primh-fio-wr-dom\") (a3 nil) (a4 nil) (a5 nil) (a6 nil)) (let ((r (write-region a0 a1 a2 a3 a4 a5 a6))) (list (eq r a0) (eq r a1) (eq r a2) (eq r a3) (eq r a4) (eq r a5) (eq r a6))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil nil t t t t))"
+  },
+  {
+   "id": "write-region/0183",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\") \"strλ\\n\")) (a1 'sym) (a2 \"/tmp/romacs-primh-fio-wr-dom\") (a3 t) (a4 t) (a5 nil) (a6 nil)) (let ((r (write-region a0 a1 a2 a3 a4 a5 a6))) (list (eq r a0) (eq r a1) (eq r a2) (eq r a3) (eq r a4) (eq r a5) (eq r a6))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil nil nil nil t t))"
+  },
+  {
+   "id": "write-region/0184",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\") \"strλ\\n\")) (a1 'sym) (a2 nil) (a3 t) (a4 nil) (a5 nil) (a6 nil)) (let ((r (write-region a0 a1 a2 a3 a4 a5 a6))) (list (eq r a0) (eq r a1) (eq r a2) (eq r a3) (eq r a4) (eq r a5) (eq r a6))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "write-region/0185",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\") \"strλ\\n\")) (a1 'sym) (a2 \"/tmp/romacs-primh-fio-wr-no-such-dir/x\") (a3 nil) (a4 t) (a5 nil) (a6 nil)) (let ((r (write-region a0 a1 a2 a3 a4 a5 a6))) (list (eq r a0) (eq r a1) (eq r a2) (eq r a3) (eq r a4) (eq r a5) (eq r a6))))) (error (list 'sig e))))",
+   "expected": "(sig (file-missing \"Opening output file\" \"No such file or directory\" \"/tmp/romacs-primh-fio-wr-no-such-dir/x\"))"
+  },
+  {
+   "id": "write-region/0186",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"x\") 'sym)) (a1 nil) (a2 \"/tmp/romacs-primh-fio-wr-dom\") (a3 nil) (a4 nil) (a5 nil) (a6 nil)) (let ((r (write-region a0 a1 a2 a3 a4 a5 a6))) (list (eq r a0) (eq r a1) (eq r a2) (eq r a3) (eq r a4) (eq r a5) (eq r a6))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p sym))"
+  },
+  {
+   "id": "write-region/0187",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"x\") 'sym)) (a1 nil) (a2 \"/tmp/romacs-primh-fio-wr-dom\") (a3 t) (a4 t) (a5 nil) (a6 nil)) (let ((r (write-region a0 a1 a2 a3 a4 a5 a6))) (list (eq r a0) (eq r a1) (eq r a2) (eq r a3) (eq r a4) (eq r a5) (eq r a6))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p sym))"
+  },
+  {
+   "id": "write-region/0188",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"x\") 'sym)) (a1 nil) (a2 nil) (a3 t) (a4 nil) (a5 nil) (a6 nil)) (let ((r (write-region a0 a1 a2 a3 a4 a5 a6))) (list (eq r a0) (eq r a1) (eq r a2) (eq r a3) (eq r a4) (eq r a5) (eq r a6))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p sym))"
+  },
+  {
+   "id": "write-region/0189",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"x\") 'sym)) (a1 nil) (a2 \"/tmp/romacs-primh-fio-wr-no-such-dir/x\") (a3 nil) (a4 t) (a5 nil) (a6 nil)) (let ((r (write-region a0 a1 a2 a3 a4 a5 a6))) (list (eq r a0) (eq r a1) (eq r a2) (eq r a3) (eq r a4) (eq r a5) (eq r a6))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p sym))"
+  },
+  {
+   "id": "write-region/0190",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"x\") 'sym)) (a1 4) (a2 \"/tmp/romacs-primh-fio-wr-dom\") (a3 nil) (a4 nil) (a5 nil) (a6 nil)) (let ((r (write-region a0 a1 a2 a3 a4 a5 a6))) (list (eq r a0) (eq r a1) (eq r a2) (eq r a3) (eq r a4) (eq r a5) (eq r a6))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p sym))"
+  },
+  {
+   "id": "write-region/0191",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"x\") 'sym)) (a1 4) (a2 \"/tmp/romacs-primh-fio-wr-dom\") (a3 t) (a4 t) (a5 nil) (a6 nil)) (let ((r (write-region a0 a1 a2 a3 a4 a5 a6))) (list (eq r a0) (eq r a1) (eq r a2) (eq r a3) (eq r a4) (eq r a5) (eq r a6))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p sym))"
+  },
+  {
+   "id": "write-region/0192",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"x\") 'sym)) (a1 4) (a2 nil) (a3 t) (a4 nil) (a5 nil) (a6 nil)) (let ((r (write-region a0 a1 a2 a3 a4 a5 a6))) (list (eq r a0) (eq r a1) (eq r a2) (eq r a3) (eq r a4) (eq r a5) (eq r a6))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p sym))"
+  },
+  {
+   "id": "write-region/0193",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"x\") 'sym)) (a1 4) (a2 \"/tmp/romacs-primh-fio-wr-no-such-dir/x\") (a3 nil) (a4 t) (a5 nil) (a6 nil)) (let ((r (write-region a0 a1 a2 a3 a4 a5 a6))) (list (eq r a0) (eq r a1) (eq r a2) (eq r a3) (eq r a4) (eq r a5) (eq r a6))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p sym))"
+  },
+  {
+   "id": "write-region/0194",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"x\") 'sym)) (a1 'sym) (a2 \"/tmp/romacs-primh-fio-wr-dom\") (a3 nil) (a4 nil) (a5 nil) (a6 nil)) (let ((r (write-region a0 a1 a2 a3 a4 a5 a6))) (list (eq r a0) (eq r a1) (eq r a2) (eq r a3) (eq r a4) (eq r a5) (eq r a6))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p sym))"
+  },
+  {
+   "id": "write-region/0195",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"x\") 'sym)) (a1 'sym) (a2 \"/tmp/romacs-primh-fio-wr-dom\") (a3 t) (a4 t) (a5 nil) (a6 nil)) (let ((r (write-region a0 a1 a2 a3 a4 a5 a6))) (list (eq r a0) (eq r a1) (eq r a2) (eq r a3) (eq r a4) (eq r a5) (eq r a6))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p sym))"
+  },
+  {
+   "id": "write-region/0196",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"x\") 'sym)) (a1 'sym) (a2 nil) (a3 t) (a4 nil) (a5 nil) (a6 nil)) (let ((r (write-region a0 a1 a2 a3 a4 a5 a6))) (list (eq r a0) (eq r a1) (eq r a2) (eq r a3) (eq r a4) (eq r a5) (eq r a6))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p sym))"
+  },
+  {
+   "id": "write-region/0197",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"x\") 'sym)) (a1 'sym) (a2 \"/tmp/romacs-primh-fio-wr-no-such-dir/x\") (a3 nil) (a4 t) (a5 nil) (a6 nil)) (let ((r (write-region a0 a1 a2 a3 a4 a5 a6))) (list (eq r a0) (eq r a1) (eq r a2) (eq r a3) (eq r a4) (eq r a5) (eq r a6))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument integer-or-marker-p sym))"
+  },
+  {
+   "id": "write-region/0198",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (progn (insert \"héllo\\nwörld\\n\") (narrow-to-region 3 5) (list (write-region nil nil \"/tmp/romacs-primh-fio-wr-narrow\") (point-min) (point-max) last-coding-system-used (let ((coding-system-for-read (quote utf-8-unix))) (with-temp-buffer (insert-file-contents \"/tmp/romacs-primh-fio-wr-narrow\") (append (buffer-string) nil))))))) (error (list 'sig e))))",
+   "expected": "(ok (nil 3 5 utf-8-unix (104 233 108 108 111 10 119 246 114 108 100 10)))"
+  },
+  {
+   "id": "write-region/0199",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (progn (insert \"héllo\\nwörld\\n\") (list (write-region 5 2 \"/tmp/romacs-primh-fio-wr-rev\") (let ((coding-system-for-read (quote utf-8-unix))) (with-temp-buffer (insert-file-contents \"/tmp/romacs-primh-fio-wr-rev\") (append (buffer-string) nil))))))) (error (list 'sig e))))",
+   "expected": "(ok (nil (233 108 108)))"
+  },
+  {
+   "id": "write-region/0200",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (progn (insert \"héllo\\nwörld\\n\") (list (write-region (copy-marker 2) (copy-marker 4) \"/tmp/romacs-primh-fio-wr-marker\") (let ((coding-system-for-read (quote utf-8-unix))) (with-temp-buffer (insert-file-contents \"/tmp/romacs-primh-fio-wr-marker\") (append (buffer-string) nil))))))) (error (list 'sig e))))",
+   "expected": "(ok (nil (233 108)))"
+  },
+  {
+   "id": "write-region/0201",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (progn (insert \"abc\") (condition-case e (write-region 10 2 \"/tmp/romacs-primh-fio-wr-oob\") (error (list (car e) (nth 2 e) (nth 3 e))))))) (error (list 'sig e))))",
+   "expected": "(ok (args-out-of-range 10 2))"
+  },
+  {
+   "id": "write-region/0202",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (progn (insert \"abc\") (narrow-to-region 2 3) (condition-case e (write-region 1 3 \"/tmp/romacs-primh-fio-wr-oob2\") (error (list (car e) (nth 2 e) (nth 3 e))))))) (error (list 'sig e))))",
+   "expected": "(ok (args-out-of-range 1 3))"
+  },
+  {
+   "id": "write-region/0203",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (progn (insert \"abc\") (condition-case e (write-region 2 nil \"/tmp/romacs-primh-fio-wr-endnil\") (error e))))) (error (list 'sig e))))",
+   "expected": "(ok (wrong-type-argument integer-or-marker-p nil))"
+  },
+  {
+   "id": "write-region/0204",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (progn (insert \"abc\") (condition-case e (write-region 1.5 2 \"/tmp/romacs-primh-fio-wr-float\") (error e))))) (error (list 'sig e))))",
+   "expected": "(ok (wrong-type-argument integer-or-marker-p 1.5))"
+  },
+  {
+   "id": "write-region/0205",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (write-region \"λ\\n\" nil \"/tmp/romacs-primh-fio-wr-mb\") (let ((coding-system-for-read (quote utf-8-unix))) (with-temp-buffer (insert-file-contents \"/tmp/romacs-primh-fio-wr-mb\") (append (buffer-string) nil))))) (error (list 'sig e))))",
+   "expected": "(ok (nil (955 10)))"
+  },
+  {
+   "id": "write-region/0206",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (write-region \"\\316\\273!\" nil \"/tmp/romacs-primh-fio-wr-ub\") (let ((coding-system-for-read (quote utf-8-unix))) (with-temp-buffer (insert-file-contents \"/tmp/romacs-primh-fio-wr-ub\") (append (buffer-string) nil))))) (error (list 'sig e))))",
+   "expected": "(ok (nil (955 33)))"
+  },
+  {
+   "id": "write-region/0207",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (write-region \"a\\r\\nb\" nil \"/tmp/romacs-primh-fio-wr-cr\") (let ((coding-system-for-read (quote utf-8-unix))) (with-temp-buffer (insert-file-contents \"/tmp/romacs-primh-fio-wr-cr\") (append (buffer-string) nil))))) (error (list 'sig e))))",
+   "expected": "(ok (nil (97 13 10 98)))"
+  },
+  {
+   "id": "write-region/0208",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (write-region \"\" nil \"/tmp/romacs-primh-fio-wr-empty\") (let ((coding-system-for-read (quote utf-8-unix))) (with-temp-buffer (insert-file-contents \"/tmp/romacs-primh-fio-wr-empty\") (append (buffer-string) nil))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "write-region/0209",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (write-region \"ab\\n\" nil \"/tmp/romacs-primh-fio-wr-app\") (write-region \"cd\\n\" nil \"/tmp/romacs-primh-fio-wr-app\" t) (let ((coding-system-for-read (quote utf-8-unix))) (with-temp-buffer (insert-file-contents \"/tmp/romacs-primh-fio-wr-app\") (append (buffer-string) nil))))) (error (list 'sig e))))",
+   "expected": "(ok (97 98 10 99 100 10))"
+  },
+  {
+   "id": "write-region/0210",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (write-region \"abcd\" nil \"/tmp/romacs-primh-fio-wr-off\") (write-region \"X\" nil \"/tmp/romacs-primh-fio-wr-off\" 1) (let ((coding-system-for-read (quote utf-8-unix))) (with-temp-buffer (insert-file-contents \"/tmp/romacs-primh-fio-wr-off\") (append (buffer-string) nil))))) (error (list 'sig e))))",
+   "expected": "(ok (97 88 99 100))"
+  },
+  {
+   "id": "write-region/0211",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (write-region \"abcd\" nil \"/tmp/romacs-primh-fio-wr-offf\") (write-region \"X\" nil \"/tmp/romacs-primh-fio-wr-offf\" 2.0) (let ((coding-system-for-read (quote utf-8-unix))) (with-temp-buffer (insert-file-contents \"/tmp/romacs-primh-fio-wr-offf\") (append (buffer-string) nil))))) (error (list 'sig e))))",
+   "expected": "(ok (97 98 88 100))"
+  },
+  {
+   "id": "write-region/0212",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (write-region \"ab\" nil \"/tmp/romacs-primh-fio-wr-past\") (write-region \"X\" nil \"/tmp/romacs-primh-fio-wr-past\" 4) (let ((coding-system-for-read (quote utf-8-unix))) (with-temp-buffer (insert-file-contents \"/tmp/romacs-primh-fio-wr-past\") (append (buffer-string) nil))))) (error (list 'sig e))))",
+   "expected": "(ok (97 98 0 0 88))"
+  },
+  {
+   "id": "write-region/0213",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (condition-case e (write-region \"X\" nil \"/tmp/romacs-primh-fio-wr-neg\" -1) (error e))) (error (list 'sig e))))",
+   "expected": "(ok (wrong-type-argument file-offset -1))"
+  },
+  {
+   "id": "write-region/0214",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (write-region \"ab\" nil \"/tmp/romacs-primh-fio-wr-app0\") (write-region \"X\" nil \"/tmp/romacs-primh-fio-wr-app0\" 0) (let ((coding-system-for-read (quote utf-8-unix))) (with-temp-buffer (insert-file-contents \"/tmp/romacs-primh-fio-wr-app0\") (append (buffer-string) nil))))) (error (list 'sig e))))",
+   "expected": "(ok (88 98))"
+  },
+  {
+   "id": "write-region/0215",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (progn (insert \"v\") (list (write-region nil nil \"/tmp/romacs-primh-fio-wr-visit\" nil t) (equal buffer-file-name \"/tmp/romacs-primh-fio-wr-visit\"))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "write-region/0216",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (progn (insert \"v\") (list (write-region nil nil \"/tmp/romacs-primh-fio-wr-vs\" nil \"/tmp/romacs-primh-fio-wr-vs-other-never-created\") (equal buffer-file-name \"/tmp/romacs-primh-fio-wr-vs-other-never-created\") (let ((coding-system-for-read (quote utf-8-unix))) (with-temp-buffer (insert-file-contents \"/tmp/romacs-primh-fio-wr-vs\") (append (buffer-string) nil))) (condition-case e (insert-file-contents \"/tmp/romacs-primh-fio-wr-vs-other-never-created\") (file-missing (quote missing))))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t (118) missing))"
+  },
+  {
+   "id": "write-region/0217",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (progn (insert \"v\") (list (write-region nil nil \"/tmp/romacs-primh-fio-wr-quiet\" nil (quote quiet)) buffer-file-name)))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "write-region/0218",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (condition-case e (write-region \"x\" nil \"/tmp/romacs-primh-fio-wr-lock\" nil nil (quote foo)) (error e))) (error (list 'sig e))))",
+   "expected": "(ok (wrong-type-argument stringp foo))"
+  },
+  {
+   "id": "write-region/0219",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (write-region \"x\" nil \"/tmp/romacs-primh-fio-wr-lock2\" nil nil \"/tmp/romacs-primh-fio-wr-lock2-name\") (let ((coding-system-for-read (quote utf-8-unix))) (with-temp-buffer (insert-file-contents \"/tmp/romacs-primh-fio-wr-lock2\") (append (buffer-string) nil))))) (error (list 'sig e))))",
+   "expected": "(ok (nil (120)))"
+  },
+  {
+   "id": "write-region/0220",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (write-region \"x\" nil \"/tmp/romacs-primh-fio-wr-excl\") (condition-case e (write-region \"y\" nil \"/tmp/romacs-primh-fio-wr-excl\" nil nil nil (quote excl)) (error (list (car e) (nth 1 e) (equal (nth 2 e) \"/tmp/romacs-primh-fio-wr-excl\")))))) (error (list 'sig e))))",
+   "expected": "(ok (file-already-exists \"File exists\" t))"
+  },
+  {
+   "id": "write-region/0221",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (condition-case e (write-region \"x\" nil \"/tmp/romacs-primh-fio-wr-no-such-dir/x\") (error (list (car e) (nth 1 e) (nth 2 e))))) (error (list 'sig e))))",
+   "expected": "(ok (file-missing \"Opening output file\" \"No such file or directory\"))"
+  },
+  {
+   "id": "write-region/0222",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (condition-case e (write-region \"x\" nil \"/tmp/\") (error (list (car e) (nth 1 e) (nth 2 e))))) (error (list 'sig e))))",
+   "expected": "(ok (file-error \"Opening output file\" \"Is a directory\"))"
+  },
+  {
+   "id": "write-region/0223",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (condition-case e (write-region \"x\" nil 5) (error e))) (error (list 'sig e))))",
+   "expected": "(ok (wrong-type-argument stringp 5))"
+  },
+  {
+   "id": "write-region/0224",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((coding-system-for-write (quote utf-8))) (list (write-region \"λ\\n\" nil \"/tmp/romacs-primh-fio-wr-c8\") last-coding-system-used (let ((coding-system-for-read (quote utf-8-unix))) (with-temp-buffer (insert-file-contents \"/tmp/romacs-primh-fio-wr-c8\") (append (buffer-string) nil)))))) (error (list 'sig e))))",
+   "expected": "(ok (nil utf-8-unix (955 10)))"
+  },
+  {
+   "id": "write-region/0225",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((coding-system-for-write (quote utf-8-unix))) (list (write-region \"λ\\n\" nil \"/tmp/romacs-primh-fio-wr-c8u\") last-coding-system-used (let ((coding-system-for-read (quote utf-8-unix))) (with-temp-buffer (insert-file-contents \"/tmp/romacs-primh-fio-wr-c8u\") (append (buffer-string) nil)))))) (error (list 'sig e))))",
+   "expected": "(ok (nil utf-8-unix (955 10)))"
+  },
+  {
+   "id": "write-region/0226",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((coding-system-for-write (quote latin-1))) (list (write-region \"é\\n\" nil \"/tmp/romacs-primh-fio-wr-cl1\") last-coding-system-used))) (error (list 'sig e))))",
+   "expected": "(ok (nil iso-latin-1-unix))"
+  },
+  {
+   "id": "write-region/0227",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((coding-system-for-write (quote utf-8-dos))) (list (write-region \"a\\nb\" nil \"/tmp/romacs-primh-fio-wr-cdos\") last-coding-system-used))) (error (list 'sig e))))",
+   "expected": "(ok (nil utf-8-dos))"
+  },
+  {
+   "id": "write-region/0228",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (progn (set (make-local-variable (quote buffer-file-coding-system)) (quote utf-8)) (insert \"λ\") (list (write-region nil nil \"/tmp/romacs-primh-fio-wr-bf8\") last-coding-system-used (let ((coding-system-for-read (quote utf-8-unix))) (with-temp-buffer (insert-file-contents \"/tmp/romacs-primh-fio-wr-bf8\") (append (buffer-string) nil))))))) (error (list 'sig e))))",
+   "expected": "(ok (nil utf-8-unix (955)))"
+  },
+  {
+   "id": "write-region/0229",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((write-region-annotate-functions (list (lambda (s e) nil)))) (write-region \"x\" nil \"/tmp/romacs-primh-fio-wr-ann\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "write-region/0230",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (progn (set-buffer-multibyte nil) (insert \"ab\") (write-region nil nil \"/tmp/romacs-primh-fio-wr-uni\")))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "write-region/0231",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((file-name-handler-alist (quote ((\"\\\\`/nowhere/\" . ignore))))) (write-region \"x\" nil \"/tmp/romacs-primh-fio-wr-fnh\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "write-region/0232",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (with-temp-buffer (progn (insert \"* Heading\\nλ body\\n\") (write-region nil nil \"/tmp/romacs-primh-fio-wr-rt\") (with-temp-buffer (insert-file-contents \"/tmp/romacs-primh-fio-wr-rt\" t) (list (equal (buffer-string) \"* Heading\\nλ body\\n\") (equal buffer-file-name \"/tmp/romacs-primh-fio-wr-rt\")))))) (error (list 'sig e))))",
+   "expected": "(ok (t t))"
+  },
+  {
+   "id": "write-region/0233",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"/tmp/romacs-primh-fio-wr-dom\") (error (list 'sig e))))",
+   "expected": "(ok \"/tmp/romacs-primh-fio-wr-dom\")"
+  },
+  {
+   "id": "write-region/0234",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"/tmp/romacs-primh-fio-wr-no-such-dir/x\") (error (list 'sig e))))",
+   "expected": "(ok \"/tmp/romacs-primh-fio-wr-no-such-dir/x\")"
+  },
+  {
+   "id": "write-region/0235",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 'sym) (error (list 'sig e))))",
+   "expected": "(ok sym)"
+  },
+  {
+   "id": "write-region/0236",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\") \"strλ\\n\")) (error (list 'sig e))))",
+   "expected": "(ok \"strλ\n\")"
+  },
+  {
+   "id": "write-region/0237",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") 2)) (error (list 'sig e))))",
+   "expected": "(ok 2)"
+  },
+  {
+   "id": "write-region/0238",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"héllo\\nwörld\\n\") nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "write-region/0239",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set-buffer (get-buffer-create \"fio-wr\")) (erase-buffer) (setq buffer-file-name nil) (insert \"x\") 'sym)) (error (list 'sig e))))",
+   "expected": "(ok sym)"
+  },
+  {
+   "id": "write-region/0240",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 4) (error (list 'sig e))))",
+   "expected": "(ok 4)"
+  },
+  {
+   "id": "write-region/0241",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok nil) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "write-region/0242",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok t) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  }
+ ],
+ "pinned": {
+  "write-region/0226": "SIGNAL-VS-VALUE",
+  "write-region/0227": "SIGNAL-VS-VALUE",
+  "write-region/0229": "SIGNAL-VS-VALUE",
+  "write-region/0230": "SIGNAL-VS-VALUE"
+ }
+}

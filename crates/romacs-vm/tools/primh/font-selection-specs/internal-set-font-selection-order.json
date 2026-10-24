@@ -1,0 +1,31 @@
+{
+  "name": "internal-set-font-selection-order",
+  "arity": [
+    1,
+    1
+  ],
+  "effect": "global",
+  "gnu_files": [
+    "xfaces.c",
+    "font.c"
+  ],
+  "gnu_def": "xfaces.c:5850",
+  "rust": "src/prims/font_selection_order.rs:5",
+  "args": [
+    "font-order-probes-only"
+  ],
+  "probes": [
+    "(internal-set-font-selection-order '(:width :height :weight :slant))",
+    "(internal-set-font-selection-order '(:width :width :width :width))",
+    "(internal-set-font-selection-order nil)",
+    "(internal-set-font-selection-order '(:width))",
+    "(internal-set-font-selection-order '(:width :height :weight :slant :width))",
+    "(internal-set-font-selection-order '(:width :unknown :weight :slant))",
+    "(internal-set-font-selection-order 42)",
+    "(internal-set-font-selection-order '(:width :height :weight . :slant))",
+    "(let ((face-font-selection-order 'sentinel)) (list (internal-set-font-selection-order '(:slant :weight :height :width)) face-font-selection-order (boundp 'face-font-sort-order) (fboundp 'face-font-sort-order)))",
+    "(list (fboundp 'internal-set-font-selection-order) (functionp 'internal-set-font-selection-order) (funcall #'internal-set-font-selection-order '(:width :height :weight :slant)))",
+    "(let ((x (make-symbol \":width\"))) (condition-case e (internal-set-font-selection-order (list x :height :weight :slant)) (error (list (car e) (car (cdr e)) (eq (car (cdr (cdr e))) x)))))",
+    "(let ((x (list :width :height :weight :slant))) (setcdr (cdr (cdr (cdr x))) x) (condition-case e (internal-set-font-selection-order x) (error (list (car e) (car (cdr e)) (eq (car (cdr (cdr e))) x)))))"
+  ]
+}

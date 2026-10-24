@@ -1,0 +1,170 @@
+{
+ "blob": "787f8e8ff6cd9b631e4d0418c4a4d0aab778837a",
+ "compiled": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": true,
+  "results": {
+   "go-mod-ts-mode-test-indentation": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-ready-p 'gomod)) :form (treesit-ready-p gomod) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "go-mod-ts-test-font-lock": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-ready-p 'gomod)) :form (treesit-ready-p gomod) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "go-ts-mode-test-indentation": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-ready-p 'go)) :form (treesit-ready-p go) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "go-ts-test-font-lock": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-ready-p 'go)) :form (treesit-ready-p go) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "go-work-ts-mode-test-indentation": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-ready-p 'gowork)) :form (treesit-ready-p gowork) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "go-work-ts-test-font-lock": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-ready-p 'gowork)) :form (treesit-ready-p gowork) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   }
+  },
+  "timed_out": false
+ },
+ "file": "lisp/progmodes/go-ts-mode-tests.el",
+ "gnu": {
+  "emacs": "<recording-path-redacted>/emacs-32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+  "version": "32.0.50"
+ },
+ "harness_sha256": "78c20850429a08af22faadf73b5d164c560230e83d7eb88ef60cb995670703ef",
+ "mini": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": null,
+  "results": {
+   "go-mod-ts-mode-test-indentation": {
+    "as_expected": null,
+    "detail": "((skip-unless (treesit-ready-p 'gomod)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "go-mod-ts-test-font-lock": {
+    "as_expected": null,
+    "detail": "((skip-unless (treesit-ready-p 'gomod)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "go-ts-mode-test-indentation": {
+    "as_expected": null,
+    "detail": "((skip-unless (treesit-ready-p 'go)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "go-ts-test-font-lock": {
+    "as_expected": null,
+    "detail": "((skip-unless (treesit-ready-p 'go)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "go-work-ts-mode-test-indentation": {
+    "as_expected": null,
+    "detail": "((skip-unless (treesit-ready-p 'gowork)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "go-work-ts-test-font-lock": {
+    "as_expected": null,
+    "detail": "((skip-unless (treesit-ready-p 'gowork)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   }
+  },
+  "timed_out": false
+ },
+ "read_error": null,
+ "real": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": true,
+  "results": {
+   "go-mod-ts-mode-test-indentation": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-ready-p 'gomod)) :form (treesit-ready-p gomod) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "go-mod-ts-test-font-lock": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-ready-p 'gomod)) :form (treesit-ready-p gomod) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "go-ts-mode-test-indentation": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-ready-p 'go)) :form (treesit-ready-p go) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "go-ts-test-font-lock": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-ready-p 'go)) :form (treesit-ready-p go) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "go-work-ts-mode-test-indentation": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-ready-p 'gowork)) :form (treesit-ready-p gowork) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "go-work-ts-test-font-lock": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-ready-p 'gowork)) :form (treesit-ready-p gowork) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   }
+  },
+  "timed_out": false
+ },
+ "schema": 1,
+ "toplevel_deftests": 6
+}

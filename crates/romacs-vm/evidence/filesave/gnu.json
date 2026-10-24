@@ -1,0 +1,266 @@
+{
+  "oracle": "<recording-path-redacted>/emacs-32.0.50",
+  "sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+  "uid": 1000,
+  "rows": [
+    {
+      "id": "writable-file",
+      "form": "(file-writable-p \"$FIXTURE/file\")",
+      "stdout": "t",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "id": "writable-readonly",
+      "form": "(file-writable-p \"$FIXTURE/readonly\")",
+      "stdout": "nil",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "id": "writable-directory",
+      "form": "(file-writable-p \"$FIXTURE/dir\")",
+      "stdout": "t",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "id": "writable-missing",
+      "form": "(file-writable-p \"$FIXTURE/missing\")",
+      "stdout": "t",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "id": "writable-missing-parent",
+      "form": "(file-writable-p \"$FIXTURE/missing/child\")",
+      "stdout": "nil",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "id": "writable-missing-trailing-slash",
+      "form": "(file-writable-p \"$FIXTURE/missing/\")",
+      "stdout": "nil",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "id": "writable-readonly-parent",
+      "form": "(file-writable-p \"$FIXTURE/rodir/child\")",
+      "stdout": "nil",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "id": "writable-dangling",
+      "form": "(file-writable-p \"$FIXTURE/dangling\")",
+      "stdout": "t",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "id": "modes-file",
+      "form": "(file-modes \"$FIXTURE/file\")",
+      "stdout": "416",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "id": "modes-dir",
+      "form": "(file-modes \"$FIXTURE/dir\")",
+      "stdout": "493",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "id": "modes-missing",
+      "form": "(file-modes \"$FIXTURE/missing\")",
+      "stdout": "nil",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "id": "modes-enotdir",
+      "form": "(file-modes \"$FIXTURE/file/child\")",
+      "stdout": "nil",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "id": "modes-link",
+      "form": "(file-modes \"$FIXTURE/link\")",
+      "stdout": "416",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "id": "modes-nofollow",
+      "form": "(file-modes \"$FIXTURE/link\" 'anything)",
+      "stdout": "511",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "id": "modes-dangling",
+      "form": "(file-modes \"$FIXTURE/dangling\")",
+      "stdout": "nil",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "id": "set-nofollow",
+      "form": "(set-file-modes \"$FIXTURE/link\" 511 t)",
+      "stdout": "(file-error \"Doing chmod\" \"Operation not supported\" \"$FIXTURE/link\")",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "id": "set-missing",
+      "form": "(set-file-modes \"$FIXTURE/missing\" 384)",
+      "stdout": "(file-missing \"Doing chmod\" \"No such file or directory\" \"$FIXTURE/missing\")",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "id": "set-lowbits",
+      "form": "(progn (set-file-modes \"$FIXTURE/file\" 8576) (file-modes \"$FIXTURE/file\"))",
+      "stdout": "384",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "id": "rename-exists",
+      "form": "(rename-file \"$FIXTURE/file\" \"$FIXTURE/target\")",
+      "stdout": "(file-already-exists \"File already exists\" \"$FIXTURE/target\")",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "id": "rename-same",
+      "form": "(rename-file \"$FIXTURE/file\" \"$FIXTURE/file\")",
+      "stdout": "(file-already-exists \"File already exists\" \"$FIXTURE/file\")",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "id": "rename-missing",
+      "form": "(rename-file \"$FIXTURE/missing\" \"$FIXTURE/new\")",
+      "stdout": "(file-missing \"Renaming\" \"No such file or directory\" \"$FIXTURE/missing\" \"$FIXTURE/new\")",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "id": "rename-replace",
+      "form": "(progn (rename-file \"$FIXTURE/file\" \"$FIXTURE/target\" t) (list (file-exists-p \"$FIXTURE/file\") (file-exists-p \"$FIXTURE/target\")))",
+      "stdout": "(nil t)",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "id": "rename-directory",
+      "form": "(progn (rename-file \"$FIXTURE/target\" \"$FIXTURE/dir/\") (file-exists-p \"$FIXTURE/dir/target\"))",
+      "stdout": "t",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "id": "temp-name",
+      "form": "(let* ((p \"$FIXTURE/prefix-\") (n (make-temp-name p))) (list (substring n 0 (length p)) (- (length n) (length p)) (file-exists-p n) (multibyte-string-p n)))",
+      "stdout": "(\"$FIXTURE/prefix-\" 6 nil nil)",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "id": "temp-nonexistent-parent",
+      "form": "(let ((n (make-temp-name \"$FIXTURE/missing/prefix-\"))) (file-exists-p n))",
+      "stdout": "nil",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "id": "temp-relative",
+      "form": "(substring (make-temp-name \"relative-\") 0 9)",
+      "stdout": "\"relative-\"",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "id": "temp-no-handler",
+      "form": "(let ((file-name-handler-alist '((\".*\" . broken)))) (substring (make-temp-name \"relative-\") 0 9))",
+      "stdout": "\"relative-\"",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "id": "invalid-writable",
+      "form": "(file-writable-p 1)",
+      "stdout": "(wrong-type-argument stringp 1)",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "id": "invalid-temp",
+      "form": "(make-temp-name nil)",
+      "stdout": "(wrong-type-argument stringp nil)",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "id": "invalid-modes",
+      "form": "(file-modes 1)",
+      "stdout": "(wrong-type-argument stringp 1)",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "id": "invalid-rename",
+      "form": "(rename-file 1 2)",
+      "stdout": "(wrong-type-argument stringp 1)",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "id": "invalid-set-precedence",
+      "form": "(set-file-modes 1 nil)",
+      "stdout": "(wrong-type-argument fixnump nil)",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "id": "nul-modes",
+      "form": "(file-modes \"a\\0b\")",
+      "stdout": "(wrong-type-argument filenamep \"a\u0000b\")",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "id": "handler-file-writable-p",
+      "form": "(let ((file-name-handler-alist '((\"/filesave-magic/\" . filesave-handler)))) (file-writable-p \"/filesave-magic/a\"))",
+      "stdout": "(file-writable-p \"/filesave-magic/a\")",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "id": "handler-file-modes",
+      "form": "(let ((file-name-handler-alist '((\"/filesave-magic/\" . filesave-handler)))) (file-modes \"/filesave-magic/a\" 'nofollow))",
+      "stdout": "(file-modes \"/filesave-magic/a\" nofollow)",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "id": "handler-set-file-modes",
+      "form": "(let ((file-name-handler-alist '((\"/filesave-magic/\" . filesave-handler)))) (set-file-modes \"/filesave-magic/a\" 384 t))",
+      "stdout": "(set-file-modes \"/filesave-magic/a\" 384 t)",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "id": "handler-rename-file",
+      "form": "(let ((file-name-handler-alist '((\"/filesave-magic/\" . filesave-handler)))) (rename-file \"/filesave-magic/a\" \"/filesave-magic/b\" t))",
+      "stdout": "(rename-file \"/filesave-magic/a\" \"/filesave-magic/b\" t)",
+      "stderr": "",
+      "exit": 0
+    }
+  ]
+}

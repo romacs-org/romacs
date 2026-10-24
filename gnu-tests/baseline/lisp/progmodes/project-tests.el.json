@@ -1,0 +1,359 @@
+{
+  "blob": "9516c2ad1193a11979bc48286ef095146de1c061",
+  "compiled": {
+    "complete": true,
+    "exit": 0,
+    "garbled_lines": 0,
+    "load_error": null,
+    "load_ok": true,
+    "results": {
+      "project-find-regexp": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "project-find-regexp-with-prefix": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "project-ignores": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "project-ignores-bug-50240": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "project-name-<vc>-obeys-cache-invalidation": {
+        "as_expected": true,
+        "detail": "(ert-test-skipped ((skip-unless (eq (vc-responsible-backend default-directory) 'Git)) :form (signal error (\"No VC backend is responsible for <recording-home>/.hermes/cache/scratch/gts-tree-t8p5ta2b/test/lisp/progmodes/\"))))",
+        "expected": ":passed",
+        "outcome": "skipped",
+        "tags": []
+      },
+      "project-name-<vc>-reuses-cache": {
+        "as_expected": true,
+        "detail": "(ert-test-skipped ((skip-unless (eq (vc-responsible-backend default-directory) 'Git)) :form (signal error (\"No VC backend is responsible for <recording-home>/.hermes/cache/scratch/gts-tree-t8p5ta2b/test/lisp/progmodes/\"))))",
+        "expected": ":passed",
+        "outcome": "skipped",
+        "tags": []
+      },
+      "project-try-vc-invalidates-cache": {
+        "as_expected": true,
+        "detail": "(ert-test-skipped ((skip-unless (eq (vc-responsible-backend default-directory) 'Git)) :form (signal error (\"No VC backend is responsible for <recording-home>/.hermes/cache/scratch/gts-tree-t8p5ta2b/test/lisp/progmodes/\"))))",
+        "expected": ":passed",
+        "outcome": "skipped",
+        "tags": []
+      },
+      "project-try-vc-uses-cache": {
+        "as_expected": true,
+        "detail": "(ert-test-skipped ((skip-unless (eq (vc-responsible-backend default-directory) 'Git)) :form (signal error (\"No VC backend is responsible for <recording-home>/.hermes/cache/scratch/gts-tree-t8p5ta2b/test/lisp/progmodes/\"))))",
+        "expected": ":passed",
+        "outcome": "skipped",
+        "tags": []
+      },
+      "project-vc-extra-root-markers-supports-wildcards": {
+        "as_expected": true,
+        "detail": "(ert-test-skipped ((skip-unless (eq (vc-responsible-backend default-directory) 'Git)) :form (signal error (\"No VC backend is responsible for <recording-home>/.hermes/cache/scratch/gts-tree-t8p5ta2b/test/lisp/progmodes/\"))))",
+        "expected": ":passed",
+        "outcome": "skipped",
+        "tags": []
+      },
+      "project-vc-ignores-in-external-directory": {
+        "as_expected": true,
+        "detail": "(ert-test-skipped ((skip-unless (eq (vc-responsible-backend default-directory) 'Git)) :form (signal error (\"No VC backend is responsible for <recording-home>/.hermes/cache/scratch/gts-tree-t8p5ta2b/test/lisp/progmodes/\"))))",
+        "expected": ":passed",
+        "outcome": "skipped",
+        "tags": []
+      },
+      "project-vc-nonexistent-directory-no-error": {
+        "as_expected": true,
+        "detail": "(ert-test-skipped ((skip-unless (eq (vc-responsible-backend default-directory) 'Git)) :form (signal error (\"No VC backend is responsible for <recording-home>/.hermes/cache/scratch/gts-tree-t8p5ta2b/test/lisp/progmodes/\"))))",
+        "expected": ":passed",
+        "outcome": "skipped",
+        "tags": []
+      },
+      "project-vc-recognizes-git": {
+        "as_expected": true,
+        "detail": "(ert-test-skipped ((skip-unless (eq (vc-responsible-backend default-directory) 'Git)) :form (signal error (\"No VC backend is responsible for <recording-home>/.hermes/cache/scratch/gts-tree-t8p5ta2b/test/lisp/progmodes/\"))))",
+        "expected": ":passed",
+        "outcome": "skipped",
+        "tags": []
+      },
+      "project-vc-supports-files-in-subdirectory": {
+        "as_expected": true,
+        "detail": "(ert-test-skipped ((skip-unless (eq (vc-responsible-backend default-directory) 'Git)) :form (signal error (\"No VC backend is responsible for <recording-home>/.hermes/cache/scratch/gts-tree-t8p5ta2b/test/lisp/progmodes/\"))))",
+        "expected": ":passed",
+        "outcome": "skipped",
+        "tags": []
+      },
+      "project-vc-supports-project-in-different-dir": {
+        "as_expected": true,
+        "detail": "(ert-test-skipped ((skip-unless (eq (vc-responsible-backend default-directory) 'Git)) :form (signal error (\"No VC backend is responsible for <recording-home>/.hermes/cache/scratch/gts-tree-t8p5ta2b/test/lisp/progmodes/\"))))",
+        "expected": ":passed",
+        "outcome": "skipped",
+        "tags": []
+      },
+      "project/quoted-directory": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      }
+    },
+    "timed_out": false
+  },
+  "file": "lisp/progmodes/project-tests.el",
+  "gnu": {
+    "emacs": "<recording-path-redacted>/emacs-32.0.50",
+    "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+    "sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+    "version": "32.0.50"
+  },
+  "harness_sha256": "78c20850429a08af22faadf73b5d164c560230e83d7eb88ef60cb995670703ef",
+  "mini": {
+    "complete": true,
+    "exit": 0,
+    "garbled_lines": 0,
+    "load_error": null,
+    "load_ok": null,
+    "results": {
+      "project-find-regexp": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "project-find-regexp-with-prefix": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "project-ignores": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "project-ignores-bug-50240": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "project-name-<vc>-obeys-cache-invalidation": {
+        "as_expected": null,
+        "detail": "(error \"No VC backend is responsible for <recording-home>/.hermes/cache/scratch/gts-tree-t8p5ta2b/test/lisp/progmodes/\")",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "project-name-<vc>-reuses-cache": {
+        "as_expected": null,
+        "detail": "(error \"No VC backend is responsible for <recording-home>/.hermes/cache/scratch/gts-tree-t8p5ta2b/test/lisp/progmodes/\")",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "project-try-vc-invalidates-cache": {
+        "as_expected": null,
+        "detail": "(error \"No VC backend is responsible for <recording-home>/.hermes/cache/scratch/gts-tree-t8p5ta2b/test/lisp/progmodes/\")",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "project-try-vc-uses-cache": {
+        "as_expected": null,
+        "detail": "(error \"No VC backend is responsible for <recording-home>/.hermes/cache/scratch/gts-tree-t8p5ta2b/test/lisp/progmodes/\")",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "project-vc-extra-root-markers-supports-wildcards": {
+        "as_expected": null,
+        "detail": "(error \"No VC backend is responsible for <recording-home>/.hermes/cache/scratch/gts-tree-t8p5ta2b/test/lisp/progmodes/\")",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "project-vc-ignores-in-external-directory": {
+        "as_expected": null,
+        "detail": "(error \"No VC backend is responsible for <recording-home>/.hermes/cache/scratch/gts-tree-t8p5ta2b/test/lisp/progmodes/\")",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "project-vc-nonexistent-directory-no-error": {
+        "as_expected": null,
+        "detail": "(error \"No VC backend is responsible for <recording-home>/.hermes/cache/scratch/gts-tree-t8p5ta2b/test/lisp/progmodes/\")",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "project-vc-recognizes-git": {
+        "as_expected": null,
+        "detail": "(error \"No VC backend is responsible for <recording-home>/.hermes/cache/scratch/gts-tree-t8p5ta2b/test/lisp/progmodes/\")",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "project-vc-supports-files-in-subdirectory": {
+        "as_expected": null,
+        "detail": "(error \"No VC backend is responsible for <recording-home>/.hermes/cache/scratch/gts-tree-t8p5ta2b/test/lisp/progmodes/\")",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "project-vc-supports-project-in-different-dir": {
+        "as_expected": null,
+        "detail": "(error \"No VC backend is responsible for <recording-home>/.hermes/cache/scratch/gts-tree-t8p5ta2b/test/lisp/progmodes/\")",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "project/quoted-directory": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      }
+    },
+    "timed_out": false
+  },
+  "read_error": null,
+  "real": {
+    "complete": true,
+    "exit": 0,
+    "garbled_lines": 0,
+    "load_error": null,
+    "load_ok": true,
+    "results": {
+      "project-find-regexp": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "project-find-regexp-with-prefix": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "project-ignores": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "project-ignores-bug-50240": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "project-name-<vc>-obeys-cache-invalidation": {
+        "as_expected": true,
+        "detail": "(ert-test-skipped ((skip-unless (eq (vc-responsible-backend default-directory) 'Git)) :form (signal error (\"No VC backend is responsible for <recording-home>/.hermes/cache/scratch/gts-tree-t8p5ta2b/test/lisp/progmodes/\"))))",
+        "expected": ":passed",
+        "outcome": "skipped",
+        "tags": []
+      },
+      "project-name-<vc>-reuses-cache": {
+        "as_expected": true,
+        "detail": "(ert-test-skipped ((skip-unless (eq (vc-responsible-backend default-directory) 'Git)) :form (signal error (\"No VC backend is responsible for <recording-home>/.hermes/cache/scratch/gts-tree-t8p5ta2b/test/lisp/progmodes/\"))))",
+        "expected": ":passed",
+        "outcome": "skipped",
+        "tags": []
+      },
+      "project-try-vc-invalidates-cache": {
+        "as_expected": true,
+        "detail": "(ert-test-skipped ((skip-unless (eq (vc-responsible-backend default-directory) 'Git)) :form (signal error (\"No VC backend is responsible for <recording-home>/.hermes/cache/scratch/gts-tree-t8p5ta2b/test/lisp/progmodes/\"))))",
+        "expected": ":passed",
+        "outcome": "skipped",
+        "tags": []
+      },
+      "project-try-vc-uses-cache": {
+        "as_expected": true,
+        "detail": "(ert-test-skipped ((skip-unless (eq (vc-responsible-backend default-directory) 'Git)) :form (signal error (\"No VC backend is responsible for <recording-home>/.hermes/cache/scratch/gts-tree-t8p5ta2b/test/lisp/progmodes/\"))))",
+        "expected": ":passed",
+        "outcome": "skipped",
+        "tags": []
+      },
+      "project-vc-extra-root-markers-supports-wildcards": {
+        "as_expected": true,
+        "detail": "(ert-test-skipped ((skip-unless (eq (vc-responsible-backend default-directory) 'Git)) :form (signal error (\"No VC backend is responsible for <recording-home>/.hermes/cache/scratch/gts-tree-t8p5ta2b/test/lisp/progmodes/\"))))",
+        "expected": ":passed",
+        "outcome": "skipped",
+        "tags": []
+      },
+      "project-vc-ignores-in-external-directory": {
+        "as_expected": true,
+        "detail": "(ert-test-skipped ((skip-unless (eq (vc-responsible-backend default-directory) 'Git)) :form (signal error (\"No VC backend is responsible for <recording-home>/.hermes/cache/scratch/gts-tree-t8p5ta2b/test/lisp/progmodes/\"))))",
+        "expected": ":passed",
+        "outcome": "skipped",
+        "tags": []
+      },
+      "project-vc-nonexistent-directory-no-error": {
+        "as_expected": true,
+        "detail": "(ert-test-skipped ((skip-unless (eq (vc-responsible-backend default-directory) 'Git)) :form (signal error (\"No VC backend is responsible for <recording-home>/.hermes/cache/scratch/gts-tree-t8p5ta2b/test/lisp/progmodes/\"))))",
+        "expected": ":passed",
+        "outcome": "skipped",
+        "tags": []
+      },
+      "project-vc-recognizes-git": {
+        "as_expected": true,
+        "detail": "(ert-test-skipped ((skip-unless (eq (vc-responsible-backend default-directory) 'Git)) :form (signal error (\"No VC backend is responsible for <recording-home>/.hermes/cache/scratch/gts-tree-t8p5ta2b/test/lisp/progmodes/\"))))",
+        "expected": ":passed",
+        "outcome": "skipped",
+        "tags": []
+      },
+      "project-vc-supports-files-in-subdirectory": {
+        "as_expected": true,
+        "detail": "(ert-test-skipped ((skip-unless (eq (vc-responsible-backend default-directory) 'Git)) :form (signal error (\"No VC backend is responsible for <recording-home>/.hermes/cache/scratch/gts-tree-t8p5ta2b/test/lisp/progmodes/\"))))",
+        "expected": ":passed",
+        "outcome": "skipped",
+        "tags": []
+      },
+      "project-vc-supports-project-in-different-dir": {
+        "as_expected": true,
+        "detail": "(ert-test-skipped ((skip-unless (eq (vc-responsible-backend default-directory) 'Git)) :form (signal error (\"No VC backend is responsible for <recording-home>/.hermes/cache/scratch/gts-tree-t8p5ta2b/test/lisp/progmodes/\"))))",
+        "expected": ":passed",
+        "outcome": "skipped",
+        "tags": []
+      },
+      "project/quoted-directory": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      }
+    },
+    "timed_out": false
+  },
+  "schema": 1,
+  "toplevel_deftests": 15
+}

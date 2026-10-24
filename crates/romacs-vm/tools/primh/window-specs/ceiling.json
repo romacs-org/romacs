@@ -1,0 +1,74 @@
+{
+ "name": "ceiling",
+ "arity": [
+  1,
+  2
+ ],
+ "effect": "pure",
+ "gnu_files": [
+  "floatfns.c"
+ ],
+ "gnu_def": "floatfns.c:524",
+ "rust": "src/prims/rounding.rs:182",
+ "args": [
+  "any",
+  "any"
+ ],
+ "extra": {
+  "0": [
+   "2.5",
+   "-2.5",
+   "0.5",
+   "-0.5",
+   "-0.0",
+   "1.0e+INF",
+   "-1.0e+INF",
+   "0.0e+NaN",
+   "1e300",
+   "5e-324",
+   "most-negative-fixnum",
+   "(- most-positive-fixnum)",
+   "7",
+   "-7",
+   "230"
+  ],
+  "1": [
+   "0.0",
+   "-0.0",
+   "2",
+   "-2",
+   "3",
+   "20",
+   "0.5",
+   "0.1",
+   "1.0e+INF",
+   "0.0e+NaN",
+   "1e-300",
+   "most-negative-fixnum"
+  ]
+ },
+ "probes": [
+  "(list (ceiling 0.5) (ceiling 1.5) (ceiling 2.5) (ceiling -0.5) (ceiling -1.5) (ceiling -2.5) (ceiling 3.49) (ceiling -3.51))",
+  "(list (ceiling 7 2) (ceiling -7 2) (ceiling 7 -2) (ceiling -7 -2) (ceiling 5 2) (ceiling -5 2) (ceiling 6 4) (ceiling 10 4) (ceiling -10 4))",
+  "(list (ceiling 1.5 0.5) (ceiling 0.1 0.01) (ceiling 0.3 0.1) (ceiling 1 3.0) (ceiling 2 3.0) (ceiling -2 3.0) (ceiling 1 0.1))",
+  "(list (ceiling 5e-324 1e300) (ceiling -5e-324 1e300) (ceiling 1e-300 1e300) (ceiling 1 1.0e+INF) (ceiling -1 1.0e+INF) (ceiling 0.0 1.0e+INF))",
+  "(list (ceiling 1e300 1e299) (ceiling 1e15 0.1) (ceiling 4503599627370497.0 2) (ceiling 9007199254740993 2.0))",
+  "(list (ceiling 230 20) (* 20 (ceiling 230 20)) (ceiling 460 2) (ceiling 12 1) (ceiling 25 2) (ceiling 23 2))",
+  "(condition-case e (ceiling most-negative-fixnum -1) (error e))",
+  "(condition-case e (ceiling most-positive-fixnum 0.5) (error e))",
+  "(condition-case e (ceiling 1e300) (error e))",
+  "(condition-case e (ceiling 1.0e+INF) (error e))",
+  "(condition-case e (ceiling 0.0e+NaN) (error e))",
+  "(condition-case e (ceiling 1.0e+INF 1.0e+INF) (error e))",
+  "(condition-case e (ceiling 1 0.0e+NaN) (error e))",
+  "(condition-case e (ceiling 1 0) (error e))",
+  "(condition-case e (ceiling 1.5 -0.0) (error e))",
+  "(condition-case e (ceiling (make-marker)) (error (car e)))",
+  "(condition-case e (ceiling 1 'x) (error e))",
+  "(condition-case e (ceiling 'x 0) (error e))",
+  "(let ((x 1.5)) (list (ceiling x) x))",
+  "(eq (ceiling most-positive-fixnum) most-positive-fixnum)",
+  "(funcall #'ceiling 9 4)",
+  "(apply #'ceiling '(9.5))"
+ ]
+}

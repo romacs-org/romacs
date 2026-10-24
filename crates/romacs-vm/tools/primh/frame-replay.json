@@ -1,0 +1,1056 @@
+{
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "cases": [
+  {
+   "primitive": "framep",
+   "id": "framep/0000",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (framep nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "primitive": "framep",
+   "id": "framep/0001",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (framep t)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "primitive": "framep",
+   "id": "framep/0002",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (framep 1)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "primitive": "framep",
+   "id": "framep/0003",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (framep 'symbol)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "primitive": "framep",
+   "id": "framep/0004",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (framep \"string\")) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "primitive": "framep",
+   "id": "framep/0005",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (framep (selected-window))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "primitive": "framep",
+   "id": "framep/0006",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'framep '())) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr framep> 0))"
+  },
+  {
+   "primitive": "framep",
+   "id": "framep/0007",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'framep '(1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr framep> 2))"
+  },
+  {
+   "primitive": "framep",
+   "id": "framep/0008",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (framep a0))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "primitive": "framep",
+   "id": "framep/0009",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil)) (let ((r (framep a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (t))"
+  },
+  {
+   "primitive": "framep",
+   "id": "framep/0010",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'symbol)) (let ((r (framep a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "primitive": "framep",
+   "id": "framep/0011",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (fboundp 'framep)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "primitive": "framep",
+   "id": "framep/0012",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (framep (selected-frame))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "primitive": "framep",
+   "id": "framep/0013",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (framep (frame-terminal))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "primitive": "framep",
+   "id": "framep/0014",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (framep nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "primitive": "framep",
+   "id": "framep/0015",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (framep t)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "primitive": "framep",
+   "id": "framep/0016",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (framep 1)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "primitive": "framep",
+   "id": "framep/0017",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (framep 'symbol)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "primitive": "framep",
+   "id": "framep/0018",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (framep \"string\")) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "primitive": "framep",
+   "id": "framep/0019",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (framep (selected-window))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "primitive": "framep",
+   "id": "framep/0020",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (funcall #'framep (selected-frame))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "primitive": "frame-list",
+   "id": "frame-list/0001",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'frame-list '(1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr frame-list> 1))"
+  },
+  {
+   "primitive": "frame-list",
+   "id": "frame-list/0003",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let () (let ((r (frame-list ))) (list )))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "primitive": "frame-list",
+   "id": "frame-list/0004",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (fboundp 'frame-list)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "primitive": "frame-list",
+   "id": "frame-list/0005",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (equal (frame-list) (list (selected-frame)))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "primitive": "frame-list",
+   "id": "frame-list/0006",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eq (frame-list) (frame-list))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "primitive": "frame-list",
+   "id": "frame-list/0007",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (equal (funcall #'frame-list) (frame-list))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "primitive": "frame-terminal",
+   "id": "frame-terminal/0001",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (frame-terminal t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument frame-live-p t))"
+  },
+  {
+   "primitive": "frame-terminal",
+   "id": "frame-terminal/0002",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (frame-terminal 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument frame-live-p 1))"
+  },
+  {
+   "primitive": "frame-terminal",
+   "id": "frame-terminal/0003",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (frame-terminal 'symbol)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument frame-live-p symbol))"
+  },
+  {
+   "primitive": "frame-terminal",
+   "id": "frame-terminal/0004",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (frame-terminal \"string\")) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument frame-live-p \"string\"))"
+  },
+  {
+   "primitive": "frame-terminal",
+   "id": "frame-terminal/0005",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'frame-terminal '(1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr frame-terminal> 2))"
+  },
+  {
+   "primitive": "frame-terminal",
+   "id": "frame-terminal/0007",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil)) (let ((r (frame-terminal a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "primitive": "frame-terminal",
+   "id": "frame-terminal/0008",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'symbol)) (let ((r (frame-terminal a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument frame-live-p symbol))"
+  },
+  {
+   "primitive": "frame-terminal",
+   "id": "frame-terminal/0009",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (fboundp 'frame-terminal)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "primitive": "frame-terminal",
+   "id": "frame-terminal/0010",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eq (frame-terminal) (frame-terminal nil))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "primitive": "frame-terminal",
+   "id": "frame-terminal/0011",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eq (frame-terminal) (frame-terminal (selected-frame)))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "primitive": "frame-terminal",
+   "id": "frame-terminal/0012",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eq (funcall #'frame-terminal) (frame-terminal))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "primitive": "frame-terminal",
+   "id": "frame-terminal/0013",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (terminal-live-p (frame-terminal))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "primitive": "terminal-live-p",
+   "id": "terminal-live-p/0000",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (terminal-live-p nil)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "primitive": "terminal-live-p",
+   "id": "terminal-live-p/0001",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (terminal-live-p t)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "primitive": "terminal-live-p",
+   "id": "terminal-live-p/0002",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (terminal-live-p 1)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "primitive": "terminal-live-p",
+   "id": "terminal-live-p/0003",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (terminal-live-p 'symbol)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "primitive": "terminal-live-p",
+   "id": "terminal-live-p/0004",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (terminal-live-p \"string\")) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "primitive": "terminal-live-p",
+   "id": "terminal-live-p/0005",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'terminal-live-p '())) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr terminal-live-p> 0))"
+  },
+  {
+   "primitive": "terminal-live-p",
+   "id": "terminal-live-p/0006",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'terminal-live-p '(1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr terminal-live-p> 2))"
+  },
+  {
+   "primitive": "terminal-live-p",
+   "id": "terminal-live-p/0007",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (terminal-live-p a0))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "primitive": "terminal-live-p",
+   "id": "terminal-live-p/0008",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil)) (let ((r (terminal-live-p a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "primitive": "terminal-live-p",
+   "id": "terminal-live-p/0009",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'symbol)) (let ((r (terminal-live-p a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "primitive": "terminal-live-p",
+   "id": "terminal-live-p/0010",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (fboundp 'terminal-live-p)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "primitive": "terminal-live-p",
+   "id": "terminal-live-p/0011",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (terminal-live-p nil)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "primitive": "terminal-live-p",
+   "id": "terminal-live-p/0012",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (terminal-live-p (selected-frame))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "primitive": "terminal-live-p",
+   "id": "terminal-live-p/0013",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (terminal-live-p (frame-terminal))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "primitive": "terminal-live-p",
+   "id": "terminal-live-p/0014",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (terminal-live-p t)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "primitive": "terminal-live-p",
+   "id": "terminal-live-p/0015",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (terminal-live-p 1)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "primitive": "terminal-live-p",
+   "id": "terminal-live-p/0016",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (terminal-live-p 'symbol)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "primitive": "terminal-live-p",
+   "id": "terminal-live-p/0017",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (terminal-live-p \"string\")) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "primitive": "terminal-live-p",
+   "id": "terminal-live-p/0018",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (terminal-live-p (selected-window))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "primitive": "terminal-live-p",
+   "id": "terminal-live-p/0019",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (funcall #'terminal-live-p (frame-terminal))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "primitive": "last-nonminibuffer-frame",
+   "id": "last-nonminibuffer-frame/0001",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'last-nonminibuffer-frame '(1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr last-nonminibuffer-frame> 1))"
+  },
+  {
+   "primitive": "last-nonminibuffer-frame",
+   "id": "last-nonminibuffer-frame/0003",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let () (let ((r (last-nonminibuffer-frame ))) (list )))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "primitive": "last-nonminibuffer-frame",
+   "id": "last-nonminibuffer-frame/0004",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (fboundp 'last-nonminibuffer-frame)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "primitive": "last-nonminibuffer-frame",
+   "id": "last-nonminibuffer-frame/0005",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eq (last-nonminibuffer-frame) (selected-frame))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "primitive": "last-nonminibuffer-frame",
+   "id": "last-nonminibuffer-frame/0006",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eq (funcall #'last-nonminibuffer-frame) (selected-frame))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "primitive": "terminal-list",
+   "id": "terminal-list/0001",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'terminal-list '(1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr terminal-list> 1))"
+  },
+  {
+   "primitive": "terminal-list",
+   "id": "terminal-list/0003",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let () (let ((r (terminal-list ))) (list )))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "primitive": "terminal-list",
+   "id": "terminal-list/0004",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (fboundp 'terminal-list)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "primitive": "terminal-list",
+   "id": "terminal-list/0005",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (equal (terminal-list) (list (frame-terminal)))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "primitive": "terminal-list",
+   "id": "terminal-list/0006",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eq (terminal-list) (terminal-list))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "primitive": "terminal-list",
+   "id": "terminal-list/0007",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (equal (funcall #'terminal-list) (terminal-list))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "primitive": "tty-top-frame",
+   "id": "tty-top-frame/0000",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (tty-top-frame nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "primitive": "tty-top-frame",
+   "id": "tty-top-frame/0001",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (tty-top-frame t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument terminal-live-p t))"
+  },
+  {
+   "primitive": "tty-top-frame",
+   "id": "tty-top-frame/0002",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (tty-top-frame 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument terminal-live-p 1))"
+  },
+  {
+   "primitive": "tty-top-frame",
+   "id": "tty-top-frame/0003",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (tty-top-frame 'symbol)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument terminal-live-p symbol))"
+  },
+  {
+   "primitive": "tty-top-frame",
+   "id": "tty-top-frame/0004",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (tty-top-frame \"string\")) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument terminal-live-p \"string\"))"
+  },
+  {
+   "primitive": "tty-top-frame",
+   "id": "tty-top-frame/0005",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'tty-top-frame '(1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr tty-top-frame> 2))"
+  },
+  {
+   "primitive": "tty-top-frame",
+   "id": "tty-top-frame/0006",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (tty-top-frame a0))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "primitive": "tty-top-frame",
+   "id": "tty-top-frame/0007",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil)) (let ((r (tty-top-frame a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (t))"
+  },
+  {
+   "primitive": "tty-top-frame",
+   "id": "tty-top-frame/0008",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'symbol)) (let ((r (tty-top-frame a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument terminal-live-p symbol))"
+  },
+  {
+   "primitive": "tty-top-frame",
+   "id": "tty-top-frame/0009",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (fboundp 'tty-top-frame)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "primitive": "tty-top-frame",
+   "id": "tty-top-frame/0010",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (tty-top-frame)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "primitive": "tty-top-frame",
+   "id": "tty-top-frame/0011",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (tty-top-frame (selected-frame))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "primitive": "tty-top-frame",
+   "id": "tty-top-frame/0012",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (tty-top-frame (frame-terminal))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "primitive": "tty-top-frame",
+   "id": "tty-top-frame/0013",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (funcall #'tty-top-frame nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "primitive": "window-list",
+   "id": "window-list/0001",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (window-list nil nil 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument windowp 1))"
+  },
+  {
+   "primitive": "window-list",
+   "id": "window-list/0003",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (window-list nil t 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument windowp 1))"
+  },
+  {
+   "primitive": "window-list",
+   "id": "window-list/0004",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (window-list 1 nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (error \"Window is on a different frame\"))"
+  },
+  {
+   "primitive": "window-list",
+   "id": "window-list/0005",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (window-list 1 nil 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument windowp 1))"
+  },
+  {
+   "primitive": "window-list",
+   "id": "window-list/0006",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (window-list 1 t nil)) (error (list 'sig e))))",
+   "expected": "(sig (error \"Window is on a different frame\"))"
+  },
+  {
+   "primitive": "window-list",
+   "id": "window-list/0007",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (window-list 1 t 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument windowp 1))"
+  },
+  {
+   "primitive": "window-list",
+   "id": "window-list/0008",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (window-list 'symbol nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (error \"Window is on a different frame\"))"
+  },
+  {
+   "primitive": "window-list",
+   "id": "window-list/0009",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (window-list 'symbol nil 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument windowp 1))"
+  },
+  {
+   "primitive": "window-list",
+   "id": "window-list/0010",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (window-list 'symbol t nil)) (error (list 'sig e))))",
+   "expected": "(sig (error \"Window is on a different frame\"))"
+  },
+  {
+   "primitive": "window-list",
+   "id": "window-list/0011",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (window-list 'symbol t 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument windowp 1))"
+  },
+  {
+   "primitive": "window-list",
+   "id": "window-list/0012",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'window-list '(1 1 1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr window-list> 4))"
+  },
+  {
+   "primitive": "window-list",
+   "id": "window-list/0014",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 nil) (a2 nil)) (let ((r (window-list a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil nil))"
+  },
+  {
+   "primitive": "window-list",
+   "id": "window-list/0015",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 t) (a2 1)) (let ((r (window-list a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument windowp 1))"
+  },
+  {
+   "primitive": "window-list",
+   "id": "window-list/0016",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 t) (a2 nil)) (let ((r (window-list a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (error \"Window is on a different frame\"))"
+  },
+  {
+   "primitive": "window-list",
+   "id": "window-list/0017",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'symbol) (a1 nil) (a2 1)) (let ((r (window-list a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument windowp 1))"
+  },
+  {
+   "primitive": "window-list",
+   "id": "window-list/0018",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (fboundp 'window-list)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "primitive": "window-list",
+   "id": "window-list/0019",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (equal (window-list) (list (selected-window)))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "primitive": "window-list",
+   "id": "window-list/0020",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (equal (window-list nil t) (list (selected-window) (minibuffer-window)))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "primitive": "window-list",
+   "id": "window-list/0021",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (equal (window-list nil 'never) (list (selected-window)))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "primitive": "window-list",
+   "id": "window-list/0022",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (equal (window-list nil t (minibuffer-window)) (list (minibuffer-window) (selected-window)))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "primitive": "window-list",
+   "id": "window-list/0023",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eq (window-list) (window-list))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "primitive": "window-list",
+   "id": "window-list/0024",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (equal (funcall #'window-list) (window-list))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "primitive": "window-list",
+   "id": "window-list/0025",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (list (equal (window-list) (list a b)) (equal (window-list nil nil b) (list b a)) (equal (window-list nil t b) (list b (minibuffer-window) a))))) (error (list 'sig e))))",
+   "expected": "(ok (t t t))",
+   "gnu_regime_variant": "(ok (nil nil nil))"
+  },
+  {
+   "primitive": "window-list",
+   "id": "window-list/0026",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (condition-case e (window-list nil nil p) (error (list (car e) (car (cdr e)) (eq (car (cdr (cdr e))) p)))))) (error (list 'sig e))))",
+   "expected": "(ok (wrong-type-argument window-live-p t))"
+  },
+  {
+   "primitive": "get-buffer-window",
+   "id": "get-buffer-window/0004",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (get-buffer-window 1 nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 1))"
+  },
+  {
+   "primitive": "get-buffer-window",
+   "id": "get-buffer-window/0005",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (get-buffer-window 1 t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 1))"
+  },
+  {
+   "primitive": "get-buffer-window",
+   "id": "get-buffer-window/0006",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (get-buffer-window 1 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 1))"
+  },
+  {
+   "primitive": "get-buffer-window",
+   "id": "get-buffer-window/0007",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (get-buffer-window 1 'visible)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 1))"
+  },
+  {
+   "primitive": "get-buffer-window",
+   "id": "get-buffer-window/0008",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (get-buffer-window 'symbol nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp symbol))"
+  },
+  {
+   "primitive": "get-buffer-window",
+   "id": "get-buffer-window/0009",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (get-buffer-window 'symbol t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp symbol))"
+  },
+  {
+   "primitive": "get-buffer-window",
+   "id": "get-buffer-window/0010",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (get-buffer-window 'symbol 0)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp symbol))"
+  },
+  {
+   "primitive": "get-buffer-window",
+   "id": "get-buffer-window/0011",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (get-buffer-window 'symbol 'visible)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp symbol))"
+  },
+  {
+   "primitive": "get-buffer-window",
+   "id": "get-buffer-window/0012",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'get-buffer-window '(1 1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr get-buffer-window> 3))"
+  },
+  {
+   "primitive": "get-buffer-window",
+   "id": "get-buffer-window/0014",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 nil)) (let ((r (get-buffer-window a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "primitive": "get-buffer-window",
+   "id": "get-buffer-window/0015",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 'visible)) (let ((r (get-buffer-window a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "primitive": "get-buffer-window",
+   "id": "get-buffer-window/0016",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 0)) (let ((r (get-buffer-window a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 1))"
+  },
+  {
+   "primitive": "get-buffer-window",
+   "id": "get-buffer-window/0017",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'symbol) (a1 t)) (let ((r (get-buffer-window a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp symbol))"
+  },
+  {
+   "primitive": "get-buffer-window",
+   "id": "get-buffer-window/0018",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (fboundp 'get-buffer-window)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "primitive": "get-buffer-window",
+   "id": "get-buffer-window/0019",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eq (get-buffer-window) (selected-window))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "primitive": "get-buffer-window",
+   "id": "get-buffer-window/0020",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eq (get-buffer-window (current-buffer)) (selected-window))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "primitive": "get-buffer-window",
+   "id": "get-buffer-window/0021",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eq (get-buffer-window (buffer-name)) (selected-window))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "primitive": "get-buffer-window",
+   "id": "get-buffer-window/0022",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (get-buffer-window \"frame-probe-missing-buffer\")) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "primitive": "get-buffer-window",
+   "id": "get-buffer-window/0023",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (get-buffer-window (get-buffer-create \"frame-probe-undisplayed\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "primitive": "get-buffer-window",
+   "id": "get-buffer-window/0024",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eq (funcall #'get-buffer-window nil t) (selected-window))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "primitive": "get-buffer-window",
+   "id": "get-buffer-window/0025",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eq (get-buffer-window nil nil) (selected-window))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "primitive": "get-buffer-window",
+   "id": "get-buffer-window/0026",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eq (get-buffer-window nil t) (selected-window))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "primitive": "get-buffer-window",
+   "id": "get-buffer-window/0027",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eq (get-buffer-window nil 0) (selected-window))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "primitive": "get-buffer-window",
+   "id": "get-buffer-window/0028",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eq (get-buffer-window nil 'visible) (selected-window))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "primitive": "get-buffer-window",
+   "id": "get-buffer-window/0029",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eq (get-buffer-window nil (selected-frame)) (selected-window))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "primitive": "get-buffer-window",
+   "id": "get-buffer-window/0030",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (let ((buf (get-buffer-create \"frame-probe-other\"))) (set-window-buffer b buf) (list (eq (get-buffer-window buf) b) (eq (get-buffer-window nil) a))))) (error (list 'sig e))))",
+   "expected": "(ok (t t))"
+  },
+  {
+   "primitive": "get-buffer-window",
+   "id": "get-buffer-window/0031",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (let* ((hb (window-pixel-height b)) (half-b (/ hb 2)) (c (progn (set-window-new-pixel b (- hb half-b)) (split-window-internal b half-b nil 0.5))) (x (get-buffer-create \"frame-search-cyclic\"))) (set-window-buffer a x) (set-window-buffer c x) (select-window b) (eq (get-buffer-window x) c)))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "primitive": "window-combination-limit",
+   "id": "window-combination-limit/0000",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (window-combination-limit nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument window-valid-p nil))"
+  },
+  {
+   "primitive": "window-combination-limit",
+   "id": "window-combination-limit/0001",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (window-combination-limit 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument window-valid-p 1))"
+  },
+  {
+   "primitive": "window-combination-limit",
+   "id": "window-combination-limit/0002",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (window-combination-limit 'symbol)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument window-valid-p symbol))"
+  },
+  {
+   "primitive": "window-combination-limit",
+   "id": "window-combination-limit/0003",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'window-combination-limit '())) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr window-combination-limit> 0))"
+  },
+  {
+   "primitive": "window-combination-limit",
+   "id": "window-combination-limit/0004",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'window-combination-limit '(1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr window-combination-limit> 2))"
+  },
+  {
+   "primitive": "window-combination-limit",
+   "id": "window-combination-limit/0005",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (window-combination-limit a0))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument window-valid-p nil))"
+  },
+  {
+   "primitive": "window-combination-limit",
+   "id": "window-combination-limit/0006",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil)) (let ((r (window-combination-limit a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument window-valid-p nil))"
+  },
+  {
+   "primitive": "window-combination-limit",
+   "id": "window-combination-limit/0007",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (fboundp 'window-combination-limit)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "primitive": "window-combination-limit",
+   "id": "window-combination-limit/0008",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (window-combination-limit nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument window-valid-p nil))"
+  },
+  {
+   "primitive": "window-combination-limit",
+   "id": "window-combination-limit/0009",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (window-combination-limit (selected-window))) (error (list 'sig e))))",
+   "expected": "(sig (error \"Combination limit is meaningful for internal windows only\"))"
+  },
+  {
+   "primitive": "window-combination-limit",
+   "id": "window-combination-limit/0010",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (window-combination-limit (minibuffer-window))) (error (list 'sig e))))",
+   "expected": "(sig (error \"Combination limit is meaningful for internal windows only\"))"
+  },
+  {
+   "primitive": "window-combination-limit",
+   "id": "window-combination-limit/0011",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (window-combination-limit p))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "primitive": "window-combination-limit",
+   "id": "window-combination-limit/0012",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (funcall #'window-combination-limit p))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "primitive": "window-combination-limit",
+   "id": "window-combination-limit/0013",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (progn (set-window-new-pixel p h) (set-window-new-pixel a h) (delete-window-internal b) (condition-case e (window-combination-limit p) (error (list (car e) (car (cdr e)) (eq (car (cdr (cdr e))) p))))))) (error (list 'sig e))))",
+   "expected": "(ok (wrong-type-argument window-valid-p t))"
+  },
+  {
+   "primitive": "window-combination-limit",
+   "id": "window-combination-limit/0014",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((window-combination-limit t)) (let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (eq (window-combination-limit p) t)))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  }
+ ]
+}

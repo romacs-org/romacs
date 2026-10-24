@@ -1,0 +1,18 @@
+{
+  "name": "standard-case-table",
+  "arity": [0, 0],
+  "effect": "reads",
+  "gnu_files": ["casetab.c", "chartab.c"],
+  "gnu_def": "casetab.c:72",
+  "rust": "src/prims/casetab.rs:3",
+  "args": [],
+  "probes": [
+    "(list (fboundp 'standard-case-table) (functionp #'standard-case-table) (eq (funcall #'standard-case-table) (standard-case-table)))",
+    "(let ((tbl (standard-case-table))) (list (type-of tbl) (char-table-p tbl) (char-table-subtype tbl) (eq tbl (standard-case-table))))",
+    "(let ((tbl (standard-case-table))) (list (char-table-p (char-table-extra-slot tbl 0)) (char-table-p (char-table-extra-slot tbl 1)) (char-table-p (char-table-extra-slot tbl 2)) (eq (char-table-extra-slot (char-table-extra-slot tbl 1) 2) (char-table-extra-slot tbl 2))))",
+    "(let ((tbl (standard-case-table))) (list (aref tbl 0) (aref tbl 65) (aref tbl 90) (aref tbl 97) (aref tbl 127) (aref (char-table-extra-slot tbl 0) 97) (aref (char-table-extra-slot tbl 1) 65) (aref (char-table-extra-slot tbl 2) 65)))",
+    "(let* ((original (standard-case-table)) (tbl (copy-sequence original))) (list (eq tbl original) (eq (char-table-extra-slot tbl 0) (char-table-extra-slot original 0))))",
+    "(let ((tbl (make-char-table 'case-table nil))) (list (get 'case-table 'char-table-extra-slots) (char-table-extra-slot tbl 0) (char-table-extra-slot tbl 1) (char-table-extra-slot tbl 2)))",
+    "(aref (standard-case-table) 192)"
+  ]
+}

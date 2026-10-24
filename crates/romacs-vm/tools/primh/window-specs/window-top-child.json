@@ -1,0 +1,32 @@
+{
+ "name": "window-top-child",
+ "arity": [
+  0,
+  1
+ ],
+ "effect": "reads",
+ "gnu_files": [
+  "window.c"
+ ],
+ "gnu_def": "window.c:689",
+ "rust": "src/prims/window.rs:34",
+ "args": [
+  "none"
+ ],
+ "extra": {
+  "0": [
+   "1",
+   "'sym",
+   "(copy-sequence \"s\")"
+  ]
+ },
+ "probes": [
+  "(window-top-child)",
+  "(window-top-child (minibuffer-window))",
+  "(let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (list (funcall (lambda (w) (cond ((eq w a) 'a) ((eq w b) 'b) ((eq w p) 'p) ((eq w (minibuffer-window)) 'm) ((windowp w) 'other) (t w))) (window-top-child p)) (window-top-child a) (window-top-child b)))",
+  "(let* ((a (selected-window)) (h (window-pixel-width a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half t 0.5))) (p (window-parent b))) (list (window-top-child p) (eq (window-left-child p) a)))",
+  "(let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (let* ((c (progn (set-window-new-pixel b (- (window-pixel-width b) (/ (window-pixel-width b) 2))) (split-window-internal b (/ (window-pixel-width b) 2) t 0.5))) (q (window-parent c))) (list (funcall (lambda (w) (cond ((eq w a) 'a) ((eq w b) 'b) ((eq w p) 'p) ((eq w (minibuffer-window)) 'm) ((windowp w) 'other) (t w))) (window-top-child p)) (eq (window-next-sibling a) q) (window-top-child q) (eq (window-left-child q) b))))",
+  "(let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (progn (set-window-new-pixel p h) (set-window-new-pixel a h) (delete-window-internal b) (condition-case e (window-top-child p) (error (list (car e) (car (cdr e)) (eq (car (cdr (cdr e))) p))))))",
+  "(condition-case e (window-top-child (selected-frame)) (error (list (car e) (car (cdr e)) (eq (car (cdr (cdr e))) (selected-frame)))))"
+ ]
+}

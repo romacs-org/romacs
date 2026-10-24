@@ -1,0 +1,44 @@
+{
+ "name": "delete-other-windows-internal",
+ "arity": [
+  0,
+  2
+ ],
+ "effect": "global",
+ "gnu_files": [
+  "window.c"
+ ],
+ "gnu_def": "window.c:3467",
+ "rust": "src/prims/window.rs:114",
+ "args": [
+  "none",
+  "none"
+ ],
+ "extra": {
+  "0": [
+   "1",
+   "'sym",
+   "(copy-sequence \"s\")"
+  ],
+  "1": [
+   "nil"
+  ]
+ },
+ "probes": [
+  "(delete-other-windows-internal)",
+  "(condition-case e (delete-other-windows-internal (minibuffer-window)) (error e))",
+  "(let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (list (delete-other-windows-internal a) (window-live-p a) (window-live-p b) (window-valid-p p) (eq (frame-root-window) a) (eq (selected-window) a) (window-parent a) (= (window-pixel-height a) h)))",
+  "(let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (progn (select-window a) (list (delete-other-windows-internal b) (window-live-p a) (window-live-p b) (eq (frame-root-window) b) (eq (selected-window) b) (eq (current-buffer) (window-buffer b)) (= (window-pixel-height b) h))))",
+  "(let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (let ((before (window-use-time a))) (delete-other-windows-internal b) (list (- (window-use-time b) before) (window-live-p b))))",
+  "(let* ((a (selected-window)) (h (window-pixel-width a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half t 0.5))) (p (window-parent b))) (progn (delete-other-windows-internal b) (list (eq (frame-root-window) b) (= (window-pixel-width b) h) (window-live-p a))))",
+  "(let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (let* ((c (progn (set-window-new-pixel b (- (window-pixel-width b) (/ (window-pixel-width b) 2))) (split-window-internal b (/ (window-pixel-width b) 2) t 0.5))) (q (window-parent c))) (list (delete-other-windows-internal q) (eq (frame-root-window) q) (window-live-p a) (window-live-p b) (window-live-p c) (= (+ (window-pixel-width b) (window-pixel-width c)) (window-pixel-width q)) (= (window-pixel-height b) (window-pixel-height q)) (= (window-pixel-height q) h) (eq (selected-window) b))))",
+  "(let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (let* ((c (progn (set-window-new-pixel b (- (window-pixel-width b) (/ (window-pixel-width b) 2))) (split-window-internal b (/ (window-pixel-width b) 2) t 0.5))) (q (window-parent c))) (list (delete-other-windows-internal c q) (eq (window-next-sibling a) c) (eq (window-parent c) p) (window-live-p b) (window-valid-p q) (eq (frame-root-window) p))))",
+  "(let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (let* ((c (progn (set-window-new-pixel b (- (window-pixel-width b) (/ (window-pixel-width b) 2))) (split-window-internal b (/ (window-pixel-width b) 2) t 0.5))) (q (window-parent c))) (condition-case e (delete-other-windows-internal a q) (error e))))",
+  "(let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (delete-other-windows-internal p))",
+  "(let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (delete-other-windows-internal a a))",
+  "(let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (progn (set-window-new-pixel p h) (set-window-new-pixel a h) (delete-window-internal b) (condition-case e (delete-other-windows-internal b) (error (list (car e) (car (cdr e)) (eq (car (cdr (cdr e))) b))))))",
+  "(let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (condition-case e (delete-other-windows-internal a 1) (error (list (car e) (car (cdr e)) (eq (car (cdr (cdr e))) 1)))))",
+  "(let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (progn (set-window-point b 1) (delete-other-windows-internal a) (list (window-start a) (window-live-p a))))",
+  "(let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (progn (let ((i 0)) (while (< i 100) (insert \"line\\n\") (setq i (1+ i)))) (set-window-start b 201) (let ((old (window-start b))) (delete-other-windows-internal b) (list old (window-start b) (eq (frame-root-window) b)))))"
+ ]
+}

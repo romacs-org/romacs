@@ -1,0 +1,28 @@
+{
+  "name": "make-char-table",
+  "arity": [
+    1,
+    2
+  ],
+  "effect": "reads",
+  "gnu_files": [
+    "chartab.c"
+  ],
+  "gnu_def": "chartab.c:104",
+  "rust": "src/prims/char_table.rs:4",
+  "args": [
+    "none",
+    "none"
+  ],
+  "probes": [
+    "(let ((ct (make-char-table 'ct-test))) (list (char-table-p ct) (char-table-subtype ct) (aref ct 0)))",
+    "(let ((p (make-symbol \"purpose\"))) (put p 'char-table-extra-slots 11) (let ((ct (make-char-table p 'initial))) (list (char-table-extra-slot ct 0) (char-table-extra-slot ct 10) (aref ct 4194303))))",
+    "(let ((p (make-symbol \"purpose\"))) (put p 'char-table-extra-slots -1) (make-char-table p))",
+    "(let ((p (make-symbol \"purpose\"))) (put p 'char-table-extra-slots 1.0) (make-char-table p))",
+    "(make-char-table 42)",
+    "(let ((ct (make-char-table nil 'initial))) (aset ct 65 nil) (list (aref ct 65) (aref ct 66)))",
+    "(let ((p (make-symbol \"purpose\"))) (put p 'char-table-extra-slots 0) (let ((ct (make-char-table p 'zero))) (list (aref ct 0) (aref ct 128512))))",
+    "(let ((p (make-symbol \"purpose\"))) (put p 'char-table-extra-slots 2) (let ((ct (make-char-table p 'two))) (list (char-table-extra-slot ct 0) (char-table-extra-slot ct 1))))",
+    "(list (fboundp 'make-char-table) (functionp 'make-char-table) (char-table-p (funcall #'make-char-table nil)))"
+  ]
+}

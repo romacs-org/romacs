@@ -1,0 +1,29 @@
+{
+ "name": "frame-char-width",
+ "arity": [
+  0,
+  1
+ ],
+ "effect": "reads",
+ "gnu_files": [
+  "frame.c"
+ ],
+ "gnu_def": "frame.c:4363",
+ "rust": "src/prims/window.rs:192",
+ "args": [
+  "none"
+ ],
+ "extra": {
+  "0": [
+   "1",
+   "'sym",
+   "(copy-sequence \"s\")"
+  ]
+ },
+ "probes": [
+  "(integerp (frame-char-width))",
+  "(= (frame-char-width) (frame-char-width (selected-frame)))",
+  "(= (* (frame-char-width) (window-total-width (selected-window))) (window-pixel-width (selected-window)))",
+  "(condition-case e (frame-char-width (selected-window)) (error (list (car e) (car (cdr e)) (eq (car (cdr (cdr e))) (selected-window)))))"
+ ]
+}

@@ -1,0 +1,193 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "copy-alist",
+ "spec_sha256": "0b1e4d373e9bbc576b2734f8211cb1bc61db338b3966a1b73c3a97ea46e302de",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "copy-alist",
+    "subr",
+    1,
+    1
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "fns.c": "db81c235d7c63f312128ad84c11d55ae4665a2599099be1229dbaa329afdb3bf"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "copy-alist/0000",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-alist nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "copy-alist/0001",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-alist (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok (1 2 3))"
+  },
+  {
+   "id": "copy-alist/0002",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-alist (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok (a (b)))"
+  },
+  {
+   "id": "copy-alist/0003",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-alist 42)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 42))"
+  },
+  {
+   "id": "copy-alist/0004",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-alist [1])) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp [1]))"
+  },
+  {
+   "id": "copy-alist/0005",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-alist \"a\")) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp \"a\"))"
+  },
+  {
+   "id": "copy-alist/0006",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-alist '(a . b))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp b))"
+  },
+  {
+   "id": "copy-alist/0007",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'copy-alist '())) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr copy-alist> 0))"
+  },
+  {
+   "id": "copy-alist/0008",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'copy-alist '(1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr copy-alist> 2))"
+  },
+  {
+   "id": "copy-alist/0009",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (copy-alist a0))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "copy-alist/0010",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil)) (let ((r (copy-alist a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (t))"
+  },
+  {
+   "id": "copy-alist/0011",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 42)) (let ((r (copy-alist a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 42))"
+  },
+  {
+   "id": "copy-alist/0012",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 '(a . b))) (let ((r (copy-alist a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp b))"
+  },
+  {
+   "id": "copy-alist/0013",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-alist '((a . 1) (b . 2)))) (error (list 'sig e))))",
+   "expected": "(ok ((a . 1) (b . 2)))"
+  },
+  {
+   "id": "copy-alist/0014",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-alist nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "copy-alist/0015",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((entry (cons (list 'key) (list 'value))) (atom (vector 1)) (xs (list entry atom)) (ys (copy-alist xs))) (list (eq xs ys) (eq entry (car ys)) (eq (car entry) (car (car ys))) (eq (cdr entry) (cdr (car ys))) (eq atom (car (cdr ys)))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil t t t))"
+  },
+  {
+   "id": "copy-alist/0016",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (condition-case e (copy-alist '(a . b)) (error e))) (error (list 'sig e))))",
+   "expected": "(ok (wrong-type-argument listp b))"
+  },
+  {
+   "id": "copy-alist/0017",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (condition-case e (copy-alist [a]) (error e))) (error (list 'sig e))))",
+   "expected": "(ok (wrong-type-argument listp [a]))"
+  },
+  {
+   "id": "copy-alist/0018",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((xs (list 'a 'b))) (setcdr (cdr xs) xs) (condition-case e (copy-alist xs) (circular-list (list (car e) (eq (car (cdr e)) (cdr xs))))))) (error (list 'sig e))))",
+   "expected": "(ok (circular-list t))"
+  },
+  {
+   "id": "copy-alist/0019",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (funcall #'copy-alist '((a . 2)))) (error (list 'sig e))))",
+   "expected": "(ok ((a . 2)))"
+  },
+  {
+   "id": "copy-alist/0020",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"a\") (error (list 'sig e))))",
+   "expected": "(ok \"a\")"
+  },
+  {
+   "id": "copy-alist/0021",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok '(a . b)) (error (list 'sig e))))",
+   "expected": "(ok (a . b))"
+  },
+  {
+   "id": "copy-alist/0022",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list 'a (list 'b))) (error (list 'sig e))))",
+   "expected": "(ok (a (b)))"
+  },
+  {
+   "id": "copy-alist/0023",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list 1 2 3)) (error (list 'sig e))))",
+   "expected": "(ok (1 2 3))"
+  },
+  {
+   "id": "copy-alist/0024",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 42) (error (list 'sig e))))",
+   "expected": "(ok 42)"
+  },
+  {
+   "id": "copy-alist/0025",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok [1]) (error (list 'sig e))))",
+   "expected": "(ok [1])"
+  },
+  {
+   "id": "copy-alist/0026",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok nil) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  }
+ ]
+}

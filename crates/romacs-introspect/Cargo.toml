@@ -1,0 +1,38 @@
+[package]
+name = "romacs-introspect"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Core-free introspection index for romacs: where every primitive is implemented, with provenance, derived at build time"
+build = "build.rs"
+
+# This crate must never depend on an evaluator: not romacs-core, not VM2. It
+# answers questions ABOUT them from data the build derives, so it outlives
+# romacs-core's removal unchanged, and no Lisp `Value` -- nor any index into a
+# moving heap -- can cross into it. `tests/boundary.rs` fails if a romacs-*
+# dependency is ever added here. The live half, which does boot the runtimes,
+# is `romacs-introspect-live`.
+
+[dependencies]
+serde_json.workspace = true
+sha2.workspace = true
+toml.workspace = true
+
+[build-dependencies]
+regex = "1.12"
+serde_json.workspace = true
+sha2.workspace = true
+toml.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+regex = "1.12"
+
+[[bin]]
+name = "romacs-introspect"
+path = "src/main.rs"
+
+[lints]
+workspace = true

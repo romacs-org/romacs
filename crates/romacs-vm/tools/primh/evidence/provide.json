@@ -1,0 +1,149 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "provide",
+ "spec_sha256": "0c0a41f92b2b90cca305fa44c03b81cf9676f9ac80af1b6d5f917c5d4a62ac6e",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "provide",
+    "subr",
+    1,
+    2
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "fns.c": "db81c235d7c63f312128ad84c11d55ae4665a2599099be1229dbaa329afdb3bf"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "provide/0000",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'provide '())) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr provide> 0))"
+  },
+  {
+   "id": "provide/0001",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'provide '(1 1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr provide> 3))"
+  },
+  {
+   "id": "provide/0002",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (provide 'ps '(display syntax-table field)) (list (get 'ps 'subfeatures) (featurep 'ps) (featurep 'ps nil) (featurep 'ps 'display) (featurep 'ps 'missing)))) (error (list 'sig e))))",
+   "expected": "(ok ((display syntax-table field) t t t nil))"
+  },
+  {
+   "id": "provide/0003",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (provide 'plain) (list (featurep 'plain) (featurep 'plain 'x) (get 'plain 'subfeatures)))) (error (list 'sig e))))",
+   "expected": "(ok (t nil nil))"
+  },
+  {
+   "id": "provide/0004",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (provide 'ps '(x)) (provide 'ps) (provide 'ps nil) (list (get 'ps 'subfeatures) (featurep 'ps 'x)))) (error (list 'sig e))))",
+   "expected": "(ok ((x) t))"
+  },
+  {
+   "id": "provide/0005",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (provide 'ps '(x)) (provide 'ps '(y)) (list (get 'ps 'subfeatures) (featurep 'ps 'x) (featurep 'ps 'y)))) (error (list 'sig e))))",
+   "expected": "(ok ((y) nil t))"
+  },
+  {
+   "id": "provide/0006",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (provide 'ps '((a b) \"same\")) (list (featurep 'ps (list 'a 'b)) (featurep 'ps (copy-sequence \"same\"))))) (error (list 'sig e))))",
+   "expected": "(ok (t t))"
+  },
+  {
+   "id": "provide/0007",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (put 'absent 'subfeatures '(x)) (featurep 'absent 'x))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "provide/0008",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (provide 'ps '(x . bad))) (error (list 'sig e))))",
+   "expected": "(ok ps)"
+  },
+  {
+   "id": "provide/0009",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (provide 1 '(x))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1))"
+  },
+  {
+   "id": "provide/0010",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (provide 'ps 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "provide/0011",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (featurep 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1))"
+  },
+  {
+   "id": "provide/0012",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (provide)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr provide> 0))",
+   "gnu_regime_variant": "(sig (wrong-number-of-arguments provide 0))"
+  },
+  {
+   "id": "provide/0013",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (provide 'ps nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr provide> 3))",
+   "gnu_regime_variant": "(sig (wrong-number-of-arguments provide 3))"
+  },
+  {
+   "id": "provide/0014",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (featurep)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr featurep> 0))",
+   "gnu_regime_variant": "(sig (wrong-number-of-arguments featurep 0))"
+  },
+  {
+   "id": "provide/0015",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (featurep 'ps nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr featurep> 3))",
+   "gnu_regime_variant": "(sig (wrong-number-of-arguments featurep 3))"
+  },
+  {
+   "id": "provide/0016",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (provide 'ps '(x . bad)) (condition-case e (featurep 'ps 'y) (error e)))) (error (list 'sig e))))",
+   "expected": "(ok (wrong-type-argument listp (x . bad)))"
+  },
+  {
+   "id": "provide/0017",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (provide 'ps) (put 'ps 'subfeatures 1) (condition-case e (featurep 'ps 'y) (error e)))) (error (list 'sig e))))",
+   "expected": "(ok (wrong-type-argument listp 1))"
+  },
+  {
+   "id": "provide/0018",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((xs (list 'x))) (setcdr xs xs) (provide 'ps xs) (condition-case e (featurep 'ps 'y) (error (list (car e) (eq (car (cdr e)) xs)))))) (error (list 'sig e))))",
+   "expected": "(ok (circular-list t))"
+  }
+ ]
+}

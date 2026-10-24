@@ -1,0 +1,13 @@
+;; GNU GNU Emacs 32.0.50, sha256 20a94ee7abc04960e3296deead030a37866d1d1e1522f3efd818838af7fffbe4
+;; al-cyc.el:
+(defalias 'al-cyc-m 'al-cyc-target)
+(defalias 'al-cyc-target 'al-cyc-m)
+;; output:
+(cyclic-function-indirection al-c-b)
+(al-c-b nil)
+(cyclic-function-indirection al-c-s)
+(cyclic-function-indirection al-c-z)
+al-c-mm
+(cyclic-function-indirection al-cyc-target)
+signalled
+(autoload nil)

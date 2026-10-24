@@ -1,0 +1,20 @@
+# name|left|right|at|inserted plist|build
+inh-default-rear-sticky|2:10||2|2:10|no
+inh-right-not-front||2:10|2||no
+inh-front-sticky-t||2:10,4:1|2|4:L2,2:10|yes
+inh-front-sticky-list||2:10,3:1,4:L3|2|4:L3,3:1|yes
+inh-rear-nonsticky-t|2:10,3:1,5:1||2||no
+inh-rear-nonsticky-list|2:10,3:1,5:L2||2|3:1|no
+inh-both-left-wins|2:10|2:11,4:1|2|2:10|no
+inh-both-left-nil|2:0|2:11,4:1|2|4:L2,2:11|yes
+inh-ltr-cross|3:1,5:L3|3:2,4:L3,5:L3|2|4:L3,5:L3,3:2|yes
+inh-default-nonsticky|2:10,8:L1||2|2:10|no
+inh-mid-all-sticky|2:10,4:L2||1|2:10,4:L2|no
+inh-mid-nonsticky|2:10,8:L1||1|2:10|no
+inh-mid-rear-nonsticky-t|2:10,5:1||1||no
+inh-at-beg|2:10||0||no
+inh-at-beg-front|2:10,4:1||0|4:L2,2:10|yes
+inh-at-eob||2:10|4|2:10|no
+inh-at-eob-nonsticky||2:10,5:1|4||no
+inh-category-front||6:7,2:10|2|6:7,2:10|no
+inh-default-nonsticky-override|2:10,3:1||2|3:1|no

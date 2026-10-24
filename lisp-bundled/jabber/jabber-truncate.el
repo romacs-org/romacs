@@ -1,0 +1,98 @@
+;;; jabber-truncate.el --- cleanup top lines in chatbuffers  -*- lexical-binding: t; -*-
+
+;; Copyright (C) 2007 - Kirill A. Korinskiy - catap@catap.ru
+;; Copyright (C) 2026  Thanos Apollo
+
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
+
+;; This file is a part of jabber.el.
+
+;; This program is free software; you can redistribute it and/or modify
+;; it under the terms of the GNU General Public License as published by
+;; the Free Software Foundation; either version 2 of the License, or
+;; (at your option) any later version.
+
+;; This program is distributed in the hope that it will be useful,
+;; but WITHOUT ANY WARRANTY; without even the implied warranty of
+;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+;; GNU General Public License for more details.
+
+;; You should have received a copy of the GNU General Public License
+;; along with this program; if not, write to the Free Software
+;; Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+
+;;; Commentary:
+;;
+
+;;; Code:
+
+(require 'cl-lib)
+
+(require 'jabber-alert)
+(require 'ewoc)
+
+(defvar jabber-log-lines-to-keep 1000
+  "Maximum number of lines in chat buffer.")
+
+;; Truncation and chat-buffer support form a reload cycle, so this reverse
+;; call remains lazy.
+(defvar jabber-chat-ewoc)               ; jabber-chatbuffer.el
+(defvar jabber-chat--msg-nodes)        ; jabber-chatbuffer.el
+(declare-function jabber-chat-ewoc-unregister-node
+                  "jabber-chatbuffer" (node))
+(autoload 'jabber-chat-ewoc-unregister-node "jabber-chatbuffer")
+(declare-function jabber-chat-buffer--call-with-transcript
+                  "jabber-chatbuffer" (function &rest args))
+(autoload 'jabber-chat-buffer--call-with-transcript "jabber-chatbuffer")
+
+(defun jabber-truncate-top (buffer &optional ewoc)
+  "Clean old history from a chat BUFFER.
+Optional EWOC is ewoc-widget to work.  Default is
+`jabber-chat-ewoc'.  `jabber-log-lines-to-keep' specifies the
+number of lines to keep.
+
+Note that this might interfere with
+`jabber-chat-display-more-backlog': you ask for more history, you
+get it, and then it just gets deleted."
+  (interactive)
+  (with-current-buffer buffer
+    (save-restriction
+      (widen)
+      (jabber-chat-buffer--call-with-transcript
+       (lambda ()
+         (let* ((work-ewoc (or ewoc jabber-chat-ewoc))
+                (delete-before
+                 ;; Keep whole nodes, including the one crossing the cutoff.
+                 (ewoc-prev
+                  work-ewoc
+                  (ewoc-locate work-ewoc
+                               (save-excursion
+                                 (goto-char (point-max))
+                                 (forward-line (- jabber-log-lines-to-keep))
+                                 (point))))))
+           (while delete-before
+             (jabber-chat-ewoc-unregister-node delete-before)
+             (setq delete-before
+                   (prog1
+                       (ewoc-prev work-ewoc delete-before)
+                     (ewoc-delete work-ewoc delete-before))))))))))
+
+(defun jabber-truncate-muc (_nick _group buffer _text _proposed-alert)
+  "Clean old history from the MUC BUFFER.
+`jabber-log-lines-to-keep' specifies the number of lines to
+keep."
+  (jabber-truncate-top buffer))
+
+(defun jabber-truncate-chat (_from buffer _text _proposed-alert)
+  "Clean old history from chat BUFFER.
+`jabber-log-lines-to-keep' specifies the number of lines to
+keep.
+
+Note that this might interfer with
+`jabber-chat-display-more-backlog': you ask for more history, you
+get it, and then it just gets deleted."
+  (jabber-truncate-top buffer))
+
+(provide 'jabber-truncate)
+
+;;; jabber-truncate.el ends here

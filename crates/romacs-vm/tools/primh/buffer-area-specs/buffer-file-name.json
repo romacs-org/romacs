@@ -1,0 +1,33 @@
+{
+  "name": "buffer-file-name",
+  "arity": [
+    0,
+    1
+  ],
+  "effect": "reads",
+  "gnu_files": [
+    "buffer.c"
+  ],
+  "gnu_def": "buffer.c:1334",
+  "rust": "src/prims/buffer_state.rs:21",
+  "args": [
+    "projected-buffer-area"
+  ],
+  "probes": [
+    "(buffer-file-name)",
+    "(buffer-file-name nil)",
+    "(let ((b (get-buffer-create \"bf-empty\"))) (buffer-file-name b))",
+    "(let ((b (get-buffer-create \"bf-live\"))) (with-current-buffer b (setq buffer-file-name \"\u03bb/\u6587.txt\")) (buffer-file-name b))",
+    "(let ((b (get-buffer-create \"bf-killed\"))) (with-current-buffer b (setq buffer-file-name \"\u03bb/\u6587.txt\")) (kill-buffer b) (buffer-file-name b))",
+    "(let ((b (get-buffer-create \"bf-killed-empty\"))) (kill-buffer b) (buffer-file-name b))",
+    "(with-temp-buffer (insert \"\u03bb\u6587\") (narrow-to-region 2 3) (setq buffer-file-name \"narrow\") (list (buffer-file-name) (progn (widen) (buffer-file-name))))",
+    "(with-temp-buffer (setq buffer-file-name \"outer\") (let ((buffer-file-name \"inner\")) (buffer-file-name)))",
+    "(with-temp-buffer (let ((name (copy-sequence \"\u03bb.txt\"))) (setq buffer-file-name name) (eq name (buffer-file-name))))",
+    "(let ((a (get-buffer-create \"bf-a\")) (b (get-buffer-create \"bf-b\"))) (with-current-buffer a (setq buffer-file-name \"A\")) (with-current-buffer b (setq buffer-file-name \"B\") (list (buffer-file-name a) (buffer-file-name b) (buffer-file-name))))",
+    "(buffer-file-name \"absent\")",
+    "(buffer-file-name 7)",
+    "(buffer-file-name t)",
+    "(list (fboundp 'buffer-file-name) (functionp 'buffer-file-name))",
+    "(with-temp-buffer (setq buffer-file-name \"indirect\") (funcall 'buffer-file-name (current-buffer)))"
+  ]
+}

@@ -1,0 +1,83 @@
+{
+ "name": "wrap-fringe",
+ "frame": {
+  "width": 480,
+  "height": 168,
+  "bg": "#ffffff",
+  "fg": "#000000",
+  "fringe": 8,
+  "fringe_bg": "#f2f2f2",
+  "fringe_fg": "#000000"
+ },
+ "font": {
+  "family": "Liberation Mono",
+  "pixel_size": 20,
+  "regular": "/usr/share/fonts/liberation/LiberationMono-Regular.ttf",
+  "bold": "/usr/share/fonts/liberation/LiberationMono-Bold.ttf",
+  "italic": "/usr/share/fonts/liberation/LiberationMono-Italic.ttf"
+ },
+ "cursor_color": "#00a000",
+ "buffer": [
+  {
+   "text": "The quick brown fox "
+  },
+  {
+   "text": "jumps over the lazy dog; Ωμέγα",
+   "fg": "#0000ff"
+  },
+  {
+   "text": " άλφα βήτα γάμμα δέλτα.\n"
+  },
+  {
+   "text": "second line\n"
+  }
+ ],
+ "point": 81,
+ "expect": {
+  "origin": [
+   8,
+   0
+  ],
+  "cols": 38,
+  "rows": [
+   {
+    "text": "The quick brown fox jumps over the laz",
+    "runs": [
+     {
+      "start": 20,
+      "end": 38,
+      "fg": "#0000ff"
+     }
+    ]
+   },
+   {
+    "text": "y dog; Ωμέγα άλφα βήτα γάμμα δέλτα.",
+    "runs": [
+     {
+      "start": 0,
+      "end": 12,
+      "fg": "#0000ff"
+     }
+    ]
+   },
+   {
+    "text": "second line",
+    "runs": []
+   }
+  ],
+  "cursor": {
+   "row": 2,
+   "col": 6
+  },
+  "fringe_marks": [
+   {
+    "row": 0,
+    "side": "right"
+   },
+   {
+    "row": 1,
+    "side": "left"
+   }
+  ]
+ }
+}

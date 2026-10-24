@@ -1,0 +1,884 @@
+{
+ "blob": "db00496cda8b7c5e8a67a4054f5f13cf5da41b95",
+ "compiled": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": true,
+  "results": {
+   "treesit-basic-parsing": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-language-available-p 'json)) :form (treesit-language-available-p json) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "treesit-cross-boundary": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-language-available-p 'json)) :form (treesit-language-available-p json) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "treesit-cursor-helper-with-missing-node": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-language-available-p 'json)) :form (treesit-language-available-p json) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "treesit-defun-navigation-nested-1": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-language-available-p 'python)) :form (treesit-language-available-p python) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "treesit-defun-navigation-nested-2": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-language-available-p 'javascript)) :form (treesit-language-available-p javascript) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "treesit-defun-navigation-nested-3": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-language-available-p 'bash)) :form (treesit-language-available-p bash) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "treesit-defun-navigation-nested-4": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-language-available-p 'elixir)) :form (treesit-language-available-p elixir) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "treesit-defun-navigation-top-level": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-language-available-p 'python)) :form (treesit-language-available-p python) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "treesit-imenu": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "treesit-indirect-buffer": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-language-available-p 'json)) :form (treesit-language-available-p json) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "treesit-intersect-ranges": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "treesit-linecol-basic": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "treesit-linecol-col-same-line": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "treesit-linecol-enable-disable": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-language-available-p 'json)) :form (treesit-language-available-p json) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "treesit-linecol-search-back-across-newline": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "treesit-multi-lang": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (treesit-language-available-p 'html) (treesit-language-available-p 'css) (treesit-language-available-p 'javascript))) :form (and (treesit-language-available-p 'html) (treesit-language-available-p 'css) (treesit-language-available-p 'javascript)) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "treesit-narrow": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-language-available-p 'json)) :form (treesit-language-available-p json) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "treesit-node-api": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-language-available-p 'json)) :form (treesit-language-available-p json) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "treesit-node-at": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-language-available-p 'json)) :form (treesit-language-available-p json) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "treesit-node-check": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-language-available-p 'json)) :form (treesit-language-available-p json) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "treesit-node-supplemental": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-language-available-p 'json)) :form (treesit-language-available-p json) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "treesit-parser-supplemental": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-language-available-p 'json)) :form (treesit-language-available-p json) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "treesit-query-api": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-language-available-p 'json)) :form (treesit-language-available-p json) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "treesit-query-marker-position": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-language-available-p 'json)) :form (treesit-language-available-p json) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "treesit-query-node-only-and-grouped": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-language-available-p 'json)) :form (treesit-language-available-p json) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "treesit-range": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-language-available-p 'json)) :form (treesit-language-available-p json) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "treesit-range-fixup-after-edit": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-language-available-p 'json)) :form (treesit-language-available-p json) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "treesit-range-helper": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "treesit-range-merge": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "treesit-range-offset": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-language-available-p 'javascript)) :form (treesit-language-available-p javascript) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "treesit-search-backward": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-language-available-p 'json)) :form (treesit-language-available-p json) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "treesit-search-backward-named-only": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-language-available-p 'json)) :form (treesit-language-available-p json) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "treesit-search-forward": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-language-available-p 'json)) :form (treesit-language-available-p json) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "treesit-search-forward-named-only": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-language-available-p 'json)) :form (treesit-language-available-p json) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "treesit-search-forward-predicate": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-language-available-p 'json)) :form (treesit-language-available-p json) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "treesit-search-forward-predicate-invalid-predicate": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-language-available-p 'json)) :form (treesit-language-available-p json) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "treesit-search-subtree": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-language-available-p 'json)) :form (treesit-language-available-p json) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "treesit-search-subtree-backward-1": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-language-available-p 'python)) :form (treesit-language-available-p python) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "treesit-search-subtree-forward-1": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-language-available-p 'python)) :form (treesit-language-available-p python) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "treesit-test-simple-indent-add-rules": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   }
+  },
+  "timed_out": false
+ },
+ "file": "src/treesit-tests.el",
+ "gnu": {
+  "emacs": "<recording-path-redacted>/emacs-32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+  "version": "32.0.50"
+ },
+ "harness_sha256": "78c20850429a08af22faadf73b5d164c560230e83d7eb88ef60cb995670703ef",
+ "mini": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": null,
+  "results": {
+   "treesit-basic-parsing": {
+    "as_expected": null,
+    "detail": "((skip-unless (treesit-language-available-p 'json)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "treesit-cross-boundary": {
+    "as_expected": null,
+    "detail": "((skip-unless (treesit-language-available-p 'json)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "treesit-cursor-helper-with-missing-node": {
+    "as_expected": null,
+    "detail": "((skip-unless (treesit-language-available-p 'json)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "treesit-defun-navigation-nested-1": {
+    "as_expected": null,
+    "detail": "((skip-unless (treesit-language-available-p 'python)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "treesit-defun-navigation-nested-2": {
+    "as_expected": null,
+    "detail": "((skip-unless (treesit-language-available-p 'javascript)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "treesit-defun-navigation-nested-3": {
+    "as_expected": null,
+    "detail": "((skip-unless (treesit-language-available-p 'bash)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "treesit-defun-navigation-nested-4": {
+    "as_expected": null,
+    "detail": "((skip-unless (treesit-language-available-p 'elixir)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "treesit-defun-navigation-top-level": {
+    "as_expected": null,
+    "detail": "((skip-unless (treesit-language-available-p 'python)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "treesit-imenu": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "treesit-indirect-buffer": {
+    "as_expected": null,
+    "detail": "((skip-unless (treesit-language-available-p 'json)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "treesit-intersect-ranges": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "treesit-linecol-basic": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "treesit-linecol-col-same-line": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "treesit-linecol-enable-disable": {
+    "as_expected": null,
+    "detail": "((skip-unless (treesit-language-available-p 'json)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "treesit-linecol-search-back-across-newline": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "treesit-multi-lang": {
+    "as_expected": null,
+    "detail": "((skip-unless (and (treesit-language-available-p 'html) (treesit-language-available-p 'css) (treesit-language-available-p 'javascript))))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "treesit-narrow": {
+    "as_expected": null,
+    "detail": "((skip-unless (treesit-language-available-p 'json)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "treesit-node-api": {
+    "as_expected": null,
+    "detail": "((skip-unless (treesit-language-available-p 'json)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "treesit-node-at": {
+    "as_expected": null,
+    "detail": "((skip-unless (treesit-language-available-p 'json)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "treesit-node-check": {
+    "as_expected": null,
+    "detail": "((skip-unless (treesit-language-available-p 'json)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "treesit-node-supplemental": {
+    "as_expected": null,
+    "detail": "((skip-unless (treesit-language-available-p 'json)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "treesit-parser-supplemental": {
+    "as_expected": null,
+    "detail": "((skip-unless (treesit-language-available-p 'json)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "treesit-query-api": {
+    "as_expected": null,
+    "detail": "((skip-unless (treesit-language-available-p 'json)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "treesit-query-marker-position": {
+    "as_expected": null,
+    "detail": "((skip-unless (treesit-language-available-p 'json)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "treesit-query-node-only-and-grouped": {
+    "as_expected": null,
+    "detail": "((skip-unless (treesit-language-available-p 'json)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "treesit-range": {
+    "as_expected": null,
+    "detail": "((skip-unless (treesit-language-available-p 'json)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "treesit-range-fixup-after-edit": {
+    "as_expected": null,
+    "detail": "((skip-unless (treesit-language-available-p 'json)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "treesit-range-helper": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "treesit-range-merge": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "treesit-range-offset": {
+    "as_expected": null,
+    "detail": "((skip-unless (treesit-language-available-p 'javascript)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "treesit-search-backward": {
+    "as_expected": null,
+    "detail": "((skip-unless (treesit-language-available-p 'json)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "treesit-search-backward-named-only": {
+    "as_expected": null,
+    "detail": "((skip-unless (treesit-language-available-p 'json)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "treesit-search-forward": {
+    "as_expected": null,
+    "detail": "((skip-unless (treesit-language-available-p 'json)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "treesit-search-forward-named-only": {
+    "as_expected": null,
+    "detail": "((skip-unless (treesit-language-available-p 'json)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "treesit-search-forward-predicate": {
+    "as_expected": null,
+    "detail": "((skip-unless (treesit-language-available-p 'json)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "treesit-search-forward-predicate-invalid-predicate": {
+    "as_expected": null,
+    "detail": "((skip-unless (treesit-language-available-p 'json)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "treesit-search-subtree": {
+    "as_expected": null,
+    "detail": "((skip-unless (treesit-language-available-p 'json)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "treesit-search-subtree-backward-1": {
+    "as_expected": null,
+    "detail": "((skip-unless (treesit-language-available-p 'python)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "treesit-search-subtree-forward-1": {
+    "as_expected": null,
+    "detail": "((skip-unless (treesit-language-available-p 'python)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "treesit-test-simple-indent-add-rules": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   }
+  },
+  "timed_out": false
+ },
+ "read_error": null,
+ "real": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": true,
+  "results": {
+   "treesit-basic-parsing": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-language-available-p 'json)) :form (treesit-language-available-p json) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "treesit-cross-boundary": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-language-available-p 'json)) :form (treesit-language-available-p json) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "treesit-cursor-helper-with-missing-node": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-language-available-p 'json)) :form (treesit-language-available-p json) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "treesit-defun-navigation-nested-1": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-language-available-p 'python)) :form (treesit-language-available-p python) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "treesit-defun-navigation-nested-2": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-language-available-p 'javascript)) :form (treesit-language-available-p javascript) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "treesit-defun-navigation-nested-3": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-language-available-p 'bash)) :form (treesit-language-available-p bash) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "treesit-defun-navigation-nested-4": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-language-available-p 'elixir)) :form (treesit-language-available-p elixir) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "treesit-defun-navigation-top-level": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-language-available-p 'python)) :form (treesit-language-available-p python) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "treesit-imenu": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "treesit-indirect-buffer": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-language-available-p 'json)) :form (treesit-language-available-p json) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "treesit-intersect-ranges": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "treesit-linecol-basic": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "treesit-linecol-col-same-line": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "treesit-linecol-enable-disable": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-language-available-p 'json)) :form (treesit-language-available-p json) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "treesit-linecol-search-back-across-newline": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "treesit-multi-lang": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (and (treesit-language-available-p 'html) (treesit-language-available-p 'css) (treesit-language-available-p 'javascript))) :form (and (treesit-language-available-p 'html) (treesit-language-available-p 'css) (treesit-language-available-p 'javascript)) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "treesit-narrow": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-language-available-p 'json)) :form (treesit-language-available-p json) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "treesit-node-api": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-language-available-p 'json)) :form (treesit-language-available-p json) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "treesit-node-at": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-language-available-p 'json)) :form (treesit-language-available-p json) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "treesit-node-check": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-language-available-p 'json)) :form (treesit-language-available-p json) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "treesit-node-supplemental": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-language-available-p 'json)) :form (treesit-language-available-p json) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "treesit-parser-supplemental": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-language-available-p 'json)) :form (treesit-language-available-p json) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "treesit-query-api": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-language-available-p 'json)) :form (treesit-language-available-p json) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "treesit-query-marker-position": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-language-available-p 'json)) :form (treesit-language-available-p json) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "treesit-query-node-only-and-grouped": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-language-available-p 'json)) :form (treesit-language-available-p json) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "treesit-range": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-language-available-p 'json)) :form (treesit-language-available-p json) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "treesit-range-fixup-after-edit": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-language-available-p 'json)) :form (treesit-language-available-p json) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "treesit-range-helper": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "treesit-range-merge": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "treesit-range-offset": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-language-available-p 'javascript)) :form (treesit-language-available-p javascript) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "treesit-search-backward": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-language-available-p 'json)) :form (treesit-language-available-p json) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "treesit-search-backward-named-only": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-language-available-p 'json)) :form (treesit-language-available-p json) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "treesit-search-forward": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-language-available-p 'json)) :form (treesit-language-available-p json) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "treesit-search-forward-named-only": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-language-available-p 'json)) :form (treesit-language-available-p json) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "treesit-search-forward-predicate": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-language-available-p 'json)) :form (treesit-language-available-p json) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "treesit-search-forward-predicate-invalid-predicate": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-language-available-p 'json)) :form (treesit-language-available-p json) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "treesit-search-subtree": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-language-available-p 'json)) :form (treesit-language-available-p json) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "treesit-search-subtree-backward-1": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-language-available-p 'python)) :form (treesit-language-available-p python) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "treesit-search-subtree-forward-1": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (treesit-language-available-p 'python)) :form (treesit-language-available-p python) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "treesit-test-simple-indent-add-rules": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   }
+  },
+  "timed_out": false
+ },
+ "schema": 1,
+ "toplevel_deftests": 40
+}

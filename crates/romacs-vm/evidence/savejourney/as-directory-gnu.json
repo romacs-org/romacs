@@ -1,0 +1,8 @@
+{
+  "expression": "(progn (dolist (s '(\"\" \"/\" \"//\" \"a\" \"a/\" \"a//\")) (prin1 (list s (file-name-as-directory s))) (terpri)) (let ((file-name-handler-alist '((\"remote\" . sj-handler)))) (fset 'sj-handler (lambda (&rest a) 2)) (prin1 (condition-case e (file-name-as-directory \"remote\") (error e)))))",
+  "result": {
+    "output": "(\"\" \"./\")\n(\"/\" \"/\")\n(\"//\" \"//\")\n(\"a\" \"a/\")\n(\"a/\" \"a/\")\n(\"a//\" \"a//\")\n(error \"Invalid handler in \u2018file-name-handler-alist\u2019\")",
+    "exit_code": 0,
+    "error": null
+  }
+}

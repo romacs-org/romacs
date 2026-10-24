@@ -1,0 +1,21 @@
+[package]
+name = "romacs-introspect-live"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Boots VM2 and enumerates its function bindings for a checked registry snapshot"
+
+# Only owned names leave the VM; no moving-heap values escape.
+[dependencies]
+romacs-vm = { path = "../romacs-vm" }
+romacs-introspect = { path = "../romacs-introspect" }
+serde_json.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
+
+[[bin]]
+name = "romacs-introspect-live"
+path = "src/main.rs"

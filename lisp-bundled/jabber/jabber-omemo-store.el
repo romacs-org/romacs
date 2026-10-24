@@ -1,0 +1,350 @@
+;;; jabber-omemo-store.el --- OMEMO persistence  -*- lexical-binding: t; -*-
+
+;; Copyright (C) 2026 Thanos Apollo
+
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
+
+;; This file is part of emacs-jabber.
+
+;; emacs-jabber is free software: you can redistribute it and/or modify
+;; it under the terms of the GNU General Public License as published by
+;; the Free Software Foundation, either version 3 of the License, or
+;; (at your option) any later version.
+
+;; emacs-jabber is distributed in the hope that it will be useful,
+;; but WITHOUT ANY WARRANTY; without even the implied warranty of
+;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+;; GNU General Public License for more details.
+
+;; You should have received a copy of the GNU General Public License
+;; along with emacs-jabber.  If not, see <https://www.gnu.org/licenses/>.
+
+;;; Commentary:
+
+;; SQLite persistence for OMEMO state.  Uses the shared database
+;; connection from `jabber-db'.  OMEMO tables are created by
+;; `jabber-db--migrate' (version 2) when the database is opened.
+
+;;; Code:
+
+(require 'jabber-db)
+
+(defsubst jabber-omemo-store--as-unibyte (value)
+  "Return VALUE as a unibyte string if it is a string, else VALUE.
+SQLite returns BLOBs as multibyte strings; this normalizes them
+for the C module which expects unibyte."
+  (if (and (stringp value) (multibyte-string-p value))
+      (encode-coding-string value 'raw-text)
+    value))
+
+(defsubst jabber-omemo-store--as-blob (value)
+  "Return a binary-coded copy of string VALUE for SQLite BLOB binding."
+  (propertize value 'coding-system 'binary))
+
+;;; Store blob CRUD
+
+(defun jabber-omemo-store-save (account blob)
+  "Upsert serialized OMEMO store BLOB for ACCOUNT.
+Preserves the spk_rotated_at column; INSERT OR REPLACE would
+delete and re-insert the row, wiping it."
+  (when-let* ((db (jabber-db-ensure-open)))
+    (sqlite-execute db
+		    "INSERT INTO omemo_store (account, store_blob) VALUES (?, ?)
+  ON CONFLICT(account) DO UPDATE SET store_blob = excluded.store_blob"
+		    (list account (jabber-omemo-store--as-blob blob)))))
+
+(defun jabber-omemo-store-spk-rotated-at (account)
+  "Return ACCOUNT's signed pre-key rotation time as epoch seconds, or nil."
+  (when-let* ((db (jabber-db-ensure-open)))
+    (caar (sqlite-select db
+			 "SELECT spk_rotated_at FROM omemo_store WHERE account = ?"
+			 (list account)))))
+
+(defun jabber-omemo-store-set-spk-rotated-at (account time)
+  "Record TIME (epoch seconds) as ACCOUNT's signed pre-key rotation time.
+The account's store row must already exist."
+  (when-let* ((db (jabber-db-ensure-open)))
+    (sqlite-execute db
+		    "UPDATE omemo_store SET spk_rotated_at = ? WHERE account = ?"
+		    (list time account))))
+
+(defun jabber-omemo-store-load (account)
+  "Load serialized OMEMO store blob for ACCOUNT, or nil."
+  (when-let* ((db (jabber-db-ensure-open)))
+    (jabber-omemo-store--as-unibyte
+     (caar (sqlite-select db
+			  "SELECT store_blob FROM omemo_store WHERE account = ?"
+			  (list account))))))
+
+(defun jabber-omemo-store-delete (account)
+  "Delete OMEMO store for ACCOUNT."
+  (when-let* ((db (jabber-db-ensure-open)))
+    (sqlite-execute db
+		    "DELETE FROM omemo_store WHERE account = ?"
+		    (list account))))
+
+;;; Device ID CRUD
+
+(defun jabber-omemo-store-save-device-id (account device-id)
+  "Upsert DEVICE-ID for ACCOUNT in the omemo_device_id table."
+  (when-let* ((db (jabber-db-ensure-open)))
+    (sqlite-execute db
+		    "INSERT OR REPLACE INTO omemo_device_id (account, device_id) VALUES (?, ?)"
+		    (list account device-id))))
+
+(defun jabber-omemo-store-load-device-id (account)
+  "Load the device ID for ACCOUNT, or nil if not set."
+  (when-let* ((db (jabber-db-ensure-open)))
+    (caar (sqlite-select db
+			 "SELECT device_id FROM omemo_device_id WHERE account = ?"
+			 (list account)))))
+
+;;; Trust CRUD
+
+(defun jabber-omemo-store-save-trust (account jid device-id
+					      identity-key trust)
+  "Upsert trust record for ACCOUNT, JID, DEVICE-ID.
+IDENTITY-KEY is a unibyte blob.
+TRUST is 0=undecided, 1=tofu, 2=verified, -1=untrusted.
+Sets first_seen to current time on initial insert.
+Rejects the update if the device already has a different identity key."
+  (when-let* ((db (jabber-db-ensure-open)))
+    (let ((existing (jabber-omemo-store--as-unibyte
+                     (caar (sqlite-select db "\
+SELECT identity_key FROM omemo_trust
+  WHERE account = ? AND jid = ? AND device_id = ?"
+                                          (list account jid device-id))))))
+      (if (and existing (not (equal existing identity-key)))
+          (display-warning 'jabber-omemo
+			   (format "SECURITY: device %d for %s changed identity key! Rejecting."
+				   device-id jid)
+			   :warning)
+        (let ((now (truncate (float-time))))
+          (sqlite-execute db "\
+INSERT INTO omemo_trust (account, jid, device_id, identity_key, trust, first_seen)
+  VALUES (?, ?, ?, ?, ?, ?)
+  ON CONFLICT (account, jid, device_id)
+  DO UPDATE SET trust = excluded.trust"
+			  (list account jid device-id
+                                (jabber-omemo-store--as-blob identity-key)
+                                trust now)))))))
+
+(defun jabber-omemo-store-ensure-trust (account jid device-id identity-key)
+  "Ensure a trust record exists for ACCOUNT, JID, DEVICE-ID.
+Creates one with trust 0 (undecided) if none exists.
+If a record already exists, leaves it unchanged.
+Warns if the stored identity key differs from IDENTITY-KEY."
+  (when-let* ((db (jabber-db-ensure-open))
+              (identity-key identity-key))
+    (let ((existing (jabber-omemo-store--as-unibyte
+                     (caar (sqlite-select db "\
+SELECT identity_key FROM omemo_trust
+  WHERE account = ? AND jid = ? AND device_id = ?"
+                                          (list account jid device-id))))))
+      (cond
+       ((and existing (not (equal existing identity-key)))
+        (display-warning 'jabber-omemo
+			 (format "SECURITY: device %d for %s changed identity key! Rejecting."
+				 device-id jid)
+			 :warning))
+       (existing nil)
+       (t
+        (let ((now (truncate (float-time))))
+          (sqlite-execute db "\
+INSERT INTO omemo_trust (account, jid, device_id, identity_key, trust, first_seen)
+  VALUES (?, ?, ?, ?, 0, ?)"
+			  (list account jid device-id
+                                (jabber-omemo-store--as-blob identity-key)
+                                now))))))))
+
+(defun jabber-omemo-store-load-trust (account jid device-id)
+  "Load trust record for ACCOUNT, JID, DEVICE-ID as a plist, or nil.
+Returns (:identity-key BLOB :trust INT :first-seen INT)."
+  (when-let* ((db (jabber-db-ensure-open)))
+    (when-let* ((row (car (sqlite-select db "\
+SELECT identity_key, trust, first_seen FROM omemo_trust
+  WHERE account = ? AND jid = ? AND device_id = ?"
+					 (list account jid device-id)))))
+      (list :identity-key (jabber-omemo-store--as-unibyte (nth 0 row))
+            :trust (nth 1 row)
+            :first-seen (nth 2 row)))))
+
+(defun jabber-omemo-store-set-trust (account jid device-id level)
+  "Update trust LEVEL for a known device (ACCOUNT, JID, DEVICE-ID)."
+  (when-let* ((db (jabber-db-ensure-open)))
+    (sqlite-execute db "\
+UPDATE omemo_trust SET trust = ?
+  WHERE account = ? AND jid = ? AND device_id = ?"
+		    (list level account jid device-id))))
+
+(defun jabber-omemo-store-delete-trust (account jid device-id)
+  "Delete trust record for ACCOUNT, JID, DEVICE-ID."
+  (when-let* ((db (jabber-db-ensure-open)))
+    (sqlite-execute db "\
+DELETE FROM omemo_trust
+  WHERE account = ? AND jid = ? AND device_id = ?"
+		    (list account jid device-id))))
+
+(defun jabber-omemo-store-all-trust (account jid)
+  "List all trust records for ACCOUNT + JID.
+Returns a list of plists (:device-id INT :identity-key BLOB
+:trust INT :first-seen INT)."
+  (when-let* ((db (jabber-db-ensure-open)))
+    (mapcar (lambda (row)
+              (list :device-id (nth 0 row)
+                    :identity-key (jabber-omemo-store--as-unibyte (nth 1 row))
+                    :trust (nth 2 row)
+                    :first-seen (nth 3 row)))
+            (sqlite-select db "\
+SELECT device_id, identity_key, trust, first_seen FROM omemo_trust
+  WHERE account = ? AND jid = ?"
+			   (list account jid)))))
+
+;;; Device list CRUD
+
+(defun jabber-omemo-store-save-device (account jid device-id
+					       &optional active)
+  "Upsert device record for ACCOUNT, JID, DEVICE-ID.
+ACTIVE defaults to 1 (true).  Sets last_seen to current time."
+  (when-let* ((db (jabber-db-ensure-open)))
+    (let ((now (truncate (float-time)))
+          (act (if (or (null active) (eq active t)) 1 active)))
+      (sqlite-execute db "\
+INSERT OR REPLACE INTO omemo_devices (account, jid, device_id, active, last_seen)
+  VALUES (?, ?, ?, ?, ?)"
+		      (list account jid device-id act now)))))
+
+(defun jabber-omemo-store-load-devices (account jid)
+  "Load all device records for ACCOUNT + JID.
+Returns a list of plists (:device-id INT :active BOOL :last-seen INT)."
+  (when-let* ((db (jabber-db-ensure-open)))
+    (mapcar (lambda (row)
+              (list :device-id (nth 0 row)
+                    :active (not (zerop (nth 1 row)))
+                    :last-seen (nth 2 row)))
+            (sqlite-select db "\
+SELECT device_id, active, last_seen FROM omemo_devices
+  WHERE account = ? AND jid = ?"
+			   (list account jid)))))
+
+(defun jabber-omemo-store-set-device-active (account jid device-id active)
+  "Mark device DEVICE-ID of ACCOUNT+JID as ACTIVE (non-nil) or inactive (nil)."
+  (when-let* ((db (jabber-db-ensure-open)))
+    (sqlite-execute db "\
+UPDATE omemo_devices SET active = ?
+  WHERE account = ? AND jid = ? AND device_id = ?"
+		    (list (if active 1 0) account jid device-id))))
+
+(defun jabber-omemo-store-delete-device (account jid device-id)
+  "Remove a device record for ACCOUNT, JID, DEVICE-ID."
+  (when-let* ((db (jabber-db-ensure-open)))
+    (sqlite-execute db "\
+DELETE FROM omemo_devices
+  WHERE account = ? AND jid = ? AND device_id = ?"
+		    (list account jid device-id))))
+
+;;; Session CRUD
+
+(defun jabber-omemo-store-save-session (account jid device-id blob)
+  "Upsert session BLOB for ACCOUNT, JID, DEVICE-ID."
+  (when-let* ((db (jabber-db-ensure-open)))
+    (sqlite-execute db "\
+INSERT OR REPLACE INTO omemo_sessions (account, jid, device_id, session_blob)
+  VALUES (?, ?, ?, ?)"
+		    (list account jid device-id
+                          (jabber-omemo-store--as-blob blob)))))
+
+(defun jabber-omemo-store--session-transaction (operation)
+  "Call OPERATION inside an OMEMO session savepoint."
+  (when-let* ((db (jabber-db-ensure-open)))
+    (sqlite-execute db "SAVEPOINT omemo_session_migration")
+    (condition-case err
+        (prog1
+            (funcall operation)
+          (sqlite-execute db "RELEASE omemo_session_migration"))
+      (error
+       (condition-case cleanup-err
+           (sqlite-execute db "ROLLBACK TO omemo_session_migration")
+         (error
+          (message "OMEMO session rollback failed: %s"
+                   (error-message-string cleanup-err))))
+       (condition-case cleanup-err
+           (sqlite-execute db "RELEASE omemo_session_migration")
+         (error
+          (message "OMEMO session savepoint release failed: %s"
+                   (error-message-string cleanup-err))))
+       (signal (car err) (cdr err))))))
+
+(defun jabber-omemo-store-save-session-and-clear-legacy-keys
+    (account jid device-id blob)
+  "Save session BLOB for ACCOUNT, JID, DEVICE-ID and remove legacy keys."
+  (jabber-omemo-store--session-transaction
+   (lambda ()
+     (jabber-omemo-store-save-session account jid device-id blob)
+     (jabber-omemo-store-delete-skipped-keys account jid device-id))))
+
+(defun jabber-omemo-store-delete-session-state (account jid device-id)
+  "Delete session and legacy skipped keys for ACCOUNT, JID, DEVICE-ID."
+  (jabber-omemo-store--session-transaction
+   (lambda ()
+     (jabber-omemo-store-delete-session account jid device-id)
+     (jabber-omemo-store-delete-skipped-keys account jid device-id))))
+
+(defun jabber-omemo-store-load-session (account jid device-id)
+  "Load session blob for ACCOUNT, JID, DEVICE-ID, or nil."
+  (when-let* ((db (jabber-db-ensure-open)))
+    (jabber-omemo-store--as-unibyte
+     (caar (sqlite-select db "\
+SELECT session_blob FROM omemo_sessions
+  WHERE account = ? AND jid = ? AND device_id = ?"
+			  (list account jid device-id))))))
+
+(defun jabber-omemo-store-delete-session (account jid device-id)
+  "Delete session for ACCOUNT, JID, DEVICE-ID."
+  (when-let* ((db (jabber-db-ensure-open)))
+    (sqlite-execute db "\
+DELETE FROM omemo_sessions
+  WHERE account = ? AND jid = ? AND device_id = ?"
+		    (list account jid device-id))))
+
+(defun jabber-omemo-store-all-sessions (account jid)
+  "List all sessions for ACCOUNT + JID.
+Returns a list of plists (:device-id INT :session-blob BLOB)."
+  (when-let* ((db (jabber-db-ensure-open)))
+    (mapcar (lambda (row)
+              (list :device-id (nth 0 row)
+                    :session-blob (jabber-omemo-store--as-unibyte (nth 1 row))))
+            (sqlite-select db "\
+SELECT device_id, session_blob FROM omemo_sessions
+  WHERE account = ? AND jid = ?"
+			   (list account jid)))))
+
+;;; Legacy skipped-key migration
+
+(defun jabber-omemo-store-all-skipped-keys (account jid device-id)
+  "Return all skipped message keys for ACCOUNT+JID+DEVICE-ID.
+Each element is (MSG-NUMBER DH-KEY MSG-KEY), the entry format of
+`jabber-omemo--session-set-skipped-keys'."
+  (when-let* ((db (jabber-db-ensure-open)))
+    (mapcar (lambda (row)
+              (list (car row)
+                    (jabber-omemo-store--as-unibyte (cadr row))
+                    (jabber-omemo-store--as-unibyte (caddr row))))
+            (sqlite-select db "\
+SELECT message_number, dh_key, message_key FROM omemo_skipped_keys
+  WHERE account = ? AND jid = ? AND device_id = ?
+  ORDER BY created_at ASC, rowid ASC"
+                           (list account jid device-id)))))
+
+(defun jabber-omemo-store-delete-skipped-keys (account jid device-id)
+  "Delete all skipped message keys for ACCOUNT+JID+DEVICE-ID.
+Used when a session is replaced; keys from the old ratchet can
+never match again."
+  (when-let* ((db (jabber-db-ensure-open)))
+    (sqlite-execute db "\
+DELETE FROM omemo_skipped_keys
+  WHERE account = ? AND jid = ? AND device_id = ?"
+		    (list account jid device-id))))
+
+(provide 'jabber-omemo-store)
+;;; jabber-omemo-store.el ends here

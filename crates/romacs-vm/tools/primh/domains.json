@@ -1,0 +1,24 @@
+{
+  "comment": "Shared argument-value catalog. Each value is Lisp SOURCE evaluated freshly per case on both sides, so destructive primitives never mutate a literal constant. Tags let a declaration narrow a position; 'any' is the default and is usually right: GNU's own CHECK_* signals then DERIVE the coercion table (see primh.py infer).",
+  "values": [
+    {"src": "nil",                         "tags": ["symbol", "list", "atom"]},
+    {"src": "t",                           "tags": ["symbol", "atom"]},
+    {"src": "0",                           "tags": ["int", "natnum", "atom"]},
+    {"src": "1",                           "tags": ["int", "natnum", "atom"]},
+    {"src": "2",                           "tags": ["int", "natnum", "atom"]},
+    {"src": "-1",                          "tags": ["int", "atom"]},
+    {"src": "most-positive-fixnum",        "tags": ["int", "natnum", "atom"]},
+    {"src": "1.5",                         "tags": ["float", "atom"]},
+    {"src": "'sym",                        "tags": ["symbol", "atom"]},
+    {"src": ":kw",                         "tags": ["symbol", "atom"]},
+    {"src": "(copy-sequence \"\")",        "tags": ["string", "sequence", "atom"]},
+    {"src": "(copy-sequence \"abc\")",     "tags": ["string", "sequence", "atom"]},
+    {"src": "(copy-sequence \"λx\")",      "tags": ["string", "sequence", "atom"]},
+    {"src": "(list 1 2 3)",                "tags": ["list", "sequence"]},
+    {"src": "(list 'a (list 'b))",         "tags": ["list", "sequence"]},
+    {"src": "(cons 1 2)",                  "tags": ["dotted"]},
+    {"src": "(cons 1 (cons 2 3))",         "tags": ["dotted"]},
+    {"src": "(vector 1 2)",                "tags": ["vector", "sequence", "atom"]},
+    {"src": "(let ((x (list 1 2))) (setcdr (cdr x) x) x)", "tags": ["circular"], "printable": false}
+  ]
+}

@@ -1,0 +1,124 @@
+#!/usr/bin/env python3
+"""Cheap, crate-local feedback, NOT an acceptance gate. See doc/dev-loop.md."""
+import argparse
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+import time
+
+ROOT = Path(__file__).resolve().parent.parent
+# Exclude whole targets before Cargo builds them, not just at nextest runtime.
+# Full gate keeps every target and every test, with its optimized profile.
+VM2_SLOW = {
+    "parity_ratchet": "full census and ratchet evidence",
+    "heap_boundary": "trybuild performs nested compilation",
+    "primitive_gc_boundary": "nested cargo compile-contract proof",
+    "symbol_with_pos": "GNU load-chain frontier",
+    "subrp_chain": "GNU load-chain frontier",
+    "mapc_frontier": "GNU load-chain frontier",
+    "inline_load_chain": "GNU load-chain frontier",
+    "gv_load_chain": "GNU load-chain frontier",
+    "match_data_dead_buffer": "live GNU oracle matrix",
+    "primh_minibuf": "exhaustive primitive oracle replay",
+    "primh_fns_core": "exhaustive primitive oracle replay",
+    "primh_str": "exhaustive primitive oracle replay",
+    "printer_restoration": "live GNU printer oracle",
+    "ert_require_chain": "GNU load-chain frontier",
+}
+HEAVY_PACKAGES = {
+    "romacs-gnu-tests", "romacs-gui-tests", "romacs-gui-oracle",
+    "romacs-vm-gui", "romacs-tui-tests", "romacs-perf",
+}
+
+
+def select(package):
+    name = package["name"]
+    if name in HEAVY_PACKAGES:
+        raise ValueError(f"{name} belongs to the full/GUI/performance tier; run scripts/gate full")
+    targets = package["targets"]
+    tests = {t["name"] for t in targets if t["kind"] == ["test"]}
+    excluded = VM2_SLOW if name == "romacs-vm" else {}
+    stale = set(excluded) - tests
+    if stale:
+        raise ValueError(f"stale fast-tier exclusions: {', '.join(sorted(stale))}")
+    selected = sorted(tests - set(excluded))
+    library = any("lib" in t["kind"] and t.get("test", True) for t in targets)
+    if not library and not selected:
+        raise ValueError(f"{name}: no fast-tier test targets; run scripts/gate full")
+    flags = ["--lib"] if library else []
+    for test in selected:
+        flags.extend(["--test", test])
+    return flags, selected, excluded
+
+
+def run(command, env):
+    print("dev-loop:", " ".join(command[:8]),
+          f"... ({len(command)} arguments)" if len(command) > 8 else "", flush=True)
+    subprocess.run(command, cwd=ROOT, env=env, check=True)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("crate", help="exact workspace package name")
+    parser.add_argument("--list", action="store_true", help="show target selection without building")
+    args = parser.parse_args()
+    started = time.monotonic()
+    status = 1
+    try:
+        env = os.environ.copy()
+        # Deliberately ignore inherited slot/lane targets. Opt in explicitly.
+        env["CARGO_TARGET_DIR"] = env.get("DEV_LOOP_TARGET_DIR", str(ROOT / "target"))
+        env.setdefault("CARGO_BUILD_JOBS", "5")
+        env["PATH"] = env.get("PATH", "") + os.pathsep + str(Path.home() / ".nix-profile/bin")
+        metadata = json.loads(subprocess.check_output(
+            ["cargo", "metadata", "--no-deps", "--locked", "--format-version", "1"],
+            cwd=ROOT, env=env))
+        members = set(metadata["workspace_members"])
+        matches = [p for p in metadata["packages"] if p["id"] in members and p["name"] == args.crate]
+        if len(matches) != 1:
+            raise ValueError(f"unknown workspace crate: {args.crate}")
+        targets, selected, excluded = select(matches[0])
+        print(f"dev-loop: FAST ONLY; {len(selected)} integration targets; "
+              f"{len(excluded)} full-tier targets excluded; target={env['CARGO_TARGET_DIR']}", flush=True)
+        if args.list:
+            print(json.dumps({"targets": targets, "full_tier": excluded}, indent=2))
+            status = 0
+            return status
+        overrides = [key for key in env if key in {"RUSTFLAGS", "CARGO_ENCODED_RUSTFLAGS"}
+                     or (key.startswith("CARGO_TARGET_") and key.endswith("_RUSTFLAGS"))]
+        if overrides:
+            raise ValueError("unset rustflag overrides so the dev linker config is effective: "
+                             + ", ".join(sorted(overrides)))
+        host = subprocess.check_output(["rustc", "-vV"], env=env, text=True)
+        if "host: x86_64-unknown-linux-gnu" not in host:
+            raise ValueError("fast-linker configuration currently supports x86_64-unknown-linux-gnu only")
+        sysroot = subprocess.check_output(["rustc", "--print", "sysroot"], env=env, text=True).strip()
+        if not (Path(sysroot) / "lib/rustlib/x86_64-unknown-linux-gnu/bin/gcc-ld/ld.lld").is_file():
+            raise ValueError("Rust's bundled LLD is missing; install the project's Rust toolchain")
+        if not shutil.which("cargo-nextest", path=env["PATH"]):
+            raise ValueError("cargo-nextest missing from PATH; install cargo-nextest or enter the project tool environment")
+        config = ["--config", str(ROOT / ".cargo/dev.toml")]
+        common = ["--locked", "-p", args.crate, *targets]
+        phase = time.monotonic()
+        run(["cargo", "check", *config, "--profile", "dev-fast", *common], env)
+        print(f"dev-loop: check {time.monotonic() - phase:.3f}s", flush=True)
+        phase = time.monotonic()
+        # nextest launches Cargo itself: Cargo's global --config is NOT forwarded.
+        run(["cargo", "nextest", "run", *config, "--cargo-profile", "dev-fast", *common,
+             "--test-threads", env.get("DEV_LOOP_TEST_THREADS", "8"), "--no-fail-fast",
+             "--no-tests=fail", "--status-level", "fail", "--final-status-level", "fail"], env)
+        print(f"dev-loop: tests (build + execution) {time.monotonic() - phase:.3f}s", flush=True)
+        status = 0
+    except (ValueError, OSError, subprocess.CalledProcessError) as error:
+        print(f"dev-loop: {error}", file=sys.stderr)
+    finally:
+        print(f"dev-loop: elapsed {time.monotonic() - started:.3f}s; "
+              f"{'PASS (fast tier only)' if status == 0 else 'FAIL'}", flush=True)
+    return status
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,19 @@
+[package]
+name = "romacs-vm-gui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+romacs-vm = { path = "../romacs-vm" }
+romacs-layout-input = { path = "../romacs-layout-input" }
+romacs-layout2 = { path = "../romacs-layout2" }
+romacs-display-protocol.workspace = true
+romacs-font.workspace = true
+romacs-face.workspace = true
+romacs-renderer-wgpu.workspace = true
+romacs-display-runtime = { path = "../romacs-display-runtime", default-features = false, features = ["core-free"] }
+serde_json.workspace = true
+
+[dev-dependencies]
+wgpu.workspace = true

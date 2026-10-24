@@ -1,0 +1,24 @@
+--- a/romacs-land.sh
++++ b/romacs-land.sh
+@@ -429,7 +429,8 @@
+ mainenv env PYTHONDONTWRITEBYTECODE=1 python3 "$RECORD_ROOT/reference/record_committed.py" \
+   --root "$RECORD_ROOT" --code-repository "$R" --landing-target "$NEW" \
+   || die "candidate invalidates written-record claims or procedural review"
+-mainenv git -C "$R" update-ref -m "romacs-land: Merge $BR (tree $TREE)" refs/heads/master "$NEW" "$M_OLD" \
++mainenv python3 "$SELF_DIR/master-reference-guard.py" publish --repo "$R" --old "$M_OLD" --new "$NEW" \
++  --message "romacs-land: Merge $BR (tree $TREE)" 9>&- \
+   || die "master moved during publication (expected ${M_OLD:0:10}); nothing landed -- rerun"
+ # master now names the certified tree. Bring the canonical index and worktree
+ # from M_OLD to NEW; refuses rather than overwriting local edits.
+--- a/romacs-land-fast.sh
++++ b/romacs-land-fast.sh
+@@ -41,7 +41,8 @@
+ NEW="$LANE_C"
+ [ "$(mainenv git -C "$R" rev-parse "$NEW^{tree}")" = "$TREE" ] || die "check tree: publication tree differs"
+ refuse_if_frozen
+-mainenv git -C "$R" update-ref -m "romacs-land: Fast-forward $BR (tree $TREE)" refs/heads/master "$NEW" "$M_OLD" 9>&- || die "check CAS: master moved during publication; nothing landed"
++mainenv python3 "$SELF_DIR/master-reference-guard.py" publish --repo "$R" --old "$M_OLD" --new "$NEW" \
++  --message "romacs-land: Fast-forward $BR (tree $TREE)" 9>&- || die "check CAS: master moved during publication; nothing landed"
+ mainenv git -C "$R" read-tree -m -u "$M_OLD" "$NEW" 9>&- || die "LANDED BUT CHECKOUT SYNC FAILED: master=$NEW; run git -C $R read-tree -m -u $M_OLD $NEW"
+ exec 9>&-
+ [ "$(commit_of "$R" refs/heads/master)" = "$NEW" ] || die "post-publication: master moved again"

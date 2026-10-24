@@ -1,0 +1,9 @@
+error[E0499]: cannot borrow `vm` as mutable more than once at a time
+ --> tests/heap_boundary/fail/local_across_load.rs:5:5
+  |
+4 |     let (car, _) = vm.eval_source("(list (list 1))").unwrap().cons_pair().unwrap();
+  |                    -- first mutable borrow occurs here
+5 |     vm.load_file(std::path::Path::new("/dev/null")).unwrap();
+  |     ^^ second mutable borrow occurs here
+6 |     println!("{}", car.display().unwrap());
+  |                    --- first borrow later used here

@@ -1,0 +1,43 @@
+{
+  "name": "bolp",
+  "arity": [
+    0,
+    0
+  ],
+  "effect": "reads",
+  "gnu_files": [
+    "editfns.c"
+  ],
+  "gnu_def": "editfns.c:1019",
+  "rust": "src/prims/point_predicates.rs:4",
+  "args": [],
+  "probes": [
+    "(with-temp-buffer (bolp))",
+    "(with-temp-buffer (insert \"\") (goto-char 1) (bolp))",
+    "(with-temp-buffer (insert \"abc\") (goto-char 1) (bolp))",
+    "(with-temp-buffer (insert \"abc\") (goto-char 2) (bolp))",
+    "(with-temp-buffer (insert \"abc\") (goto-char 3) (bolp))",
+    "(with-temp-buffer (insert \"abc\") (goto-char 4) (bolp))",
+    "(with-temp-buffer (insert \"a\\nb\") (goto-char 1) (bolp))",
+    "(with-temp-buffer (insert \"a\\nb\") (goto-char 2) (bolp))",
+    "(with-temp-buffer (insert \"a\\nb\") (goto-char 3) (bolp))",
+    "(with-temp-buffer (insert \"a\\nb\") (goto-char 4) (bolp))",
+    "(with-temp-buffer (insert \"é🙂a\\nЖb\") (goto-char 1) (bolp))",
+    "(with-temp-buffer (insert \"é🙂a\\nЖb\") (goto-char 2) (bolp))",
+    "(with-temp-buffer (insert \"é🙂a\\nЖb\") (goto-char 3) (bolp))",
+    "(with-temp-buffer (insert \"é🙂a\\nЖb\") (goto-char 4) (bolp))",
+    "(with-temp-buffer (insert \"é🙂a\\nЖb\") (goto-char 5) (bolp))",
+    "(with-temp-buffer (insert \"é🙂a\\nЖb\") (goto-char 6) (bolp))",
+    "(with-temp-buffer (insert \"é🙂a\\nЖb\") (goto-char 7) (bolp))",
+    "(with-temp-buffer (insert \"é🙂a\\nЖb\") (narrow-to-region 3 6) (goto-char 3) (bolp))",
+    "(with-temp-buffer (insert \"é🙂a\\nЖb\") (narrow-to-region 3 6) (goto-char 4) (bolp))",
+    "(with-temp-buffer (insert \"é🙂a\\nЖb\") (narrow-to-region 2 3) (goto-char 3) (bolp))",
+    "(with-temp-buffer (insert \"é🙂a\\nЖb\") (narrow-to-region 3 3) (goto-char 3) (bolp))",
+    "(with-temp-buffer (insert \"é🙂a\\nЖb\") (narrow-to-region 2 6) (goto-char 5) (bolp))",
+    "(with-temp-buffer (set-buffer-multibyte nil) (insert (unibyte-string 255 10 254)) (goto-char 1) (bolp))",
+    "(with-temp-buffer (set-buffer-multibyte nil) (insert (unibyte-string 255 10 254)) (goto-char 2) (bolp))",
+    "(with-temp-buffer (set-buffer-multibyte nil) (insert (unibyte-string 255 10 254)) (goto-char 3) (bolp))",
+    "(with-temp-buffer (set-buffer-multibyte nil) (insert (unibyte-string 255 10 254)) (goto-char 4) (bolp))",
+    "(list (fboundp 'bolp) (functionp #'bolp) (funcall #'bolp))"
+  ]
+}

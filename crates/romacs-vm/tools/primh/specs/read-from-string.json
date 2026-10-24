@@ -1,0 +1,54 @@
+{
+ "name": "read-from-string",
+ "arity": [
+  1,
+  3
+ ],
+ "effect": "global",
+ "gnu_files": [
+  "lread.c"
+ ],
+ "gnu_def": "lread.c:2511",
+ "rust": "src/prims/read.rs:4",
+ "args": [
+  "string",
+  "int",
+  "int"
+ ],
+ "extra": {
+  "1": [
+   "nil"
+  ],
+  "2": [
+   "nil"
+  ]
+ },
+ "probes": [
+  "(read-from-string \"  42 tail\")",
+  "(read-from-string \"λ abc\" 2)",
+  "(read-from-string \"foo\" -1)",
+  "(read-from-string \"foo\" 0 8)",
+  "(read-from-string \"foo\" 2 1)",
+  "(read-from-string \"foo\" 4)",
+  "(read-from-string \"foo\" t)",
+  "(read-from-string \"\")",
+  "(read-from-string \"(\")",
+  "(read-from-string \")\")",
+  "(read-from-string \"[1 (a . b) \\\"λ\\\"] rest\")",
+  "(read-from-string 42)",
+  "(read-from-string nil)",
+  "(read-from-string \"foo\" nil nil)",
+  "(read-from-string \"a#b\")",
+  "(let ((r (read-from-string (concat \"a\" (string 160) \"b\")))) (list (symbol-name (car r)) (cdr r)))",
+  "(let ((r (read-from-string (concat \"a\" (string 11) \"b\")))) (list (symbol-name (car r)) (cdr r)))",
+  "(read-from-string \"2.25e+INF\")",
+  "(read-from-string \"-3.75e+INF\")",
+  "(read-from-string \"2305843009213693952\")",
+  "(let ((i 0) (s \"0\")) (while (< i 257) (setq s (concat \"(\" s \")\")) (setq i (1+ i))) (let ((r (read-from-string s))) (cdr r)))",
+  "(read-from-string \"(a . b c)\")",
+  "(read-from-string \"#s(hash-table)\")",
+  "(read-from-string \"a#b\" 0 1)",
+  "(let ((i 0) (s \"0\")) (while (< i 256) (setq s (concat \"(\" s \")\")) (setq i (1+ i))) (cdr (read-from-string s)))",
+  "(list (numberp (car (read-from-string \"2.25e+INF\"))) (numberp (car (read-from-string \"-3.75e+INF\"))))"
+ ]
+}

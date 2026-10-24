@@ -1,0 +1,68 @@
+{
+ "name": "vector-or-char-table-p",
+ "arity": [
+  1,
+  1
+ ],
+ "effect": "pure",
+ "gnu_files": [
+  "data.c"
+ ],
+ "gnu_def": "data.c:444",
+ "rust": "src/prims/vector_or_char_table_p.rs:5",
+ "args": [
+  "data-predicate-curated"
+ ],
+ "extra": {
+  "0": [
+   "nil",
+   "t",
+   "'x",
+   ":key",
+   "0",
+   "1",
+   "-1",
+   "4194303",
+   "4194304",
+   "1152921504606846975",
+   "1152921504606846976",
+   "2305843009213693951",
+   "-2305843009213693952",
+   "#x2000000000000000",
+   "#x-2000000000000001",
+   "#xffffffffffffffffffffffffffffffff",
+   "#x-ffffffffffffffffffffffffffffffff",
+   "0.0",
+   "-0.0",
+   "1.5",
+   "-1.5",
+   "1.0e+INF",
+   "-1.0e+INF",
+   "0.0e+NaN",
+   "\"\"",
+   "\"x\"",
+   "\"\u03bb\"",
+   "'(1 . 2)",
+   "[1]"
+  ]
+ },
+ "probes": [
+  "(vector-or-char-table-p (make-marker))",
+  "(vector-or-char-table-p (set-marker (make-marker) 1))",
+  "(vector-or-char-table-p (current-buffer))",
+  "(vector-or-char-table-p (symbol-function 'car))",
+  "(vector-or-char-table-p (lambda (x) x))",
+  "(vector-or-char-table-p (make-symbol \"x\"))",
+  "(vector-or-char-table-p (make-hash-table))",
+  "(vector-or-char-table-p (make-char-table 'data-predicate))",
+  "(vector-or-char-table-p (standard-syntax-table))",
+  "(vector-or-char-table-p (obarray-make 3))",
+  "(vector-or-char-table-p (make-overlay 1 1))",
+  "(vector-or-char-table-p (selected-window))",
+  "(vector-or-char-table-p (selected-frame))",
+  "(vector-or-char-table-p (frame-terminal))",
+  "(vector-or-char-table-p (unibyte-string 255))",
+  "(funcall #'vector-or-char-table-p 0)",
+  "(funcall #'vector-or-char-table-p (symbol-function 'car))"
+ ]
+}

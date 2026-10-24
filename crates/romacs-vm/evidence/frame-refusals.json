@@ -1,0 +1,167 @@
+{
+  "source": "a25a368c4a3f3bc4950d2080aa2d41d0ccc1e662",
+  "gnu_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+  "vm2_sha256": "b5b65e6b183fd4d84a41ff73b00cbd94d24c4055d20228391e6f27e70ffe684d",
+  "rows": [
+    {
+      "name": "window-list",
+      "source": "(list (fboundp 'window-list) (condition-case e (progn (window-list ) 'ok) (error e)) (condition-case e (progn (funcall 'window-list ) 'ok) (error e)))",
+      "results": {
+        "gnu": {
+          "exit": 0,
+          "stdout": "(t ok ok)",
+          "stderr": ""
+        },
+        "vm2": {
+          "exit": 0,
+          "stdout": "(t ok ok)\n",
+          "stderr": ""
+        }
+      }
+    },
+    {
+      "name": "get-buffer-window",
+      "source": "(list (fboundp 'get-buffer-window) (condition-case e (progn (get-buffer-window ) 'ok) (error e)) (condition-case e (progn (funcall 'get-buffer-window ) 'ok) (error e)))",
+      "results": {
+        "gnu": {
+          "exit": 0,
+          "stdout": "(t ok ok)",
+          "stderr": ""
+        },
+        "vm2": {
+          "exit": 0,
+          "stdout": "(t ok ok)\n",
+          "stderr": ""
+        }
+      }
+    },
+    {
+      "name": "minibuffer-selected-window",
+      "source": "(list (fboundp 'minibuffer-selected-window) (condition-case e (progn (minibuffer-selected-window ) 'ok) (error e)) (condition-case e (progn (funcall 'minibuffer-selected-window ) 'ok) (error e)))",
+      "results": {
+        "gnu": {
+          "exit": 0,
+          "stdout": "(t ok ok)",
+          "stderr": ""
+        },
+        "vm2": {
+          "exit": 0,
+          "stdout": "(nil (void-function minibuffer-selected-window) (void-function minibuffer-selected-window))\n",
+          "stderr": ""
+        }
+      }
+    },
+    {
+      "name": "set-window-hscroll",
+      "source": "(list (fboundp 'set-window-hscroll) (condition-case e (progn (set-window-hscroll nil 0) 'ok) (error e)) (condition-case e (progn (funcall 'set-window-hscroll nil 0) 'ok) (error e)))",
+      "results": {
+        "gnu": {
+          "exit": 0,
+          "stdout": "(t ok ok)",
+          "stderr": ""
+        },
+        "vm2": {
+          "exit": 0,
+          "stdout": "(nil (void-function set-window-hscroll) (void-function set-window-hscroll))\n",
+          "stderr": ""
+        }
+      }
+    },
+    {
+      "name": "window-combination-limit",
+      "source": "(list (fboundp 'window-combination-limit) (condition-case e (progn (window-combination-limit (selected-window)) 'ok) (error e)) (condition-case e (progn (funcall 'window-combination-limit (selected-window)) 'ok) (error e)))",
+      "results": {
+        "gnu": {
+          "exit": 0,
+          "stdout": "(t (error \"Combination limit is meaningful for internal windows only\") (error \"Combination limit is meaningful for internal windows only\"))",
+          "stderr": ""
+        },
+        "vm2": {
+          "exit": 0,
+          "stdout": "(t (error \"Combination limit is meaningful for internal windows only\") (error \"Combination limit is meaningful for internal windows only\"))\n",
+          "stderr": ""
+        }
+      }
+    },
+    {
+      "name": "recenter",
+      "source": "(list (fboundp 'recenter) (condition-case e (progn (recenter ) 'ok) (error e)) (condition-case e (progn (funcall 'recenter ) 'ok) (error e)))",
+      "results": {
+        "gnu": {
+          "exit": 0,
+          "stdout": "(t ok ok)",
+          "stderr": ""
+        },
+        "vm2": {
+          "exit": 0,
+          "stdout": "(nil (void-function recenter) (void-function recenter))\n",
+          "stderr": ""
+        }
+      }
+    },
+    {
+      "name": "terminal-list",
+      "source": "(list (fboundp 'terminal-list) (condition-case e (progn (terminal-list ) 'ok) (error e)) (condition-case e (progn (funcall 'terminal-list ) 'ok) (error e)))",
+      "results": {
+        "gnu": {
+          "exit": 0,
+          "stdout": "(t ok ok)",
+          "stderr": ""
+        },
+        "vm2": {
+          "exit": 0,
+          "stdout": "(t ok ok)\n",
+          "stderr": ""
+        }
+      }
+    },
+    {
+      "name": "tty-top-frame",
+      "source": "(list (fboundp 'tty-top-frame) (condition-case e (progn (tty-top-frame ) 'ok) (error e)) (condition-case e (progn (funcall 'tty-top-frame ) 'ok) (error e)))",
+      "results": {
+        "gnu": {
+          "exit": 0,
+          "stdout": "(t ok ok)",
+          "stderr": ""
+        },
+        "vm2": {
+          "exit": 0,
+          "stdout": "(t ok ok)\n",
+          "stderr": ""
+        }
+      }
+    },
+    {
+      "name": "object-identity",
+      "source": "(list (windowp (selected-window)) (symbolp (selected-frame)) (eq (window-frame (selected-window)) (selected-frame)) (windowp (minibuffer-window)))",
+      "results": {
+        "gnu": {
+          "exit": 0,
+          "stdout": "(t nil t t)",
+          "stderr": ""
+        },
+        "vm2": {
+          "exit": 0,
+          "stdout": "(t nil t t)\n",
+          "stderr": ""
+        }
+      }
+    },
+    {
+      "name": "window-list-1",
+      "source": "(list (fboundp 'window-list-1) (equal (window-list-1 nil t) (list (selected-window) (minibuffer-window))))",
+      "results": {
+        "gnu": {
+          "exit": 0,
+          "stdout": "(t t)",
+          "stderr": ""
+        },
+        "vm2": {
+          "exit": 0,
+          "stdout": "(t t)\n",
+          "stderr": ""
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,241 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "get-load-suffixes",
+ "spec_sha256": "2653a9e18ed2216fe419d158dae8b8f4f35f36a6ff0a9818d6f5f1fd54c106fb",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "get-load-suffixes",
+    "subr",
+    0,
+    0
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "lread.c": "f343ea2619bd35d4a0a41c15d3143045acd0cecc06ea0e449c65141b4f146c53"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "get-load-suffixes/0000",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (get-load-suffixes )) (error (list 'sig e))))",
+   "expected": "(ok (\".so\" \".elc\" \".elc.gz\" \".el\" \".el.gz\"))"
+  },
+  {
+   "id": "get-load-suffixes/0001",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'get-load-suffixes '(1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr get-load-suffixes> 1))"
+  },
+  {
+   "id": "get-load-suffixes/0002",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let () (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (get-load-suffixes ))) (error (list 'sig e))))",
+   "expected": "(ok (\".so\" \".elc\" \".elc.gz\" \".el\" \".el.gz\"))"
+  },
+  {
+   "id": "get-load-suffixes/0003",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let () (let ((r (get-load-suffixes ))) (list )))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "get-load-suffixes/0004",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((load-suffixes (list \".so\" \".elc\" \".el\")) (load-file-rep-suffixes (list \"\"))) (get-load-suffixes))) (error (list 'sig e))))",
+   "expected": "(ok (\".so\" \".elc\" \".el\"))"
+  },
+  {
+   "id": "get-load-suffixes/0005",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((load-suffixes (list \".elc\" \".el\")) (load-file-rep-suffixes (list \"\"))) (get-load-suffixes))) (error (list 'sig e))))",
+   "expected": "(ok (\".elc\" \".el\"))"
+  },
+  {
+   "id": "get-load-suffixes/0006",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((load-suffixes (list \".elc\" \".el\")) (load-file-rep-suffixes (list \"\" \".gz\"))) (get-load-suffixes))) (error (list 'sig e))))",
+   "expected": "(ok (\".elc\" \".elc.gz\" \".el\" \".el.gz\"))"
+  },
+  {
+   "id": "get-load-suffixes/0007",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((load-suffixes nil) (load-file-rep-suffixes (list \"\"))) (get-load-suffixes))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "get-load-suffixes/0008",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((load-suffixes (list \".elc\")) (load-file-rep-suffixes nil)) (get-load-suffixes))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "get-load-suffixes/0009",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((load-suffixes nil) (load-file-rep-suffixes nil)) (get-load-suffixes))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "get-load-suffixes/0010",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((load-suffixes (list \"a\" \"b\")) (load-file-rep-suffixes (list \"1\" \"2\" \"3\"))) (get-load-suffixes))) (error (list 'sig e))))",
+   "expected": "(ok (\"a1\" \"a2\" \"a3\" \"b1\" \"b2\" \"b3\"))"
+  },
+  {
+   "id": "get-load-suffixes/0011",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set 'jka-compr-load-suffixes (list \".gz\")) (let ((load-suffixes (list \".so\" \".elc\")) (load-file-rep-suffixes (list \"\" \".gz\" \".bz2\"))) (get-load-suffixes)))) (error (list 'sig e))))",
+   "expected": "(ok (\".so\" \".so.bz2\" \".elc\" \".elc.gz\" \".elc.bz2\"))"
+  },
+  {
+   "id": "get-load-suffixes/0012",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set 'jka-compr-load-suffixes nil) (let ((load-suffixes (list \".so\" \".elc\")) (load-file-rep-suffixes (list \"\" \".gz\"))) (get-load-suffixes)))) (error (list 'sig e))))",
+   "expected": "(ok (\".so\" \".so.gz\" \".elc\" \".elc.gz\"))"
+  },
+  {
+   "id": "get-load-suffixes/0013",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set 'jka-compr-load-suffixes (list \".gz\")) (let ((load-suffixes (list \"x.so\" \".so.1\")) (load-file-rep-suffixes (list \".gz\"))) (get-load-suffixes)))) (error (list 'sig e))))",
+   "expected": "(ok (\".so.1.gz\"))"
+  },
+  {
+   "id": "get-load-suffixes/0014",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (makunbound 'jka-compr-load-suffixes) (let ((load-suffixes (list \".so\")) (load-file-rep-suffixes (list \"\" \".gz\"))) (get-load-suffixes)))) (error (list 'sig e))))",
+   "expected": "(sig (void-variable jka-compr-load-suffixes))"
+  },
+  {
+   "id": "get-load-suffixes/0015",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (makunbound 'jka-compr-load-suffixes) (let ((load-suffixes (list \".elc\")) (load-file-rep-suffixes (list \"\" \".gz\"))) (get-load-suffixes)))) (error (list 'sig e))))",
+   "expected": "(ok (\".elc\" \".elc.gz\"))"
+  },
+  {
+   "id": "get-load-suffixes/0016",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((load-suffixes (list \".so\")) (load-file-rep-suffixes (list \"\"))) (get-load-suffixes))) (error (list 'sig e))))",
+   "expected": "(ok (\".so\"))"
+  },
+  {
+   "id": "get-load-suffixes/0017",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((load-suffixes (cons \".a\" \".b\")) (load-file-rep-suffixes (list \"\" \".gz\"))) (get-load-suffixes))) (error (list 'sig e))))",
+   "expected": "(ok (\".a\" \".a.gz\"))"
+  },
+  {
+   "id": "get-load-suffixes/0018",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((load-suffixes (list \".a\")) (load-file-rep-suffixes (cons \"\" \".z\"))) (get-load-suffixes))) (error (list 'sig e))))",
+   "expected": "(ok (\".a\"))"
+  },
+  {
+   "id": "get-load-suffixes/0019",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((load-suffixes \".elc\") (load-file-rep-suffixes (list \"\"))) (get-load-suffixes))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "get-load-suffixes/0020",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((load-suffixes (list \".a\" 1)) (load-file-rep-suffixes (list \"\" \".gz\"))) (get-load-suffixes))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 1))"
+  },
+  {
+   "id": "get-load-suffixes/0021",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((load-suffixes (list \".a\" 'sym)) (load-file-rep-suffixes (list \"\"))) (get-load-suffixes))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep sym))"
+  },
+  {
+   "id": "get-load-suffixes/0022",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((load-suffixes (list (list ?a ?b))) (load-file-rep-suffixes (list \"\"))) (get-load-suffixes))) (error (list 'sig e))))",
+   "expected": "(ok (\"ab\"))"
+  },
+  {
+   "id": "get-load-suffixes/0023",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((load-suffixes (list \".a\")) (load-file-rep-suffixes (list (vector ?x)))) (get-load-suffixes))) (error (list 'sig e))))",
+   "expected": "(ok (\".ax\"))"
+  },
+  {
+   "id": "get-load-suffixes/0024",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((load-suffixes (list \".λ\")) (load-file-rep-suffixes (list \"\" \".ж\"))) (get-load-suffixes))) (error (list 'sig e))))",
+   "expected": "(ok (\".λ\" \".λ.ж\"))"
+  },
+  {
+   "id": "get-load-suffixes/0025",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((load-suffixes (list \".a\")) (load-file-rep-suffixes (list \"\"))) (let ((r (get-load-suffixes))) (list (multibyte-string-p (car r)) (length r))))) (error (list 'sig e))))",
+   "expected": "(ok (nil 1))"
+  },
+  {
+   "id": "get-load-suffixes/0026",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((load-suffixes (list \".a\")) (load-file-rep-suffixes (list \"\"))) (let ((x (get-load-suffixes))) (list (eq (car x) (car load-suffixes)) (equal (car x) (car load-suffixes)) (eq x (get-load-suffixes)))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t nil))"
+  },
+  {
+   "id": "get-load-suffixes/0027",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((load-suffixes (let ((x (list \".a\"))) (setcdr x x) x)) (load-file-rep-suffixes (list \"\"))) (get-load-suffixes))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (\".a\" . #0)))"
+  },
+  {
+   "id": "get-load-suffixes/0028",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((load-suffixes (list \".a\")) (load-file-rep-suffixes (let ((x (list \"\"))) (setcdr x x) x))) (get-load-suffixes))) (error (list 'sig e))))",
+   "expected": "(sig (circular-list (\"\" . #0)))"
+  },
+  {
+   "id": "get-load-suffixes/0029",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (let ((load-suffixes (list \".q\"))) (setq load-file-rep-suffixes (list \"\"))) (car (get-load-suffixes)))) (error (list 'sig e))))",
+   "expected": "(ok \".so\")"
+  },
+  {
+   "id": "get-load-suffixes/0030",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (special-variable-p 'load-suffixes) (special-variable-p 'load-file-rep-suffixes) (boundp 'load-suffixes))) (error (list 'sig e))))",
+   "expected": "(ok (t t t))"
+  },
+  {
+   "id": "get-load-suffixes/0031",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((load-suffixes (list \".x\")) (load-file-rep-suffixes (list \"\" \".y\"))) (list (funcall #'get-load-suffixes) (apply #'get-load-suffixes nil)))) (error (list 'sig e))))",
+   "expected": "(ok ((\".x\" \".x.y\") (\".x\" \".x.y\")))"
+  },
+  {
+   "id": "get-load-suffixes/0032",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((load-suffixes (list (copy-sequence \".x\"))) (load-file-rep-suffixes (list \"\" (copy-sequence \".y\")))) (let ((r (get-load-suffixes))) (let ((i 0)) (while (< i 5000) (list i i) (setq i (1+ i)))) r))) (error (list 'sig e))))",
+   "expected": "(ok (\".x\" \".x.y\"))"
+  },
+  {
+   "id": "get-load-suffixes/0033",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (condition-case e (funcall #'get-load-suffixes 1) (error e))) (error (list 'sig e))))",
+   "expected": "(ok (wrong-number-of-arguments #<subr get-load-suffixes> 1))"
+  }
+ ],
+ "pinned": {
+  "get-load-suffixes/0000": "VALUE",
+  "get-load-suffixes/0002": "VALUE",
+  "get-load-suffixes/0027": "PRINTER",
+  "get-load-suffixes/0028": "PRINTER"
+ }
+}

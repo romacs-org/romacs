@@ -1,0 +1,29 @@
+{
+  "name": "load",
+  "arity": [
+    1,
+    5
+  ],
+  "effect": "global",
+  "gnu_files": [
+    "lread.c"
+  ],
+  "gnu_def": "lread.c:1068",
+  "rust": "src/loader.rs:276",
+  "args": [
+    "top-level-load-fixture",
+    "top-level-load-fixture",
+    "top-level-load-fixture",
+    "top-level-load-fixture",
+    "top-level-load-fixture"
+  ],
+  "probes": [
+    "(progn (load (expand-file-name \"evidence/toplevel-progn/macro.el\") nil t t) tp-result)",
+    "(progn (defmacro tp-generated () '(progn (defun tp-constructor () 42) (eval-and-compile (tp-constructor)))) (load (expand-file-name \"evidence/toplevel-progn/generated.el\") nil t t) (tp-constructor))",
+    "(progn (defmacro tp-m () 1) (load (expand-file-name \"evidence/toplevel-progn/prog1.el\") nil t t) tp-answer)",
+    "(progn (defmacro tp-m () 1) (load (expand-file-name \"evidence/toplevel-progn/prog2-first.el\") nil t t) tp-answer)",
+    "(progn (defmacro tp-m () 1) (load (expand-file-name \"evidence/toplevel-progn/prog2-second.el\") nil t t) tp-answer)",
+    "(progn (defmacro tp-m () 1) (load (expand-file-name \"evidence/toplevel-progn/lexical.el\") nil t t) tp-answer)",
+    "(progn (setq tp-cache-state 1) (defmacro tp-cache-m () (load (expand-file-name \"evidence/toplevel-progn/lexical.el\") nil t t) tp-cache-state) (eval '(setq tp-cache-result (list (tp-cache-m)))) (setq tp-cache-first tp-cache-result tp-cache-state 2) (eval '(setq tp-cache-result (list (tp-cache-m)))) (list tp-cache-first tp-cache-result))"
+  ]
+}

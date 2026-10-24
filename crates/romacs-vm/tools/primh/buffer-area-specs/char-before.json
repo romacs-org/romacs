@@ -1,0 +1,36 @@
+{
+  "name": "char-before",
+  "arity": [
+    0,
+    1
+  ],
+  "effect": "reads",
+  "gnu_files": [
+    "editfns.c"
+  ],
+  "gnu_def": "editfns.c:1070",
+  "rust": "src/prims/buffer_state.rs:28",
+  "args": [
+    "projected-buffer-area"
+  ],
+  "probes": [
+    "(with-temp-buffer (char-before))",
+    "(with-temp-buffer (insert \"a\u03bb\u6587z\") (goto-char 3) (narrow-to-region 2 4) (list (char-before) (char-before 2) (char-before 4) (char-before 5) (point)))",
+    "(with-temp-buffer (insert \"a\u03bb\u6587z\") (list (char-before 1) (char-before 2) (char-before 3) (char-before 4) (char-before 5)))",
+    "(with-temp-buffer (insert \"a\u03bb\u6587z\") (narrow-to-region 3 3) (list (char-before 2) (char-before 3) (char-before 4)))",
+    "(with-temp-buffer (insert \"a\u03bb\u6587z\") (narrow-to-region 2 4) (widen) (char-before 5))",
+    "(with-temp-buffer (set-buffer-multibyte nil) (insert (unibyte-string 0 127 128 255)) (list (char-before 1) (char-before 2) (char-before 3) (char-before 4) (char-before 5)))",
+    "(with-temp-buffer (insert \"a\u03bb\u6587z\") (let ((m (copy-marker 4))) (list (char-before m) (point))))",
+    "(let ((b (get-buffer-create \"char-dead\")) (m (make-marker))) (with-current-buffer b (insert \"\u03bb\") (set-marker m 2)) (kill-buffer b) (list (marker-position m) (marker-buffer m) (condition-case e (char-before m) (error e))))",
+    "(char-before (make-marker))",
+    "(let ((a (get-buffer-create \"cb-a\")) (b (get-buffer-create \"cb-b\")) (m (make-marker))) (with-current-buffer a (insert \"\u03bbx\") (set-marker m 2)) (with-current-buffer b (insert \"abcdef\") (char-before m)))",
+    "(let ((a (get-buffer-create \"cb-a2\")) (b (get-buffer-create \"cb-b2\")) (m (make-marker))) (with-current-buffer a (insert \"abc\") (set-marker m 3)) (with-current-buffer b (insert \"\u03bbx\") (char-before m)))",
+    "(with-temp-buffer (insert \"x\") (list (char-before -1) (char-before 0) (char-before #x100000000000000000000000) (char-before #x-100000000000000000000000)))",
+    "(char-before 1.0)",
+    "(char-before t)",
+    "(char-before \"bad\")",
+    "(char-before '(1))",
+    "(list (fboundp 'char-before) (functionp 'char-before))",
+    "(with-temp-buffer (insert \"\u03bb\") (funcall 'char-before))"
+  ]
+}

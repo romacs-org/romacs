@@ -1,0 +1,181 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "next-window",
+ "spec_sha256": "cce0bbf5abf3c35d16ce185698c17314ebfbdf61f006bcbf83ebcfdd4132777d",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "next-window",
+    "subr",
+    0,
+    3
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "window.c": "9bbd2274831c6cee89f1aff0464e0b2695f966d00ff7d1518dc9411cf64b64d8"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "next-window/0000",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (next-window 1 nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument window-live-p 1))"
+  },
+  {
+   "id": "next-window/0001",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (next-window 'sym nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument window-live-p sym))"
+  },
+  {
+   "id": "next-window/0002",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (next-window (copy-sequence \"s\") nil nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument window-live-p \"s\"))"
+  },
+  {
+   "id": "next-window/0003",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'next-window '(1 1 1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr next-window> 4))"
+  },
+  {
+   "id": "next-window/0004",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 nil) (a2 nil)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (next-window a0 a1 a2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument window-live-p 1))"
+  },
+  {
+   "id": "next-window/0005",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 nil) (a2 nil)) (let ((r (next-window a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument window-live-p 1))"
+  },
+  {
+   "id": "next-window/0006",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eq (next-window) (selected-window))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "next-window/0007",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eq (next-window nil t) (minibuffer-window))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "next-window/0008",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eq (next-window (minibuffer-window)) (selected-window))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "next-window/0009",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eq (next-window (minibuffer-window) t) (selected-window))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "next-window/0010",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (let (r) (dolist (w (list (next-window a) (next-window b) (next-window) (next-window b t) (next-window b 'lambda) (next-window (minibuffer-window)) (next-window (minibuffer-window) t))) (push (funcall (lambda (w) (cond ((eq w a) 'a) ((eq w b) 'b) ((eq w p) 'p) ((eq w (minibuffer-window)) 'm) ((windowp w) 'other) (t w))) w) r)) (nreverse r)))) (error (list 'sig e))))",
+   "expected": "(ok (b a b m a a a))",
+   "gnu_regime_variant": "(ok (b other b other other a a))"
+  },
+  {
+   "id": "next-window/0011",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (let (r) (dolist (w (list (next-window a nil t) (next-window b nil 'visible) (next-window b nil 0) (next-window b nil (selected-frame)) (next-window b nil 'other) (next-window b t t))) (push (funcall (lambda (w) (cond ((eq w a) 'a) ((eq w b) 'b) ((eq w p) 'p) ((eq w (minibuffer-window)) 'm) ((windowp w) 'other) (t w))) w) r)) (nreverse r)))) (error (list 'sig e))))",
+   "expected": "(ok (b a a a a m))",
+   "gnu_regime_variant": "(ok (b other other other other other))"
+  },
+  {
+   "id": "next-window/0012",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (let (r) (dolist (w (list (next-window a nil a) (next-window b nil b) (next-window b nil (minibuffer-window)) (next-window b t (minibuffer-window)) (next-window a 'lambda (minibuffer-window)))) (push (funcall (lambda (w) (cond ((eq w a) 'a) ((eq w b) 'b) ((eq w p) 'p) ((eq w (minibuffer-window)) 'm) ((windowp w) 'other) (t w))) w) r)) (nreverse r)))) (error (list 'sig e))))",
+   "expected": "(ok (b a a m b))",
+   "gnu_regime_variant": "(ok (b other other other b))"
+  },
+  {
+   "id": "next-window/0013",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (let* ((c (progn (set-window-new-pixel b (- (window-pixel-width b) (/ (window-pixel-width b) 2))) (split-window-internal b (/ (window-pixel-width b) 2) t 0.5)))) (let (r) (dolist (w (list (next-window a) (next-window b) (next-window c) (next-window c t) (next-window (minibuffer-window) t))) (push (funcall (lambda (w) (cond ((eq w a) 'a) ((eq w b) 'b) ((eq w c) 'c) ((eq w (minibuffer-window)) 'm) (t w))) w) r)) (nreverse r))))) (error (list 'sig e))))",
+   "expected": "(ok (b c a m a))",
+   "gnu_regime_variant": "(ok (b c #<window 4 on *scratch*> #<window 4 on *scratch*> a))"
+  },
+  {
+   "id": "next-window/0014",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (let* ((c (progn (set-window-new-pixel a (- (window-pixel-height a) (/ (window-pixel-height a) 2))) (split-window-internal a (/ (window-pixel-height a) 2) 'above 0.5)))) (let (r) (dolist (w (list (next-window c) (next-window a) (next-window b))) (push (funcall (lambda (w) (cond ((eq w a) 'a) ((eq w b) 'b) ((eq w c) 'c) ((eq w (minibuffer-window)) 'm) (t w))) w) r)) (nreverse r))))) (error (list 'sig e))))",
+   "expected": "(ok (a b c))",
+   "gnu_regime_variant": "(ok (a b #<window 4 on *scratch*>))"
+  },
+  {
+   "id": "next-window/0015",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (condition-case e (next-window p) (error (list (car e) (car (cdr e)) (eq (car (cdr (cdr e))) p)))))) (error (list 'sig e))))",
+   "expected": "(ok (wrong-type-argument window-live-p t))"
+  },
+  {
+   "id": "next-window/0016",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (progn (set-window-new-pixel p h) (set-window-new-pixel a h) (delete-window-internal b) (condition-case e (next-window b) (error (list (car e) (car (cdr e)) (eq (car (cdr (cdr e))) b))))))) (error (list 'sig e))))",
+   "expected": "(ok (wrong-type-argument window-live-p t))"
+  },
+  {
+   "id": "next-window/0017",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (progn (set-window-new-pixel p h) (set-window-new-pixel a h) (delete-window-internal b) (let (r) (dolist (w (list (next-window a) (next-window a t))) (push (funcall (lambda (w) (cond ((eq w a) 'a) ((eq w b) 'b) ((eq w p) 'p) ((eq w (minibuffer-window)) 'm) ((windowp w) 'other) (t w))) w) r)) (nreverse r))))) (error (list 'sig e))))",
+   "expected": "(ok (a m))"
+  },
+  {
+   "id": "next-window/0018",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (condition-case e (next-window (selected-frame)) (error (list (car e) (car (cdr e)) (eq (car (cdr (cdr e))) (selected-frame)))))) (error (list 'sig e))))",
+   "expected": "(ok (wrong-type-argument window-live-p t))"
+  },
+  {
+   "id": "next-window/0019",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eq (funcall #'next-window) (selected-window))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "next-window/0020",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 'sym) (error (list 'sig e))))",
+   "expected": "(ok sym)"
+  },
+  {
+   "id": "next-window/0021",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"s\")) (error (list 'sig e))))",
+   "expected": "(ok \"s\")"
+  },
+  {
+   "id": "next-window/0022",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1) (error (list 'sig e))))",
+   "expected": "(ok 1)"
+  },
+  {
+   "id": "next-window/0023",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok nil) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  }
+ ],
+ "pinned": {}
+}

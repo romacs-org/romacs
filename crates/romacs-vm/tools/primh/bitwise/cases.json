@@ -1,0 +1,118 @@
+[
+  {
+    "id": "logior-0",
+    "expression": "(logior)"
+  },
+  {
+    "id": "logior-1",
+    "expression": "(logior 7)"
+  },
+  {
+    "id": "logior-2",
+    "expression": "(logior 128 134217728)"
+  },
+  {
+    "id": "logior-3",
+    "expression": "(logior 1 2 4 8)"
+  },
+  {
+    "id": "logior-4",
+    "expression": "(logior -16 3)"
+  },
+  {
+    "id": "logior-5",
+    "expression": "(logior #x10000000000000000000000000 1)"
+  },
+  {
+    "id": "logior-6",
+    "expression": "(logior 1 #x10000000000000000000000000)"
+  },
+  {
+    "id": "logior-7",
+    "expression": "(logior #x-10000000000000000000000000 3)"
+  },
+  {
+    "id": "logior-8",
+    "expression": "(logior #xFFFFFFFFFFFFFFFFFFFFFFFF #x10000000000000000000000000)"
+  },
+  {
+    "id": "logior-9",
+    "expression": "(logior 1.0)"
+  },
+  {
+    "id": "logior-10",
+    "expression": "(logior 'bad)"
+  },
+  {
+    "id": "logior-11",
+    "expression": "(logior 1 'bad)"
+  },
+  {
+    "id": "logior-12",
+    "expression": "(logior 1 2.0)"
+  },
+  {
+    "id": "logior-13",
+    "expression": "(logior #x10000000000000000000000000 'bad)"
+  },
+  {
+    "id": "logior-14",
+    "expression": "(logior #x10000000000000000000000000 2.0)"
+  },
+  {
+    "id": "logior-15",
+    "expression": "(logior 1 2.0 'bad)"
+  },
+  {
+    "id": "logior-16",
+    "expression": "(logior (copy-marker 1) 8)"
+  },
+  {
+    "id": "logior-17",
+    "expression": "(logior 8 (copy-marker 1))"
+  },
+  {
+    "id": "logior-18",
+    "expression": "(logior (make-marker))"
+  },
+  {
+    "id": "logior-19",
+    "expression": "(let ((x #x10000000000000000000000000)) (eq x (logior x)))"
+  },
+  {
+    "id": "logior-20",
+    "expression": "(logior #x-10000000000000000000000000 -1)"
+  },
+  {
+    "id": "logior-21",
+    "expression": "(logior most-positive-fixnum)"
+  },
+  {
+    "id": "logior-22",
+    "expression": "(logior most-negative-fixnum -1)"
+  },
+  {
+    "id": "logior-23",
+    "expression": "(logior 'bad 1)"
+  },
+  {
+    "id": "logior-24",
+    "expression": "(logior #x10000000000000000000000000 (copy-marker 1))"
+  },
+  {
+    "id": "logior-25",
+    "expression": "(logior 1 (make-marker))"
+  },
+  {
+    "id": "logior-26",
+    "expression": "(fixnump (logior #x-10000000000000000000000000 -1))"
+  },
+  {
+    "id": "logior-27",
+    "expression": "(bignump (logior #x10000000000000000000000000 1))"
+  },
+  {
+    "id": "logior-28",
+    "expression": "(logior 7 3)"
+  }
+]

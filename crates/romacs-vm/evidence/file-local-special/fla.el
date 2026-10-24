@@ -1,0 +1,10 @@
+;;; fla.el --- -*- lexical-binding: t -*-
+(defun fla-get () (if (boundp 'fla-v) fla-v 'unbound))
+(defun fla-early () (let ((fla-v 1)) (fla-get)))
+(defvar fla-v)
+(load "fln")
+(setq flz-2 (let ((fla-v 8)) (flz-get)))
+(defun fla-late () (let ((fla-v 2)) (fla-get)))
+(defmacro fla-mac () (let ((fla-v 3)) (list 'quote (fla-get))))
+(setq fla-same (let ((fla-v 7)) (fla-get)))
+(setq fla-r (list (fla-early) (fla-late) (fla-mac) (funcall (lambda () (let ((fla-v 4)) (fla-get)))) (let ((fla-v 5)) (fla-get)) (special-variable-p 'fla-v)))

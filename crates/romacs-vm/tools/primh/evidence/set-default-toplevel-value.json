@@ -1,0 +1,334 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "set-default-toplevel-value",
+ "spec_sha256": "4ba495fb3912f72609c59eb2ee9c185dff2b2efd1890ddbc0ec1fbe5e6e78d76",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "set-default-toplevel-value",
+    "subr",
+    2,
+    2
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "eval.c": "db894444b2edc1e7e675d5d8f97cba7e6f77f2beb0e5c3a130afc505c6f387b4",
+  "data.c": "eca7895a8043cd0a960dfe037a46028374d1a40cc6ee4d0cf6de90ac56c242ae"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "set-default-toplevel-value/0000",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default-toplevel-value 'tv 7)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "set-default-toplevel-value/0001",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default-toplevel-value nil 7)) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant nil))"
+  },
+  {
+   "id": "set-default-toplevel-value/0002",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default-toplevel-value t 7)) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant t))"
+  },
+  {
+   "id": "set-default-toplevel-value/0003",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default-toplevel-value :tv 7)) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant :tv))"
+  },
+  {
+   "id": "set-default-toplevel-value/0004",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default-toplevel-value 1 7)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 1))"
+  },
+  {
+   "id": "set-default-toplevel-value/0005",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default-toplevel-value \"text\" 7)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp \"text\"))"
+  },
+  {
+   "id": "set-default-toplevel-value/0006",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default-toplevel-value '(a) 7)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (a)))"
+  },
+  {
+   "id": "set-default-toplevel-value/0007",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default-toplevel-value [1] 7)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp [1]))"
+  },
+  {
+   "id": "set-default-toplevel-value/0008",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'set-default-toplevel-value '(1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr set-default-toplevel-value> 1))"
+  },
+  {
+   "id": "set-default-toplevel-value/0009",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'set-default-toplevel-value '(1 1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr set-default-toplevel-value> 3))"
+  },
+  {
+   "id": "set-default-toplevel-value/0010",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'tv) (a1 7)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (set-default-toplevel-value a0 a1))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "set-default-toplevel-value/0011",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'tv) (a1 7)) (let ((r (set-default-toplevel-value a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "set-default-toplevel-value/0012",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :tv) (a1 7)) (let ((r (set-default-toplevel-value a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant :tv))"
+  },
+  {
+   "id": "set-default-toplevel-value/0013",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 '(a)) (a1 7)) (let ((r (set-default-toplevel-value a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp (a)))"
+  },
+  {
+   "id": "set-default-toplevel-value/0014",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (fboundp 'set-default-toplevel-value) (functionp #'set-default-toplevel-value) (funcall #'set-default-toplevel-value 'tv 7) (default-value 'tv))) (error (list 'sig e))))",
+   "expected": "(ok (t t nil 7))"
+  },
+  {
+   "id": "set-default-toplevel-value/0015",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (set-default-toplevel-value 'tv '(3 4)) (default-toplevel-value 'tv))) (error (list 'sig e))))",
+   "expected": "(ok (nil (3 4)))"
+  },
+  {
+   "id": "set-default-toplevel-value/0016",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defvar tv 1) (list (let ((tv 2)) (let ((tv 3)) (list (set-default-toplevel-value 'tv 4) tv (default-value 'tv) (default-toplevel-value 'tv)))) tv))) (error (list 'sig e))))",
+   "expected": "(ok ((nil 3 3 4) 4))"
+  },
+  {
+   "id": "set-default-toplevel-value/0017",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defvar tv) (makunbound 'tv) (list (let ((tv 2)) (list (set-default-toplevel-value 'tv 4) tv (default-toplevel-value 'tv))) tv))) (error (list 'sig e))))",
+   "expected": "(ok ((nil 2 4) 4))"
+  },
+  {
+   "id": "set-default-toplevel-value/0018",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defvar tv 1) (defvaralias 'ta 'tv) (list (let ((tv 2)) (list (set-default-toplevel-value 'ta 4) ta tv (default-toplevel-value 'ta) (default-toplevel-value 'tv))) tv))) (error (list 'sig e))))",
+   "expected": "(ok ((nil 4 4 4 1) 1))"
+  },
+  {
+   "id": "set-default-toplevel-value/0019",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defvar tv 1) (defvaralias 'ta 'tv) (list (let ((ta 2)) (list (set-default-toplevel-value 'tv 4) ta tv)) tv))) (error (list 'sig e))))",
+   "expected": "(ok ((nil 2 4) 4))",
+   "gnu_regime_variant": "(ok ((nil 2 2) 4))"
+  },
+  {
+   "id": "set-default-toplevel-value/0020",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defvar tv 1) (make-local-variable 'tv) (setq tv 5) (list (let ((tv 9)) (list (set-default-toplevel-value 'tv 4) tv (default-value 'tv) (default-toplevel-value 'tv))) tv (default-value 'tv)))) (error (list 'sig e))))",
+   "expected": "(ok ((nil 9 4 4) 5 4))"
+  },
+  {
+   "id": "set-default-toplevel-value/0021",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defvar tv 1) (make-variable-buffer-local 'tv) (list (let ((tv 9)) (list (set-default-toplevel-value 'tv 4) tv (default-value 'tv) (default-toplevel-value 'tv))) tv (default-value 'tv)))) (error (list 'sig e))))",
+   "expected": "(ok ((nil 9 9 4) 4 4))"
+  },
+  {
+   "id": "set-default-toplevel-value/0022",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defvar tv 1) (make-variable-buffer-local 'tv) (list (let ((tv 9)) (set-buffer (get-buffer-create \"tv-other\")) (list (set-default-toplevel-value 'tv 4) tv (default-value 'tv) (default-toplevel-value 'tv))) tv))) (error (list 'sig e))))",
+   "expected": "(ok ((nil 9 9 4) 4))"
+  },
+  {
+   "id": "set-default-toplevel-value/0023",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defvar tv 1) (make-variable-buffer-local 'tv) (setq tv 5) (list (set-default-toplevel-value 'tv 4) tv (default-value 'tv)))) (error (list 'sig e))))",
+   "expected": "(ok (nil 5 4))"
+  },
+  {
+   "id": "set-default-toplevel-value/0024",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((s (make-symbol \":tv\")) (v (list 3 4))) (list (set-default-toplevel-value s v) (eq (default-toplevel-value s) v)))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "set-default-toplevel-value/0025",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defvar tv 1) (defvaralias 'ta 'tv) (list (set-default-toplevel-value 'ta 6) tv ta))) (error (list 'sig e))))",
+   "expected": "(ok (nil 6 6))"
+  },
+  {
+   "id": "set-default-toplevel-value/0026",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default-toplevel-value :tv :tv)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "set-default-toplevel-value/0027",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (set-default-toplevel-value 'most-positive-fixnum 0)) (error (list 'sig e))))",
+   "expected": "(sig (setting-constant most-positive-fixnum))"
+  },
+  {
+   "id": "set-default-toplevel-value/0028",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq undo-limit 11) (list (let ((undo-limit 22)) (list (set-default-toplevel-value 'undo-limit 33) undo-limit (default-toplevel-value 'undo-limit))) undo-limit))) (error (list 'sig e))))",
+   "expected": "(ok ((nil 22 33) 33))"
+  },
+  {
+   "id": "set-default-toplevel-value/0029",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set-buffer (get-buffer-create \"tv-fresh\")) (set-default 'fill-column 71) (list (let ((fill-column 82)) (list (set-default-toplevel-value 'fill-column 93) fill-column (default-value 'fill-column) (default-toplevel-value 'fill-column))) fill-column))) (error (list 'sig e))))",
+   "expected": "(ok ((nil 82 82 93) 93))"
+  },
+  {
+   "id": "set-default-toplevel-value/0030",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (set-buffer (get-buffer-create \"tv-fresh\")) (set-default 'fill-column 71) (make-local-variable 'fill-column) (setq fill-column 75) (list (let ((fill-column 82)) (list (set-default-toplevel-value 'fill-column 93) fill-column (default-value 'fill-column) (default-toplevel-value 'fill-column))) fill-column (default-value 'fill-column)))) (error (list 'sig e))))",
+   "expected": "(ok ((nil 82 93 93) 75 93))"
+  },
+  {
+   "id": "set-default-toplevel-value/0031",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defvar tv 1) (list (catch 'stop (let ((tv 2)) (set-default-toplevel-value 'tv 4) (throw 'stop tv))) tv))) (error (list 'sig e))))",
+   "expected": "(ok (2 4))"
+  },
+  {
+   "id": "set-default-toplevel-value/0032",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq undo-limit 11) (condition-case e (let ((undo-limit 22)) (set-default-toplevel-value 'undo-limit \"bad\")) (error e)))) (error (list 'sig e))))",
+   "expected": "(ok (wrong-type-argument integerp \"bad\"))"
+  },
+  {
+   "id": "set-default-toplevel-value/0033",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq undo-limit 11) (condition-case e (catch 'stop (let ((undo-limit 22)) (set-default-toplevel-value 'undo-limit \"bad\") (throw 'stop 9))) (error e)))) (error (list 'sig e))))",
+   "expected": "(ok (wrong-type-argument integerp \"bad\"))"
+  },
+  {
+   "id": "set-default-toplevel-value/0034",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq undo-limit 11) (condition-case e (funcall (lambda () (let ((undo-limit 22)) (set-default-toplevel-value 'undo-limit \"bad\")))) (error e)))) (error (list 'sig e))))",
+   "expected": "(ok (wrong-type-argument integerp \"bad\"))"
+  },
+  {
+   "id": "set-default-toplevel-value/0035",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq undo-limit 11) (let ((tv-clean nil)) (list (condition-case e (unwind-protect (let ((undo-limit 22)) (set-default-toplevel-value 'undo-limit \"bad\")) (setq tv-clean t)) (error e)) tv-clean)))) (error (list 'sig e))))",
+   "expected": "(ok ((wrong-type-argument integerp \"bad\") t))"
+  },
+  {
+   "id": "set-default-toplevel-value/0036",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defvar tv 1) (let ((tv 2)) (set-default-toplevel-value 'tv (list 4 5)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i))))) tv)) (error (list 'sig e))))",
+   "expected": "(ok (4 5))"
+  },
+  {
+   "id": "set-default-toplevel-value/0037",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq undo-limit 11) (condition-case e (funcall (lambda (undo-limit) (set-default-toplevel-value 'undo-limit \"bad\")) 22) (error e)))) (error (list 'sig e))))",
+   "expected": "(ok (wrong-type-argument integerp \"bad\"))"
+  },
+  {
+   "id": "set-default-toplevel-value/0038",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defvar tv 1) (list (funcall (lambda (tv) (list (default-toplevel-value 'tv) (set-default-toplevel-value 'tv 4) tv)) 2) tv))) (error (list 'sig e))))",
+   "expected": "(ok ((1 nil 2) 4))",
+   "gnu_regime_variant": "(ok ((4 nil 2) 4))"
+  },
+  {
+   "id": "set-default-toplevel-value/0039",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (condition-case e (catch 'stop (condition-case nil (let ((undo-limit 22)) (set-default-toplevel-value 'undo-limit \"bad\") (throw 'stop 9)) (wrong-type-argument 'inner))) (error (list 'outer e)))) (error (list 'sig e))))",
+   "expected": "(ok inner)"
+  },
+  {
+   "id": "set-default-toplevel-value/0040",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (condition-case e (let ((undo-limit 22)) (set-default-toplevel-value 'undo-limit \"bad\") (signal 'arith-error nil)) (wrong-type-argument 'type) (arith-error 'arithmetic) (error (list 'outer e)))) (error (list 'sig e))))",
+   "expected": "(ok type)"
+  },
+  {
+   "id": "set-default-toplevel-value/0041",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"text\") (error (list 'sig e))))",
+   "expected": "(ok \"text\")"
+  },
+  {
+   "id": "set-default-toplevel-value/0042",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok '(a)) (error (list 'sig e))))",
+   "expected": "(ok (a))"
+  },
+  {
+   "id": "set-default-toplevel-value/0043",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 'tv) (error (list 'sig e))))",
+   "expected": "(ok tv)"
+  },
+  {
+   "id": "set-default-toplevel-value/0044",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1) (error (list 'sig e))))",
+   "expected": "(ok 1)"
+  },
+  {
+   "id": "set-default-toplevel-value/0045",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 7) (error (list 'sig e))))",
+   "expected": "(ok 7)"
+  },
+  {
+   "id": "set-default-toplevel-value/0046",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok :tv) (error (list 'sig e))))",
+   "expected": "(ok :tv)"
+  },
+  {
+   "id": "set-default-toplevel-value/0047",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok [1]) (error (list 'sig e))))",
+   "expected": "(ok [1])"
+  },
+  {
+   "id": "set-default-toplevel-value/0048",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok nil) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "set-default-toplevel-value/0049",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok t) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  }
+ ]
+}

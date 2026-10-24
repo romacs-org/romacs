@@ -1,0 +1,24 @@
+# GNU Emacs 31.0.90 `tty-color-alist' on TERM=rxvt-16color.  MEASURED, not derived:
+# `emacs -Q -nw' driven through a real pty with COLORTERM unset, dumping every
+# (NAME INDEX R G B) row in the order the list holds them -- which is the order
+# `tty-color-approximate' consults, and therefore what decides an exact tie.
+#
+# Format: NAME INDEX R G B, with R G B the 16-bit components tty-color-alist
+# stores.  CELLS is `display-color-cells'.
+# CELLS 16
+black 0 0 0 0
+red 1 52685 0 0
+green 2 0 52685 0
+yellow 3 52685 52685 0
+blue 4 0 0 52685
+magenta 5 52685 0 52685
+cyan 6 0 52685 52685
+white 7 58853 58853 58853
+brightblack 8 19789 19789 19789
+brightred 9 65535 0 0
+brightgreen 10 0 65535 0
+brightyellow 11 65535 65535 0
+brightblue 12 0 0 65535
+brightmagenta 13 65535 0 65535
+brightcyan 14 0 65535 65535
+brightwhite 15 65535 65535 65535

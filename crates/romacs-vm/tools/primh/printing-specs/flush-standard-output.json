@@ -1,0 +1,18 @@
+{
+ "name": "flush-standard-output",
+ "arity": [
+  0,
+  0
+ ],
+ "effect": "global",
+ "gnu_files": [
+  "print.c"
+ ],
+ "gnu_def": "print.c:917",
+ "rust": "src/prims/printing.rs:47",
+ "args": [],
+ "probes": [
+  "(flush-standard-output)",
+  "(funcall #'flush-standard-output)"
+ ]
+}

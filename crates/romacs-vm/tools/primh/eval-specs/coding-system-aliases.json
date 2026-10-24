@@ -1,0 +1,31 @@
+{
+  "name": "coding-system-aliases",
+  "arity": [
+    1,
+    1
+  ],
+  "effect": "global",
+  "gnu_files": [
+    "coding.c"
+  ],
+  "gnu_def": "coding.c:11644",
+  "rust": "src/prims/coding.rs:67",
+  "args": [
+    "no-generated-domain"
+  ],
+  "probes": [
+    "(car (coding-system-aliases nil))",
+    "(car (coding-system-aliases 'no-conversion))",
+    "(coding-system-aliases 'oracle-missing)",
+    "(coding-system-aliases 17)",
+    "(coding-system-aliases \"raw-text\")",
+    "(coding-system-aliases '(no-conversion))",
+    "(coding-system-aliases [])",
+    "(progn (define-coding-system-internal 'oracle-cod 67 'raw-text nil t nil nil nil nil nil nil '(:probe 7) nil) (list (coding-system-aliases 'oracle-cod) (coding-system-aliases 'oracle-cod-unix) (coding-system-aliases 'oracle-cod-dos) (coding-system-aliases 'oracle-cod-mac)))",
+    "(progn (setq oracle-count 0) (put 'oracle-lazy 'coding-system-define-form '(progn (setq oracle-count (1+ oracle-count)) (define-coding-system-internal 'oracle-lazy 67 'raw-text nil t nil nil nil nil nil nil '(:probe 7) nil))) (list (coding-system-aliases 'oracle-lazy) (coding-system-aliases 'oracle-lazy) oracle-count (get 'oracle-lazy 'coding-system-define-form)))",
+    "(progn (setq oracle-count 0) (put 'oracle-lazy 'coding-system-define-form '(progn (setq oracle-count (1+ oracle-count)) (error \"lazy-error\"))) (condition-case e (coding-system-aliases 'oracle-lazy) (error (list e oracle-count (get 'oracle-lazy 'coding-system-define-form)))))",
+    "(progn (setq oracle-count 0) (put 'oracle-lazy 'coding-system-define-form '(progn (setq oracle-count (1+ oracle-count)) nil)) (condition-case e (coding-system-aliases 'oracle-lazy) (error (list e oracle-count))))",
+    "(progn (define-coding-system-internal 'oracle-cod 67 'raw-text nil t nil nil nil nil nil nil '(:probe 7) nil) (let ((a (coding-system-aliases 'oracle-cod))) (define-coding-system-alias 'oracle-a 'oracle-cod) (define-coding-system-alias 'oracle-b 'oracle-a) (list a (eq a (coding-system-aliases 'oracle-b)) (coding-system-aliases 'oracle-cod-unix))))",
+    "(progn (define-coding-system-internal 'oracle-cod 67 'raw-text nil t nil nil nil nil nil nil '(:probe 7) nil) (define-coding-system-alias 'oracle-a 'oracle-cod) (define-coding-system-alias 'oracle-a 'oracle-cod) (coding-system-aliases 'oracle-cod))"
+  ]
+}

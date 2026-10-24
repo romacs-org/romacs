@@ -1,0 +1,68 @@
+{
+ "name": "floatp",
+ "arity": [
+  1,
+  1
+ ],
+ "effect": "pure",
+ "gnu_files": [
+  "data.c"
+ ],
+ "gnu_def": "data.c:619",
+ "rust": "src/prims/floatp.rs:5",
+ "args": [
+  "data-predicate-curated"
+ ],
+ "extra": {
+  "0": [
+   "nil",
+   "t",
+   "'x",
+   ":key",
+   "0",
+   "1",
+   "-1",
+   "4194303",
+   "4194304",
+   "1152921504606846975",
+   "1152921504606846976",
+   "2305843009213693951",
+   "-2305843009213693952",
+   "#x2000000000000000",
+   "#x-2000000000000001",
+   "#xffffffffffffffffffffffffffffffff",
+   "#x-ffffffffffffffffffffffffffffffff",
+   "0.0",
+   "-0.0",
+   "1.5",
+   "-1.5",
+   "1.0e+INF",
+   "-1.0e+INF",
+   "0.0e+NaN",
+   "\"\"",
+   "\"x\"",
+   "\"\u03bb\"",
+   "'(1 . 2)",
+   "[1]"
+  ]
+ },
+ "probes": [
+  "(floatp (make-marker))",
+  "(floatp (set-marker (make-marker) 1))",
+  "(floatp (current-buffer))",
+  "(floatp (symbol-function 'car))",
+  "(floatp (lambda (x) x))",
+  "(floatp (make-symbol \"x\"))",
+  "(floatp (make-hash-table))",
+  "(floatp (make-char-table 'data-predicate))",
+  "(floatp (standard-syntax-table))",
+  "(floatp (obarray-make 3))",
+  "(floatp (make-overlay 1 1))",
+  "(floatp (selected-window))",
+  "(floatp (selected-frame))",
+  "(floatp (frame-terminal))",
+  "(floatp (unibyte-string 255))",
+  "(funcall #'floatp 0)",
+  "(funcall #'floatp (symbol-function 'car))"
+ ]
+}

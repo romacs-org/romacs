@@ -1,0 +1,163 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "mapconcat",
+ "spec_sha256": "be37ee332e706f003a227dd8ac5ce63e6dc9c1b7d33e404d908290e8a460999d",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "mapconcat",
+    "subr",
+    2,
+    3
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "fns.c": "db81c235d7c63f312128ad84c11d55ae4665a2599099be1229dbaa329afdb3bf"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "mapconcat/0000",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'mapconcat '(1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr mapconcat> 1))"
+  },
+  {
+   "id": "mapconcat/0001",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'mapconcat '(1 1 1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr mapconcat> 4))"
+  },
+  {
+   "id": "mapconcat/0002",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (equal (mapconcat (lambda (x) (list (+ x 64))) '(1 2 3) \"-\") \"A-B-C\")) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "mapconcat/0003",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (equal (funcall #'mapconcat #'identity [\"a\" \"b\"] '(955)) \"aλb\")) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "mapconcat/0004",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (equal (mapconcat #'list \"λ雪\" [45]) \"λ-雪\")) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "mapconcat/0005",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (equal (mapconcat #'identity '(\"a\" nil \"b\")) \"ab\")) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "mapconcat/0006",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (equal (mapconcat 'invalid nil 'invalid) \"\")) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "mapconcat/0007",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (multibyte-string-p (mapconcat 'invalid nil 'invalid))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "mapconcat/0008",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (equal (mapconcat #'identity '(\"a\") 'invalid) \"a\")) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "mapconcat/0009",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((n 0)) (condition-case e (mapconcat (lambda (x) (setq n (1+ n)) x) '(1 2) \"-\") (error (list n e))))) (error (list 'sig e))))",
+   "expected": "(ok (2 (wrong-type-argument sequencep 1)))"
+  },
+  {
+   "id": "mapconcat/0010",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapconcat 'invalid '(1 . bad))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp bad))"
+  },
+  {
+   "id": "mapconcat/0011",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapconcat #'identity 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 1))"
+  },
+  {
+   "id": "mapconcat/0012",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapconcat #'identity [\"a\" \"b\"] 9)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument sequencep 9))"
+  },
+  {
+   "id": "mapconcat/0013",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapconcat #'identity [\"a\" [99999999]])) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument characterp 99999999))"
+  },
+  {
+   "id": "mapconcat/0014",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapconcat 'missing [1])) (error (list 'sig e))))",
+   "expected": "(sig (void-function missing))"
+  },
+  {
+   "id": "mapconcat/0015",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((x (list \"a\" \"b\"))) (setcdr (cdr x) x) (condition-case e (mapconcat #'identity x) (circular-list (car e))))) (error (list 'sig e))))",
+   "expected": "(ok circular-list)"
+  },
+  {
+   "id": "mapconcat/0016",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (equal (mapconcat (lambda (x) (if x \"T\" \"F\")) (make-bool-vector 3 t) \",\") \"T,T,T\")) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "mapconcat/0017",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (mapconcat #'identity (make-char-table 'test))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument listp #^[nil nil test nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil]))"
+  },
+  {
+   "id": "mapconcat/0018",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((f (symbol-function 'concat))) (fset 'concat (lambda (&rest x) \"WRONG\")) (equal (mapconcat #'identity [\"a\" \"b\"]) \"ab\"))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "mapconcat/0019",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (fboundp 'mapconcat) (functionp #'mapconcat))) (error (list 'sig e))))",
+   "expected": "(ok (t t))"
+  },
+  {
+   "id": "mapconcat/0020",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (equal (mapconcat #'identity (vector (unibyte-string 255) (unibyte-string 128)) (unibyte-string 45)) (unibyte-string 255 45 128))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "mapconcat/0021",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (get-text-property 0 'face (mapconcat #'identity (list (propertize \"x\" 'face 'bold))))) (error (list 'sig e))))",
+   "expected": "(ok bold)"
+  }
+ ]
+}

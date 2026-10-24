@@ -1,0 +1,70 @@
+{
+ "name": "read-string",
+ "arity": [
+  1,
+  5
+ ],
+ "effect": "global",
+ "gnu_files": [
+  "minibuf.c"
+ ],
+ "gnu_def": "minibuf.c:1420",
+ "rust": "src/prims/minibuf.rs:39",
+ "args": [
+  "none",
+  "none",
+  "none",
+  "none",
+  "none"
+ ],
+ "extra": {
+  "0": [
+   "(progn (setq unread-command-events (append \"abc\\r\" nil) executing-kbd-macro t) (copy-sequence \"P: \"))",
+   "(progn (setq unread-command-events (append \"\\r\" nil) executing-kbd-macro t) (copy-sequence \"P: \"))",
+   "(progn (setq unread-command-events (append \"(a b)\\r\" nil) executing-kbd-macro t) (copy-sequence \"P: \"))",
+   "(progn (setq unread-command-events (append \"1 2\\r\" nil) executing-kbd-macro t) (copy-sequence \"P: \"))",
+   "(progn (setq unread-command-events (append \"ab\" nil) executing-kbd-macro t) (copy-sequence \"P: \"))",
+   "(progn (setq unread-command-events (append \"ab\\u007fc\\r\" nil) executing-kbd-macro t) (copy-sequence \"P: \"))",
+   "(progn (setq unread-command-events (append \"x\\n\" nil) executing-kbd-macro t) (copy-sequence \"P: \"))",
+   "(progn (setq unread-command-events (append \"q\\r\" nil) executing-kbd-macro t) (copy-sequence \"\"))",
+   "nil",
+   "'sym"
+  ],
+  "1": [
+   "nil",
+   "(copy-sequence \"init\")",
+   "(cons (copy-sequence \"init\") 1)",
+   "5"
+  ],
+  "2": [
+   "nil"
+  ],
+  "3": [
+   "nil",
+   "(copy-sequence \"dflt\")",
+   "(list (copy-sequence \"d1\") \"d2\")",
+   "5",
+   "(list 5 6)",
+   "(copy-sequence \"\")"
+  ],
+  "4": [
+   "nil",
+   "t"
+  ]
+ },
+ "probes": [
+  "(condition-case q (let ((unread-command-events (append \"ab\\C-g\" nil)) (executing-kbd-macro t)) (read-string \"P: \")) (quit (list 'quit q)))",
+  "(condition-case q (let ((unread-command-events (append \"\\C-g\" nil)) (executing-kbd-macro t)) (read-string \"P: \" nil nil \"dflt\")) (quit (list 'quit q)))",
+  "(let ((unread-command-events (append \"\\r\" nil)) (executing-kbd-macro t)) (let ((d (copy-sequence \"dd\"))) (eq d (read-string \"P: \" nil nil d))))",
+  "(let ((unread-command-events (append \"\\r\" nil)) (executing-kbd-macro t)) (let ((d (list (copy-sequence \"d1\") \"d2\"))) (eq (car d) (read-string \"P: \" nil nil d))))",
+  "(let ((unread-command-events (append \"\\r\" nil)) (executing-kbd-macro t)) (read-string \"P: \" nil nil '(nil \"x\")))",
+  "(let ((unread-command-events (append \"\\r\" nil)) (executing-kbd-macro t)) (read-string \"P: \" nil nil 'sym))",
+  "(let ((unread-command-events (append \"\\r\" nil)) (executing-kbd-macro t)) (read-string \"P: \" \"\" nil \"dflt\"))",
+  "(let ((unread-command-events (append \"a\\r\" nil)) (executing-kbd-macro t)) (read-string \"P: \" nil t \"dflt\"))",
+  "(let ((unread-command-events (append \"a\\rb\\r\" nil)) (executing-kbd-macro t)) (list (read-string \"1: \") (read-string \"2: \")))",
+  "(let ((unread-command-events (append \"a\\r\" nil)) (executing-kbd-macro t)) (list (read-string \"1: \") (read-string \"2: \")))",
+  "(let ((unread-command-events (append \"a\\r\" nil)) (executing-kbd-macro t)) (let ((inhibit-interaction t)) (read-string 5)))",
+  "(let ((executing-kbd-macro nil) (unread-command-events (list ?a ?\\r))) (read-string \"P: \"))",
+  "(progn (defun romacs-churn () (interactive) (let ((i 0)) (while (< i 5000) (list i (make-string 3 ?z)) (setq i (1+ i)))) (garbage-collect)) (let ((unread-command-events (append [f7 ?\\r ?x f7 ?\\r] nil)) (executing-kbd-macro t)) (let ((m (make-sparse-keymap)) (d (copy-sequence \"dflt\"))) (set-keymap-parent m minibuffer-local-map) (define-key m [f7] 'romacs-churn) (let ((minibuffer-local-map m)) (list (eq d (read-string \"P: \" nil nil d)) d (read-string \"Q: \" nil nil d))))))"
+ ]
+}

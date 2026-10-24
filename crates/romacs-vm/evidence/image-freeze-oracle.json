@@ -1,0 +1,90 @@
+{
+  "oracle": "<recording-path-redacted>/emacs-32.0.50",
+  "sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+  "cases": [
+    {
+      "name": "yank-menu-mutation-and-alias",
+      "form": "(let* ((freeze-menu '(\"Select Yank\" nil)) (freeze-alias freeze-menu) (freeze-map (cons 'keymap freeze-menu))) (setcdr (cdr freeze-menu) (cons '(entry . 7) nil)) (list (eq freeze-menu freeze-alias) (eq freeze-menu (cdr freeze-map)) freeze-menu))",
+      "command": [
+        "<recording-path-redacted>/emacs-32.0.50",
+        "-Q",
+        "--batch",
+        "--eval",
+        "(prin1 (let* ((freeze-menu '(\"Select Yank\" nil)) (freeze-alias freeze-menu) (freeze-map (cons 'keymap freeze-menu))) (setcdr (cdr freeze-menu) (cons '(entry . 7) nil)) (list (eq freeze-menu freeze-alias) (eq freeze-menu (cdr freeze-map)) freeze-menu)))"
+      ],
+      "exit": 0,
+      "stdout": "(t t (\"Select Yank\" nil (entry . 7)))",
+      "stderr": ""
+    },
+    {
+      "name": "root-cold-and-plist-alias",
+      "form": "(let* ((freeze-shared (list 1 2)) (freeze-form (list 'quote freeze-shared))) (setplist 'freeze-owner freeze-shared) (list (eq freeze-shared (eval freeze-form)) (eq freeze-shared (symbol-plist 'freeze-owner))))",
+      "command": [
+        "<recording-path-redacted>/emacs-32.0.50",
+        "-Q",
+        "--batch",
+        "--eval",
+        "(prin1 (let* ((freeze-shared (list 1 2)) (freeze-form (list 'quote freeze-shared))) (setplist 'freeze-owner freeze-shared) (list (eq freeze-shared (eval freeze-form)) (eq freeze-shared (symbol-plist 'freeze-owner)))))"
+      ],
+      "exit": 0,
+      "stdout": "(t t)",
+      "stderr": ""
+    },
+    {
+      "name": "mutable-code-literal",
+      "form": "(funcall (byte-compile '(lambda () (nreverse '(1 2)))))",
+      "command": [
+        "<recording-path-redacted>/emacs-32.0.50",
+        "-Q",
+        "--batch",
+        "--eval",
+        "(prin1 (funcall (byte-compile '(lambda () (nreverse '(1 2))))))"
+      ],
+      "exit": 0,
+      "stdout": "(2 1)",
+      "stderr": " Warning: ‘nreverse’ on constant list (arg 1)\n"
+    },
+    {
+      "name": "mixed-code-data-after-mutation",
+      "form": "(progn (fset 'freeze-mixed (byte-compile '(lambda () '(1 2)))) (defvar freeze-value (freeze-mixed)) (setplist 'freeze-owner freeze-value) (let ((identical (list (eq freeze-value (freeze-mixed)) (eq freeze-value (symbol-plist 'freeze-owner))))) (setcar freeze-value 9) (list identical (freeze-mixed))))",
+      "command": [
+        "<recording-path-redacted>/emacs-32.0.50",
+        "-Q",
+        "--batch",
+        "--eval",
+        "(prin1 (progn (fset 'freeze-mixed (byte-compile '(lambda () '(1 2)))) (defvar freeze-value (freeze-mixed)) (setplist 'freeze-owner freeze-value) (let ((identical (list (eq freeze-value (freeze-mixed)) (eq freeze-value (symbol-plist 'freeze-owner))))) (setcar freeze-value 9) (list identical (freeze-mixed)))))"
+      ],
+      "exit": 0,
+      "stdout": "((t t) (9 2))",
+      "stderr": ""
+    },
+    {
+      "name": "plist-put-retains-shared-root",
+      "form": "(let ((freeze-shared (list 1 2))) (setplist 'freeze-owner freeze-shared) (put 'freeze-owner 1 9) (list (eq freeze-shared (symbol-plist 'freeze-owner)) freeze-shared))",
+      "command": [
+        "<recording-path-redacted>/emacs-32.0.50",
+        "-Q",
+        "--batch",
+        "--eval",
+        "(prin1 (let ((freeze-shared (list 1 2))) (setplist 'freeze-owner freeze-shared) (put 'freeze-owner 1 9) (list (eq freeze-shared (symbol-plist 'freeze-owner)) freeze-shared)))"
+      ],
+      "exit": 0,
+      "stdout": "(t (1 9))",
+      "stderr": ""
+    },
+    {
+      "name": "repeated-mutable-code-literal",
+      "form": "(let ((f (byte-compile '(lambda () (nreverse '(1 2)))))) (list (funcall f) (funcall f)))",
+      "command": [
+        "<recording-path-redacted>/emacs-32.0.50",
+        "-Q",
+        "--batch",
+        "--eval",
+        "(prin1 (let ((f (byte-compile '(lambda () (nreverse '(1 2)))))) (list (funcall f) (funcall f))))"
+      ],
+      "exit": 0,
+      "stdout": "((2 1) (1))",
+      "stderr": " Warning: ‘nreverse’ on constant list (arg 1)\n"
+    }
+  ]
+}

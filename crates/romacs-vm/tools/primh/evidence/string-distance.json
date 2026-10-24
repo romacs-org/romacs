@@ -1,0 +1,2149 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "string-distance",
+ "spec_sha256": "f43c53f1a869a2dbaefe6ba52bae27bbb9b22f91bc522bfd20bcf7e16c23f432",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "string-distance",
+    "subr",
+    2,
+    3
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "fns.c": "db81c235d7c63f312128ad84c11d55ae4665a2599099be1229dbaa329afdb3bf"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "string-distance/0000",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"\") (copy-sequence \"\") nil)) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "string-distance/0001",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"\") (copy-sequence \"\") t)) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "string-distance/0002",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"\") (copy-sequence \"\") 'sym)) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "string-distance/0003",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"\") (copy-sequence \"\") :kw)) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "string-distance/0004",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"\") (copy-sequence \"\") 1)) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "string-distance/0005",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"\") (copy-sequence \"abc\") nil)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0006",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"\") (copy-sequence \"abc\") t)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0007",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"\") (copy-sequence \"abc\") 'sym)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0008",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"\") (copy-sequence \"abc\") :kw)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0009",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"\") (copy-sequence \"abc\") 1)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0010",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"\") (copy-sequence \"λx\") nil)) (error (list 'sig e))))",
+   "expected": "(ok 2)"
+  },
+  {
+   "id": "string-distance/0011",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"\") (copy-sequence \"λx\") t)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0012",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"\") (copy-sequence \"λx\") 'sym)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0013",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"\") (copy-sequence \"λx\") :kw)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0014",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"\") (copy-sequence \"λx\") 1)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0015",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"\") 7 nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0016",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"\") 7 t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0017",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"\") 7 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0018",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"\") 7 :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0019",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"\") 7 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0020",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"\") (unibyte-string 255 128 97) nil)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0021",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"\") (unibyte-string 255 128 97) t)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0022",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"\") (unibyte-string 255 128 97) 'sym)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0023",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"\") (unibyte-string 255 128 97) :kw)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0024",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"\") (unibyte-string 255 128 97) 1)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0025",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"\") (string-to-multibyte (unibyte-string 255 97)) nil)) (error (list 'sig e))))",
+   "expected": "(ok 2)"
+  },
+  {
+   "id": "string-distance/0026",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"\") (string-to-multibyte (unibyte-string 255 97)) t)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0027",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"\") (string-to-multibyte (unibyte-string 255 97)) 'sym)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0028",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"\") (string-to-multibyte (unibyte-string 255 97)) :kw)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0029",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"\") (string-to-multibyte (unibyte-string 255 97)) 1)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0030",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"abc\") (copy-sequence \"\") nil)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0031",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"abc\") (copy-sequence \"\") t)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0032",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"abc\") (copy-sequence \"\") 'sym)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0033",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"abc\") (copy-sequence \"\") :kw)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0034",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"abc\") (copy-sequence \"\") 1)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0035",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"abc\") (copy-sequence \"abc\") nil)) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "string-distance/0036",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"abc\") (copy-sequence \"abc\") t)) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "string-distance/0037",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"abc\") (copy-sequence \"abc\") 'sym)) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "string-distance/0038",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"abc\") (copy-sequence \"abc\") :kw)) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "string-distance/0039",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"abc\") (copy-sequence \"abc\") 1)) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "string-distance/0040",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"abc\") (copy-sequence \"λx\") nil)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0041",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"abc\") (copy-sequence \"λx\") t)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0042",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"abc\") (copy-sequence \"λx\") 'sym)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0043",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"abc\") (copy-sequence \"λx\") :kw)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0044",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"abc\") (copy-sequence \"λx\") 1)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0045",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"abc\") 7 nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0046",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"abc\") 7 t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0047",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"abc\") 7 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0048",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"abc\") 7 :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0049",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"abc\") 7 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0050",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"abc\") (unibyte-string 255 128 97) nil)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0051",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"abc\") (unibyte-string 255 128 97) t)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0052",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"abc\") (unibyte-string 255 128 97) 'sym)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0053",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"abc\") (unibyte-string 255 128 97) :kw)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0054",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"abc\") (unibyte-string 255 128 97) 1)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0055",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"abc\") (string-to-multibyte (unibyte-string 255 97)) nil)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0056",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"abc\") (string-to-multibyte (unibyte-string 255 97)) t)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0057",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"abc\") (string-to-multibyte (unibyte-string 255 97)) 'sym)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0058",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"abc\") (string-to-multibyte (unibyte-string 255 97)) :kw)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0059",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"abc\") (string-to-multibyte (unibyte-string 255 97)) 1)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0060",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"λx\") (copy-sequence \"\") nil)) (error (list 'sig e))))",
+   "expected": "(ok 2)"
+  },
+  {
+   "id": "string-distance/0061",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"λx\") (copy-sequence \"\") t)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0062",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"λx\") (copy-sequence \"\") 'sym)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0063",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"λx\") (copy-sequence \"\") :kw)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0064",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"λx\") (copy-sequence \"\") 1)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0065",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"λx\") (copy-sequence \"abc\") nil)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0066",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"λx\") (copy-sequence \"abc\") t)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0067",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"λx\") (copy-sequence \"abc\") 'sym)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0068",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"λx\") (copy-sequence \"abc\") :kw)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0069",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"λx\") (copy-sequence \"abc\") 1)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0070",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"λx\") (copy-sequence \"λx\") nil)) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "string-distance/0071",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"λx\") (copy-sequence \"λx\") t)) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "string-distance/0072",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"λx\") (copy-sequence \"λx\") 'sym)) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "string-distance/0073",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"λx\") (copy-sequence \"λx\") :kw)) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "string-distance/0074",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"λx\") (copy-sequence \"λx\") 1)) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "string-distance/0075",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"λx\") 7 nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0076",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"λx\") 7 t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0077",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"λx\") 7 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0078",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"λx\") 7 :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0079",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"λx\") 7 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0080",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"λx\") (unibyte-string 255 128 97) nil)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0081",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"λx\") (unibyte-string 255 128 97) t)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0082",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"λx\") (unibyte-string 255 128 97) 'sym)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0083",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"λx\") (unibyte-string 255 128 97) :kw)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0084",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"λx\") (unibyte-string 255 128 97) 1)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0085",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"λx\") (string-to-multibyte (unibyte-string 255 97)) nil)) (error (list 'sig e))))",
+   "expected": "(ok 2)"
+  },
+  {
+   "id": "string-distance/0086",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"λx\") (string-to-multibyte (unibyte-string 255 97)) t)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0087",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"λx\") (string-to-multibyte (unibyte-string 255 97)) 'sym)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0088",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"λx\") (string-to-multibyte (unibyte-string 255 97)) :kw)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0089",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (copy-sequence \"λx\") (string-to-multibyte (unibyte-string 255 97)) 1)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0090",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance nil (copy-sequence \"\") nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "string-distance/0091",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance nil (copy-sequence \"\") t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "string-distance/0092",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance nil (copy-sequence \"\") 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "string-distance/0093",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance nil (copy-sequence \"\") :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "string-distance/0094",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance nil (copy-sequence \"\") 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "string-distance/0095",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance nil (copy-sequence \"abc\") nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "string-distance/0096",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance nil (copy-sequence \"abc\") t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "string-distance/0097",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance nil (copy-sequence \"abc\") 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "string-distance/0098",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance nil (copy-sequence \"abc\") :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "string-distance/0099",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance nil (copy-sequence \"abc\") 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "string-distance/0100",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance nil (copy-sequence \"λx\") nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "string-distance/0101",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance nil (copy-sequence \"λx\") t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "string-distance/0102",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance nil (copy-sequence \"λx\") 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "string-distance/0103",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance nil (copy-sequence \"λx\") :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "string-distance/0104",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance nil (copy-sequence \"λx\") 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "string-distance/0105",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance nil 7 nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "string-distance/0106",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance nil 7 t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "string-distance/0107",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance nil 7 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "string-distance/0108",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance nil 7 :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "string-distance/0109",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance nil 7 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "string-distance/0110",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance nil (unibyte-string 255 128 97) nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "string-distance/0111",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance nil (unibyte-string 255 128 97) t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "string-distance/0112",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance nil (unibyte-string 255 128 97) 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "string-distance/0113",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance nil (unibyte-string 255 128 97) :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "string-distance/0114",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance nil (unibyte-string 255 128 97) 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "string-distance/0115",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance nil (string-to-multibyte (unibyte-string 255 97)) nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "string-distance/0116",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance nil (string-to-multibyte (unibyte-string 255 97)) t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "string-distance/0117",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance nil (string-to-multibyte (unibyte-string 255 97)) 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "string-distance/0118",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance nil (string-to-multibyte (unibyte-string 255 97)) :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "string-distance/0119",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance nil (string-to-multibyte (unibyte-string 255 97)) 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "string-distance/0120",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance 7 (copy-sequence \"\") nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0121",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance 7 (copy-sequence \"\") t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0122",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance 7 (copy-sequence \"\") 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0123",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance 7 (copy-sequence \"\") :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0124",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance 7 (copy-sequence \"\") 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0125",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance 7 (copy-sequence \"abc\") nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0126",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance 7 (copy-sequence \"abc\") t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0127",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance 7 (copy-sequence \"abc\") 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0128",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance 7 (copy-sequence \"abc\") :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0129",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance 7 (copy-sequence \"abc\") 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0130",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance 7 (copy-sequence \"λx\") nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0131",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance 7 (copy-sequence \"λx\") t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0132",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance 7 (copy-sequence \"λx\") 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0133",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance 7 (copy-sequence \"λx\") :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0134",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance 7 (copy-sequence \"λx\") 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0135",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance 7 7 nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0136",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance 7 7 t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0137",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance 7 7 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0138",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance 7 7 :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0139",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance 7 7 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0140",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance 7 (unibyte-string 255 128 97) nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0141",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance 7 (unibyte-string 255 128 97) t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0142",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance 7 (unibyte-string 255 128 97) 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0143",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance 7 (unibyte-string 255 128 97) :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0144",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance 7 (unibyte-string 255 128 97) 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0145",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance 7 (string-to-multibyte (unibyte-string 255 97)) nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0146",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance 7 (string-to-multibyte (unibyte-string 255 97)) t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0147",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance 7 (string-to-multibyte (unibyte-string 255 97)) 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0148",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance 7 (string-to-multibyte (unibyte-string 255 97)) :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0149",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance 7 (string-to-multibyte (unibyte-string 255 97)) 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0150",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance 'foo (copy-sequence \"\") nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp foo))"
+  },
+  {
+   "id": "string-distance/0151",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance 'foo (copy-sequence \"\") t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp foo))"
+  },
+  {
+   "id": "string-distance/0152",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance 'foo (copy-sequence \"\") 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp foo))"
+  },
+  {
+   "id": "string-distance/0153",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance 'foo (copy-sequence \"\") :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp foo))"
+  },
+  {
+   "id": "string-distance/0154",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance 'foo (copy-sequence \"\") 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp foo))"
+  },
+  {
+   "id": "string-distance/0155",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance 'foo (copy-sequence \"abc\") nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp foo))"
+  },
+  {
+   "id": "string-distance/0156",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance 'foo (copy-sequence \"abc\") t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp foo))"
+  },
+  {
+   "id": "string-distance/0157",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance 'foo (copy-sequence \"abc\") 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp foo))"
+  },
+  {
+   "id": "string-distance/0158",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance 'foo (copy-sequence \"abc\") :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp foo))"
+  },
+  {
+   "id": "string-distance/0159",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance 'foo (copy-sequence \"abc\") 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp foo))"
+  },
+  {
+   "id": "string-distance/0160",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance 'foo (copy-sequence \"λx\") nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp foo))"
+  },
+  {
+   "id": "string-distance/0161",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance 'foo (copy-sequence \"λx\") t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp foo))"
+  },
+  {
+   "id": "string-distance/0162",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance 'foo (copy-sequence \"λx\") 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp foo))"
+  },
+  {
+   "id": "string-distance/0163",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance 'foo (copy-sequence \"λx\") :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp foo))"
+  },
+  {
+   "id": "string-distance/0164",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance 'foo (copy-sequence \"λx\") 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp foo))"
+  },
+  {
+   "id": "string-distance/0165",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance 'foo 7 nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp foo))"
+  },
+  {
+   "id": "string-distance/0166",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance 'foo 7 t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp foo))"
+  },
+  {
+   "id": "string-distance/0167",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance 'foo 7 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp foo))"
+  },
+  {
+   "id": "string-distance/0168",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance 'foo 7 :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp foo))"
+  },
+  {
+   "id": "string-distance/0169",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance 'foo 7 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp foo))"
+  },
+  {
+   "id": "string-distance/0170",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance 'foo (unibyte-string 255 128 97) nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp foo))"
+  },
+  {
+   "id": "string-distance/0171",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance 'foo (unibyte-string 255 128 97) t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp foo))"
+  },
+  {
+   "id": "string-distance/0172",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance 'foo (unibyte-string 255 128 97) 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp foo))"
+  },
+  {
+   "id": "string-distance/0173",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance 'foo (unibyte-string 255 128 97) :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp foo))"
+  },
+  {
+   "id": "string-distance/0174",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance 'foo (unibyte-string 255 128 97) 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp foo))"
+  },
+  {
+   "id": "string-distance/0175",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance 'foo (string-to-multibyte (unibyte-string 255 97)) nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp foo))"
+  },
+  {
+   "id": "string-distance/0176",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance 'foo (string-to-multibyte (unibyte-string 255 97)) t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp foo))"
+  },
+  {
+   "id": "string-distance/0177",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance 'foo (string-to-multibyte (unibyte-string 255 97)) 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp foo))"
+  },
+  {
+   "id": "string-distance/0178",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance 'foo (string-to-multibyte (unibyte-string 255 97)) :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp foo))"
+  },
+  {
+   "id": "string-distance/0179",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance 'foo (string-to-multibyte (unibyte-string 255 97)) 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp foo))"
+  },
+  {
+   "id": "string-distance/0180",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (unibyte-string 255 128 97) (copy-sequence \"\") nil)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0181",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (unibyte-string 255 128 97) (copy-sequence \"\") t)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0182",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (unibyte-string 255 128 97) (copy-sequence \"\") 'sym)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0183",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (unibyte-string 255 128 97) (copy-sequence \"\") :kw)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0184",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (unibyte-string 255 128 97) (copy-sequence \"\") 1)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0185",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (unibyte-string 255 128 97) (copy-sequence \"abc\") nil)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0186",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (unibyte-string 255 128 97) (copy-sequence \"abc\") t)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0187",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (unibyte-string 255 128 97) (copy-sequence \"abc\") 'sym)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0188",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (unibyte-string 255 128 97) (copy-sequence \"abc\") :kw)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0189",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (unibyte-string 255 128 97) (copy-sequence \"abc\") 1)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0190",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (unibyte-string 255 128 97) (copy-sequence \"λx\") nil)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0191",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (unibyte-string 255 128 97) (copy-sequence \"λx\") t)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0192",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (unibyte-string 255 128 97) (copy-sequence \"λx\") 'sym)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0193",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (unibyte-string 255 128 97) (copy-sequence \"λx\") :kw)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0194",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (unibyte-string 255 128 97) (copy-sequence \"λx\") 1)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0195",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (unibyte-string 255 128 97) 7 nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0196",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (unibyte-string 255 128 97) 7 t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0197",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (unibyte-string 255 128 97) 7 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0198",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (unibyte-string 255 128 97) 7 :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0199",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (unibyte-string 255 128 97) 7 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0200",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (unibyte-string 255 128 97) (unibyte-string 255 128 97) nil)) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "string-distance/0201",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (unibyte-string 255 128 97) (unibyte-string 255 128 97) t)) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "string-distance/0202",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (unibyte-string 255 128 97) (unibyte-string 255 128 97) 'sym)) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "string-distance/0203",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (unibyte-string 255 128 97) (unibyte-string 255 128 97) :kw)) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "string-distance/0204",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (unibyte-string 255 128 97) (unibyte-string 255 128 97) 1)) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "string-distance/0205",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (unibyte-string 255 128 97) (string-to-multibyte (unibyte-string 255 97)) nil)) (error (list 'sig e))))",
+   "expected": "(ok 2)"
+  },
+  {
+   "id": "string-distance/0206",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (unibyte-string 255 128 97) (string-to-multibyte (unibyte-string 255 97)) t)) (error (list 'sig e))))",
+   "expected": "(ok 2)"
+  },
+  {
+   "id": "string-distance/0207",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (unibyte-string 255 128 97) (string-to-multibyte (unibyte-string 255 97)) 'sym)) (error (list 'sig e))))",
+   "expected": "(ok 2)"
+  },
+  {
+   "id": "string-distance/0208",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (unibyte-string 255 128 97) (string-to-multibyte (unibyte-string 255 97)) :kw)) (error (list 'sig e))))",
+   "expected": "(ok 2)"
+  },
+  {
+   "id": "string-distance/0209",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (unibyte-string 255 128 97) (string-to-multibyte (unibyte-string 255 97)) 1)) (error (list 'sig e))))",
+   "expected": "(ok 2)"
+  },
+  {
+   "id": "string-distance/0210",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (string-to-multibyte (unibyte-string 255 97)) (copy-sequence \"\") nil)) (error (list 'sig e))))",
+   "expected": "(ok 2)"
+  },
+  {
+   "id": "string-distance/0211",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (string-to-multibyte (unibyte-string 255 97)) (copy-sequence \"\") t)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0212",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (string-to-multibyte (unibyte-string 255 97)) (copy-sequence \"\") 'sym)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0213",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (string-to-multibyte (unibyte-string 255 97)) (copy-sequence \"\") :kw)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0214",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (string-to-multibyte (unibyte-string 255 97)) (copy-sequence \"\") 1)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0215",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (string-to-multibyte (unibyte-string 255 97)) (copy-sequence \"abc\") nil)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0216",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (string-to-multibyte (unibyte-string 255 97)) (copy-sequence \"abc\") t)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0217",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (string-to-multibyte (unibyte-string 255 97)) (copy-sequence \"abc\") 'sym)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0218",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (string-to-multibyte (unibyte-string 255 97)) (copy-sequence \"abc\") :kw)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0219",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (string-to-multibyte (unibyte-string 255 97)) (copy-sequence \"abc\") 1)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0220",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (string-to-multibyte (unibyte-string 255 97)) (copy-sequence \"λx\") nil)) (error (list 'sig e))))",
+   "expected": "(ok 2)"
+  },
+  {
+   "id": "string-distance/0221",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (string-to-multibyte (unibyte-string 255 97)) (copy-sequence \"λx\") t)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0222",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (string-to-multibyte (unibyte-string 255 97)) (copy-sequence \"λx\") 'sym)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0223",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (string-to-multibyte (unibyte-string 255 97)) (copy-sequence \"λx\") :kw)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0224",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (string-to-multibyte (unibyte-string 255 97)) (copy-sequence \"λx\") 1)) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0225",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (string-to-multibyte (unibyte-string 255 97)) 7 nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0226",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (string-to-multibyte (unibyte-string 255 97)) 7 t)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0227",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (string-to-multibyte (unibyte-string 255 97)) 7 'sym)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0228",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (string-to-multibyte (unibyte-string 255 97)) 7 :kw)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0229",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (string-to-multibyte (unibyte-string 255 97)) 7 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0230",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (string-to-multibyte (unibyte-string 255 97)) (unibyte-string 255 128 97) nil)) (error (list 'sig e))))",
+   "expected": "(ok 2)"
+  },
+  {
+   "id": "string-distance/0231",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (string-to-multibyte (unibyte-string 255 97)) (unibyte-string 255 128 97) t)) (error (list 'sig e))))",
+   "expected": "(ok 2)"
+  },
+  {
+   "id": "string-distance/0232",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (string-to-multibyte (unibyte-string 255 97)) (unibyte-string 255 128 97) 'sym)) (error (list 'sig e))))",
+   "expected": "(ok 2)"
+  },
+  {
+   "id": "string-distance/0233",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (string-to-multibyte (unibyte-string 255 97)) (unibyte-string 255 128 97) :kw)) (error (list 'sig e))))",
+   "expected": "(ok 2)"
+  },
+  {
+   "id": "string-distance/0234",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (string-to-multibyte (unibyte-string 255 97)) (unibyte-string 255 128 97) 1)) (error (list 'sig e))))",
+   "expected": "(ok 2)"
+  },
+  {
+   "id": "string-distance/0235",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (string-to-multibyte (unibyte-string 255 97)) (string-to-multibyte (unibyte-string 255 97)) nil)) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "string-distance/0236",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (string-to-multibyte (unibyte-string 255 97)) (string-to-multibyte (unibyte-string 255 97)) t)) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "string-distance/0237",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (string-to-multibyte (unibyte-string 255 97)) (string-to-multibyte (unibyte-string 255 97)) 'sym)) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "string-distance/0238",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (string-to-multibyte (unibyte-string 255 97)) (string-to-multibyte (unibyte-string 255 97)) :kw)) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "string-distance/0239",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (string-to-multibyte (unibyte-string 255 97)) (string-to-multibyte (unibyte-string 255 97)) 1)) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "string-distance/0240",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'string-distance '(1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr string-distance> 1))"
+  },
+  {
+   "id": "string-distance/0241",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'string-distance '(1 1 1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr string-distance> 4))"
+  },
+  {
+   "id": "string-distance/0242",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\")) (a1 (copy-sequence \"\")) (a2 nil)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (string-distance a0 a1 a2))) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "string-distance/0243",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 (copy-sequence \"abc\")) (a2 'sym)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (string-distance a0 a1 a2))) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "string-distance/0244",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 (copy-sequence \"λx\")) (a2 1)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (string-distance a0 a1 a2))) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "string-distance/0245",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 (unibyte-string 255 128 97)) (a2 t)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (string-distance a0 a1 a2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "string-distance/0246",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 7) (a1 (string-to-multibyte (unibyte-string 255 97))) (a2 :kw)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (string-distance a0 a1 a2))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0247",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (unibyte-string 255 128 97)) (a1 (copy-sequence \"abc\")) (a2 nil)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (string-distance a0 a1 a2))) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0248",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (string-to-multibyte (unibyte-string 255 97))) (a1 (copy-sequence \"λx\")) (a2 'sym)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (string-distance a0 a1 a2))) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0249",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\")) (a1 (copy-sequence \"\")) (a2 nil)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil nil))"
+  },
+  {
+   "id": "string-distance/0250",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\")) (a1 (copy-sequence \"\")) (a2 :kw)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil nil))"
+  },
+  {
+   "id": "string-distance/0251",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\")) (a1 (copy-sequence \"abc\")) (a2 t)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil nil))"
+  },
+  {
+   "id": "string-distance/0252",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\")) (a1 (copy-sequence \"abc\")) (a2 1)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil nil))"
+  },
+  {
+   "id": "string-distance/0253",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\")) (a1 (copy-sequence \"λx\")) (a2 'sym)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil nil))"
+  },
+  {
+   "id": "string-distance/0254",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\")) (a1 7) (a2 nil)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0255",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\")) (a1 7) (a2 :kw)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0256",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\")) (a1 (unibyte-string 255 128 97)) (a2 t)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil nil))"
+  },
+  {
+   "id": "string-distance/0257",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\")) (a1 (unibyte-string 255 128 97)) (a2 1)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil nil))"
+  },
+  {
+   "id": "string-distance/0258",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"\")) (a1 (string-to-multibyte (unibyte-string 255 97))) (a2 'sym)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil nil))"
+  },
+  {
+   "id": "string-distance/0259",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 (copy-sequence \"\")) (a2 nil)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil nil))"
+  },
+  {
+   "id": "string-distance/0260",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 (copy-sequence \"\")) (a2 :kw)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil nil))"
+  },
+  {
+   "id": "string-distance/0261",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 (copy-sequence \"abc\")) (a2 t)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil nil))"
+  },
+  {
+   "id": "string-distance/0262",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 (copy-sequence \"abc\")) (a2 1)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil nil))"
+  },
+  {
+   "id": "string-distance/0263",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 (copy-sequence \"λx\")) (a2 'sym)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil nil))"
+  },
+  {
+   "id": "string-distance/0264",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 7) (a2 nil)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0265",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 7) (a2 :kw)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0266",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 (unibyte-string 255 128 97)) (a2 t)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil nil))"
+  },
+  {
+   "id": "string-distance/0267",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 (unibyte-string 255 128 97)) (a2 1)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil nil))"
+  },
+  {
+   "id": "string-distance/0268",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"abc\")) (a1 (string-to-multibyte (unibyte-string 255 97))) (a2 'sym)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil nil))"
+  },
+  {
+   "id": "string-distance/0269",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 (copy-sequence \"\")) (a2 nil)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil nil))"
+  },
+  {
+   "id": "string-distance/0270",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 (copy-sequence \"\")) (a2 :kw)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil nil))"
+  },
+  {
+   "id": "string-distance/0271",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 (copy-sequence \"abc\")) (a2 t)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil nil))"
+  },
+  {
+   "id": "string-distance/0272",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 (copy-sequence \"abc\")) (a2 1)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil nil))"
+  },
+  {
+   "id": "string-distance/0273",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 (copy-sequence \"λx\")) (a2 'sym)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil nil))"
+  },
+  {
+   "id": "string-distance/0274",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 7) (a2 nil)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0275",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 7) (a2 :kw)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0276",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 (unibyte-string 255 128 97)) (a2 t)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil nil))"
+  },
+  {
+   "id": "string-distance/0277",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 (unibyte-string 255 128 97)) (a2 1)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil nil))"
+  },
+  {
+   "id": "string-distance/0278",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\")) (a1 (string-to-multibyte (unibyte-string 255 97))) (a2 'sym)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil nil))"
+  },
+  {
+   "id": "string-distance/0279",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 (copy-sequence \"\")) (a2 nil)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "string-distance/0280",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 (copy-sequence \"\")) (a2 :kw)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "string-distance/0281",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 (copy-sequence \"abc\")) (a2 t)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "string-distance/0282",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 (copy-sequence \"abc\")) (a2 1)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "string-distance/0283",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 (copy-sequence \"λx\")) (a2 'sym)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "string-distance/0284",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 7) (a2 nil)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "string-distance/0285",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 7) (a2 :kw)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "string-distance/0286",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 (unibyte-string 255 128 97)) (a2 t)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "string-distance/0287",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 (unibyte-string 255 128 97)) (a2 1)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "string-distance/0288",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 (string-to-multibyte (unibyte-string 255 97))) (a2 'sym)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "string-distance/0289",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 7) (a1 (copy-sequence \"\")) (a2 nil)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0290",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 7) (a1 (copy-sequence \"\")) (a2 :kw)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0291",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 7) (a1 (copy-sequence \"abc\")) (a2 t)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0292",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 7) (a1 (copy-sequence \"abc\")) (a2 1)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0293",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 7) (a1 (copy-sequence \"λx\")) (a2 'sym)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0294",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 7) (a1 7) (a2 nil)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0295",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 7) (a1 7) (a2 :kw)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0296",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 7) (a1 (unibyte-string 255 128 97)) (a2 t)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0297",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 7) (a1 (unibyte-string 255 128 97)) (a2 1)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0298",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 7) (a1 (string-to-multibyte (unibyte-string 255 97))) (a2 'sym)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0299",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'foo) (a1 (copy-sequence \"\")) (a2 nil)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp foo))"
+  },
+  {
+   "id": "string-distance/0300",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'foo) (a1 (copy-sequence \"\")) (a2 :kw)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp foo))"
+  },
+  {
+   "id": "string-distance/0301",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'foo) (a1 (copy-sequence \"abc\")) (a2 t)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp foo))"
+  },
+  {
+   "id": "string-distance/0302",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'foo) (a1 (copy-sequence \"abc\")) (a2 1)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp foo))"
+  },
+  {
+   "id": "string-distance/0303",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'foo) (a1 (copy-sequence \"λx\")) (a2 'sym)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp foo))"
+  },
+  {
+   "id": "string-distance/0304",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'foo) (a1 7) (a2 nil)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp foo))"
+  },
+  {
+   "id": "string-distance/0305",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'foo) (a1 7) (a2 :kw)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp foo))"
+  },
+  {
+   "id": "string-distance/0306",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'foo) (a1 (unibyte-string 255 128 97)) (a2 t)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp foo))"
+  },
+  {
+   "id": "string-distance/0307",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'foo) (a1 (unibyte-string 255 128 97)) (a2 1)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp foo))"
+  },
+  {
+   "id": "string-distance/0308",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'foo) (a1 (string-to-multibyte (unibyte-string 255 97))) (a2 'sym)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp foo))"
+  },
+  {
+   "id": "string-distance/0309",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (unibyte-string 255 128 97)) (a1 (copy-sequence \"\")) (a2 nil)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil nil))"
+  },
+  {
+   "id": "string-distance/0310",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (unibyte-string 255 128 97)) (a1 (copy-sequence \"\")) (a2 :kw)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil nil))"
+  },
+  {
+   "id": "string-distance/0311",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (unibyte-string 255 128 97)) (a1 (copy-sequence \"abc\")) (a2 t)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil nil))"
+  },
+  {
+   "id": "string-distance/0312",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (unibyte-string 255 128 97)) (a1 (copy-sequence \"abc\")) (a2 1)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil nil))"
+  },
+  {
+   "id": "string-distance/0313",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (unibyte-string 255 128 97)) (a1 (copy-sequence \"λx\")) (a2 'sym)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil nil))"
+  },
+  {
+   "id": "string-distance/0314",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (unibyte-string 255 128 97)) (a1 7) (a2 nil)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0315",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (unibyte-string 255 128 97)) (a1 7) (a2 :kw)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0316",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (unibyte-string 255 128 97)) (a1 (unibyte-string 255 128 97)) (a2 t)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil nil))"
+  },
+  {
+   "id": "string-distance/0317",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (unibyte-string 255 128 97)) (a1 (unibyte-string 255 128 97)) (a2 1)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil nil))"
+  },
+  {
+   "id": "string-distance/0318",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (unibyte-string 255 128 97)) (a1 (string-to-multibyte (unibyte-string 255 97))) (a2 'sym)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil nil))"
+  },
+  {
+   "id": "string-distance/0319",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (string-to-multibyte (unibyte-string 255 97))) (a1 (copy-sequence \"\")) (a2 nil)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil nil))"
+  },
+  {
+   "id": "string-distance/0320",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (string-to-multibyte (unibyte-string 255 97))) (a1 (copy-sequence \"\")) (a2 :kw)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil nil))"
+  },
+  {
+   "id": "string-distance/0321",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (string-to-multibyte (unibyte-string 255 97))) (a1 (copy-sequence \"abc\")) (a2 t)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil nil))"
+  },
+  {
+   "id": "string-distance/0322",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (string-to-multibyte (unibyte-string 255 97))) (a1 (copy-sequence \"abc\")) (a2 1)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil nil))"
+  },
+  {
+   "id": "string-distance/0323",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (string-to-multibyte (unibyte-string 255 97))) (a1 (copy-sequence \"λx\")) (a2 'sym)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil nil))"
+  },
+  {
+   "id": "string-distance/0324",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (string-to-multibyte (unibyte-string 255 97))) (a1 7) (a2 nil)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0325",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (string-to-multibyte (unibyte-string 255 97))) (a1 7) (a2 :kw)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 7))"
+  },
+  {
+   "id": "string-distance/0326",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (string-to-multibyte (unibyte-string 255 97))) (a1 (unibyte-string 255 128 97)) (a2 t)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil nil))"
+  },
+  {
+   "id": "string-distance/0327",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (string-to-multibyte (unibyte-string 255 97))) (a1 (unibyte-string 255 128 97)) (a2 1)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil nil))"
+  },
+  {
+   "id": "string-distance/0328",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (string-to-multibyte (unibyte-string 255 97))) (a1 (string-to-multibyte (unibyte-string 255 97))) (a2 'sym)) (let ((r (string-distance a0 a1 a2))) (list (eq r a0) (eq r a1) (eq r a2))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil nil))"
+  },
+  {
+   "id": "string-distance/0329",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance \"kitten\" \"sitting\")) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0330",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance \"λ雪\" \"λ😀\")) (error (list 'sig e))))",
+   "expected": "(ok 1)"
+  },
+  {
+   "id": "string-distance/0331",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance \"\" \"λ雪\")) (error (list 'sig e))))",
+   "expected": "(ok 2)"
+  },
+  {
+   "id": "string-distance/0332",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance \"\" \"λ雪\" t)) (error (list 'sig e))))",
+   "expected": "(ok 5)"
+  },
+  {
+   "id": "string-distance/0333",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (unibyte-string 255) (string-to-multibyte (unibyte-string 255)))) (error (list 'sig e))))",
+   "expected": "(ok 1)"
+  },
+  {
+   "id": "string-distance/0334",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (unibyte-string 255) (unibyte-string 128))) (error (list 'sig e))))",
+   "expected": "(ok 1)"
+  },
+  {
+   "id": "string-distance/0335",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (condition-case e (string-distance 'wrong 'also-wrong) (error e))) (error (list 'sig e))))",
+   "expected": "(ok (wrong-type-argument stringp wrong))"
+  },
+  {
+   "id": "string-distance/0336",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (condition-case e (string-distance \"ok\" 'wrong) (error e))) (error (list 'sig e))))",
+   "expected": "(ok (wrong-type-argument stringp wrong))"
+  },
+  {
+   "id": "string-distance/0337",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (funcall #'string-distance \"ABC\" \"abc\")) (error (list 'sig e))))",
+   "expected": "(ok 3)"
+  },
+  {
+   "id": "string-distance/0338",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (propertize \"abc\" 'face 'bold) \"abc\")) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "string-distance/0339",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (string 4194303 2097152 55296) (string 4194303 2097153 55296))) (error (list 'sig e))))",
+   "expected": "(ok 1)"
+  },
+  {
+   "id": "string-distance/0340",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-distance (string 4194303) (string 4194303) t)) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "string-distance/0341",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 'foo) (error (list 'sig e))))",
+   "expected": "(ok foo)"
+  },
+  {
+   "id": "string-distance/0342",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 'sym) (error (list 'sig e))))",
+   "expected": "(ok sym)"
+  },
+  {
+   "id": "string-distance/0343",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"\")) (error (list 'sig e))))",
+   "expected": "(ok \"\")"
+  },
+  {
+   "id": "string-distance/0344",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"abc\")) (error (list 'sig e))))",
+   "expected": "(ok \"abc\")"
+  },
+  {
+   "id": "string-distance/0345",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"λx\")) (error (list 'sig e))))",
+   "expected": "(ok \"λx\")"
+  },
+  {
+   "id": "string-distance/0346",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-to-multibyte (unibyte-string 255 97))) (error (list 'sig e))))",
+   "expected": "(ok \"\\377a\")"
+  },
+  {
+   "id": "string-distance/0347",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (unibyte-string 255 128 97)) (error (list 'sig e))))",
+   "expected": "(ok \"\\377\\200a\")"
+  },
+  {
+   "id": "string-distance/0348",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1) (error (list 'sig e))))",
+   "expected": "(ok 1)"
+  },
+  {
+   "id": "string-distance/0349",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 7) (error (list 'sig e))))",
+   "expected": "(ok 7)"
+  },
+  {
+   "id": "string-distance/0350",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok :kw) (error (list 'sig e))))",
+   "expected": "(ok :kw)"
+  },
+  {
+   "id": "string-distance/0351",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok nil) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "string-distance/0352",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok t) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "name": "terminal-list",
+ "arity": [
+  0,
+  0
+ ],
+ "effect": "reads",
+ "gnu_files": [
+  "terminal.c"
+ ],
+ "gnu_def": "terminal.c:501",
+ "args": [],
+ "extra": {},
+ "probes": [
+  "(fboundp 'terminal-list)",
+  "(equal (terminal-list) (list (frame-terminal)))",
+  "(eq (terminal-list) (terminal-list))",
+  "(equal (funcall #'terminal-list) (terminal-list))"
+ ],
+ "rust": "src/prims/frame.rs:14"
+}

@@ -1,0 +1,566 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "sequencep",
+ "spec_sha256": "9827a7780d07ac3f8a2fbb0ab63c811d256ef49bdd0f0ff489299598f26a44f3",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "sequencep",
+    "subr",
+    1,
+    1
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "data.c": "eca7895a8043cd0a960dfe037a46028374d1a40cc6ee4d0cf6de90ac56c242ae"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "sequencep/0000",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (sequencep nil)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "sequencep/0001",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (sequencep t)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "sequencep/0002",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (sequencep 'x)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "sequencep/0003",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (sequencep :key)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "sequencep/0004",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (sequencep 0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "sequencep/0005",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (sequencep 1)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "sequencep/0006",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (sequencep -1)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "sequencep/0007",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (sequencep 4194303)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "sequencep/0008",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (sequencep 4194304)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "sequencep/0009",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (sequencep 1152921504606846975)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "sequencep/0010",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (sequencep 1152921504606846976)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "sequencep/0011",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (sequencep 2305843009213693951)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "sequencep/0012",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (sequencep -2305843009213693952)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "sequencep/0013",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (sequencep #x2000000000000000)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "sequencep/0014",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (sequencep #x-2000000000000001)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "sequencep/0015",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (sequencep #xffffffffffffffffffffffffffffffff)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "sequencep/0016",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (sequencep #x-ffffffffffffffffffffffffffffffff)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "sequencep/0017",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (sequencep 0.0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "sequencep/0018",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (sequencep -0.0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "sequencep/0019",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (sequencep 1.5)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "sequencep/0020",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (sequencep -1.5)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "sequencep/0021",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (sequencep 1.0e+INF)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "sequencep/0022",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (sequencep -1.0e+INF)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "sequencep/0023",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (sequencep 0.0e+NaN)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "sequencep/0024",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (sequencep \"\")) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "sequencep/0025",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (sequencep \"x\")) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "sequencep/0026",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (sequencep \"λ\")) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "sequencep/0027",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (sequencep '(1 . 2))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "sequencep/0028",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (sequencep [1])) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "sequencep/0029",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'sequencep '())) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr sequencep> 0))"
+  },
+  {
+   "id": "sequencep/0030",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'sequencep '(1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr sequencep> 2))"
+  },
+  {
+   "id": "sequencep/0031",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (sequencep a0))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "sequencep/0032",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil)) (let ((r (sequencep a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "sequencep/0033",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :key)) (let ((r (sequencep a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "sequencep/0034",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1)) (let ((r (sequencep a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "sequencep/0035",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1152921504606846975)) (let ((r (sequencep a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "sequencep/0036",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -2305843009213693952)) (let ((r (sequencep a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "sequencep/0037",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 #xffffffffffffffffffffffffffffffff)) (let ((r (sequencep a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "sequencep/0038",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -0.0)) (let ((r (sequencep a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "sequencep/0039",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.0e+INF)) (let ((r (sequencep a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "sequencep/0040",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 \"\")) (let ((r (sequencep a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "sequencep/0041",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 '(1 . 2))) (let ((r (sequencep a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "sequencep/0042",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (sequencep (make-marker))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "sequencep/0043",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (sequencep (set-marker (make-marker) 1))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "sequencep/0044",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (sequencep (current-buffer))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "sequencep/0045",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (sequencep (symbol-function 'car))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "sequencep/0046",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (sequencep (lambda (x) x))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "sequencep/0047",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (sequencep (make-symbol \"x\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "sequencep/0048",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (sequencep (make-hash-table))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "sequencep/0049",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (sequencep (make-char-table 'data-predicate))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "sequencep/0050",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (sequencep (standard-syntax-table))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "sequencep/0051",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (sequencep (obarray-make 3))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "sequencep/0052",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (sequencep (make-overlay 1 1))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "sequencep/0053",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (sequencep (selected-window))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "sequencep/0054",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (sequencep (selected-frame))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "sequencep/0055",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (sequencep (frame-terminal))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "sequencep/0056",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (sequencep (unibyte-string 255))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "sequencep/0057",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (funcall #'sequencep 0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "sequencep/0058",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (funcall #'sequencep (symbol-function 'car))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "sequencep/0059",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (sequencep (make-bool-vector 2 t))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "sequencep/0060",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"\") (error (list 'sig e))))",
+   "expected": "(ok \"\")"
+  },
+  {
+   "id": "sequencep/0061",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"x\") (error (list 'sig e))))",
+   "expected": "(ok \"x\")"
+  },
+  {
+   "id": "sequencep/0062",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"λ\") (error (list 'sig e))))",
+   "expected": "(ok \"λ\")"
+  },
+  {
+   "id": "sequencep/0063",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok #x-2000000000000001) (error (list 'sig e))))",
+   "expected": "(ok -2305843009213693953)"
+  },
+  {
+   "id": "sequencep/0064",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok #x-ffffffffffffffffffffffffffffffff) (error (list 'sig e))))",
+   "expected": "(ok -340282366920938463463374607431768211455)"
+  },
+  {
+   "id": "sequencep/0065",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok #x2000000000000000) (error (list 'sig e))))",
+   "expected": "(ok 2305843009213693952)"
+  },
+  {
+   "id": "sequencep/0066",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok #xffffffffffffffffffffffffffffffff) (error (list 'sig e))))",
+   "expected": "(ok 340282366920938463463374607431768211455)"
+  },
+  {
+   "id": "sequencep/0067",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok '(1 . 2)) (error (list 'sig e))))",
+   "expected": "(ok (1 . 2))"
+  },
+  {
+   "id": "sequencep/0068",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 'x) (error (list 'sig e))))",
+   "expected": "(ok x)"
+  },
+  {
+   "id": "sequencep/0069",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok -0.0) (error (list 'sig e))))",
+   "expected": "(ok -0.0)"
+  },
+  {
+   "id": "sequencep/0070",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok -1) (error (list 'sig e))))",
+   "expected": "(ok -1)"
+  },
+  {
+   "id": "sequencep/0071",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok -1.0e+INF) (error (list 'sig e))))",
+   "expected": "(ok -1.0e+INF)"
+  },
+  {
+   "id": "sequencep/0072",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok -1.5) (error (list 'sig e))))",
+   "expected": "(ok -1.5)"
+  },
+  {
+   "id": "sequencep/0073",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok -2305843009213693952) (error (list 'sig e))))",
+   "expected": "(ok -2305843009213693952)"
+  },
+  {
+   "id": "sequencep/0074",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 0) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "sequencep/0075",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 0.0) (error (list 'sig e))))",
+   "expected": "(ok 0.0)"
+  },
+  {
+   "id": "sequencep/0076",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 0.0e+NaN) (error (list 'sig e))))",
+   "expected": "(ok 0.0e+NaN)"
+  },
+  {
+   "id": "sequencep/0077",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1) (error (list 'sig e))))",
+   "expected": "(ok 1)"
+  },
+  {
+   "id": "sequencep/0078",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1.0e+INF) (error (list 'sig e))))",
+   "expected": "(ok 1.0e+INF)"
+  },
+  {
+   "id": "sequencep/0079",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1.5) (error (list 'sig e))))",
+   "expected": "(ok 1.5)"
+  },
+  {
+   "id": "sequencep/0080",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1152921504606846975) (error (list 'sig e))))",
+   "expected": "(ok 1152921504606846975)"
+  },
+  {
+   "id": "sequencep/0081",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1152921504606846976) (error (list 'sig e))))",
+   "expected": "(ok 1152921504606846976)"
+  },
+  {
+   "id": "sequencep/0082",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 2305843009213693951) (error (list 'sig e))))",
+   "expected": "(ok 2305843009213693951)"
+  },
+  {
+   "id": "sequencep/0083",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 4194303) (error (list 'sig e))))",
+   "expected": "(ok 4194303)"
+  },
+  {
+   "id": "sequencep/0084",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 4194304) (error (list 'sig e))))",
+   "expected": "(ok 4194304)"
+  },
+  {
+   "id": "sequencep/0085",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok :key) (error (list 'sig e))))",
+   "expected": "(ok :key)"
+  },
+  {
+   "id": "sequencep/0086",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok [1]) (error (list 'sig e))))",
+   "expected": "(ok [1])"
+  },
+  {
+   "id": "sequencep/0087",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok nil) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "sequencep/0088",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok t) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  }
+ ],
+ "pinned": {}
+}

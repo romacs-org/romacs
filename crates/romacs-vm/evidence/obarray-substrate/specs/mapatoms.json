@@ -1,0 +1,35 @@
+{
+  "name": "mapatoms",
+  "arity": [
+    1,
+    2
+  ],
+  "effect": "global",
+  "gnu_files": [
+    "lread.c"
+  ],
+  "gnu_def": "lread.c:5119",
+  "rust": "src/prims/obarray.rs:20",
+  "args": [
+    "none",
+    "none"
+  ],
+  "extra": {
+    "0": [
+      "'ignore",
+      "42"
+    ],
+    "1": [
+      "(obarray-make)",
+      "(vector 0)",
+      "[]",
+      "42"
+    ]
+  },
+  "probes": [
+    "(let ((a (obarray-make)) (seen nil)) (intern \"map-a\" a) (intern \"map-b\" a) (intern \"map-c\" a) (list (mapatoms (lambda (s) (setq seen (cons (symbol-name s) seen))) a) seen))",
+    "(let ((a (vector 0)) (seen nil)) (intern \"one\" a) (intern \"two\" a) (intern \"three\" a) (mapatoms (lambda (s) (setq seen (cons (symbol-name s) seen))) a) seen)",
+    "(let ((a (obarray-make 3)) (seen nil)) (intern \"alpha\" a) (intern \"beta\" a) (intern \"gamma\" a) (intern \"delta\" a) (intern \"epsilon\" a) (mapatoms (lambda (s) (setq seen (cons (symbol-name s) seen))) a) seen)",
+    "(list (fboundp 'mapatoms) (functionp 'mapatoms))"
+  ]
+}

@@ -1,0 +1,33 @@
+{
+ "name": "window-new-total",
+ "arity": [
+  0,
+  1
+ ],
+ "effect": "reads",
+ "gnu_files": [
+  "window.c"
+ ],
+ "gnu_def": "window.c:934",
+ "rust": "src/prims/window.rs:49",
+ "args": [
+  "none"
+ ],
+ "extra": {
+  "0": [
+   "1",
+   "'sym",
+   "(copy-sequence \"s\")"
+  ]
+ },
+ "probes": [
+  "(window-new-total)",
+  "(window-new-total (minibuffer-window))",
+  "(window-new-total (frame-root-window))",
+  "(let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (list (window-new-total a) (= (window-new-total b) (/ (window-pixel-height p) (frame-char-height))) (= (window-new-total p) (/ h (frame-char-height)))))",
+  "(let* ((a (selected-window)) (h (window-pixel-width a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half t 0.5))) (p (window-parent b))) (list (window-new-total a) (= (window-new-total b) (/ (window-pixel-width p) (frame-char-width))) (= (window-new-total p) (/ h (frame-char-width)))))",
+  "(let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (progn (set-window-new-total a 3) (let* ((c (progn (set-window-new-pixel b (- (window-pixel-height b) (/ (window-pixel-height b) 2))) (split-window-internal b (/ (window-pixel-height b) 2) nil 0.25)))) (list (window-new-total a) (= (window-new-total c) (- (/ h (frame-char-height)) 3 (window-new-total b)))))))",
+  "(let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (progn (set-window-new-pixel p h) (set-window-new-pixel a h) (delete-window-internal b) (list (window-new-total a) (window-valid-p b))))",
+  "(let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (progn (set-window-new-pixel p h) (set-window-new-pixel a h) (delete-window-internal b) (condition-case e (window-new-total b) (error (list (car e) (car (cdr e)) (eq (car (cdr (cdr e))) b))))))"
+ ]
+}

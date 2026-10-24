@@ -1,0 +1,241 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "recordp",
+ "spec_sha256": "3476153ae90d2ea830dcfad92bc9ea7b3a99b5aafb61745cd203e478b624fc01",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "recordp",
+    "subr",
+    1,
+    1
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "data.c": "eca7895a8043cd0a960dfe037a46028374d1a40cc6ee4d0cf6de90ac56c242ae"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "recordp/0000",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (recordp nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "recordp/0001",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (recordp [tag])) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "recordp/0002",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (recordp (record 'tag))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "recordp/0003",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (recordp (record nil))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "recordp/0004",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'recordp '())) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr recordp> 0))"
+  },
+  {
+   "id": "recordp/0005",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'recordp '(1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr recordp> 2))"
+  },
+  {
+   "id": "recordp/0006",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (recordp a0))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "recordp/0007",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil)) (let ((r (recordp a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (t))"
+  },
+  {
+   "id": "recordp/0008",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (record nil))) (let ((r (recordp a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "recordp/0009",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (record 'tag) (record nil 1 2) (make-record 'tag 3 'fill) (make-record 'tag 0 nil))) (error (list 'sig e))))",
+   "expected": "(ok (#s(tag) #s(nil 1 2) #s(tag fill fill fill) #s(tag)))"
+  },
+  {
+   "id": "recordp/0010",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (recordp (record 'tag)) (recordp [tag]) (recordp nil) (vectorp (record 'tag)) (arrayp (record 'tag)) (sequencep (record 'tag)) (type-of (record 'tag 1)) (type-of (record 42)))) (error (list 'sig e))))",
+   "expected": "(ok (t nil nil nil nil nil tag 42))"
+  },
+  {
+   "id": "recordp/0011",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((r (record 'tag 10 20))) (list (length r) (aref r 0) (aref r 2) (aset r 1 99) (aref r 1) (aset r 0 'new-tag) (type-of r)))) (error (list 'sig e))))",
+   "expected": "(ok (3 tag 20 99 99 new-tag new-tag))"
+  },
+  {
+   "id": "recordp/0012",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((x (list 7)) (r (record 'tag x)) (c (copy-sequence r))) (list (equal r c) (eq r c) (eq (aref r 1) (aref c 1)) (equal r [tag (7)]) (equal r (record 'other x)) (progn (aset c 1 9) (aref r 1))))) (error (list 'sig e))))",
+   "expected": "(ok (t nil t nil nil (7)))"
+  },
+  {
+   "id": "recordp/0013",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((r (record 'tag 1 '(2 3))) (s (prin1-to-string r))) (list s (equal r (read s)) (recordp (read s)) (type-of (read s)) (length (read s))))) (error (list 'sig e))))",
+   "expected": "(ok (\"#s(tag 1 (2 3))\" t t tag 3))"
+  },
+  {
+   "id": "recordp/0014",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((c (record 'cl-structure-class 'my-class))) (list (type-of (record c 1)) (type-of (record (record 'other 'my-class))) (type-of (record nil))))) (error (list 'sig e))))",
+   "expected": "(ok (my-class my-class nil))"
+  },
+  {
+   "id": "recordp/0015",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (condition-case e (aref (record 'tag 1) -1) (error e)) (condition-case e (aref (record 'tag 1) 2) (error e)) (condition-case e (aset (record 'tag) 1 9) (error e)) (condition-case e (aref (record 'tag) 'bad) (error e)) (condition-case e (make-record 'tag -1 nil) (error e)) (condition-case e (make-record 'tag 'bad nil) (error e)))) (error (list 'sig e))))",
+   "expected": "(ok ((args-out-of-range #s(tag 1) -1) (args-out-of-range #s(tag 1) 2) (args-out-of-range #s(tag) 1) (wrong-type-argument fixnump bad) (wrong-type-argument wholenump -1) (wrong-type-argument wholenump bad)))"
+  },
+  {
+   "id": "recordp/0016",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (condition-case e (apply #'record nil) (error e)) (condition-case e (apply #'make-record '(tag 2)) (error e)) (condition-case e (apply #'make-record '(tag 2 nil extra)) (error e)) (condition-case e (apply #'recordp nil) (error e)) (condition-case e (apply #'recordp '(nil nil)) (error e)))) (error (list 'sig e))))",
+   "expected": "(ok ((wrong-number-of-arguments #<subr record> 0) (wrong-number-of-arguments #<subr make-record> 2) (wrong-number-of-arguments #<subr make-record> 4) (wrong-number-of-arguments #<subr recordp> 0) (wrong-number-of-arguments #<subr recordp> 2)))"
+  },
+  {
+   "id": "recordp/0017",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (fboundp 'record) (functionp #'record) (recordp (funcall #'record 'tag 1)) (recordp (funcall #'make-record 'tag 1 nil)) (funcall #'recordp (record 'tag)))) (error (list 'sig e))))",
+   "expected": "(ok (t t t t t))"
+  },
+  {
+   "id": "recordp/0018",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((r (record (record 'cl-structure-class 'gc-class) (list 777) (vector (list 888))))) (list (type-of r) (car (aref r 1)) (car (aref (aref r 2) 0))))) (error (list 'sig e))))",
+   "expected": "(ok (gc-class 777 888))"
+  },
+  {
+   "id": "recordp/0019",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (condition-case e (apply #'record nil) (error (list (car e) (nth 2 e)))) (condition-case e (apply #'make-record '(tag 2)) (error (list (car e) (nth 2 e)))) (condition-case e (apply #'make-record '(tag 2 nil extra)) (error (list (car e) (nth 2 e)))) (condition-case e (apply #'recordp nil) (error (list (car e) (nth 2 e)))) (condition-case e (apply #'recordp '(nil nil)) (error (list (car e) (nth 2 e)))))) (error (list 'sig e))))",
+   "expected": "(ok ((wrong-number-of-arguments 0) (wrong-number-of-arguments 2) (wrong-number-of-arguments 4) (wrong-number-of-arguments 0) (wrong-number-of-arguments 2)))"
+  },
+  {
+   "id": "recordp/0020",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((x (list 7)) (r (make-record 'tag 2 x)) (q (record 'tag x x))) (list (length r) (eq (aref r 1) x) (eq (aref r 1) (aref r 2)) (eq (aref q 1) x) (eq (aref q 1) (aref q 2)) (progn (setcar x 9) (car (aref r 2)))))) (error (list 'sig e))))",
+   "expected": "(ok (3 t t t t 9))"
+  },
+  {
+   "id": "recordp/0021",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (recordp (record 'tag)) (recordp [tag]) (recordp nil) (vectorp (record 'tag)) (type-of (record 'tag 1)) (type-of (record 42)))) (error (list 'sig e))))",
+   "expected": "(ok (t nil nil nil tag 42))"
+  },
+  {
+   "id": "recordp/0022",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let* ((r (record 'tag 1 '(2 3))) (s (prin1-to-string r))) (list s (equal r (car (read-from-string s))) (recordp (car (read-from-string s))) (type-of (car (read-from-string s))) (length (car (read-from-string s)))))) (error (list 'sig e))))",
+   "expected": "(ok (\"#s(tag 1 (2 3))\" t t tag 3))"
+  },
+  {
+   "id": "recordp/0023",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((r (make-record 'tag 4094 'fill))) (list (length r) (aref r 0) (aref r 4094)))) (error (list 'sig e))))",
+   "expected": "(ok (4095 tag fill))"
+  },
+  {
+   "id": "recordp/0024",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (condition-case e (make-record 'tag 4095 nil) (error e))) (error (list 'sig e))))",
+   "expected": "(ok (error \"Attempt to allocate a record of 4096 slots; max is 4095\"))"
+  },
+  {
+   "id": "recordp/0025",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (type-of (record (record 'short))) (type-of (record (record nil))))) (error (list 'sig e))))",
+   "expected": "(ok (#s(short) #s(nil)))"
+  },
+  {
+   "id": "recordp/0026",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (condition-case e (read-from-string \"#s()\") (error e)) (condition-case e (read-from-string \"#s(tag . tail)\") (error e)) (condition-case e (read-from-string \"#s(tag\") (error e)))) (error (list 'sig e))))",
+   "expected": "(ok ((invalid-read-syntax \"#s\") (invalid-read-syntax \".\") (end-of-file)))"
+  },
+  {
+   "id": "recordp/0027",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((r (apply #'record 'tag (make-list 4094 'fill)))) (list (length r) (aref r 0) (aref r 4094)))) (error (list 'sig e))))",
+   "expected": "(ok (4095 tag fill))"
+  },
+  {
+   "id": "recordp/0028",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (condition-case e (apply #'record 'tag (make-list 4095 nil)) (error e))) (error (list 'sig e))))",
+   "expected": "(ok (error \"Attempt to allocate a record of 4096 slots; max is 4095\"))"
+  },
+  {
+   "id": "recordp/0029",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((r (car (read-from-string (concat \"#s(tag\" (apply #'concat (make-list 4094 \" fill\")) \")\"))))) (list (length r) (aref r 0) (aref r 4094)))) (error (list 'sig e))))",
+   "expected": "(ok (4095 tag fill))"
+  },
+  {
+   "id": "recordp/0030",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (condition-case e (read-from-string (concat \"#s(tag\" (apply #'concat (make-list 4095 \" nil\")) \")\")) (error e))) (error (list 'sig e))))",
+   "expected": "(ok (error \"Attempt to allocate a record of 4096 slots; max is 4095\"))"
+  },
+  {
+   "id": "recordp/0031",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (record 'tag)) (error (list 'sig e))))",
+   "expected": "(ok #s(tag))"
+  },
+  {
+   "id": "recordp/0032",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (record nil)) (error (list 'sig e))))",
+   "expected": "(ok #s(nil))"
+  },
+  {
+   "id": "recordp/0033",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok [tag]) (error (list 'sig e))))",
+   "expected": "(ok [tag])"
+  },
+  {
+   "id": "recordp/0034",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok nil) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  }
+ ]
+}

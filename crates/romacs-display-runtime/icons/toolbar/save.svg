@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+  <!-- Floppy disk body -->
+  <path d="M3 3.5a.5.5 0 0 1 .5-.5h11l2.5 2.5V16.5a.5.5 0 0 1-.5.5H3.5a.5.5 0 0 1-.5-.5V3.5Z"/>
+  <!-- Top slot -->
+  <path d="M6 3v3.5h7V3"/>
+  <!-- Label area -->
+  <rect x="5.5" y="10" width="9" height="4.5" rx="0.5"/>
+</svg>

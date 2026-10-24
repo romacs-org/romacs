@@ -1,0 +1,53 @@
+;; Re-entrant / cyclic require: GNU 32.0.50 vs VM2 (vm2/autoload).
+;; Fixtures (auto-ev/cyc/):
+;; --- cyc-a.el
+;;   (provide 'cyc-a)
+;;   (require 'cyc-b)
+;;   (defun cyc-a-fn () (list 'a (cyc-b-fn)))
+;; --- cyc-b.el
+;;   (require 'cyc-a)
+;;   (defun cyc-b-fn () 'b)
+;;   (setq cyc-b-saw-a (fboundp 'cyc-a-fn))
+;;   (provide 'cyc-b)
+;; --- late-a.el
+;;   (require 'late-b)
+;;   (defun late-a-fn () 'a)
+;;   (provide 'late-a)
+;; --- late-b.el
+;;   (require 'late-a)
+;;   (defun late-b-fn () 'b)
+;;   (provide 'late-b)
+;; --- self.el
+;;   (setq self-depth (1+ (if (boundp 'self-depth) self-depth 0)))
+;;   (if (< self-depth 2) (load "self"))
+;;   (provide 'self)
+;; --- gs.el
+;;   (setq gs-loads (1+ (if (boundp 'gs-loads) gs-loads 0)))
+;;   (require 'gg)
+;;   (defun gs-f () 'gs)
+;;   (provide 'gs)
+;; --- gg.el
+;;   (provide 'gg)
+;;   (require 'gs)
+;;   (defun gg-f () (list 'gg (gs-f)))
+;; Each case: (condition-case e CASE (error (list 'signal e)))
+;; case                       GNU                                                   VM2
+;; early-provide cycle        (cyc-a (a b) nil t)                                   (cyc-a (a b) nil t)
+;; late-provide cycle         (signal (error "Recursive ‘require’ for feature ‘late-a’"))  (signal (error))  [loader: recursive source load: late-a.el]
+;; file loads itself once     (self 2)                                              (signal (error))  [recursive source load: self.el]
+;; gnus-sum/gnus-group shape  (gs 2 (gg gs))  gs.el loaded twice, nested            (signal (error))  [recursive source load: gs.el]
+;;
+;; GNU dynamic measurement (not static): GNU 32.0.50 loading SOURCE from the
+;; pinned gnu-emacs-ref lisp/ tree (45b0f7699df; .elc only for files the
+;; source tree does not contain, e.g. *-loaddefs), requiring
+;; calendar org org-agenda gnus vc-git, with `require' wrapped to log any
+;; require of a feature whose own require is still in progress
+;; (auto-ev/cyc/gnu-reentry.el):
+;;   requires=892 reentries=7 by-kind=((NOT . 1) (provided . 6))
+;;     (cl-lib provided cl-lib) x2     ; cl-macs/cl-seq require cl-lib: already provided
+;;     (calendar provided cal-menu)    ; calendar.el:163 provides before :164 requires cal-menu
+;;     (gnus-sum NOT gnus-group)       ; GENUINE re-entry: gnus-sum.el is loaded again, nested
+;;     (gnus-group provided gnus-sum)
+;;     (gnus-sum provided gnus-art) x2
+;; With installed .elc files instead: requires=222 reentries=1 ((calendar provided cal-menu)).
+;; Org: no load-time re-entry at all in either run.

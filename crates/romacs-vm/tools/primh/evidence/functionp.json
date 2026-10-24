@@ -1,0 +1,589 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "functionp",
+ "spec_sha256": "c1fb2bb8d10d120d38f29e67572daea7602739aa1164211b406d13d3ccddd48f",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "functionp",
+    "subr",
+    1,
+    1
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "eval.c": "db894444b2edc1e7e675d5d8f97cba7e6f77f2beb0e5c3a130afc505c6f387b4"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "functionp/0000",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (functionp nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "functionp/0001",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (functionp t)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "functionp/0002",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (functionp 0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "functionp/0003",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (functionp 1)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "functionp/0004",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (functionp 2)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "functionp/0005",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (functionp -1)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "functionp/0006",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (functionp most-positive-fixnum)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "functionp/0007",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (functionp 1.5)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "functionp/0008",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (functionp 'sym)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "functionp/0009",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (functionp :kw)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "functionp/0010",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (functionp (copy-sequence \"\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "functionp/0011",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (functionp (copy-sequence \"abc\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "functionp/0012",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (functionp (copy-sequence \"λx\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "functionp/0013",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (functionp (list 1 2 3))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "functionp/0014",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (functionp (list 'a (list 'b)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "functionp/0015",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (functionp (cons 1 2))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "functionp/0016",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (functionp (cons 1 (cons 2 3)))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "functionp/0017",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (functionp (vector 1 2))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "functionp/0018",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (functionp (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "functionp/0019",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (functionp 'car)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "functionp/0020",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (functionp 'when)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "functionp/0021",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (functionp 'if)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "functionp/0022",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (functionp (lambda (x) x))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "functionp/0023",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (functionp '(lambda (x) x))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "functionp/0024",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (functionp (list 'autoload \"f\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "functionp/0025",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (functionp (list 'keymap))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "functionp/0026",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'functionp '())) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr functionp> 0))"
+  },
+  {
+   "id": "functionp/0027",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'functionp '(1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr functionp> 2))"
+  },
+  {
+   "id": "functionp/0028",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (functionp a0))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "functionp/0029",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil)) (let ((r (functionp a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (t))"
+  },
+  {
+   "id": "functionp/0030",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1)) (let ((r (functionp a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "functionp/0031",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 most-positive-fixnum)) (let ((r (functionp a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "functionp/0032",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 :kw)) (let ((r (functionp a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "functionp/0033",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (copy-sequence \"λx\"))) (let ((r (functionp a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "functionp/0034",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (cons 1 2))) (let ((r (functionp a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "functionp/0035",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (let ((x (list 1 2))) (setcdr (cdr x) x) x))) (let ((r (functionp a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "functionp/0036",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'if)) (let ((r (functionp a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "functionp/0037",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (list 'autoload \"f\"))) (let ((r (functionp a0))) (list (eq r a0))))) (error (list 'sig e))))",
+   "expected": "(ok (nil))"
+  },
+  {
+   "id": "functionp/0038",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (functionp 'car) (functionp #'car) (functionp (symbol-function 'car)))) (error (list 'sig e))))",
+   "expected": "(ok (t t t))"
+  },
+  {
+   "id": "functionp/0039",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (functionp 'when) (functionp 'if) (functionp (symbol-function 'if)) (functionp 'setq) (functionp 'defvar))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil nil nil nil))"
+  },
+  {
+   "id": "functionp/0040",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (functionp 'funcall) (functionp 'apply) (functionp 'functionp))) (error (list 'sig e))))",
+   "expected": "(ok (t t t))"
+  },
+  {
+   "id": "functionp/0041",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (functionp '(closure (t) (x) x)) (functionp (list 'lambda)) (functionp (cons 'lambda 1)))) (error (list 'sig e))))",
+   "expected": "(ok (nil t t))"
+  },
+  {
+   "id": "functionp/0042",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defun primh-fp1 () 1) (list (functionp 'primh-fp1) (functionp (symbol-function 'primh-fp1))))) (error (list 'sig e))))",
+   "expected": "(ok (t t))"
+  },
+  {
+   "id": "functionp/0043",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defmacro primh-fp2 () 1) (functionp 'primh-fp2))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "functionp/0044",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defalias 'primh-fp3 'car) (functionp 'primh-fp3))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "functionp/0045",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defalias 'primh-fp4 'primh-fp4-missing) (functionp 'primh-fp4))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "functionp/0046",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defmacro primh-fp5m () 1) (defalias 'primh-fp5 'primh-fp5m) (functionp 'primh-fp5))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "functionp/0047",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (autoload 'primh-fp6 \"f\") (functionp 'primh-fp6))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "functionp/0048",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (autoload 'primh-fp7 \"f\" nil nil 'macro) (functionp 'primh-fp7))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "functionp/0049",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (autoload 'primh-fp8 \"f\" nil nil 'keymap) (functionp 'primh-fp8))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "functionp/0050",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (autoload 'primh-fp9 \"f\" \"doc\" t nil) (functionp 'primh-fp9))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "functionp/0051",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (autoload 'primh-fp10b \"f\") (defalias 'primh-fp10 'primh-fp10b) (functionp 'primh-fp10))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "functionp/0052",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (functionp nil) (functionp t) (functionp :primh-fp-kw))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil nil))"
+  },
+  {
+   "id": "functionp/0053",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((s (make-symbol \"primh-fp-u\"))) (fset s (lambda () 1)) (functionp s))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "functionp/0054",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (functionp 'primh-fp11-unbound)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "functionp/0055",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (fset 'primh-fp12 nil) (functionp 'primh-fp12))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "functionp/0056",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (fset 'primh-fp13 1) (functionp 'primh-fp13))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "functionp/0057",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (fset 'primh-fp14 '(lambda () 1)) (functionp 'primh-fp14))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "functionp/0058",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (fset 'primh-fp15 (list 'autoload \"f\" nil nil nil)) (functionp 'primh-fp15))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "functionp/0059",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (fset 'primh-fp16 (list 'autoload \"f\")) (functionp 'primh-fp16))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "functionp/0060",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((f (lambda (x) x))) (let ((i 0)) (while (< i 5000) (list i i) (setq i (1+ i)))) (functionp f))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "functionp/0061",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (functionp (eval '(function (lambda () 1)) nil)) (functionp (eval '(lambda () 1) t)))) (error (list 'sig e))))",
+   "expected": "(ok (t t))"
+  },
+  {
+   "id": "functionp/0062",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (defalias 'primh-fp17 (lambda () 2)) (defalias 'primh-fp18 'primh-fp17) (defalias 'primh-fp19 'primh-fp18) (functionp 'primh-fp19))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "functionp/0063",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list (funcall #'functionp 'car) (apply #'functionp '(1)))) (error (list 'sig e))))",
+   "expected": "(ok (t nil))"
+  },
+  {
+   "id": "functionp/0064",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (functionp (list 'autoload \"f\" nil nil 'macro))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "functionp/0065",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (fset 'primh-fp20 (cons 'macro (lambda () 1))) (functionp 'primh-fp20))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "functionp/0066",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok '(lambda (x) x)) (error (list 'sig e))))",
+   "expected": "(ok (lambda (x) x))"
+  },
+  {
+   "id": "functionp/0067",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 'car) (error (list 'sig e))))",
+   "expected": "(ok car)"
+  },
+  {
+   "id": "functionp/0068",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 'if) (error (list 'sig e))))",
+   "expected": "(ok if)"
+  },
+  {
+   "id": "functionp/0069",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 'sym) (error (list 'sig e))))",
+   "expected": "(ok sym)"
+  },
+  {
+   "id": "functionp/0070",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 'when) (error (list 'sig e))))",
+   "expected": "(ok when)"
+  },
+  {
+   "id": "functionp/0071",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (cons 1 (cons 2 3))) (error (list 'sig e))))",
+   "expected": "(ok (1 2 . 3))"
+  },
+  {
+   "id": "functionp/0072",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (cons 1 2)) (error (list 'sig e))))",
+   "expected": "(ok (1 . 2))"
+  },
+  {
+   "id": "functionp/0073",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"\")) (error (list 'sig e))))",
+   "expected": "(ok \"\")"
+  },
+  {
+   "id": "functionp/0074",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"abc\")) (error (list 'sig e))))",
+   "expected": "(ok \"abc\")"
+  },
+  {
+   "id": "functionp/0075",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (copy-sequence \"λx\")) (error (list 'sig e))))",
+   "expected": "(ok \"λx\")"
+  },
+  {
+   "id": "functionp/0076",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (lambda (x) x)) (error (list 'sig e))))",
+   "expected": "(ok #[257 \"\\207\" [] 2 \"\n\n(fn X)\"])",
+   "gnu_regime_variant": "(ok #[(x) (x) (t)])"
+  },
+  {
+   "id": "functionp/0077",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((x (list 1 2))) (setcdr (cdr x) x) x)) (error (list 'sig e))))",
+   "expected": "(ok (1 2 1 2 . #2))"
+  },
+  {
+   "id": "functionp/0078",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list 'a (list 'b))) (error (list 'sig e))))",
+   "expected": "(ok (a (b)))"
+  },
+  {
+   "id": "functionp/0079",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list 'autoload \"f\")) (error (list 'sig e))))",
+   "expected": "(ok (autoload \"f\"))"
+  },
+  {
+   "id": "functionp/0080",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list 'keymap)) (error (list 'sig e))))",
+   "expected": "(ok (keymap))"
+  },
+  {
+   "id": "functionp/0081",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list 1 2 3)) (error (list 'sig e))))",
+   "expected": "(ok (1 2 3))"
+  },
+  {
+   "id": "functionp/0082",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (vector 1 2)) (error (list 'sig e))))",
+   "expected": "(ok [1 2])"
+  },
+  {
+   "id": "functionp/0083",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok -1) (error (list 'sig e))))",
+   "expected": "(ok -1)"
+  },
+  {
+   "id": "functionp/0084",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 0) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "functionp/0085",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1) (error (list 'sig e))))",
+   "expected": "(ok 1)"
+  },
+  {
+   "id": "functionp/0086",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1.5) (error (list 'sig e))))",
+   "expected": "(ok 1.5)"
+  },
+  {
+   "id": "functionp/0087",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 2) (error (list 'sig e))))",
+   "expected": "(ok 2)"
+  },
+  {
+   "id": "functionp/0088",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok :kw) (error (list 'sig e))))",
+   "expected": "(ok :kw)"
+  },
+  {
+   "id": "functionp/0089",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok most-positive-fixnum) (error (list 'sig e))))",
+   "expected": "(ok 2305843009213693951)"
+  },
+  {
+   "id": "functionp/0090",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok nil) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "functionp/0091",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok t) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  }
+ ],
+ "pinned": {
+  "functionp/0040": "VALUE",
+  "functionp/0076": "PRINTER",
+  "functionp/0077": "PRINTER"
+ }
+}

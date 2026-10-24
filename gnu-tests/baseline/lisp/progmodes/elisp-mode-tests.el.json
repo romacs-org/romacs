@@ -1,0 +1,1409 @@
+{
+  "blob": "8211347ba11ccc6c8f2bb51b60765b3169b2172d",
+  "compiled": {
+    "complete": true,
+    "exit": 0,
+    "garbled_lines": 0,
+    "load_error": null,
+    "load_ok": true,
+    "results": {
+      "elisp--highlight-function-argument-indexed": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "elisp--highlight-function-argument-keyed-1": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "elisp--highlight-function-argument-keyed-2": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "elisp--preceding-sexp--char-name": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "elisp-completes-anything-quoted": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "elisp-completes-functions": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "elisp-completes-functions-after-empty-let-bindings": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "elisp-completes-functions-after-hash-quote": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "elisp-completes-functions-after-let-bindings-2": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "elisp-completes-functions-in-special-macros": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "elisp-completes-local-variables": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "elisp-completes-variables": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "elisp-completes-variables-unquoted": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "elisp-completest-variables-in-let-bindings": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "elisp-dont-shadow-punctuation-only-symbols": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "elisp-mode-infer-namespace": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "elisp-mode-with-buffer": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "elisp-shorthand-byte-compile-a-file": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "elisp-shorthand-completion-at-point": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "elisp-shorthand-escape": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "elisp-shorthand-load-a-file": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "elisp-shorthand-read-buffer": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "elisp-shorthand-read-from-string": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "elisp-test-font-lock": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "elisp-tests-syntax-propertize": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "eval-defun-prints-edebug-when-instrumented": {
+        "as_expected": true,
+        "detail": "(ert-test-skipped ((skip-when noninteractive) :form noninteractive :value t))",
+        "expected": ":passed",
+        "outcome": "skipped",
+        "tags": []
+      },
+      "eval-last-sexp-print-format-large-int": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "eval-last-sexp-print-format-large-int-echo": {
+        "as_expected": true,
+        "detail": "(ert-test-skipped ((skip-when noninteractive) :form noninteractive :value t))",
+        "expected": ":passed",
+        "outcome": "skipped",
+        "tags": []
+      },
+      "eval-last-sexp-print-format-small-int": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "eval-last-sexp-print-format-small-int-echo": {
+        "as_expected": true,
+        "detail": "(ert-test-skipped ((skip-when noninteractive) :form noninteractive :value t))",
+        "expected": ":passed",
+        "outcome": "skipped",
+        "tags": []
+      },
+      "eval-last-sexp-print-format-sym": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "eval-last-sexp-print-format-sym-echo": {
+        "as_expected": true,
+        "detail": "(ert-test-skipped ((skip-when noninteractive) :form noninteractive :value t))",
+        "expected": ":passed",
+        "outcome": "skipped",
+        "tags": []
+      },
+      "test-elisp-font-keywords-1": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-elisp-font-keywords-2": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-elisp-font-keywords-3": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-elisp-font-keywords-4": {
+        "as_expected": true,
+        "detail": "(ert-test-failed ((should (eq (test--font '(condition-case nil ... ...) \"(\\\\(if\\\\)\") nil)) :form (eq font-lock-keyword-face nil) :value nil))",
+        "expected": ":failed",
+        "outcome": "failed",
+        "tags": []
+      },
+      "test-elisp-font-keywords-5": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-indentation": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "xref-elisp-test-find-defs-constructor": {
+        "as_expected": false,
+        "detail": "(ert-test-failed ((should (equal xref expected-xref)) :form (equal #s(xref-item #(\"(cl-defstruct xref-elisp-location (:constructor xref-make-elisp-location))\" 1 13 (face font-lock-keyword-face) 14 33 (face font-lock-function-name-face)) #s(xref-elisp-location xref-elisp-location define-type \"<recording-home>/.cache/gnu-emacs-pin/45b0f7699df36b3849edc3bdef37d4cb9e75b9ea/share/emacs/32.0.50/lisp/progmodes/elisp-mode.el\")) #s(xref-item \"(cl-defstruct xref-elisp-location (:constructor xref-make-elisp-location))\" #s(xref-elisp-location xref-elisp-location define-type \"<recording-home>/.hermes/lisp/progmodes/elisp-mode.el\"))) :value nil :explanation (struct-field location (struct-field file (arrays-of-different-length 123 49 \"<recording-home>/.cache/gnu-emacs-pin/45b0f7699df36b3849edc3bdef37d4cb9e75b9ea/share/emacs/32.0.50/lisp/progmodes/elisp-mode.el\" \"<recording-home>/.hermes/lisp/progmodes/elisp-mode.el\" first-mismatch-at 14)))))",
+        "expected": ":passed",
+        "outcome": "failed",
+        "tags": []
+      },
+      "xref-elisp-test-find-defs-defalias-defun-el": {
+        "as_expected": false,
+        "detail": "(ert-test-failed ((should (equal xref expected-xref)) :form (equal #s(xref-item #(\"(defalias eshell/ff)\" 1 9 (face font-lock-keyword-face) 10 19 (face font-lock-function-name-face)) #s(xref-elisp-location eshell/ff defalias \"<recording-home>/.cache/gnu-emacs-pin/45b0f7699df36b3849edc3bdef37d4cb9e75b9ea/share/emacs/32.0.50/lisp/eshell/em-xtra.elc\")) #s(xref-item \"(defalias eshell/ff)\" #s(xref-elisp-location eshell/ff defalias \"<recording-home>/.hermes/lisp/eshell/em-xtra.elc\"))) :value nil :explanation (struct-field location (struct-field file (arrays-of-different-length 118 44 \"<recording-home>/.cache/gnu-emacs-pin/45b0f7699df36b3849edc3bdef37d4cb9e75b9ea/share/emacs/32.0.50/lisp/eshell/em-xtra.elc\" \"<recording-home>/.hermes/lisp/eshell/em-xtra.elc\" first-mismatch-at 14)))))",
+        "expected": ":passed",
+        "outcome": "failed",
+        "tags": []
+      },
+      "xref-elisp-test-find-defs-defgeneric-co-located-default": {
+        "as_expected": false,
+        "detail": "(ert-test-failed ((should (equal xref expected-xref)) :form (equal #s(xref-item #(\"(cl-defgeneric xref-elisp-generic-co-located-default)\" 1 14 (face font-lock-keyword-face) 15 52 (face font-lock-function-name-face)) #s(xref-elisp-location xref-elisp-generic-co-located-default cl-defgeneric \"<recording-home>/.hermes/cache/scratch/gnu-run-elc-5lS3My/elisp-mode-tests.elc\")) #s(xref-item \"(cl-defgeneric xref-elisp-generic-co-located-default)\" #s(xref-elisp-location xref-elisp-generic-co-located-default cl-defgeneric \"<recording-home>/.hermes/cache/scratch/gnu-run-elc-5lS3My/elisp-mode-tests.el\"))) :value nil :explanation (struct-field location (struct-field file (arrays-of-different-length 74 73 \"<recording-home>/.hermes/cache/scratch/gnu-run-elc-5lS3My/elisp-mode-tests.elc\" \"<recording-home>/.hermes/cache/scratch/gnu-run-elc-5lS3My/elisp-mode-tests.el\" first-mismatch-at 73)))))",
+        "expected": ":passed",
+        "outcome": "failed",
+        "tags": []
+      },
+      "xref-elisp-test-find-defs-defgeneric-el": {
+        "as_expected": false,
+        "detail": "(ert-test-failed ((should (equal xref expected-xref)) :form (equal #s(xref-item #(\"(cl-defgeneric xref-location-marker)\" 1 14 (face font-lock-keyword-face) 15 35 (face font-lock-function-name-face)) #s(xref-elisp-location xref-location-marker cl-defgeneric \"<recording-home>/.cache/gnu-emacs-pin/45b0f7699df36b3849edc3bdef37d4cb9e75b9ea/share/emacs/32.0.50/lisp/progmodes/xref.el\")) #s(xref-item \"(cl-defgeneric xref-location-marker)\" #s(xref-elisp-location xref-location-marker cl-defgeneric \"<recording-home>/.hermes/lisp/progmodes/xref.el\"))) :value nil :explanation (struct-field location (struct-field file (arrays-of-different-length 117 43 \"<recording-home>/.cache/gnu-emacs-pin/45b0f7699df36b3849edc3bdef37d4cb9e75b9ea/share/emacs/32.0.50/lisp/progmodes/xref.el\" \"<recording-home>/.hermes/lisp/progmodes/xref.el\" first-mismatch-at 14)))))",
+        "expected": ":passed",
+        "outcome": "failed",
+        "tags": []
+      },
+      "xref-elisp-test-find-defs-defgeneric-eval": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "xref-elisp-test-find-defs-defgeneric-implicit-generic": {
+        "as_expected": false,
+        "detail": "(ert-test-failed ((should (equal xref expected-xref)) :form (equal #s(xref-item #(\"(cl-defmethod xref-elisp-generic-implicit-generic (arg1 arg2))\" 1 13 (face font-lock-keyword-face) 14 49 (face font-lock-function-name-face)) #s(xref-elisp-location (xref-elisp-generic-implicit-generic nil t t) cl-defmethod \"<recording-home>/.hermes/cache/scratch/gnu-run-elc-5lS3My/elisp-mode-tests.elc\")) #s(xref-item \"(cl-defmethod xref-elisp-generic-implicit-generic (arg1 arg2))\" #s(xref-elisp-location (xref-elisp-generic-implicit-generic nil t t) cl-defmethod \"<recording-home>/.hermes/cache/scratch/gnu-run-elc-5lS3My/elisp-mode-tests.el\"))) :value nil :explanation (struct-field location (struct-field file (arrays-of-different-length 74 73 \"<recording-home>/.hermes/cache/scratch/gnu-run-elc-5lS3My/elisp-mode-tests.elc\" \"<recording-home>/.hermes/cache/scratch/gnu-run-elc-5lS3My/elisp-mode-tests.el\" first-mismatch-at 73)))))",
+        "expected": ":passed",
+        "outcome": "failed",
+        "tags": []
+      },
+      "xref-elisp-test-find-defs-defgeneric-no-default": {
+        "as_expected": false,
+        "detail": "(ert-test-failed ((should (equal xref expected-xref)) :form (equal #s(xref-item #(\"(cl-defgeneric xref-elisp-generic-no-default)\" 1 14 (face font-lock-keyword-face) 15 44 (face font-lock-function-name-face)) #s(xref-elisp-location xref-elisp-generic-no-default cl-defgeneric \"<recording-home>/.hermes/cache/scratch/gnu-run-elc-5lS3My/elisp-mode-tests.elc\")) #s(xref-item \"(cl-defgeneric xref-elisp-generic-no-default)\" #s(xref-elisp-location xref-elisp-generic-no-default cl-defgeneric \"<recording-home>/.hermes/cache/scratch/gnu-run-elc-5lS3My/elisp-mode-tests.el\"))) :value nil :explanation (struct-field location (struct-field file (arrays-of-different-length 74 73 \"<recording-home>/.hermes/cache/scratch/gnu-run-elc-5lS3My/elisp-mode-tests.elc\" \"<recording-home>/.hermes/cache/scratch/gnu-run-elc-5lS3My/elisp-mode-tests.el\" first-mismatch-at 73)))))",
+        "expected": ":passed",
+        "outcome": "failed",
+        "tags": []
+      },
+      "xref-elisp-test-find-defs-defgeneric-no-methods": {
+        "as_expected": false,
+        "detail": "(ert-test-failed ((should (equal xref expected-xref)) :form (equal #s(xref-item #(\"(cl-defgeneric xref-elisp-generic-no-methods)\" 1 14 (face font-lock-keyword-face) 15 44 (face font-lock-function-name-face)) #s(xref-elisp-location xref-elisp-generic-no-methods cl-defgeneric \"<recording-home>/.hermes/cache/scratch/gnu-run-elc-5lS3My/elisp-mode-tests.elc\")) #s(xref-item \"(cl-defgeneric xref-elisp-generic-no-methods)\" #s(xref-elisp-location xref-elisp-generic-no-methods cl-defgeneric \"<recording-home>/.hermes/cache/scratch/gnu-run-elc-5lS3My/elisp-mode-tests.el\"))) :value nil :explanation (struct-field location (struct-field file (arrays-of-different-length 74 73 \"<recording-home>/.hermes/cache/scratch/gnu-run-elc-5lS3My/elisp-mode-tests.elc\" \"<recording-home>/.hermes/cache/scratch/gnu-run-elc-5lS3My/elisp-mode-tests.el\" first-mismatch-at 73)))))",
+        "expected": ":passed",
+        "outcome": "failed",
+        "tags": []
+      },
+      "xref-elisp-test-find-defs-defgeneric-separate-default": {
+        "as_expected": false,
+        "detail": "(ert-test-failed ((should (equal xref expected-xref)) :form (equal #s(xref-item #(\"(cl-defgeneric xref-elisp-generic-separate-default)\" 1 14 (face font-lock-keyword-face) 15 50 (face font-lock-function-name-face)) #s(xref-elisp-location xref-elisp-generic-separate-default cl-defgeneric \"<recording-home>/.hermes/cache/scratch/gnu-run-elc-5lS3My/elisp-mode-tests.elc\")) #s(xref-item \"(cl-defgeneric xref-elisp-generic-separate-default)\" #s(xref-elisp-location xref-elisp-generic-separate-default cl-defgeneric \"<recording-home>/.hermes/cache/scratch/gnu-run-elc-5lS3My/elisp-mode-tests.el\"))) :value nil :explanation (struct-field location (struct-field file (arrays-of-different-length 74 73 \"<recording-home>/.hermes/cache/scratch/gnu-run-elc-5lS3My/elisp-mode-tests.elc\" \"<recording-home>/.hermes/cache/scratch/gnu-run-elc-5lS3My/elisp-mode-tests.el\" first-mismatch-at 73)))))",
+        "expected": ":passed",
+        "outcome": "failed",
+        "tags": []
+      },
+      "xref-elisp-test-find-defs-define-overload-co-located-default": {
+        "as_expected": false,
+        "detail": "(ert-test-failed ((should (equal xref expected-xref)) :form (equal #s(xref-item #(\"(define-overloadable-function xref-elisp-overloadable-co-located-default)\" 1 29 (face font-lock-keyword-face) 30 72 (face font-lock-function-name-face)) #s(xref-elisp-location xref-elisp-overloadable-co-located-default define-overloadable-function \"<recording-home>/.hermes/cache/scratch/gnu-run-elc-5lS3My/elisp-mode-tests.elc\")) #s(xref-item \"(define-overloadable-function xref-elisp-overloadable-co-located-default)\" #s(xref-elisp-location xref-elisp-overloadable-co-located-default define-overloadable-function \"<recording-home>/.hermes/cache/scratch/gnu-run-elc-5lS3My/elisp-mode-tests.el\"))) :value nil :explanation (struct-field location (struct-field file (arrays-of-different-length 74 73 \"<recording-home>/.hermes/cache/scratch/gnu-run-elc-5lS3My/elisp-mode-tests.elc\" \"<recording-home>/.hermes/cache/scratch/gnu-run-elc-5lS3My/elisp-mode-tests.el\" first-mismatch-at 73)))))",
+        "expected": ":passed",
+        "outcome": "failed",
+        "tags": []
+      },
+      "xref-elisp-test-find-defs-define-overload-no-default": {
+        "as_expected": false,
+        "detail": "(ert-test-failed ((should (equal xref expected-xref)) :form (equal #s(xref-item #(\"(define-overloadable-function xref-elisp-overloadable-no-default)\" 1 29 (face font-lock-keyword-face) 30 64 (face font-lock-function-name-face)) #s(xref-elisp-location xref-elisp-overloadable-no-default define-overloadable-function \"<recording-home>/.hermes/cache/scratch/gnu-run-elc-5lS3My/elisp-mode-tests.elc\")) #s(xref-item \"(define-overloadable-function xref-elisp-overloadable-no-default)\" #s(xref-elisp-location xref-elisp-overloadable-no-default define-overloadable-function \"<recording-home>/.hermes/cache/scratch/gnu-run-elc-5lS3My/elisp-mode-tests.el\"))) :value nil :explanation (struct-field location (struct-field file (arrays-of-different-length 74 73 \"<recording-home>/.hermes/cache/scratch/gnu-run-elc-5lS3My/elisp-mode-tests.elc\" \"<recording-home>/.hermes/cache/scratch/gnu-run-elc-5lS3My/elisp-mode-tests.el\" first-mismatch-at 73)))))",
+        "expected": ":passed",
+        "outcome": "failed",
+        "tags": []
+      },
+      "xref-elisp-test-find-defs-define-overload-no-methods": {
+        "as_expected": false,
+        "detail": "(ert-test-failed ((should (equal xref expected-xref)) :form (equal #s(xref-item #(\"(define-overloadable-function xref-elisp-overloadable-no-methods)\" 1 29 (face font-lock-keyword-face) 30 64 (face font-lock-function-name-face)) #s(xref-elisp-location xref-elisp-overloadable-no-methods define-overloadable-function \"<recording-home>/.hermes/cache/scratch/gnu-run-elc-5lS3My/elisp-mode-tests.elc\")) #s(xref-item \"(define-overloadable-function xref-elisp-overloadable-no-methods)\" #s(xref-elisp-location xref-elisp-overloadable-no-methods define-overloadable-function \"<recording-home>/.hermes/cache/scratch/gnu-run-elc-5lS3My/elisp-mode-tests.el\"))) :value nil :explanation (struct-field location (struct-field file (arrays-of-different-length 74 73 \"<recording-home>/.hermes/cache/scratch/gnu-run-elc-5lS3My/elisp-mode-tests.elc\" \"<recording-home>/.hermes/cache/scratch/gnu-run-elc-5lS3My/elisp-mode-tests.el\" first-mismatch-at 73)))))",
+        "expected": ":passed",
+        "outcome": "failed",
+        "tags": []
+      },
+      "xref-elisp-test-find-defs-define-overload-separate-default": {
+        "as_expected": false,
+        "detail": "(ert-test-failed ((should (equal xref expected-xref)) :form (equal #s(xref-item #(\"(define-overloadable-function xref-elisp-overloadable-separate-default)\" 1 29 (face font-lock-keyword-face) 30 70 (face font-lock-function-name-face)) #s(xref-elisp-location xref-elisp-overloadable-separate-default define-overloadable-function \"<recording-home>/.hermes/cache/scratch/gnu-run-elc-5lS3My/elisp-mode-tests.elc\")) #s(xref-item \"(define-overloadable-function xref-elisp-overloadable-separate-default)\" #s(xref-elisp-location xref-elisp-overloadable-separate-default define-overloadable-function \"<recording-home>/.hermes/cache/scratch/gnu-run-elc-5lS3My/elisp-mode-tests.el\"))) :value nil :explanation (struct-field location (struct-field file (arrays-of-different-length 74 73 \"<recording-home>/.hermes/cache/scratch/gnu-run-elc-5lS3My/elisp-mode-tests.elc\" \"<recording-home>/.hermes/cache/scratch/gnu-run-elc-5lS3My/elisp-mode-tests.el\" first-mismatch-at 73)))))",
+        "expected": ":passed",
+        "outcome": "failed",
+        "tags": []
+      },
+      "xref-elisp-test-find-defs-defun-c": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "xref-elisp-test-find-defs-defun-c-defvar-c": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "xref-elisp-test-find-defs-defun-defvar-el": {
+        "as_expected": false,
+        "detail": "(ert-test-failed ((should (equal xref expected-xref)) :form (equal #s(xref-item #(\"(defun compilation-minor-mode)\" 1 6 (face font-lock-keyword-face) 7 29 (face font-lock-function-name-face)) #s(xref-elisp-location compilation-minor-mode nil \"<recording-home>/.cache/gnu-emacs-pin/45b0f7699df36b3849edc3bdef37d4cb9e75b9ea/share/emacs/32.0.50/lisp/progmodes/compile.el\")) #s(xref-item \"(defun compilation-minor-mode)\" #s(xref-elisp-location compilation-minor-mode nil \"<recording-home>/.hermes/lisp/progmodes/compile.el\"))) :value nil :explanation (struct-field location (struct-field file (arrays-of-different-length 120 46 \"<recording-home>/.cache/gnu-emacs-pin/45b0f7699df36b3849edc3bdef37d4cb9e75b9ea/share/emacs/32.0.50/lisp/progmodes/compile.el\" \"<recording-home>/.hermes/lisp/progmodes/compile.el\" first-mismatch-at 14)))))",
+        "expected": ":passed",
+        "outcome": "failed",
+        "tags": []
+      },
+      "xref-elisp-test-find-defs-defun-el": {
+        "as_expected": false,
+        "detail": "(ert-test-failed ((should (equal xref expected-xref)) :form (equal #s(xref-item #(\"(defun xref-find-definitions)\" 1 6 (face font-lock-keyword-face) 7 28 (face font-lock-function-name-face)) #s(xref-elisp-location xref-find-definitions nil \"<recording-home>/.cache/gnu-emacs-pin/45b0f7699df36b3849edc3bdef37d4cb9e75b9ea/share/emacs/32.0.50/lisp/progmodes/xref.el\")) #s(xref-item \"(defun xref-find-definitions)\" #s(xref-elisp-location xref-find-definitions nil \"<recording-home>/.hermes/lisp/progmodes/xref.el\"))) :value nil :explanation (struct-field location (struct-field file (arrays-of-different-length 117 43 \"<recording-home>/.cache/gnu-emacs-pin/45b0f7699df36b3849edc3bdef37d4cb9e75b9ea/share/emacs/32.0.50/lisp/progmodes/xref.el\" \"<recording-home>/.hermes/lisp/progmodes/xref.el\" first-mismatch-at 14)))))",
+        "expected": ":passed",
+        "outcome": "failed",
+        "tags": []
+      },
+      "xref-elisp-test-find-defs-defun-el-defvar-c": {
+        "as_expected": false,
+        "detail": "(ert-test-failed ((should (equal xref expected-xref)) :form (equal #s(xref-item #(\"(defun abbrev-mode)\" 1 6 (face font-lock-keyword-face) 7 18 (face font-lock-function-name-face)) #s(xref-elisp-location abbrev-mode nil \"<recording-home>/.cache/gnu-emacs-pin/45b0f7699df36b3849edc3bdef37d4cb9e75b9ea/share/emacs/32.0.50/lisp/abbrev.el\")) #s(xref-item \"(defun abbrev-mode)\" #s(xref-elisp-location abbrev-mode nil \"<recording-home>/.hermes/lisp/abbrev.el\"))) :value nil :explanation (struct-field location (struct-field file (arrays-of-different-length 109 35 \"<recording-home>/.cache/gnu-emacs-pin/45b0f7699df36b3849edc3bdef37d4cb9e75b9ea/share/emacs/32.0.50/lisp/abbrev.el\" \"<recording-home>/.hermes/lisp/abbrev.el\" first-mismatch-at 14)))))",
+        "expected": ":passed",
+        "outcome": "failed",
+        "tags": []
+      },
+      "xref-elisp-test-find-defs-defun-eval": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "xref-elisp-test-find-defs-defvar-c": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "xref-elisp-test-find-defs-defvar-el": {
+        "as_expected": false,
+        "detail": "(ert-test-failed ((should (equal xref expected-xref)) :form (equal #s(xref-item #(\"(defvar xref--history)\" 1 7 (face font-lock-keyword-face) 8 21 (face font-lock-function-name-face)) #s(xref-elisp-location xref--history defvar \"<recording-home>/.cache/gnu-emacs-pin/45b0f7699df36b3849edc3bdef37d4cb9e75b9ea/share/emacs/32.0.50/lisp/progmodes/xref.el\")) #s(xref-item \"(defvar xref--history)\" #s(xref-elisp-location xref--history defvar \"<recording-home>/.hermes/lisp/progmodes/xref.el\"))) :value nil :explanation (struct-field location (struct-field file (arrays-of-different-length 117 43 \"<recording-home>/.cache/gnu-emacs-pin/45b0f7699df36b3849edc3bdef37d4cb9e75b9ea/share/emacs/32.0.50/lisp/progmodes/xref.el\" \"<recording-home>/.hermes/lisp/progmodes/xref.el\" first-mismatch-at 14)))))",
+        "expected": ":passed",
+        "outcome": "failed",
+        "tags": []
+      },
+      "xref-elisp-test-find-defs-defvar-eval": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "xref-elisp-test-find-defs-face-el": {
+        "as_expected": false,
+        "detail": "(ert-test-failed ((should (equal xref expected-xref)) :form (equal #s(xref-item #(\"(defvar font-lock-keyword-face)\" 1 7 (face font-lock-keyword-face) 8 30 (face font-lock-function-name-face)) #s(xref-elisp-location font-lock-keyword-face defvar \"<recording-home>/.cache/gnu-emacs-pin/45b0f7699df36b3849edc3bdef37d4cb9e75b9ea/share/emacs/32.0.50/lisp/font-lock.el\")) #s(xref-item \"(defvar font-lock-keyword-face)\" #s(xref-elisp-location font-lock-keyword-face defvar \"<recording-home>/.hermes/lisp/font-lock.el\"))) :value nil :explanation (struct-field location (struct-field file (arrays-of-different-length 112 38 \"<recording-home>/.cache/gnu-emacs-pin/45b0f7699df36b3849edc3bdef37d4cb9e75b9ea/share/emacs/32.0.50/lisp/font-lock.el\" \"<recording-home>/.hermes/lisp/font-lock.el\" first-mismatch-at 14)))))",
+        "expected": ":passed",
+        "outcome": "failed",
+        "tags": []
+      },
+      "xref-elisp-test-find-defs-face-eval": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "xref-elisp-test-find-defs-feature-el": {
+        "as_expected": false,
+        "detail": "(ert-test-failed ((should (equal xref expected-xref)) :form (equal #s(xref-item #(\"(feature xref)\" 1 8 (face font-lock-keyword-face) 9 13 (face font-lock-function-name-face)) #s(xref-elisp-location xref feature \"<recording-home>/.cache/gnu-emacs-pin/45b0f7699df36b3849edc3bdef37d4cb9e75b9ea/share/emacs/32.0.50/lisp/progmodes/xref.el.gz\")) #s(xref-item \"(feature xref)\" #s(xref-elisp-location xref feature \"<recording-home>/.hermes/lisp/progmodes/xref.el\"))) :value nil :explanation (struct-field location (struct-field file (arrays-of-different-length 120 43 \"<recording-home>/.cache/gnu-emacs-pin/45b0f7699df36b3849edc3bdef37d4cb9e75b9ea/share/emacs/32.0.50/lisp/progmodes/xref.el.gz\" \"<recording-home>/.hermes/lisp/progmodes/xref.el\" first-mismatch-at 14)))))",
+        "expected": ":passed",
+        "outcome": "failed",
+        "tags": []
+      },
+      "xref-elisp-test-find-defs-feature-eval": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "xref-elisp-test-find-defs-minor-defvar-c": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      }
+    },
+    "timed_out": false
+  },
+  "file": "lisp/progmodes/elisp-mode-tests.el",
+  "gnu": {
+    "emacs": "<recording-path-redacted>/emacs-32.0.50",
+    "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+    "sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+    "version": "32.0.50"
+  },
+  "harness_sha256": "78c20850429a08af22faadf73b5d164c560230e83d7eb88ef60cb995670703ef",
+  "mini": {
+    "complete": true,
+    "exit": 0,
+    "garbled_lines": 0,
+    "load_error": null,
+    "load_ok": null,
+    "results": {
+      "elisp--highlight-function-argument-indexed": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "elisp--highlight-function-argument-keyed-1": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "elisp--highlight-function-argument-keyed-2": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "elisp--preceding-sexp--char-name": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "elisp-completes-anything-quoted": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "elisp-completes-functions": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "elisp-completes-functions-after-empty-let-bindings": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "elisp-completes-functions-after-hash-quote": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "elisp-completes-functions-after-let-bindings-2": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "elisp-completes-functions-in-special-macros": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "elisp-completes-local-variables": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "elisp-completes-variables": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "elisp-completes-variables-unquoted": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "elisp-completest-variables-in-let-bindings": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "elisp-dont-shadow-punctuation-only-symbols": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "elisp-mode-infer-namespace": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "elisp-mode-with-buffer": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "elisp-shorthand-byte-compile-a-file": {
+        "as_expected": null,
+        "detail": "(file-missing \"Opening input file\" \"No such file or directory\" \"<recording-home>/.cache/gnu-emacs-pin/src/src/buffer.c-resources/simple-shorthand-test.el\")",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "elisp-shorthand-completion-at-point": {
+        "as_expected": null,
+        "detail": "(file-missing \"Cannot open load file\" \"No such file or directory\" \"<recording-home>/.cache/gnu-emacs-pin/src/src/buffer.c-resources/simple-shorthand-test.el\")",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "elisp-shorthand-escape": {
+        "as_expected": null,
+        "detail": "(file-missing \"Cannot open load file\" \"No such file or directory\" \"<recording-home>/.cache/gnu-emacs-pin/src/src/buffer.c-resources/simple-shorthand-test.el\")",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "elisp-shorthand-load-a-file": {
+        "as_expected": null,
+        "detail": "(file-missing \"Cannot open load file\" \"No such file or directory\" \"<recording-home>/.cache/gnu-emacs-pin/src/src/buffer.c-resources/simple-shorthand-test.el\")",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "elisp-shorthand-read-buffer": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "elisp-shorthand-read-from-string": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "elisp-test-font-lock": {
+        "as_expected": null,
+        "detail": "(file-missing \"Opening input file\" \"No such file or directory\" \"<recording-home>/.cache/gnu-emacs-pin/src/src/buffer.c-resources/semantic-highlighting.el\")",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "elisp-tests-syntax-propertize": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "eval-defun-prints-edebug-when-instrumented": {
+        "as_expected": null,
+        "detail": "((skip-when noninteractive))",
+        "expected": ":passed",
+        "outcome": "skipped",
+        "tags": null
+      },
+      "eval-last-sexp-print-format-large-int": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "eval-last-sexp-print-format-large-int-echo": {
+        "as_expected": null,
+        "detail": "((skip-when noninteractive))",
+        "expected": ":passed",
+        "outcome": "skipped",
+        "tags": null
+      },
+      "eval-last-sexp-print-format-small-int": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "eval-last-sexp-print-format-small-int-echo": {
+        "as_expected": null,
+        "detail": "((skip-when noninteractive))",
+        "expected": ":passed",
+        "outcome": "skipped",
+        "tags": null
+      },
+      "eval-last-sexp-print-format-sym": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "eval-last-sexp-print-format-sym-echo": {
+        "as_expected": null,
+        "detail": "((skip-when noninteractive))",
+        "expected": ":passed",
+        "outcome": "skipped",
+        "tags": null
+      },
+      "test-elisp-font-keywords-1": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "test-elisp-font-keywords-2": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "test-elisp-font-keywords-3": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "test-elisp-font-keywords-4": {
+        "as_expected": null,
+        "detail": "((should (eq (test--font '(condition-case nil (foo) (... ...)) \"(\\\\(if\\\\)\") nil) :value nil))",
+        "expected": ":failed",
+        "outcome": "failed",
+        "tags": null
+      },
+      "test-elisp-font-keywords-5": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "test-indentation": {
+        "as_expected": null,
+        "detail": "(void-function ert-test-erts-file)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "xref-elisp-test-find-defs-constructor": {
+        "as_expected": null,
+        "detail": "((should (equal xref expected-xref) :value nil))",
+        "expected": ":passed",
+        "outcome": "failed",
+        "tags": null
+      },
+      "xref-elisp-test-find-defs-defalias-defun-el": {
+        "as_expected": null,
+        "detail": "((should (equal xref expected-xref) :value nil))",
+        "expected": ":passed",
+        "outcome": "failed",
+        "tags": null
+      },
+      "xref-elisp-test-find-defs-defgeneric-co-located-default": {
+        "as_expected": null,
+        "detail": "((should (= (length xrefs) (length expected-xrefs)) :value nil))",
+        "expected": ":passed",
+        "outcome": "failed",
+        "tags": null
+      },
+      "xref-elisp-test-find-defs-defgeneric-el": {
+        "as_expected": null,
+        "detail": "((should (equal xref expected-xref) :value nil))",
+        "expected": ":passed",
+        "outcome": "failed",
+        "tags": null
+      },
+      "xref-elisp-test-find-defs-defgeneric-eval": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "xref-elisp-test-find-defs-defgeneric-implicit-generic": {
+        "as_expected": null,
+        "detail": "((should (= (length xrefs) (length expected-xrefs)) :value nil))",
+        "expected": ":passed",
+        "outcome": "failed",
+        "tags": null
+      },
+      "xref-elisp-test-find-defs-defgeneric-no-default": {
+        "as_expected": null,
+        "detail": "((should (= (length xrefs) (length expected-xrefs)) :value nil))",
+        "expected": ":passed",
+        "outcome": "failed",
+        "tags": null
+      },
+      "xref-elisp-test-find-defs-defgeneric-no-methods": {
+        "as_expected": null,
+        "detail": "((should (= (length xrefs) (length expected-xrefs)) :value nil))",
+        "expected": ":passed",
+        "outcome": "failed",
+        "tags": null
+      },
+      "xref-elisp-test-find-defs-defgeneric-separate-default": {
+        "as_expected": null,
+        "detail": "((should (= (length xrefs) (length expected-xrefs)) :value nil))",
+        "expected": ":passed",
+        "outcome": "failed",
+        "tags": null
+      },
+      "xref-elisp-test-find-defs-define-overload-co-located-default": {
+        "as_expected": null,
+        "detail": "((should (= (length xrefs) (length expected-xrefs)) :value nil))",
+        "expected": ":passed",
+        "outcome": "failed",
+        "tags": null
+      },
+      "xref-elisp-test-find-defs-define-overload-no-default": {
+        "as_expected": null,
+        "detail": "((should (= (length xrefs) (length expected-xrefs)) :value nil))",
+        "expected": ":passed",
+        "outcome": "failed",
+        "tags": null
+      },
+      "xref-elisp-test-find-defs-define-overload-no-methods": {
+        "as_expected": null,
+        "detail": "((should (= (length xrefs) (length expected-xrefs)) :value nil))",
+        "expected": ":passed",
+        "outcome": "failed",
+        "tags": null
+      },
+      "xref-elisp-test-find-defs-define-overload-separate-default": {
+        "as_expected": null,
+        "detail": "((should (= (length xrefs) (length expected-xrefs)) :value nil))",
+        "expected": ":passed",
+        "outcome": "failed",
+        "tags": null
+      },
+      "xref-elisp-test-find-defs-defun-c": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "xref-elisp-test-find-defs-defun-c-defvar-c": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "xref-elisp-test-find-defs-defun-defvar-el": {
+        "as_expected": null,
+        "detail": "((should (equal xref expected-xref) :value nil))",
+        "expected": ":passed",
+        "outcome": "failed",
+        "tags": null
+      },
+      "xref-elisp-test-find-defs-defun-el": {
+        "as_expected": null,
+        "detail": "((should (equal xref expected-xref) :value nil))",
+        "expected": ":passed",
+        "outcome": "failed",
+        "tags": null
+      },
+      "xref-elisp-test-find-defs-defun-el-defvar-c": {
+        "as_expected": null,
+        "detail": "((should (equal xref expected-xref) :value nil))",
+        "expected": ":passed",
+        "outcome": "failed",
+        "tags": null
+      },
+      "xref-elisp-test-find-defs-defun-eval": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "xref-elisp-test-find-defs-defvar-c": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "xref-elisp-test-find-defs-defvar-el": {
+        "as_expected": null,
+        "detail": "((should (equal xref expected-xref) :value nil))",
+        "expected": ":passed",
+        "outcome": "failed",
+        "tags": null
+      },
+      "xref-elisp-test-find-defs-defvar-eval": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "xref-elisp-test-find-defs-face-el": {
+        "as_expected": null,
+        "detail": "((should (equal xref expected-xref) :value nil))",
+        "expected": ":passed",
+        "outcome": "failed",
+        "tags": null
+      },
+      "xref-elisp-test-find-defs-face-eval": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "xref-elisp-test-find-defs-feature-el": {
+        "as_expected": null,
+        "detail": "((should (equal xref expected-xref) :value nil))",
+        "expected": ":passed",
+        "outcome": "failed",
+        "tags": null
+      },
+      "xref-elisp-test-find-defs-feature-eval": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      },
+      "xref-elisp-test-find-defs-minor-defvar-c": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null
+      }
+    },
+    "timed_out": false
+  },
+  "read_error": null,
+  "real": {
+    "complete": true,
+    "exit": 0,
+    "garbled_lines": 0,
+    "load_error": null,
+    "load_ok": true,
+    "results": {
+      "elisp--highlight-function-argument-indexed": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "elisp--highlight-function-argument-keyed-1": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "elisp--highlight-function-argument-keyed-2": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "elisp--preceding-sexp--char-name": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "elisp-completes-anything-quoted": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "elisp-completes-functions": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "elisp-completes-functions-after-empty-let-bindings": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "elisp-completes-functions-after-hash-quote": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "elisp-completes-functions-after-let-bindings-2": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "elisp-completes-functions-in-special-macros": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "elisp-completes-local-variables": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "elisp-completes-variables": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "elisp-completes-variables-unquoted": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "elisp-completest-variables-in-let-bindings": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "elisp-dont-shadow-punctuation-only-symbols": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "elisp-mode-infer-namespace": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "elisp-mode-with-buffer": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "elisp-shorthand-byte-compile-a-file": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "elisp-shorthand-completion-at-point": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "elisp-shorthand-escape": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "elisp-shorthand-load-a-file": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "elisp-shorthand-read-buffer": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "elisp-shorthand-read-from-string": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "elisp-test-font-lock": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "elisp-tests-syntax-propertize": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "eval-defun-prints-edebug-when-instrumented": {
+        "as_expected": true,
+        "detail": "(ert-test-skipped ((skip-when noninteractive) :form noninteractive :value t))",
+        "expected": ":passed",
+        "outcome": "skipped",
+        "tags": []
+      },
+      "eval-last-sexp-print-format-large-int": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "eval-last-sexp-print-format-large-int-echo": {
+        "as_expected": true,
+        "detail": "(ert-test-skipped ((skip-when noninteractive) :form noninteractive :value t))",
+        "expected": ":passed",
+        "outcome": "skipped",
+        "tags": []
+      },
+      "eval-last-sexp-print-format-small-int": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "eval-last-sexp-print-format-small-int-echo": {
+        "as_expected": true,
+        "detail": "(ert-test-skipped ((skip-when noninteractive) :form noninteractive :value t))",
+        "expected": ":passed",
+        "outcome": "skipped",
+        "tags": []
+      },
+      "eval-last-sexp-print-format-sym": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "eval-last-sexp-print-format-sym-echo": {
+        "as_expected": true,
+        "detail": "(ert-test-skipped ((skip-when noninteractive) :form noninteractive :value t))",
+        "expected": ":passed",
+        "outcome": "skipped",
+        "tags": []
+      },
+      "test-elisp-font-keywords-1": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-elisp-font-keywords-2": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-elisp-font-keywords-3": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-elisp-font-keywords-4": {
+        "as_expected": true,
+        "detail": "(ert-test-failed ((should (eq (test--font '(condition-case nil ... ...) \"(\\\\(if\\\\)\") nil)) :form (eq font-lock-keyword-face nil) :value nil))",
+        "expected": ":failed",
+        "outcome": "failed",
+        "tags": []
+      },
+      "test-elisp-font-keywords-5": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "test-indentation": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "xref-elisp-test-find-defs-constructor": {
+        "as_expected": false,
+        "detail": "(ert-test-failed ((should (equal xref expected-xref)) :form (equal #s(xref-item #(\"(cl-defstruct xref-elisp-location (:constructor xref-make-elisp-location))\" 1 13 (face font-lock-keyword-face) 14 33 (face font-lock-function-name-face)) #s(xref-elisp-location xref-elisp-location define-type \"<recording-home>/.cache/gnu-emacs-pin/45b0f7699df36b3849edc3bdef37d4cb9e75b9ea/share/emacs/32.0.50/lisp/progmodes/elisp-mode.el\")) #s(xref-item \"(cl-defstruct xref-elisp-location (:constructor xref-make-elisp-location))\" #s(xref-elisp-location xref-elisp-location define-type \"<recording-home>/.hermes/cache/scratch/gts-tree-t8p5ta2b/lisp/progmodes/elisp-mode.el\"))) :value nil :explanation (struct-field location (struct-field file (arrays-of-different-length 123 81 \"<recording-home>/.cache/gnu-emacs-pin/45b0f7699df36b3849edc3bdef37d4cb9e75b9ea/share/emacs/32.0.50/lisp/progmodes/elisp-mode.el\" \"<recording-home>/.hermes/cache/scratch/gts-tree-t8p5ta2b/lisp/progmodes/elisp-mode.el\" first-mismatch-at 14)))))",
+        "expected": ":passed",
+        "outcome": "failed",
+        "tags": []
+      },
+      "xref-elisp-test-find-defs-defalias-defun-el": {
+        "as_expected": false,
+        "detail": "(ert-test-failed ((should (equal xref expected-xref)) :form (equal #s(xref-item #(\"(defalias eshell/ff)\" 1 9 (face font-lock-keyword-face) 10 19 (face font-lock-function-name-face)) #s(xref-elisp-location eshell/ff defalias \"<recording-home>/.cache/gnu-emacs-pin/45b0f7699df36b3849edc3bdef37d4cb9e75b9ea/share/emacs/32.0.50/lisp/eshell/em-xtra.elc\")) #s(xref-item \"(defalias eshell/ff)\" #s(xref-elisp-location eshell/ff defalias \"<recording-home>/.hermes/cache/scratch/gts-tree-t8p5ta2b/lisp/eshell/em-xtra.elc\"))) :value nil :explanation (struct-field location (struct-field file (arrays-of-different-length 118 76 \"<recording-home>/.cache/gnu-emacs-pin/45b0f7699df36b3849edc3bdef37d4cb9e75b9ea/share/emacs/32.0.50/lisp/eshell/em-xtra.elc\" \"<recording-home>/.hermes/cache/scratch/gts-tree-t8p5ta2b/lisp/eshell/em-xtra.elc\" first-mismatch-at 14)))))",
+        "expected": ":passed",
+        "outcome": "failed",
+        "tags": []
+      },
+      "xref-elisp-test-find-defs-defgeneric-co-located-default": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "xref-elisp-test-find-defs-defgeneric-el": {
+        "as_expected": false,
+        "detail": "(ert-test-failed ((should (equal xref expected-xref)) :form (equal #s(xref-item #(\"(cl-defgeneric xref-location-marker)\" 1 14 (face font-lock-keyword-face) 15 35 (face font-lock-function-name-face)) #s(xref-elisp-location xref-location-marker cl-defgeneric \"<recording-home>/.cache/gnu-emacs-pin/45b0f7699df36b3849edc3bdef37d4cb9e75b9ea/share/emacs/32.0.50/lisp/progmodes/xref.el\")) #s(xref-item \"(cl-defgeneric xref-location-marker)\" #s(xref-elisp-location xref-location-marker cl-defgeneric \"<recording-home>/.hermes/cache/scratch/gts-tree-t8p5ta2b/lisp/progmodes/xref.el\"))) :value nil :explanation (struct-field location (struct-field file (arrays-of-different-length 117 75 \"<recording-home>/.cache/gnu-emacs-pin/45b0f7699df36b3849edc3bdef37d4cb9e75b9ea/share/emacs/32.0.50/lisp/progmodes/xref.el\" \"<recording-home>/.hermes/cache/scratch/gts-tree-t8p5ta2b/lisp/progmodes/xref.el\" first-mismatch-at 14)))))",
+        "expected": ":passed",
+        "outcome": "failed",
+        "tags": []
+      },
+      "xref-elisp-test-find-defs-defgeneric-eval": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "xref-elisp-test-find-defs-defgeneric-implicit-generic": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "xref-elisp-test-find-defs-defgeneric-no-default": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "xref-elisp-test-find-defs-defgeneric-no-methods": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "xref-elisp-test-find-defs-defgeneric-separate-default": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "xref-elisp-test-find-defs-define-overload-co-located-default": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "xref-elisp-test-find-defs-define-overload-no-default": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "xref-elisp-test-find-defs-define-overload-no-methods": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "xref-elisp-test-find-defs-define-overload-separate-default": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "xref-elisp-test-find-defs-defun-c": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "xref-elisp-test-find-defs-defun-c-defvar-c": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "xref-elisp-test-find-defs-defun-defvar-el": {
+        "as_expected": false,
+        "detail": "(ert-test-failed ((should (equal xref expected-xref)) :form (equal #s(xref-item #(\"(defun compilation-minor-mode)\" 1 6 (face font-lock-keyword-face) 7 29 (face font-lock-function-name-face)) #s(xref-elisp-location compilation-minor-mode nil \"<recording-home>/.cache/gnu-emacs-pin/45b0f7699df36b3849edc3bdef37d4cb9e75b9ea/share/emacs/32.0.50/lisp/progmodes/compile.el\")) #s(xref-item \"(defun compilation-minor-mode)\" #s(xref-elisp-location compilation-minor-mode nil \"<recording-home>/.hermes/cache/scratch/gts-tree-t8p5ta2b/lisp/progmodes/compile.el\"))) :value nil :explanation (struct-field location (struct-field file (arrays-of-different-length 120 78 \"<recording-home>/.cache/gnu-emacs-pin/45b0f7699df36b3849edc3bdef37d4cb9e75b9ea/share/emacs/32.0.50/lisp/progmodes/compile.el\" \"<recording-home>/.hermes/cache/scratch/gts-tree-t8p5ta2b/lisp/progmodes/compile.el\" first-mismatch-at 14)))))",
+        "expected": ":passed",
+        "outcome": "failed",
+        "tags": []
+      },
+      "xref-elisp-test-find-defs-defun-el": {
+        "as_expected": false,
+        "detail": "(ert-test-failed ((should (equal xref expected-xref)) :form (equal #s(xref-item #(\"(defun xref-find-definitions)\" 1 6 (face font-lock-keyword-face) 7 28 (face font-lock-function-name-face)) #s(xref-elisp-location xref-find-definitions nil \"<recording-home>/.cache/gnu-emacs-pin/45b0f7699df36b3849edc3bdef37d4cb9e75b9ea/share/emacs/32.0.50/lisp/progmodes/xref.el\")) #s(xref-item \"(defun xref-find-definitions)\" #s(xref-elisp-location xref-find-definitions nil \"<recording-home>/.hermes/cache/scratch/gts-tree-t8p5ta2b/lisp/progmodes/xref.el\"))) :value nil :explanation (struct-field location (struct-field file (arrays-of-different-length 117 75 \"<recording-home>/.cache/gnu-emacs-pin/45b0f7699df36b3849edc3bdef37d4cb9e75b9ea/share/emacs/32.0.50/lisp/progmodes/xref.el\" \"<recording-home>/.hermes/cache/scratch/gts-tree-t8p5ta2b/lisp/progmodes/xref.el\" first-mismatch-at 14)))))",
+        "expected": ":passed",
+        "outcome": "failed",
+        "tags": []
+      },
+      "xref-elisp-test-find-defs-defun-el-defvar-c": {
+        "as_expected": false,
+        "detail": "(ert-test-failed ((should (equal xref expected-xref)) :form (equal #s(xref-item #(\"(defun abbrev-mode)\" 1 6 (face font-lock-keyword-face) 7 18 (face font-lock-function-name-face)) #s(xref-elisp-location abbrev-mode nil \"<recording-home>/.cache/gnu-emacs-pin/45b0f7699df36b3849edc3bdef37d4cb9e75b9ea/share/emacs/32.0.50/lisp/abbrev.el\")) #s(xref-item \"(defun abbrev-mode)\" #s(xref-elisp-location abbrev-mode nil \"<recording-home>/.hermes/cache/scratch/gts-tree-t8p5ta2b/lisp/abbrev.el\"))) :value nil :explanation (struct-field location (struct-field file (arrays-of-different-length 109 67 \"<recording-home>/.cache/gnu-emacs-pin/45b0f7699df36b3849edc3bdef37d4cb9e75b9ea/share/emacs/32.0.50/lisp/abbrev.el\" \"<recording-home>/.hermes/cache/scratch/gts-tree-t8p5ta2b/lisp/abbrev.el\" first-mismatch-at 14)))))",
+        "expected": ":passed",
+        "outcome": "failed",
+        "tags": []
+      },
+      "xref-elisp-test-find-defs-defun-eval": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "xref-elisp-test-find-defs-defvar-c": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "xref-elisp-test-find-defs-defvar-el": {
+        "as_expected": false,
+        "detail": "(ert-test-failed ((should (equal xref expected-xref)) :form (equal #s(xref-item #(\"(defvar xref--history)\" 1 7 (face font-lock-keyword-face) 8 21 (face font-lock-function-name-face)) #s(xref-elisp-location xref--history defvar \"<recording-home>/.cache/gnu-emacs-pin/45b0f7699df36b3849edc3bdef37d4cb9e75b9ea/share/emacs/32.0.50/lisp/progmodes/xref.el\")) #s(xref-item \"(defvar xref--history)\" #s(xref-elisp-location xref--history defvar \"<recording-home>/.hermes/cache/scratch/gts-tree-t8p5ta2b/lisp/progmodes/xref.el\"))) :value nil :explanation (struct-field location (struct-field file (arrays-of-different-length 117 75 \"<recording-home>/.cache/gnu-emacs-pin/45b0f7699df36b3849edc3bdef37d4cb9e75b9ea/share/emacs/32.0.50/lisp/progmodes/xref.el\" \"<recording-home>/.hermes/cache/scratch/gts-tree-t8p5ta2b/lisp/progmodes/xref.el\" first-mismatch-at 14)))))",
+        "expected": ":passed",
+        "outcome": "failed",
+        "tags": []
+      },
+      "xref-elisp-test-find-defs-defvar-eval": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "xref-elisp-test-find-defs-face-el": {
+        "as_expected": false,
+        "detail": "(ert-test-failed ((should (equal xref expected-xref)) :form (equal #s(xref-item #(\"(defvar font-lock-keyword-face)\" 1 7 (face font-lock-keyword-face) 8 30 (face font-lock-function-name-face)) #s(xref-elisp-location font-lock-keyword-face defvar \"<recording-home>/.cache/gnu-emacs-pin/45b0f7699df36b3849edc3bdef37d4cb9e75b9ea/share/emacs/32.0.50/lisp/font-lock.el\")) #s(xref-item \"(defvar font-lock-keyword-face)\" #s(xref-elisp-location font-lock-keyword-face defvar \"<recording-home>/.hermes/cache/scratch/gts-tree-t8p5ta2b/lisp/font-lock.el\"))) :value nil :explanation (struct-field location (struct-field file (arrays-of-different-length 112 70 \"<recording-home>/.cache/gnu-emacs-pin/45b0f7699df36b3849edc3bdef37d4cb9e75b9ea/share/emacs/32.0.50/lisp/font-lock.el\" \"<recording-home>/.hermes/cache/scratch/gts-tree-t8p5ta2b/lisp/font-lock.el\" first-mismatch-at 14)))))",
+        "expected": ":passed",
+        "outcome": "failed",
+        "tags": []
+      },
+      "xref-elisp-test-find-defs-face-eval": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "xref-elisp-test-find-defs-feature-el": {
+        "as_expected": false,
+        "detail": "(ert-test-failed ((should (equal xref expected-xref)) :form (equal #s(xref-item #(\"(feature xref)\" 1 8 (face font-lock-keyword-face) 9 13 (face font-lock-function-name-face)) #s(xref-elisp-location xref feature \"<recording-home>/.cache/gnu-emacs-pin/45b0f7699df36b3849edc3bdef37d4cb9e75b9ea/share/emacs/32.0.50/lisp/progmodes/xref.el.gz\")) #s(xref-item \"(feature xref)\" #s(xref-elisp-location xref feature \"<recording-home>/.hermes/cache/scratch/gts-tree-t8p5ta2b/lisp/progmodes/xref.el\"))) :value nil :explanation (struct-field location (struct-field file (arrays-of-different-length 120 75 \"<recording-home>/.cache/gnu-emacs-pin/45b0f7699df36b3849edc3bdef37d4cb9e75b9ea/share/emacs/32.0.50/lisp/progmodes/xref.el.gz\" \"<recording-home>/.hermes/cache/scratch/gts-tree-t8p5ta2b/lisp/progmodes/xref.el\" first-mismatch-at 14)))))",
+        "expected": ":passed",
+        "outcome": "failed",
+        "tags": []
+      },
+      "xref-elisp-test-find-defs-feature-eval": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      },
+      "xref-elisp-test-find-defs-minor-defvar-c": {
+        "as_expected": true,
+        "detail": null,
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": []
+      }
+    },
+    "timed_out": false
+  },
+  "schema": 1,
+  "toplevel_deftests": 38
+}

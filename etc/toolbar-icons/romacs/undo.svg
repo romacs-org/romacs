@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+  <!-- Arrow head pointing left -->
+  <polyline points="3.5,9 7,5.5"/>
+  <polyline points="3.5,9 7,12.5"/>
+  <!-- Curved arrow body -->
+  <path d="M3.5 9h7.5a5 5 0 0 1 0 6h-3"/>
+</svg>

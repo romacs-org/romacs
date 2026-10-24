@@ -1,0 +1,417 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "format-message",
+ "spec_sha256": "af70ae5266142ceac880b7b98b2077d04feb2811e70ffac73086a4fb22e8785c",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "format-message",
+    "subr",
+    1,
+    "many"
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "editfns.c": "4ea567918bb8e3ba8bc5d144dce9ee2908bf7a108780cb63a4040daa353217c1",
+  "doc.c": "947b54fc83c64a1186024a035dd33dc1f8950c8226ae9e3c0cd04e915c59180b",
+  "disptab.h": "b40ffe7eb159103eaacdf5e1e7a574a85072996bb1d3f5d8f0b51f729e887da3"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "format-message/0000",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'format-message '())) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr format-message> 0))"
+  },
+  {
+   "id": "format-message/0001",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((text-quoting-style nil)) (format-message \"`%s' / '%S` / %% / %d / ''``\" \"`arg'\" \"`arg'\" 7))) (error (list 'sig e))))",
+   "expected": "(ok \"‘`arg'’ / ’\\\"`arg'\\\"‘ / % / 7 / ’’‘‘\")"
+  },
+  {
+   "id": "format-message/0002",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((text-quoting-style 'curve)) (format-message \"`%s' / '%S` / %% / %d / ''``\" \"`arg'\" \"`arg'\" 7))) (error (list 'sig e))))",
+   "expected": "(ok \"‘`arg'’ / ’\\\"`arg'\\\"‘ / % / 7 / ’’‘‘\")"
+  },
+  {
+   "id": "format-message/0003",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((text-quoting-style 'straight)) (format-message \"`%s' / '%S` / %% / %d / ''``\" \"`arg'\" \"`arg'\" 7))) (error (list 'sig e))))",
+   "expected": "(ok \"'`arg'' / '\\\"`arg'\\\"' / % / 7 / ''''\")"
+  },
+  {
+   "id": "format-message/0004",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((text-quoting-style 'grave)) (format-message \"`%s' / '%S` / %% / %d / ''``\" \"`arg'\" \"`arg'\" 7))) (error (list 'sig e))))",
+   "expected": "(ok \"``arg'' / '\\\"`arg'\\\"` / % / 7 / ''``\")"
+  },
+  {
+   "id": "format-message/0005",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((text-quoting-style 'unexpected)) (format-message \"`%s' / '%S` / %% / %d / ''``\" \"`arg'\" \"`arg'\" 7))) (error (list 'sig e))))",
+   "expected": "(ok \"‘`arg'’ / ’\\\"`arg'\\\"‘ / % / 7 / ’’‘‘\")"
+  },
+  {
+   "id": "format-message/0006",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((text-quoting-style 17)) (format-message \"`%s' / '%S` / %% / %d / ''``\" \"`arg'\" \"`arg'\" 7))) (error (list 'sig e))))",
+   "expected": "(ok \"‘`arg'’ / ’\\\"`arg'\\\"‘ / % / 7 / ’’‘‘\")"
+  },
+  {
+   "id": "format-message/0007",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list text-quoting-style (special-variable-p 'text-quoting-style))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "format-message/0008",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((text-quoting-style 'curve)) (list (format-message \"'\") (format-message \"`\") (format-message \"already ‘curved’\") (format \"`plain'\")))) (error (list 'sig e))))",
+   "expected": "(ok (\"’\" \"‘\" \"already ‘curved’\" \"`plain'\"))"
+  },
+  {
+   "id": "format-message/0009",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((text-quoting-style 'curve)) (format-message \"%s %S\" \"`arg'\" '(\"`nested'\")))) (error (list 'sig e))))",
+   "expected": "(ok \"`arg' (\\\"`nested'\\\")\")"
+  },
+  {
+   "id": "format-message/0010",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((text-quoting-style 'curve)) (format-message \"`%s'\" \"100% `raw'\" 'ignored))) (error (list 'sig e))))",
+   "expected": "(ok \"‘100% `raw'’\")"
+  },
+  {
+   "id": "format-message/0011",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((text-quoting-style 'straight)) (format-message \"`%s'\" \"`arg'\"))) (error (list 'sig e))))",
+   "expected": "(ok \"'`arg''\")"
+  },
+  {
+   "id": "format-message/0012",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((text-quoting-style 'grave)) (format-message \"`%s'\" \"`arg'\"))) (error (list 'sig e))))",
+   "expected": "(ok \"``arg''\")"
+  },
+  {
+   "id": "format-message/0013",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (format-message \"\")) (error (list 'sig e))))",
+   "expected": "(ok \"\")"
+  },
+  {
+   "id": "format-message/0014",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (format-message \"plain\" 'ignored)) (error (list 'sig e))))",
+   "expected": "(ok \"plain\")"
+  },
+  {
+   "id": "format-message/0015",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (format-message nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp nil))"
+  },
+  {
+   "id": "format-message/0016",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (format-message 1)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument stringp 1))"
+  },
+  {
+   "id": "format-message/0017",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((text-quoting-style 'curve)) (let ((s (format-message (unibyte-string 96 37 115 39) \"x\"))) (list (multibyte-string-p s) (append s nil))))) (error (list 'sig e))))",
+   "expected": "(ok (t (8216 120 8217)))"
+  },
+  {
+   "id": "format-message/0018",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((text-quoting-style 'straight)) (let ((s (format-message (unibyte-string 96 120 39)))) (list (multibyte-string-p s) (append s nil))))) (error (list 'sig e))))",
+   "expected": "(ok (nil (39 120 39)))"
+  },
+  {
+   "id": "format-message/0019",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((text-quoting-style 'grave)) (let ((s (format-message \"%s\" (unibyte-string 128 195 169 255)))) (append s nil)))) (error (list 'sig e))))",
+   "expected": "(ok (128 195 169 255))"
+  },
+  {
+   "id": "format-message/0020",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((text-quoting-style 'grave)) (list (format-message \"`one'\") (let ((text-quoting-style 'curve)) (format-message \"`two'\")) (format-message \"`three'\")))) (error (list 'sig e))))",
+   "expected": "(ok (\"`one'\" \"‘two’\" \"`three'\"))"
+  },
+  {
+   "id": "format-message/0021",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((text-quoting-style nil) (internal--text-quoting-flag nil) (standard-display-table nil)) (format-message \"`%s'\" \"`raw'\"))) (error (list 'sig e))))",
+   "expected": "(ok \"``raw''\")"
+  },
+  {
+   "id": "format-message/0022",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((text-quoting-style nil) (internal--text-quoting-flag t) (standard-display-table nil)) (format-message \"`%s'\" \"`raw'\"))) (error (list 'sig e))))",
+   "expected": "(ok \"‘`raw'’\")"
+  },
+  {
+   "id": "format-message/0023",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((text-quoting-style 'curve) (internal--text-quoting-flag nil)) (format-message \"`x'\"))) (error (list 'sig e))))",
+   "expected": "(ok \"‘x’\")"
+  },
+  {
+   "id": "format-message/0024",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((text-quoting-style 'straight) (internal--text-quoting-flag nil)) (format-message \"`x'\"))) (error (list 'sig e))))",
+   "expected": "(ok \"'x'\")"
+  },
+  {
+   "id": "format-message/0025",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((text-quoting-style 'grave) (internal--text-quoting-flag nil)) (format-message \"`x'\"))) (error (list 'sig e))))",
+   "expected": "(ok \"`x'\")"
+  },
+  {
+   "id": "format-message/0026",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((text-quoting-style 'unexpected) (internal--text-quoting-flag nil)) (format-message \"`x'\"))) (error (list 'sig e))))",
+   "expected": "(ok \"‘x’\")"
+  },
+  {
+   "id": "format-message/0027",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((text-quoting-style 17) (internal--text-quoting-flag nil)) (format-message \"`x'\"))) (error (list 'sig e))))",
+   "expected": "(ok \"‘x’\")"
+  },
+  {
+   "id": "format-message/0028",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (list internal--text-quoting-flag (special-variable-p 'internal--text-quoting-flag) (get 'display-table 'char-table-extra-slots))) (error (list 'sig e))))",
+   "expected": "(ok (t t nil))"
+  },
+  {
+   "id": "format-message/0029",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((saved-display-slots (get 'display-table 'char-table-extra-slots))) (unwind-protect (progn (put 'display-table 'char-table-extra-slots 18) (let ((text-quoting-style nil) (internal--text-quoting-flag t) (standard-display-table (make-char-table 'display-table))) (aset standard-display-table 8216 [96]) (format-message \"`x'\"))) (put 'display-table 'char-table-extra-slots saved-display-slots)))) (error (list 'sig e))))",
+   "expected": "(ok \"`x'\")"
+  },
+  {
+   "id": "format-message/0030",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((saved-display-slots (get 'display-table 'char-table-extra-slots))) (unwind-protect (progn (put 'display-table 'char-table-extra-slots 18) (let ((text-quoting-style nil) (internal--text-quoting-flag t) (standard-display-table (make-char-table 'display-table))) (aset standard-display-table 8216 [39]) (format-message \"`x'\"))) (put 'display-table 'char-table-extra-slots saved-display-slots)))) (error (list 'sig e))))",
+   "expected": "(ok \"‘x’\")"
+  },
+  {
+   "id": "format-message/0031",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((saved-display-slots (get 'display-table 'char-table-extra-slots))) (unwind-protect (progn (put 'display-table 'char-table-extra-slots 18) (let ((text-quoting-style nil) (internal--text-quoting-flag t) (standard-display-table (make-char-table 'display-table))) (aset standard-display-table 8216 [96 39]) (format-message \"`x'\"))) (put 'display-table 'char-table-extra-slots saved-display-slots)))) (error (list 'sig e))))",
+   "expected": "(ok \"‘x’\")"
+  },
+  {
+   "id": "format-message/0032",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((saved-display-slots (get 'display-table 'char-table-extra-slots))) (unwind-protect (progn (put 'display-table 'char-table-extra-slots 18) (let ((text-quoting-style nil) (internal--text-quoting-flag t) (standard-display-table (make-char-table 'display-table))) (aset standard-display-table 8216 []) (format-message \"`x'\"))) (put 'display-table 'char-table-extra-slots saved-display-slots)))) (error (list 'sig e))))",
+   "expected": "(ok \"‘x’\")"
+  },
+  {
+   "id": "format-message/0033",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((saved-display-slots (get 'display-table 'char-table-extra-slots))) (unwind-protect (progn (put 'display-table 'char-table-extra-slots 18) (let ((text-quoting-style nil) (internal--text-quoting-flag t) (standard-display-table (make-char-table 'display-table))) (aset standard-display-table 8216 96) (format-message \"`x'\"))) (put 'display-table 'char-table-extra-slots saved-display-slots)))) (error (list 'sig e))))",
+   "expected": "(ok \"‘x’\")"
+  },
+  {
+   "id": "format-message/0034",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((saved-display-slots (get 'display-table 'char-table-extra-slots))) (unwind-protect (progn (put 'display-table 'char-table-extra-slots 18) (let ((text-quoting-style nil) (internal--text-quoting-flag t) (standard-display-table (make-char-table 'display-table))) (aset standard-display-table 8216 '(96)) (format-message \"`x'\"))) (put 'display-table 'char-table-extra-slots saved-display-slots)))) (error (list 'sig e))))",
+   "expected": "(ok \"‘x’\")"
+  },
+  {
+   "id": "format-message/0035",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((saved-display-slots (get 'display-table 'char-table-extra-slots))) (unwind-protect (progn (put 'display-table 'char-table-extra-slots 18) (let ((text-quoting-style nil) (internal--text-quoting-flag t) (standard-display-table (make-char-table 'display-table))) (aset standard-display-table 8216 [96.0]) (format-message \"`x'\"))) (put 'display-table 'char-table-extra-slots saved-display-slots)))) (error (list 'sig e))))",
+   "expected": "(ok \"‘x’\")"
+  },
+  {
+   "id": "format-message/0036",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((saved-display-slots (get 'display-table 'char-table-extra-slots))) (unwind-protect (progn (put 'display-table 'char-table-extra-slots 18) (let ((text-quoting-style nil) (internal--text-quoting-flag t) (standard-display-table (make-char-table 'display-table))) (aset standard-display-table 8216 nil) (format-message \"`x'\"))) (put 'display-table 'char-table-extra-slots saved-display-slots)))) (error (list 'sig e))))",
+   "expected": "(ok \"‘x’\")"
+  },
+  {
+   "id": "format-message/0037",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((saved-display-slots (get 'display-table 'char-table-extra-slots))) (unwind-protect (progn (put 'display-table 'char-table-extra-slots 18) (let ((text-quoting-style nil) (internal--text-quoting-flag t) (standard-display-table (make-char-table 'display-table [96]))) (format-message \"`x'\"))) (put 'display-table 'char-table-extra-slots saved-display-slots)))) (error (list 'sig e))))",
+   "expected": "(ok \"`x'\")"
+  },
+  {
+   "id": "format-message/0038",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((saved-display-slots (get 'display-table 'char-table-extra-slots))) (unwind-protect (progn (put 'display-table 'char-table-extra-slots 18) (let ((text-quoting-style nil) (internal--text-quoting-flag t) (standard-display-table (make-char-table 'display-table)) (parent (make-char-table 'display-table))) (aset parent 8216 [96]) (set-char-table-parent standard-display-table parent) (format-message \"`x'\"))) (put 'display-table 'char-table-extra-slots saved-display-slots)))) (error (list 'sig e))))",
+   "expected": "(ok \"`x'\")"
+  },
+  {
+   "id": "format-message/0039",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((saved-display-slots (get 'display-table 'char-table-extra-slots))) (unwind-protect (progn (put 'display-table 'char-table-extra-slots 18) (let ((text-quoting-style nil) (internal--text-quoting-flag t) (standard-display-table (make-char-table 'display-table))) (aset standard-display-table 8217 [96]) (format-message \"`x'\"))) (put 'display-table 'char-table-extra-slots saved-display-slots)))) (error (list 'sig e))))",
+   "expected": "(ok \"‘x’\")"
+  },
+  {
+   "id": "format-message/0040",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((text-quoting-style nil) (internal--text-quoting-flag t) (standard-display-table [96])) (format-message \"`x'\"))) (error (list 'sig e))))",
+   "expected": "(ok \"‘x’\")"
+  },
+  {
+   "id": "format-message/0041",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((text-quoting-style nil) (internal--text-quoting-flag t) (standard-display-table (make-char-table 'not-display-table [96]))) (format-message \"`x'\"))) (error (list 'sig e))))",
+   "expected": "(ok \"‘x’\")"
+  },
+  {
+   "id": "format-message/0042",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (unwind-protect (progn (put 'not-display-table 'char-table-extra-slots 18) (let ((text-quoting-style nil) (internal--text-quoting-flag t) (standard-display-table (make-char-table 'not-display-table [96]))) (format-message \"`x'\"))) (put 'not-display-table 'char-table-extra-slots nil))) (error (list 'sig e))))",
+   "expected": "(ok \"‘x’\")"
+  },
+  {
+   "id": "format-message/0043",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((saved (get 'display-table 'char-table-extra-slots))) (unwind-protect (progn (put 'display-table 'char-table-extra-slots 0) (let ((text-quoting-style nil) (internal--text-quoting-flag t) (standard-display-table (make-char-table 'display-table [96]))) (format-message \"`x'\"))) (put 'display-table 'char-table-extra-slots saved)))) (error (list 'sig e))))",
+   "expected": "(ok \"‘x’\")"
+  },
+  {
+   "id": "format-message/0044",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((saved (get 'display-table 'char-table-extra-slots))) (unwind-protect (progn (put 'display-table 'char-table-extra-slots 6) (let ((text-quoting-style nil) (internal--text-quoting-flag t) (standard-display-table (make-char-table 'display-table [96]))) (format-message \"`x'\"))) (put 'display-table 'char-table-extra-slots saved)))) (error (list 'sig e))))",
+   "expected": "(ok \"‘x’\")"
+  },
+  {
+   "id": "format-message/0045",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((saved (get 'display-table 'char-table-extra-slots))) (unwind-protect (progn (put 'display-table 'char-table-extra-slots 17) (let ((text-quoting-style nil) (internal--text-quoting-flag t) (standard-display-table (make-char-table 'display-table [96]))) (format-message \"`x'\"))) (put 'display-table 'char-table-extra-slots saved)))) (error (list 'sig e))))",
+   "expected": "(ok \"‘x’\")"
+  },
+  {
+   "id": "format-message/0046",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((saved (get 'display-table 'char-table-extra-slots))) (unwind-protect (progn (put 'display-table 'char-table-extra-slots 19) (let ((text-quoting-style nil) (internal--text-quoting-flag t) (standard-display-table (make-char-table 'display-table [96]))) (format-message \"`x'\"))) (put 'display-table 'char-table-extra-slots saved)))) (error (list 'sig e))))",
+   "expected": "(ok \"‘x’\")"
+  },
+  {
+   "id": "format-message/0047",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eval '(let ((text-quoting-style 'straight)) (format-message \"`x'\")) t)) (error (list 'sig e))))",
+   "expected": "(ok \"'x'\")"
+  },
+  {
+   "id": "format-message/0048",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eval '(let ((text-quoting-style nil) (internal--text-quoting-flag nil)) (format-message \"`x'\")) t)) (error (list 'sig e))))",
+   "expected": "(ok \"`x'\")"
+  },
+  {
+   "id": "format-message/0049",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((saved-display-slots (get 'display-table 'char-table-extra-slots))) (unwind-protect (progn (put 'display-table 'char-table-extra-slots 18) (eval '(let ((text-quoting-style nil) (internal--text-quoting-flag t) (standard-display-table (make-char-table 'display-table [96]))) (format-message \"`x'\")) t)) (put 'display-table 'char-table-extra-slots saved-display-slots)))) (error (list 'sig e))))",
+   "expected": "(ok \"`x'\")"
+  },
+  {
+   "id": "format-message/0050",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((saved (symbol-function 'format))) (unwind-protect (progn (fset 'format (lambda (&rest ignored) \"intercepted\")) (let ((text-quoting-style 'straight)) (format-message \"`%s'\" \"raw\"))) (fset 'format saved)))) (error (list 'sig e))))",
+   "expected": "(ok \"'raw'\")"
+  },
+  {
+   "id": "format-message/0051",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((text-quoting-style nil) (internal--text-quoting-flag nil)) (let ((s (format-message (unibyte-string 96 120 39)))) (list (multibyte-string-p s) (append s nil))))) (error (list 'sig e))))",
+   "expected": "(ok (nil (96 120 39)))"
+  },
+  {
+   "id": "format-message/0052",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((text-quoting-style 'curve)) (let ((s (format-message (unibyte-string 37 115) (unibyte-string 120)))) (list (multibyte-string-p s) (append s nil))))) (error (list 'sig e))))",
+   "expected": "(ok (nil (120)))"
+  },
+  {
+   "id": "format-message/0053",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((text-quoting-style 'straight)) (let ((s (format-message (string-to-multibyte (unibyte-string 96 120 39))))) (list (multibyte-string-p s) (append s nil))))) (error (list 'sig e))))",
+   "expected": "(ok (t (39 120 39)))"
+  },
+  {
+   "id": "format-message/0054",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((text-quoting-style (make-symbol \"grave\")) (internal--text-quoting-flag nil)) (format-message \"`x'\"))) (error (list 'sig e))))",
+   "expected": "(ok \"‘x’\")"
+  },
+  {
+   "id": "format-message/0055",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((purpose (make-symbol \"display-table\"))) (put purpose 'char-table-extra-slots 18) (let ((text-quoting-style nil) (internal--text-quoting-flag t) (standard-display-table (make-char-table purpose [96]))) (format-message \"`x'\")))) (error (list 'sig e))))",
+   "expected": "(ok \"‘x’\")"
+  },
+  {
+   "id": "format-message/0056",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((text-quoting-style 'curve)) (let ((s (format-message \"`%s'\" (unibyte-string 200)))) (list (multibyte-string-p s) (append s nil))))) (error (list 'sig e))))",
+   "expected": "(ok (t (8216 4194248 8217)))"
+  },
+  {
+   "id": "format-message/0057",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((text-quoting-style 'curve)) (let ((s (format-message (unibyte-string 96 200 39)))) (list (multibyte-string-p s) (append s nil))))) (error (list 'sig e))))",
+   "expected": "(ok (t (8216 4194248 8217)))"
+  },
+  {
+   "id": "format-message/0058",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((text-quoting-style 'curve)) (let ((s (format-message \"`%s'\" (unibyte-string 128 195 169 255)))) (list (multibyte-string-p s) (append s nil))))) (error (list 'sig e))))",
+   "expected": "(ok (t (8216 4194176 4194243 4194217 4194303 8217)))"
+  },
+  {
+   "id": "format-message/0059",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((text-quoting-style 'grave)) (let ((s (format-message \"%s\" (unibyte-string 195 169)))) (list (multibyte-string-p s) (append s nil))))) (error (list 'sig e))))",
+   "expected": "(ok (nil (195 169)))"
+  },
+  {
+   "id": "format-message/0060",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((text-quoting-style 'curve)) (let ((s (format-message (unibyte-string 37 115) (unibyte-string 195 169)))) (list (multibyte-string-p s) (append s nil))))) (error (list 'sig e))))",
+   "expected": "(ok (nil (195 169)))"
+  },
+  {
+   "id": "format-message/0061",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((text-quoting-style 'curve)) (let ((s (format \"`%s'\" (unibyte-string 200)))) (list (multibyte-string-p s) (append s nil))))) (error (list 'sig e))))",
+   "expected": "(ok (nil (96 200 39)))"
+  },
+  {
+   "id": "format-message/0062",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((text-quoting-style 'curve)) (let ((s (format \"%s\" (unibyte-string 195 169)))) (list (multibyte-string-p s) (append s nil))))) (error (list 'sig e))))",
+   "expected": "(ok (nil (195 169)))"
+  },
+  {
+   "id": "format-message/0063",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((text-quoting-style 'curve)) (format \"`%s'\" \"plain\"))) (error (list 'sig e))))",
+   "expected": "(ok \"`plain'\")"
+  }
+ ]
+}

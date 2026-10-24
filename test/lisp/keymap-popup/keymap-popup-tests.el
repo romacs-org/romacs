@@ -1,0 +1,2759 @@
+;;; keymap-popup-tests.el --- Tests -*- lexical-binding: t; -*-
+
+;; Copyright (C) 2026 Free Software Foundation, Inc.
+
+;;; Commentary:
+
+;; ERT tests for keymap-popup.  Run via `make test'.
+
+;;; Code:
+
+(require 'ert)
+(require 'dired)
+(require 'keymap-popup)
+
+(defconst keymap-popup-test--directory
+  (file-name-directory (or load-file-name buffer-file-name))
+  "Directory containing the imported suite and its fixtures.")
+
+(defun keymap-popup-test--session (buf descriptions &rest properties)
+  "Install a popup session in BUF for DESCRIPTIONS.
+PROPERTIES may supply active-state and session values used by a test."
+  (let* ((source-live (list (make-symbol "test-source")))
+         (backend (or (plist-get properties :backend)
+                      (list :show #'ignore :fit #'ignore :hide #'ignore)))
+         (active (keymap-popup--make-state
+                  (plist-get properties :keymap)
+                  descriptions
+                  (plist-get properties :docstring)
+                  (or (plist-get properties :exit-key) "q")))
+         (active (keymap-popup--plist-with
+                  active
+                  :wrapper-map (plist-get properties :wrapper-map)
+                  :exit-function (plist-get properties :exit-function)))
+         (session (list :source (or (plist-get properties :source) buf)
+                        :source-live source-live
+                        :source-retire (lambda () (setcar source-live nil))
+                        :active active
+                        :stack (plist-get properties :stack)
+                        :prefix-mode (plist-get properties :prefix-mode)
+                        :reentering (plist-get properties :reentering)
+                        :persistent (plist-get properties :persistent)
+                        :backend backend
+                        :persistent-hook
+                        (plist-get properties :persistent-hook))))
+    (keymap-popup--init-session buf session)))
+
+;;; Parser tests
+
+(ert-deftest keymap-popup-test-parse-suffix-entry ()
+  (let ((result (keymap-popup--parse-entry "c" '("Comment" forgejo-view-comment))))
+    (should (equal (plist-get result :key) "c"))
+    (should (equal (plist-get result :description) "Comment"))
+    (should (equal (plist-get result :command) 'forgejo-view-comment))
+    (should (equal (plist-get result :type) 'suffix))))
+
+(ert-deftest keymap-popup-test-parse-suffix-with-if ()
+  (let* ((pred (lambda () t))
+         (result (keymap-popup--parse-entry "b" `("Browse" forgejo-browse :if ,pred))))
+    (should (equal (plist-get result :type) 'suffix))
+    (should (eq (plist-get result :if) pred))))
+
+(ert-deftest keymap-popup-test-parse-switch-entry ()
+  (let ((result (keymap-popup--parse-entry "v" '("Verbose" :switch my-verbose-var))))
+    (should (equal (plist-get result :type) 'switch))
+    (should (equal (plist-get result :variable) 'my-verbose-var))))
+
+(ert-deftest keymap-popup-test-parse-dynamic-description ()
+  (let* ((desc-fn (lambda () "dynamic"))
+         (result (keymap-popup--parse-entry "d" `(,desc-fn some-command))))
+    (should (functionp (plist-get result :description)))))
+
+(ert-deftest keymap-popup-test-parse-bindings-groups ()
+  (let* ((rows (keymap-popup--parse-bindings
+                '(:group "Actions"
+			 "c" ("Comment" forgejo-view-comment)
+			 "r" ("Reply" forgejo-issue-reply)
+			 :group "Navigate"
+			 "g" ("Refresh" forgejo-view-refresh)
+			 "q" ("Quit" quit-window))))
+         (row (car rows)))
+    (should (= (length rows) 1))
+    (should (= (length row) 2))
+    (should (equal (plist-get (car row) :name) "Actions"))
+    (should (= (length (plist-get (car row) :entries)) 2))
+    (should (equal (plist-get (cadr row) :name) "Navigate"))
+    (should (= (length (plist-get (cadr row) :entries)) 2))))
+
+(ert-deftest keymap-popup-test-parse-bindings-no-group ()
+  (let* ((rows (keymap-popup--parse-bindings
+                '("c" ("Comment" forgejo-view-comment)
+                  "r" ("Reply" forgejo-issue-reply))))
+         (row (car rows)))
+    (should (= (length rows) 1))
+    (should (= (length row) 1))
+    (should (null (plist-get (car row) :name)))
+    (should (= (length (plist-get (car row) :entries)) 2))))
+
+(ert-deftest keymap-popup-test-parse-bindings-rows ()
+  (let ((rows (keymap-popup--parse-bindings
+               '(:group "A"
+			"a" ("Aaa" ignore)
+			:group "B"
+			"b" ("Bbb" ignore)
+			:row
+			:group "C"
+			"c" ("Ccc" ignore)))))
+    (should (= (length rows) 2))
+    (should (= (length (car rows)) 2))
+    (should (= (length (cadr rows)) 1))
+    (should (equal (plist-get (caar (cdr rows)) :name) "C"))))
+
+(ert-deftest keymap-popup-test-split-groups-trailing-row ()
+  "A trailing :row with nothing after it yields no empty row."
+  (should (= 1 (length (keymap-popup--split-groups
+                        '("a" ("A" ignore) :row))))))
+
+(ert-deftest keymap-popup-test-parse-keymap-entry ()
+  (let ((result (keymap-popup--parse-entry "a" '("Metadata" :keymap my-sub-map))))
+    (should (equal (plist-get result :type) 'keymap))
+    (should (equal (plist-get result :target) 'my-sub-map))))
+
+(ert-deftest keymap-popup-test-parser-rejects-malformed-entries ()
+  (mapc
+   (lambda (case)
+     (pcase-let ((`(,key ,spec ,message) case))
+       (let ((error (should-error (keymap-popup--parse-entry key spec))))
+         (should (string-match-p message (error-message-string error))))))
+   '(("foobar" ("Bad key" ignore) "invalid key")
+     ("x" (42 ignore) "description must be a string or function")
+     ("x" ("Bad command" 42) "invalid command")
+     ("x" ("Missing switch" :switch) "switch needs a variable symbol")
+     ("x" ("Missing submenu" :keymap) "submenu needs a keymap")
+     ("x" ("Typo" ignore :stay-opn t) "unknown property :stay-opn")
+     ("x" ("Odd" ignore :if) "property :if needs a value")
+     ("x" ("Bad predicate" ignore :if t) ":if needs a function"))))
+
+(ert-deftest keymap-popup-test-parser-rejects-malformed-groups ()
+  (let ((unknown (should-error
+                  (keymap-popup--parse-bindings
+                   '(:group ("Bad" :stay-open t) "x" ("X" ignore)))))
+        (directive (should-error
+                    (keymap-popup--parse-bindings
+                     '(:grop "Bad" "x" ("X" ignore))))))
+    (should (string-match-p "unknown property :stay-open"
+                            (error-message-string unknown)))
+    (should (string-match-p "unknown directive :grop"
+                            (error-message-string directive)))))
+
+(ert-deftest keymap-popup-test-macros-reject-unsupported-syntax ()
+  (should-error
+   (macroexpand-1
+    '(keymap-popup-define keymap-popup--test-invalid-map
+       ignore "Description")))
+  (should-error
+   (macroexpand-1
+    '(keymap-popup-annotate some-map :parent parent-map
+       ignore "Description")))
+  (should-error
+   (macroexpand-1
+    '(keymap-popup-define keymap-popup--test-invalid-map
+       :popup-key "not-a-key" "x" ("X" ignore)))))
+
+(ert-deftest keymap-popup-test-attach-validates-runtime-input ()
+  (let ((map (make-sparse-keymap)))
+    (should-error
+     (keymap-popup-attach map '("x" ("Invalid" 42))))
+    (should-error
+     (keymap-popup-attach map '("x" ("Ignore" ignore)) :unknown t))
+    (should-error
+     (keymap-popup-attach map '("x" ("Ignore" ignore :c-u 4))))
+    (should-error
+     (keymap-popup-attach map '("x" ("Ignore" ignore))
+                          :persistent 'yes))))
+
+(ert-deftest keymap-popup-test-attach-accepts-forward-descriptions ()
+  "Runtime descriptions may be function symbols defined after attachment."
+  (let* ((group-description (make-symbol "future-group-description"))
+         (entry-description (make-symbol "future-entry-description"))
+         (popup-description (make-symbol "future-popup-description"))
+         (map (make-sparse-keymap)))
+    (keymap-set map "x" #'ignore)
+    (keymap-popup-attach
+     map
+     (list :group group-description
+           "x" (list entry-description 'ignore))
+     :description popup-description)
+    (let* ((rows (keymap-popup--meta map 'descriptions))
+           (group (caar rows))
+           (entry (car (plist-get group :entries))))
+      (should (eq (plist-get group :name) group-description))
+      (should (eq (plist-get entry :description) entry-description))
+      (should (eq (keymap-popup--meta map 'description)
+                  popup-description)))))
+
+(ert-deftest keymap-popup-test-attach-accepts-forward-predicates ()
+  "Runtime predicates may be function symbols defined after attachment."
+  (let* ((group-if (make-symbol "future-group-if"))
+         (group-inapt (make-symbol "future-group-inapt"))
+         (entry-if (make-symbol "future-entry-if"))
+         (entry-inapt (make-symbol "future-entry-inapt"))
+         (map (make-sparse-keymap)))
+    (keymap-set map "x" #'ignore)
+    (keymap-popup-attach
+     map
+     (list :group (list "Group" :if group-if :inapt-if group-inapt)
+           "x" (list "Ignore" 'ignore :if entry-if :inapt-if entry-inapt)))
+    (let* ((rows (keymap-popup--meta map 'descriptions))
+           (group (caar rows))
+           (entry (car (plist-get group :entries))))
+      (should (eq (plist-get group :if) group-if))
+      (should (eq (plist-get group :inapt-if) group-inapt))
+      (should (eq (plist-get entry :if) entry-if))
+      (should (eq (plist-get entry :inapt-if) entry-inapt)))))
+
+;;; Infix generator tests
+
+(ert-deftest keymap-popup-test-entry-command ()
+  (should (eq (keymap-popup--entry-command 'map '(:type suffix :command my-cmd))
+              'my-cmd))
+  (should (eq (keymap-popup--entry-command 'map '(:type switch :variable my-var))
+              'map--toggle-my-var))
+  (should (eq (keymap-popup--entry-command 'map '(:type keymap :target my-sub))
+              'map--enter-my-sub)))
+
+;;; Macro tests
+
+(ert-deftest keymap-popup-test-macro-declarations-deduplicate-keymap-symbols ()
+  (let* ((forms (cdr (macroexpand-1
+                      '(keymap-popup-define keymap-popup--test-root-map
+                         :parent (make-sparse-keymap)
+                         "a" ("A" :keymap keymap-popup--test-sub-map)
+                         "b" ("B" :keymap keymap-popup--test-sub-map)))))
+         (declarations (seq-filter
+                        (lambda (form) (eq (car-safe form) 'defvar))
+                        forms)))
+    (should (equal declarations
+                   '((defvar keymap-popup--test-root-map)
+                     (defvar keymap-popup--test-sub-map))))))
+
+(ert-deftest keymap-popup-test-macro-declarations-omit-nil-parent ()
+  (let* ((forms (cdr (macroexpand-1
+                      '(keymap-popup-define keymap-popup--test-no-parent-map
+                         "r" ("Refresh" ignore)))))
+         (declarations (seq-filter
+                        (lambda (form) (eq (car-safe form) 'defvar))
+                        forms)))
+    (should (equal declarations
+                   '((defvar keymap-popup--test-no-parent-map))))))
+
+(ert-deftest keymap-popup-test-macro-declarations-include-parent ()
+  (let* ((forms (cdr (macroexpand-1
+                      '(keymap-popup-define keymap-popup--test-child-map
+                         :parent keymap-popup--test-parent-map
+                         "s" ("Sub" :keymap keymap-popup--test-parent-map)))))
+         (declarations (seq-filter
+                        (lambda (form) (eq (car-safe form) 'defvar))
+                        forms)))
+    (should (equal declarations
+                   '((defvar keymap-popup--test-child-map)
+                     (defvar keymap-popup--test-parent-map))))))
+
+(ert-deftest keymap-popup-test-macro-expands-to-attach-meta ()
+  "Both macros attach metadata via one attach-meta call, no raw setf."
+  (dolist (form '((keymap-popup-define keymap-popup--test-attach-form-map
+                    :persistent t
+                    "r" ("Refresh" ignore))
+                  (keymap-popup-annotate keymap-popup--test-attach-form-map
+                    :exit-key "x"
+                    forward-char "Forward")))
+    (let ((forms (cdr (macroexpand-1 form))))
+      (should (= 1 (seq-count
+                    (lambda (f) (eq (car-safe f) 'keymap-popup--attach-meta))
+                    forms)))
+      (should-not (seq-some (lambda (f) (eq (car-safe f) 'setf)) forms)))))
+
+(ert-deftest keymap-popup-test-define-switch-entry-stores-command ()
+  "Define stores the generated toggle command on switch entries."
+  (eval '(keymap-popup-define keymap-popup--test-entry-cmd-map
+           :group "Toggles"
+           "v" ("Verbose" :switch keymap-popup--test-entry-cmd-verbose))
+        t)
+  (let* ((descs (keymap-popup--meta keymap-popup--test-entry-cmd-map
+                                    'descriptions))
+         (entry (car (plist-get (caar descs) :entries))))
+    (should (eq (plist-get entry :command)
+                (keymap-popup--toggle-name
+                 'keymap-popup--test-entry-cmd-map
+                 'keymap-popup--test-entry-cmd-verbose)))
+    (should (eq (plist-get entry :variable)
+                'keymap-popup--test-entry-cmd-verbose))))
+
+(ert-deftest keymap-popup-test-define-keymap-entry-stores-command ()
+  "Define stores the generated enter command on keymap entries."
+  (defvar keymap-popup--test-entry-cmd-sub (make-sparse-keymap))
+  (eval '(keymap-popup-define keymap-popup--test-entry-cmd-root
+           :group "Menus"
+           "s" ("Sub" :keymap keymap-popup--test-entry-cmd-sub))
+        t)
+  (let* ((descs (keymap-popup--meta keymap-popup--test-entry-cmd-root
+                                    'descriptions))
+         (entry (car (plist-get (caar descs) :entries))))
+    (should (eq (plist-get entry :command)
+                (keymap-popup--enter-name
+                 'keymap-popup--test-entry-cmd-root
+                 'keymap-popup--test-entry-cmd-sub)))
+    (should (eq (plist-get entry :target)
+                'keymap-popup--test-entry-cmd-sub))
+    (let (opened)
+      (cl-letf (((symbol-function 'keymap-popup)
+                 (lambda (keymap) (setq opened keymap))))
+        (call-interactively
+         #'keymap-popup--test-entry-cmd-root--enter-keymap-popup--test-entry-cmd-sub))
+      (should (eq opened keymap-popup--test-entry-cmd-sub)))))
+
+(ert-deftest keymap-popup-test-annotate-entries-lack-generated-command ()
+  "Annotate emits no generated commands, so entries carry none."
+  (defvar keymap-popup--test-entry-cmd-sub (make-sparse-keymap))
+  (setq keymap-popup--test-annotate-map (make-sparse-keymap))
+  (eval '(keymap-popup-annotate keymap-popup--test-annotate-map
+           :group "Menus"
+           "s" ("Sub" :keymap keymap-popup--test-entry-cmd-sub))
+        t)
+  (let* ((descs (keymap-popup--meta keymap-popup--test-annotate-map
+                                    'descriptions))
+         (entry (car (plist-get (caar descs) :entries))))
+    (should (eq (plist-get entry :type) 'keymap))
+    (should-not (plist-get entry :command))))
+
+(ert-deftest keymap-popup-test-macro-creates-keymap ()
+  (eval '(keymap-popup-define keymap-popup--test-map-1
+           "Test keymap."
+           :group "Actions"
+           "c" ("Comment" ignore)
+           "q" ("Quit" quit-window))
+        t)
+  (should (keymapp keymap-popup--test-map-1))
+  (should (eq (keymap-lookup keymap-popup--test-map-1 "c") #'ignore))
+  (should (eq (keymap-lookup keymap-popup--test-map-1 "q") #'quit-window)))
+
+(ert-deftest keymap-popup-test-macro-stores-descriptions ()
+  (eval '(keymap-popup-define keymap-popup--test-map-2
+           "Test."
+           :group "A"
+           "c" ("Comment" ignore)
+           :group "B"
+           "g" ("Go" ignore))
+        t)
+  (let* ((descs (keymap-popup--meta keymap-popup--test-map-2
+                                    'descriptions))
+         (row (car descs)))
+    (should (= (length descs) 1))
+    (should (= (length row) 2))
+    (should (equal (plist-get (car row) :name) "A"))
+    (should (equal (plist-get (cadr row) :name) "B"))))
+
+(ert-deftest keymap-popup-test-macro-switch-infix ()
+  (eval '(keymap-popup-define keymap-popup--test-map-3
+           "Test."
+           "v" ("Verbose" :switch keymap-popup--test-sw))
+        t)
+  (should (boundp 'keymap-popup--test-sw))
+  (should (fboundp 'keymap-popup--test-map-3--toggle-keymap-popup--test-sw)))
+
+(ert-deftest keymap-popup-test-macro-declares-maps-before-helpers ()
+  (let* ((forms (cdr (macroexpand-1
+                      '(keymap-popup-define keymap-popup--test-declared-map
+                         "Test."
+                         :parent keymap-popup--test-declared-parent
+                         "s" ("Sub" :keymap keymap-popup--test-declared-sub)))))
+         (map-pos (cl-position '(defvar keymap-popup--test-declared-map)
+                               forms :test #'equal))
+         (parent-pos (cl-position '(defvar keymap-popup--test-declared-parent)
+                                  forms :test #'equal))
+         (sub-pos (cl-position '(defvar keymap-popup--test-declared-sub)
+                               forms :test #'equal))
+         (launcher-pos (cl-position-if
+                        (lambda (form)
+                          (and (eq (car-safe form) 'defun)
+                               (eq (cadr form)
+                                   'keymap-popup--test-declared-map-popup)))
+                        forms))
+         (enter-pos (cl-position-if
+                     (lambda (form)
+                       (and (eq (car-safe form) 'defun)
+                            (eq (cadr form)
+                                'keymap-popup--test-declared-map--enter-keymap-popup--test-declared-sub)))
+                     forms))
+         (keymap-pos (cl-position-if
+                      (lambda (form) (eq (car-safe form) 'defvar-keymap))
+                      forms)))
+    (should map-pos)
+    (should parent-pos)
+    (should sub-pos)
+    (should launcher-pos)
+    (should enter-pos)
+    (should keymap-pos)
+    (should (< map-pos launcher-pos))
+    (should (< sub-pos enter-pos))
+    (should (< parent-pos keymap-pos))))
+
+(ert-deftest keymap-popup-test-macro-emits-launcher-defun ()
+  "`keymap-popup-define' emits a named `defun' for the popup launcher."
+  (eval '(keymap-popup-define keymap-popup--test-launcher
+           "Test." "c" ("Comment" ignore))
+        t)
+  (should (fboundp 'keymap-popup--test-launcher-popup))
+  (should (commandp 'keymap-popup--test-launcher-popup))
+  (should (eq (keymap-lookup keymap-popup--test-launcher "h")
+              #'keymap-popup--test-launcher-popup)))
+
+(ert-deftest keymap-popup-test-macro-emits-enterer-defun ()
+  "`keymap-popup-define' emits a named `defun' for each `:keymap' sub-menu key."
+  (defvar keymap-popup--test-sub-map (make-sparse-keymap))
+  (eval '(keymap-popup-define keymap-popup--test-with-sub
+           "Test." "s" ("Sub" :keymap keymap-popup--test-sub-map))
+        t)
+  (should (fboundp 'keymap-popup--test-with-sub--enter-keymap-popup--test-sub-map))
+  (should (eq (keymap-lookup keymap-popup--test-with-sub "s")
+              #'keymap-popup--test-with-sub--enter-keymap-popup--test-sub-map)))
+
+(ert-deftest keymap-popup-test-macro-lambda-command ()
+  (eval '(keymap-popup-define keymap-popup--test-map-5
+           "Test."
+           "x" ("Run" (lambda () (interactive) (message "running"))))
+        t)
+  (should (functionp (keymap-lookup keymap-popup--test-map-5 "x"))))
+
+(defvar keymap-popup--test-anonymous-map)
+
+(defun keymap-popup-test--anonymous-command-popup (compile)
+  "Exercise anonymous commands through a popup, using COMPILE on its factory."
+  (let* ((keymap-popup--test-anonymous-map nil)
+         (overriding-terminal-local-map nil)
+         (pre-command-hook nil)
+         (post-command-hook nil)
+         (minibuffer-setup-hook nil)
+         (minibuffer-exit-hook nil)
+         (keymap-popup-backend
+          (lambda () (list :show #'ignore :fit #'ignore :hide #'ignore)))
+         ;; Evaluate once as source, even when this test file is compiled.
+         (factory
+          (eval '(lambda (value)
+                   (keymap-popup-define keymap-popup--test-anonymous-map
+                     "a" ("Anonymous" (lambda () (interactive) (insert value)))
+                     "f" ("Filtered" (lambda () (interactive) (insert value))
+                          :if (lambda () t))
+                     "n" ("Named" ignore)))
+                t)))
+    (unwind-protect
+        (with-temp-buffer
+          (makunbound 'keymap-popup--test-anonymous-map)
+          (funcall (funcall compile factory) "captured")
+          (let* ((map keymap-popup--test-anonymous-map)
+                 (original (keymap-lookup map "a")))
+            (keymap-popup map)
+            (should (string-match-p
+                     "Anonymous" (with-current-buffer keymap-popup--buffer-name
+                                   (buffer-string))))
+            (should (string-match-p
+                     "Filtered" (with-current-buffer keymap-popup--buffer-name
+                                  (buffer-string))))
+            (dolist (key '("a" "f"))
+              (let* ((rows (keymap-popup--meta map 'descriptions))
+                     (entry (keymap-popup--find-entry-by-key rows key)))
+                (should (eq (plist-get entry :command)
+                            (keymap-lookup map key)))))
+            (call-interactively (key-binding (kbd "a")))
+            (should (equal (buffer-string) "captured"))
+            (keymap-popup-dismiss)
+            ;; A fresh closure, even with equal source and environment, is
+            ;; a replacement, not the command described by the old entry.
+            (let ((replacement (eval '(lambda () (interactive) (insert value))
+                                     '((value . "captured")))))
+              (should-not (eq original replacement))
+              (keymap-set map "a" replacement)
+              (keymap-popup map)
+              (should-not
+               (string-match-p
+                "Anonymous" (with-current-buffer keymap-popup--buffer-name
+                              (buffer-string))))
+              (keymap-popup-dismiss)
+              (keymap-set map "z" original)
+              (keymap-popup map)
+              (should (string-match-p
+                       "Anonymous" (with-current-buffer keymap-popup--buffer-name
+                                     (buffer-string))))
+              (call-interactively (key-binding (kbd "z")))
+              (should (equal (buffer-string) "capturedcaptured")))
+            (execute-kbd-macro (kbd "q"))
+            (should-not (get-buffer keymap-popup--buffer-name))
+            (should-not overriding-terminal-local-map)))
+      (keymap-popup-dismiss))))
+
+(ert-deftest keymap-popup-test-anonymous-command-popup-source ()
+  (keymap-popup-test--anonymous-command-popup #'identity))
+
+(ert-deftest keymap-popup-test-anonymous-command-popup-byte-compiled ()
+  (keymap-popup-test--anonymous-command-popup #'byte-compile))
+
+(ert-deftest keymap-popup-test-distinct-equal-commands-stay-distinct ()
+  "Equal closure bodies do not transfer labels or popup restrictions."
+  (let* ((form '(lambda () (interactive) (insert value)))
+         (environment '((value . "captured")))
+         (original (eval form environment))
+         (replacement (eval form environment))
+         (map (make-sparse-keymap)))
+    (should (equal original replacement))
+    (should-not (eq original replacement))
+    (keymap-set map "a" original)
+    (keymap-popup-attach map
+                         (list "a" (list "Original" original :inapt-if #'always)))
+    (keymap-set map "a" replacement)
+    (let* ((rows (keymap-popup--resolve-descriptions
+                  (keymap-popup--meta map 'descriptions) map))
+           (wrapper (keymap-popup--build-wrapper-map map rows nil "q")))
+      (should-not (keymap-popup--find-entry-by-key rows "a"))
+      (should (eq (keymap-lookup wrapper "a") replacement)))))
+
+(ert-deftest keymap-popup-test-macro-no-docstring ()
+  (eval '(keymap-popup-define keymap-popup--test-map-nodoc
+           :group "Actions"
+           "c" ("Comment" ignore))
+        t)
+  (should (keymapp keymap-popup--test-map-nodoc))
+  (should (eq (keymap-lookup keymap-popup--test-map-nodoc "c") #'ignore))
+  (let* ((descs (keymap-popup--meta keymap-popup--test-map-nodoc
+                                    'descriptions))
+         (row (car descs)))
+    (should (= (length descs) 1))
+    (should (= (length row) 1))
+    (should (equal (plist-get (car row) :name) "Actions"))))
+
+(ert-deftest keymap-popup-test-macro-default-popup-key ()
+  (eval '(keymap-popup-define keymap-popup--test-map-defkey
+           "c" ("Comment" ignore))
+        t)
+  (should (functionp (keymap-lookup keymap-popup--test-map-defkey "h"))))
+
+(ert-deftest keymap-popup-test-macro-popup-key-resolved-at-load ()
+  "The default popup key is read at load time, not expansion time."
+  (let ((expansion (macroexpand-1
+                    '(keymap-popup-define keymap-popup--test-map-loadkey
+                       "c" ("Comment" ignore)))))
+    (let ((keymap-popup-default-popup-key "!"))
+      (eval expansion t))
+    (should (functionp (keymap-lookup keymap-popup--test-map-loadkey "!")))
+    (should (null (keymap-lookup keymap-popup--test-map-loadkey "h")))))
+
+(ert-deftest keymap-popup-test-macro-no-exit-key-stores-no-metadata ()
+  "Without :exit-key, no exit-key metadata is stored; display falls back."
+  (eval '(keymap-popup-define keymap-popup--test-map-noexit
+           "c" ("Comment" ignore))
+        t)
+  (should-not (keymap-popup--meta keymap-popup--test-map-noexit 'exit-key)))
+
+(ert-deftest keymap-popup-test-macro-custom-popup-key ()
+  (eval '(keymap-popup-define keymap-popup--test-map-custkey
+           :popup-key "?"
+           "c" ("Comment" ignore))
+        t)
+  (should (functionp (keymap-lookup keymap-popup--test-map-custkey "?")))
+  (should (null (keymap-lookup keymap-popup--test-map-custkey "h"))))
+
+(ert-deftest keymap-popup-test-macro-exit-key ()
+  (eval '(keymap-popup-define keymap-popup--test-exit-key
+           :exit-key "x"
+           "c" ("Comment" ignore))
+        t)
+  (should (equal (keymap-popup--meta keymap-popup--test-exit-key
+                                     'exit-key)
+                 "x")))
+
+(ert-deftest keymap-popup-test-popup-key-with-docstring ()
+  (eval '(keymap-popup-define keymap-popup--test-pkdoc
+           "My commands."
+           :popup-key "?"
+           :group "Actions"
+           "c" ("Comment" ignore))
+        t)
+  (should (functionp (keymap-lookup keymap-popup--test-pkdoc "?")))
+  (should (null (keymap-lookup keymap-popup--test-pkdoc "h")))
+  (should (string-match-p "My commands"
+                          (documentation-property 'keymap-popup--test-pkdoc
+                                                  'variable-documentation))))
+
+(ert-deftest keymap-popup-test-macro-keyword-order-independent ()
+  "Keywords can appear in any order."
+  (eval '(keymap-popup-define keymap-popup--test-kworder
+           :description "Dynamic"
+           :parent special-mode-map
+           :popup-key "!"
+           :exit-key "x"
+           "c" ("Comment" ignore))
+        t)
+  (should (functionp (keymap-lookup keymap-popup--test-kworder "!")))
+  (should (equal (keymap-popup--meta keymap-popup--test-kworder 'exit-key) "x"))
+  (should (eq (keymap-parent keymap-popup--test-kworder) special-mode-map)))
+
+;;; Renderer tests
+
+(ert-deftest keymap-popup-test-render-suffix ()
+  (let* ((rows (list (list (list :name "Actions"
+                                 :entries (list (list :key "c" :description "Comment"
+                                                      :type 'suffix :command 'ignore))))))
+         (output (keymap-popup--render rows)))
+    (should (string-match-p "Actions" output))
+    (should (string-match-p "Comment" output))))
+
+(ert-deftest keymap-popup-test-render-switch-value ()
+  (defvar keymap-popup--test-render-sw nil)
+  (let* ((rows (list (list (list :name nil
+                                 :entries (list (list :key "v" :description "Verbose"
+                                                      :type 'switch
+                                                      :variable 'keymap-popup--test-render-sw))))))
+         (output-off (keymap-popup--render rows)))
+    (should (string-match-p "\\[off\\]" output-off))
+    (setq keymap-popup--test-render-sw t)
+    (let ((output-on (keymap-popup--render rows)))
+      (should (string-match-p "\\[on\\]" output-on)))))
+
+(ert-deftest keymap-popup-test-render-if-hidden ()
+  (let* ((rows (list (list (list :name nil
+                                 :entries (list (list :key "b" :description "Browse"
+                                                      :type 'suffix :command 'ignore
+                                                      :if (lambda () nil)))))))
+         (output (keymap-popup--render rows)))
+    (should-not (string-match-p "Browse" output))))
+
+(ert-deftest keymap-popup-test-render-if-shown ()
+  (let* ((rows (list (list (list :name nil
+                                 :entries (list (list :key "b" :description "Browse"
+                                                      :type 'suffix :command 'ignore
+                                                      :if (lambda () t)))))))
+         (output (keymap-popup--render rows)))
+    (should (string-match-p "Browse" output))))
+
+(ert-deftest keymap-popup-test-render-dynamic-description ()
+  (let* ((rows (list (list (list :name nil
+                                 :entries (list (list :key "d"
+                                                      :description (lambda () "Dynamic!")
+                                                      :type 'suffix :command 'ignore))))))
+         (output (keymap-popup--render rows)))
+    (should (string-match-p "Dynamic!" output))))
+
+;;; Column layout tests
+
+(ert-deftest keymap-popup-test-render-columns-side-by-side ()
+  (let* ((rows (list (list (list :name "Alpha"
+                                 :entries (list (list :key "a" :description "Aaa"
+                                                      :type 'suffix :command 'ignore)))
+                           (list :name "Beta"
+                                 :entries (list (list :key "b" :description "Bbb"
+                                                      :type 'suffix :command 'ignore))))))
+         (output (keymap-popup--render rows))
+         (lines (split-string output "\n" t)))
+    (should (string-match-p "Alpha" (car lines)))
+    (should (string-match-p "Beta" (car lines)))))
+
+(ert-deftest keymap-popup-test-render-wraps-columns-to-width ()
+  "Groups flow onto another row when they exceed the available width."
+  (let* ((rows (list (list (list :name "Alpha"
+                                 :entries (list (list :key "a" :description "Aaa"
+                                                      :type 'suffix :command 'ignore)))
+                           (list :name "Beta"
+                                 :entries (list (list :key "b" :description "Bbb"
+                                                      :type 'suffix :command 'ignore))))))
+         (wrapped (substring-no-properties (keymap-popup--render rows nil 18)))
+         (fitting (substring-no-properties (keymap-popup--render rows nil 19)))
+         (wrapped-lines (split-string wrapped "\n" t)))
+    (should-not (string-match-p "Alpha.*Beta" wrapped))
+    (should (string-match-p "Alpha.*Beta" fitting))
+    (dolist (line wrapped-lines)
+      (should (<= (string-width line) 18)))))
+
+(ert-deftest keymap-popup-test-render-truncates-overwide-column ()
+  "A lone group cannot make the rendered popup wider than its window."
+  (let* ((truncate-string-ellipsis "…")
+         (rows (list (list (list :name "A very long heading"
+                                 :entries (list (list :key "a"
+                                                      :description "A long description"
+                                                      :type 'suffix
+                                                      :command 'ignore))))))
+         (output (substring-no-properties (keymap-popup--render rows nil 12))))
+    (should (string-match-p "…" output))
+    (dolist (line (split-string output "\n" t))
+      (should (<= (string-width line) 12)))))
+
+(ert-deftest keymap-popup-test-popup-reflows-after-display ()
+  "The initial popup reflows without resolving descriptions twice."
+  (let ((map (make-sparse-keymap))
+        (description-calls 0))
+    (dolist (key '("a" "b" "c"))
+      (keymap-set map key #'ignore))
+    (keymap-popup-attach
+     map (list :group "Alpha"
+               "a" (list (lambda ()
+                           (cl-incf description-calls)
+                           "Aaa")
+                         'ignore)
+               :group "Beta" "b" '("Bbb" ignore)
+               :group "Gamma" "c" '("Ccc" ignore)))
+    (save-window-excursion
+      (let* ((popup-window (selected-window))
+             (_ (split-window popup-window 25 'right))
+             (keymap-popup-backend
+              (lambda ()
+                (list :show (lambda (buf)
+                              (set-window-buffer popup-window buf))
+                      :fit #'ignore
+                      :hide #'ignore))))
+        (unwind-protect
+            (progn
+              (keymap-popup map)
+              (let* ((buf (get-buffer keymap-popup--buffer-name))
+                     (width (max 1 (1- (window-body-width popup-window))))
+                     (output (with-current-buffer buf (buffer-string)))
+                     (lines (split-string output "\n" t)))
+                (should (= description-calls 1))
+                (should-not (string-match-p "Alpha.*Beta.*Gamma" output))
+                (dolist (line lines)
+                  (should (<= (string-width line) width)))))
+          (keymap-popup-dismiss))))))
+
+(ert-deftest keymap-popup-test-render-rows-separated ()
+  (let* ((rows (list (list (list :name "Row1"
+                                 :entries (list (list :key "a" :description "Aaa"
+                                                      :type 'suffix :command 'ignore))))
+                     (list (list :name "Row2"
+                                 :entries (list (list :key "b" :description "Bbb"
+                                                      :type 'suffix :command 'ignore))))))
+         (output (keymap-popup--render rows)))
+    (should (string-match-p "Row1" output))
+    (should (string-match-p "Row2" output))
+    (let ((lines (split-string output "\n" t)))
+      (should-not (and (string-match-p "Row1" (car lines))
+                       (string-match-p "Row2" (car lines)))))))
+
+(ert-deftest keymap-popup-test-render-empty-descriptions ()
+  "An empty resolved menu renders as a blank popup."
+  (should (equal (keymap-popup--render nil) "\n")))
+
+(ert-deftest keymap-popup-test-columns-aligned-across-rows ()
+  (let* ((rows (list
+                (list (list :name "A"
+                            :entries (list (list :key "a" :description "X"
+                                                 :type 'suffix :command 'ignore)))
+                      (list :name "B"
+                            :entries (list (list :key "b" :description "Y"
+                                                 :type 'suffix :command 'ignore))))
+                (list (list :name "Longer Name"
+                            :entries (list (list :key "c" :description "Something longer"
+                                                 :type 'suffix :command 'ignore)))
+                      (list :name "D"
+                            :entries (list (list :key "d" :description "Z"
+                                                 :type 'suffix :command 'ignore))))))
+         (output (keymap-popup--render rows))
+         (plain (substring-no-properties output))
+         (lines (split-string plain "\n" t)))
+    (let ((b-pos (string-match "B" (cl-find-if (lambda (l) (string-match-p "\\bB\\b" l)) lines)))
+          (d-pos (string-match "D" (cl-find-if (lambda (l) (string-match-p "\\bD\\b" l)) lines))))
+      (should b-pos)
+      (should d-pos)
+      (should (= b-pos d-pos)))))
+
+(ert-deftest keymap-popup-test-wrapped-columns-stay-aligned ()
+  "Automatic rows retain declared column alignment."
+  (let* ((entry (lambda (key description)
+                  (list :key key :description description
+                        :type 'suffix :command 'ignore)))
+         (rows (list
+                (list (list :name "Alpha" :entries (list (funcall entry "a" "Aaa")))
+                      (list :name "Beta" :entries (list (funcall entry "b" "Bbb")))
+                      (list :name "Gamma" :entries (list (funcall entry "g" "Ggg"))))
+                (list (list :name "Longer Name"
+                            :entries (list (funcall entry "l" "Lll")))
+                      (list :name "Delta" :entries (list (funcall entry "d" "Ddd")))
+                      (list :name "Epsilon" :entries (list (funcall entry "e" "Eee"))))))
+         (lines (split-string
+                 (substring-no-properties (keymap-popup--render rows nil 22))
+                 "\n" t))
+         (alpha-line (cl-find-if (lambda (line) (string-match-p "Alpha" line)) lines))
+         (longer-line (cl-find-if (lambda (line) (string-match-p "Longer Name" line)) lines)))
+    (should (= (string-match "Beta" alpha-line)
+               (string-match "Delta" longer-line)))
+    (should-not (string-match-p "Gamma" alpha-line))
+    (should-not (string-match-p "Epsilon" longer-line))))
+
+(ert-deftest keymap-popup-test-join-columns ()
+  (let* ((col-a '("Header A" "  a  Aaa" "  b  Bbb"))
+         (col-b '("Header B" "  c  Ccc"))
+         (widths (list (keymap-popup--column-width col-a)
+                       (keymap-popup--column-width col-b)))
+         (result (keymap-popup--join-columns (list col-a col-b) "  " widths)))
+    (should (= (length result) 3))
+    (should (string-match-p "Header A" (nth 0 result)))
+    (should (string-match-p "Header B" (nth 0 result)))
+    (should (string-match-p "Bbb" (nth 2 result)))))
+
+;;; Lookup helper tests
+
+(ert-deftest keymap-popup-test-find-entry-by-key ()
+  (let ((descs (list (list (list :name "G"
+                                 :entries (list (list :key "c" :description "Comment"
+                                                      :type 'suffix :command 'ignore)
+                                                (list :key "v" :description "Verbose"
+                                                      :type 'switch :variable 'some-var)))))))
+    (should (equal (plist-get (keymap-popup--find-entry-by-key descs "c") :type) 'suffix))
+    (should (equal (plist-get (keymap-popup--find-entry-by-key descs "v") :type) 'switch))
+    (should (null (keymap-popup--find-entry-by-key descs "z")))))
+
+(ert-deftest keymap-popup-test-keep-popup-p ()
+  (let ((descs (list (list (list :name nil
+                                 :entries (list (list :key "c" :type 'suffix :command 'ignore)
+                                                (list :key "v" :type 'switch :variable 'x)
+                                                (list :key "a" :type 'keymap :target 'sub)
+                                                (list :key "g" :type 'suffix :command 'ignore
+                                                      :stay-open t)))))))
+    (should-not (keymap-popup--keep-popup-p descs "c"))
+    (should (keymap-popup--keep-popup-p descs "v"))
+    (should (keymap-popup--keep-popup-p descs "a"))
+    ;; stay-open suffixes refresh in place, kept open
+    (should (keymap-popup--keep-popup-p descs "g"))
+    ;; Inapt-key handling lives in the keep-pred via
+    ;; `keymap-popup--inapt-key-p', not in keep-popup-p.
+    ;; C-u is detected via `this-command'.
+    (should-not (keymap-popup--keep-popup-p descs "C-u"))))
+
+;;; C-u rendering tests
+
+(ert-deftest keymap-popup-test-c-u-desc-in-normal-mode ()
+  (let* ((rows (list (list (list :name nil
+                                 :entries (list (list :key "s" :description "Submit"
+                                                      :type 'suffix :command 'ignore
+                                                      :c-u "force push"))))))
+         (output (keymap-popup--render rows)))
+    (should (string-match-p "(force push)" output))
+    (let ((pos (string-match "(force push)" output)))
+      (should (eq (get-text-property pos 'face output) 'shadow)))))
+
+(ert-deftest keymap-popup-test-c-u-desc-in-prefix-mode ()
+  (let* ((rows (list (list (list :name nil
+                                 :entries (list (list :key "s" :description "Submit"
+                                                      :type 'suffix :command 'ignore
+                                                      :c-u "force")
+                                                (list :key "g" :description "Refresh"
+                                                      :type 'suffix :command 'ignore))))))
+         (output (keymap-popup--render rows t)))
+    (let ((pos (string-match "(force)" output)))
+      (should pos)
+      (should-not (eq (get-text-property pos 'face output) 'shadow)))
+    (let ((pos (string-match "Refresh" output)))
+      (should (eq (get-text-property pos 'face output) 'shadow)))))
+
+;;; Inapt rendering tests
+
+(ert-deftest keymap-popup-test-inapt-rendered-with-face ()
+  (let* ((rows (list (list (list :name nil
+                                 :entries (list (list :key "m" :description "Merge"
+                                                      :type 'suffix :command 'ignore
+                                                      :inapt-if (lambda () t)))))))
+         (output (keymap-popup--render rows)))
+    (should (string-match-p "Merge" output))
+    (let ((pos (string-match "Merge" output)))
+      (should (eq (get-text-property pos 'face output) 'keymap-popup-inapt)))))
+
+(ert-deftest keymap-popup-test-inapt-not-when-predicate-nil ()
+  (let* ((rows (list (list (list :name nil
+                                 :entries (list (list :key "m" :description "Merge"
+                                                      :type 'suffix :command 'ignore
+                                                      :inapt-if (lambda () nil)))))))
+         (output (keymap-popup--render rows)))
+    (let ((pos (string-match "Merge" output)))
+      (should-not (eq (get-text-property pos 'face output) 'keymap-popup-inapt)))))
+
+(ert-deftest keymap-popup-test-keymap-entry-gets-submenu-face ()
+  (let* ((rows (list (list (list :name nil
+                                 :entries (list (list :key "a" :description "Sub"
+                                                      :type 'keymap :target 'x))))))
+         (output (keymap-popup--render rows)))
+    (let ((pos (string-match "Sub" output)))
+      (should (eq (get-text-property pos 'face output) 'keymap-popup-submenu)))))
+
+;;; Group-level predicate tests
+
+(ert-deftest keymap-popup-test-group-if-hidden ()
+  (let* ((rows (list (list (list :name "Visible"
+                                 :entries (list (list :key "a" :description "Alpha"
+                                                      :type 'suffix :command 'ignore)))
+                           (list :name "Hidden" :if (lambda () nil)
+                                 :entries (list (list :key "b" :description "Beta"
+                                                      :type 'suffix :command 'ignore))))))
+         (output (keymap-popup--render rows)))
+    (should (string-match-p "Alpha" output))
+    (should-not (string-match-p "Beta" output))))
+
+(ert-deftest keymap-popup-test-group-if-shown ()
+  (let* ((rows (list (list (list :name "Shown" :if (lambda () t)
+                                 :entries (list (list :key "a" :description "Alpha"
+                                                      :type 'suffix :command 'ignore))))))
+         (output (keymap-popup--render rows)))
+    (should (string-match-p "Alpha" output))
+    (should (string-match-p "Shown" output))))
+
+(ert-deftest keymap-popup-test-group-inapt-grays-all ()
+  (let* ((rows (list (list (list :name "Disabled"
+                                 :inapt-if (lambda () t)
+                                 :entries (list (list :key "a" :description "Alpha"
+                                                      :type 'suffix :command 'ignore)
+                                                (list :key "b" :description "Beta"
+                                                      :type 'suffix :command 'ignore))))))
+         (output (keymap-popup--render rows)))
+    (let ((pos-a (string-match "Alpha" output))
+          (pos-b (string-match "Beta" output)))
+      (should (eq (get-text-property pos-a 'face output) 'keymap-popup-inapt))
+      (should (eq (get-text-property pos-b 'face output) 'keymap-popup-inapt)))))
+
+;;; Integration tests
+
+(ert-deftest keymap-popup-test-full-definition ()
+  (eval '(keymap-popup-define keymap-popup--test-full
+           "Full test."
+           :group "Actions"
+           "c" ("Comment" ignore)
+           :group "Switches"
+           "v" ("Verbose" :switch keymap-popup--test-full-verbose)
+           :row
+           :group "Navigate"
+           "b" ("Browse" ignore :if (lambda () t))
+           "q" ("Quit" quit-window))
+        t)
+  (should (keymapp keymap-popup--test-full))
+  (should (eq (keymap-lookup keymap-popup--test-full "c") #'ignore))
+  (let ((descs (keymap-popup--meta keymap-popup--test-full
+                                   'descriptions)))
+    (should (= (length descs) 2))))
+
+(ert-deftest keymap-popup-test-switch-toggle-roundtrip ()
+  (eval '(keymap-popup-define keymap-popup--test-rt
+           "Test." "v" ("Verbose" :switch keymap-popup--test-rt-sw))
+        t)
+  (with-temp-buffer
+    (should (null keymap-popup--test-rt-sw))
+    (funcall-interactively #'keymap-popup--test-rt--toggle-keymap-popup--test-rt-sw)
+    (should (eq keymap-popup--test-rt-sw t))
+    (funcall-interactively #'keymap-popup--test-rt--toggle-keymap-popup--test-rt-sw)
+    (should (null keymap-popup--test-rt-sw))))
+
+(ert-deftest keymap-popup-test-stay-open-in-descriptions ()
+  (eval '(keymap-popup-define keymap-popup--test-stay
+           "g" ("Refresh" ignore :stay-open t))
+        t)
+  (let* ((descs (keymap-popup--meta keymap-popup--test-stay
+                                    'descriptions))
+         (entry (keymap-popup--find-entry-by-key descs "g")))
+    (should (plist-get entry :stay-open))))
+
+(ert-deftest keymap-popup-test-bare-stay-open-in-descriptions ()
+  "A bare :stay-open property is a true boolean flag."
+  (eval '(keymap-popup-define keymap-popup--test-bare-stay
+           "g" ("Refresh" ignore :stay-open))
+        t)
+  (let* ((descs (keymap-popup--meta keymap-popup--test-bare-stay
+                                    'descriptions))
+         (entry (keymap-popup--find-entry-by-key descs "g")))
+    (should (eq (plist-get entry :stay-open) t))))
+
+(ert-deftest keymap-popup-test-dynamic-group-name ()
+  (eval '(keymap-popup-define keymap-popup--test-dyngrp
+           :group (lambda () "Dynamic Group")
+           "c" ("Comment" ignore))
+        t)
+  (let* ((descs (keymap-popup--meta keymap-popup--test-dyngrp
+                                    'descriptions))
+         (output (keymap-popup--render descs)))
+    (should (string-match-p "Dynamic Group" output))))
+
+;;; Parent inheritance tests
+
+(ert-deftest keymap-popup-test-parent-keymap-bindings ()
+  (eval '(keymap-popup-define keymap-popup--test-parent
+           :group "Common"
+           "g" ("Refresh" ignore)
+           "q" ("Quit" quit-window))
+        t)
+  (eval '(keymap-popup-define keymap-popup--test-child
+           :parent keymap-popup--test-parent
+           :group "Child"
+           "c" ("Comment" ignore))
+        t)
+  (should (eq (keymap-lookup keymap-popup--test-child "c") #'ignore))
+  (should (eq (keymap-lookup keymap-popup--test-child "g") #'ignore))
+  (should (eq (keymap-lookup keymap-popup--test-child "h")
+              #'keymap-popup--test-child-popup))
+  (should (eq (keymap-lookup keymap-popup--test-parent "h")
+              #'keymap-popup--test-parent-popup)))
+
+(ert-deftest keymap-popup-test-parent-descriptions-merged ()
+  (eval '(keymap-popup-define keymap-popup--test-parent2
+           :group "Common"
+           "g" ("Refresh" ignore))
+        t)
+  (eval '(keymap-popup-define keymap-popup--test-child2
+           :parent keymap-popup--test-parent2
+           :group "Child"
+           "c" ("Comment" ignore))
+        t)
+  (let ((all (keymap-popup--collect-descriptions keymap-popup--test-child2)))
+    (should (>= (length all) 2))))
+
+(ert-deftest keymap-popup-test-collect-descriptions-chain ()
+  (eval '(keymap-popup-define keymap-popup--test-grandparent
+           :group "GP"
+           "g" ("Go" ignore))
+        t)
+  (eval '(keymap-popup-define keymap-popup--test-mid
+           :parent keymap-popup--test-grandparent
+           :group "Mid"
+           "m" ("Mid cmd" ignore))
+        t)
+  (eval '(keymap-popup-define keymap-popup--test-leaf
+           :parent keymap-popup--test-mid
+           :group "Leaf"
+           "l" ("Leaf cmd" ignore))
+        t)
+  (let ((all (keymap-popup--collect-descriptions keymap-popup--test-leaf)))
+    (should (>= (length all) 3))))
+
+(ert-deftest keymap-popup-test-dedupe-preserves-nil-keys ()
+  "Multiple entries with nil :key (annotated, pre-resolve) are all kept."
+  (let* ((descs `(((:name "Move" :entries ((:key nil :command forward-char
+                                                 :description "Right")
+                                           (:key nil :command backward-char
+                                                 :description "Left"))))))
+         (deduped (keymap-popup--dedupe-descriptions descs))
+         (entries (plist-get (caar deduped) :entries)))
+    (should (= (length entries) 2))
+    (should (equal (mapcar (lambda (e) (plist-get e :description)) entries)
+                   '("Right" "Left")))))
+
+(ert-deftest keymap-popup-test-collect-descriptions-child-shadows-parent ()
+  "Parent/child key collision: child wins, fully-shadowed parent groups disappear."
+  (eval '(keymap-popup-define keymap-popup--test-shadow-parent
+           :group "P"
+           "a" ("Parent A" ignore)
+           :group "Q"
+           "b" ("Parent B" ignore))
+        t)
+  (eval '(keymap-popup-define keymap-popup--test-shadow-child
+           :parent keymap-popup--test-shadow-parent
+           :group "C"
+           "a" ("Child A" ignore))
+        t)
+  (let* ((all (keymap-popup--resolve-descriptions
+               (keymap-popup--collect-descriptions keymap-popup--test-shadow-child)
+               keymap-popup--test-shadow-child))
+         (group-names (cl-loop for row in all
+                               append (mapcar (lambda (g) (plist-get g :name)) row)))
+         (entries (cl-loop for row in all
+                           append (cl-loop for group in row
+                                           append (plist-get group :entries))))
+         (keys (mapcar (lambda (e) (plist-get e :key)) entries))
+         (descs (mapcar (lambda (e) (plist-get e :description)) entries)))
+    ;; Parent group "P" is fully shadowed and dropped; "Q" survives.
+    (should (equal group-names '("C" "Q")))
+    (should (equal keys '("a" "b")))
+    (should (equal descs '("Child A" "Parent B")))))
+
+;;; Macro via-macro integration tests
+
+(ert-deftest keymap-popup-test-inapt-via-macro ()
+  (eval '(keymap-popup-define keymap-popup--test-inapt-map
+           "m" ("Merge" ignore :inapt-if (lambda () t))
+           "c" ("Comment" ignore))
+        t)
+  (let* ((descs (keymap-popup--meta keymap-popup--test-inapt-map
+                                    'descriptions))
+         (output (keymap-popup--render descs)))
+    (let ((pos (string-match "Merge" output)))
+      (should pos)
+      (should (eq (get-text-property pos 'face output) 'keymap-popup-inapt)))
+    (should (string-match-p "Comment" output))))
+
+(ert-deftest keymap-popup-test-group-inapt-via-macro ()
+  (eval '(keymap-popup-define keymap-popup--test-group-inapt-map
+           :group ("Disabled" :inapt-if (lambda () t))
+           "a" ("Alpha" ignore)
+           "b" ("Beta" ignore))
+        t)
+  (let* ((descs (keymap-popup--meta keymap-popup--test-group-inapt-map
+                                    'descriptions))
+         (output (keymap-popup--render descs))
+         (pos (string-match "Alpha" output)))
+    (should pos)
+    (should (eq (get-text-property pos 'face output) 'keymap-popup-inapt))))
+
+(ert-deftest keymap-popup-test-group-if-via-macro ()
+  (eval '(keymap-popup-define keymap-popup--test-group-if-map
+           :group ("Hidden" :if (lambda () nil))
+           "a" ("Alpha" ignore)
+           :group "Shown"
+           "b" ("Beta" ignore))
+        t)
+  (let* ((descs (keymap-popup--meta keymap-popup--test-group-if-map
+                                    'descriptions))
+         (output (keymap-popup--render descs)))
+    (should-not (string-match-p "Alpha" output))
+    (should (string-match-p "Beta" output))))
+
+(ert-deftest keymap-popup-test-if-on-switch ()
+  "An :if predicate returning nil makes the switch key act unbound."
+  (eval '(keymap-popup-define keymap-popup--test-if-sw
+           "v" ("Verbose" :switch keymap-popup--test-if-sw-var
+                :if (lambda () nil)))
+        t)
+  ;; Filter returns nil, so the key resolves to nothing at the keymap level.
+  (should-not (keymap-lookup keymap-popup--test-if-sw "v"))
+  (let* ((descs (keymap-popup--meta keymap-popup--test-if-sw
+                                    'descriptions))
+         (output (keymap-popup--render descs)))
+    (should-not (string-match-p "Verbose" output))))
+
+;;; Keymap-level predicate enforcement
+
+(ert-deftest keymap-popup-test-combined-if-function-forms ()
+  "Group and entry function forms agree in dispatch and rendering."
+  (eval '(keymap-popup-define keymap-popup--test-combined-if
+           :group ("Shown" :if #'always)
+           "a" ("Allowed" ignore :if #'always)
+           "b" ("Hidden" forward-char :if #'ignore))
+        t)
+  (should (eq (keymap-lookup keymap-popup--test-combined-if "a") #'ignore))
+  (should-not (keymap-lookup keymap-popup--test-combined-if "b")))
+
+(ert-deftest keymap-popup-test-combined-if-lexical-values ()
+  "Compiled and interpreted definitions retain lexical predicates."
+  (dolist (compile '(nil t))
+    (let* ((form '(lambda (group-p entry-p)
+                   (keymap-popup-define keymap-popup--test-lexical-if
+                     :group ("Group" :if group-p)
+                     "a" ("Action" ignore :if entry-p))
+                   keymap-popup--test-lexical-if))
+           (factory (if compile (byte-compile form) (eval form t))))
+      (dolist (flags '((t t) (nil t) (t nil) (nil nil)))
+        (makunbound 'keymap-popup--test-lexical-if)
+        (let* ((group-enabled (car flags))
+               (entry-enabled (cadr flags))
+               (map (funcall factory
+                             (lambda () group-enabled)
+                             (lambda () entry-enabled)))
+               (visible (and group-enabled entry-enabled)))
+          (should (eq (keymap-lookup map "a") (and visible #'ignore)))
+          (should (eq (not (null (string-match-p
+                                 "Action" (keymap-popup--render
+                                           (keymap-popup--meta
+                                            map 'descriptions)))))
+                      visible)))))))
+
+(ert-deftest keymap-popup-test-if-filter-blocks-when-pred-nil ()
+  "An :if predicate returning nil unbinds the key via menu-item :filter."
+  (eval '(keymap-popup-define keymap-popup--test-if-block
+           "x" ("X" ignore :if (lambda () nil)))
+        t)
+  (should-not (keymap-lookup keymap-popup--test-if-block "x")))
+
+(ert-deftest keymap-popup-test-if-filter-passes-when-pred-t ()
+  "An :if predicate returning non-nil exposes the underlying command."
+  (eval '(keymap-popup-define keymap-popup--test-if-pass
+           "x" ("X" ignore :if (lambda () t)))
+        t)
+  (should (eq (keymap-lookup keymap-popup--test-if-pass "x") #'ignore)))
+
+(ert-deftest keymap-popup-test-inapt-keymap-binding-stays-real ()
+  "An active :inapt-if leaves the keymap binding untouched.
+Enforcement lives in the popup wrapper; the keymap stays honest for
+`where-is' and `describe-key'."
+  (eval '(keymap-popup-define keymap-popup--test-inapt-route
+           "x" ("X" ignore :inapt-if (lambda () t)))
+        t)
+  (should (eq (keymap-lookup keymap-popup--test-inapt-route "x") #'ignore)))
+
+(ert-deftest keymap-popup-test-inapt-filter-passes-when-pred-nil ()
+  "An inactive :inapt-if predicate exposes the underlying command."
+  (eval '(keymap-popup-define keymap-popup--test-inapt-pass
+           "x" ("X" ignore :inapt-if (lambda () nil)))
+        t)
+  (should (eq (keymap-lookup keymap-popup--test-inapt-pass "x") #'ignore)))
+
+(ert-deftest keymap-popup-test-dynamic-inapt-toggle ()
+  "Keymap dispatch is constant regardless of the :inapt-if value.
+Enforcement moved to the wrapper; the binding never changes."
+  (defvar keymap-popup--test-dyn-flag nil)
+  (eval '(keymap-popup-define keymap-popup--test-dyn-map
+           "x" ("X" ignore
+                :inapt-if (lambda () keymap-popup--test-dyn-flag)))
+        t)
+  (let ((keymap-popup--test-dyn-flag nil))
+    (should (eq (keymap-lookup keymap-popup--test-dyn-map "x") #'ignore)))
+  (let ((keymap-popup--test-dyn-flag t))
+    (should (eq (keymap-lookup keymap-popup--test-dyn-map "x") #'ignore))))
+
+(ert-deftest keymap-popup-test-direct-dispatch-ignores-inapt ()
+  "Outside a popup, an inapt key dispatches its real command."
+  (let ((count 0))
+    (eval `(keymap-popup-define keymap-popup--test-direct-inapt
+             "x" ("X" ',(lambda () (interactive) (setq count (1+ count)))
+                  :inapt-if (lambda () t)))
+          t)
+    (let ((binding (keymap-lookup keymap-popup--test-direct-inapt "x")))
+      (should (commandp binding))
+      (call-interactively binding)
+      (should (= count 1)))))
+
+(ert-deftest keymap-popup-test-where-is-finds-inapt-command ()
+  "`where-is-internal' finds a command whose entry is inapt."
+  (eval '(keymap-popup-define keymap-popup--test-whereis-inapt
+           "n" ("Next" next-line :inapt-if (lambda () t)))
+        t)
+  (should (equal (key-description
+                  (where-is-internal
+                   #'next-line (list keymap-popup--test-whereis-inapt) t))
+                 "n")))
+
+(ert-deftest keymap-popup-test-group-if-blocks-dispatch ()
+  "Group :if applies to each entry's keymap binding."
+  (eval '(keymap-popup-define keymap-popup--test-grp-if
+           :group ("Hidden" :if (lambda () nil))
+           "a" ("A" ignore))
+        t)
+  (should-not (keymap-lookup keymap-popup--test-grp-if "a")))
+
+(ert-deftest keymap-popup-test-group-inapt-keymap-binding-stays-real ()
+  "Group :inapt-if leaves each entry's keymap binding untouched."
+  (eval '(keymap-popup-define keymap-popup--test-grp-inapt
+           :group ("Off" :inapt-if (lambda () t))
+           "a" ("A" ignore))
+        t)
+  (should (eq (keymap-lookup keymap-popup--test-grp-inapt "a") #'ignore)))
+
+(ert-deftest keymap-popup-test-if-and-inapt-combine ()
+  ":if takes precedence over :inapt-if when both are present."
+  (eval '(keymap-popup-define keymap-popup--test-both
+           "x" ("X" ignore
+                :if (lambda () nil)
+                :inapt-if (lambda () t)))
+        t)
+  (should-not (keymap-lookup keymap-popup--test-both "x")))
+
+(ert-deftest keymap-popup-test-no-predicates-binds-bare-command ()
+  "Entries without predicates are bound directly, not through menu-item."
+  (eval '(keymap-popup-define keymap-popup--test-bare
+           "x" ("X" ignore))
+        t)
+  (should (eq (keymap-lookup keymap-popup--test-bare "x") #'ignore))
+  ;; Internal: the raw binding is the bare command, not a menu-item form.
+  (should (eq (lookup-key keymap-popup--test-bare "x") #'ignore)))
+
+;;; Wrapper map tests
+
+(ert-deftest keymap-popup-test-wrapper-map-has-exit-key ()
+  (eval '(keymap-popup-define keymap-popup--test-wrap
+           "c" ("Comment" ignore))
+        t)
+  (let* ((descs (keymap-popup--meta keymap-popup--test-wrap
+                                    'descriptions))
+         (buf (get-buffer-create "*keymap-popup-test*"))
+         (map (keymap-popup--build-wrapper-map
+               keymap-popup--test-wrap descs buf "q")))
+    (unwind-protect
+        (progn
+          (should (functionp (keymap-lookup map "q")))
+          (should (eq (keymap-lookup map "c") #'ignore)))
+      (kill-buffer buf))))
+
+(ert-deftest keymap-popup-test-wrapper-map-has-c-u ()
+  (eval '(keymap-popup-define keymap-popup--test-wrap-cu
+           "c" ("Comment" ignore))
+        t)
+  (let* ((descs (keymap-popup--meta keymap-popup--test-wrap-cu
+                                    'descriptions))
+         (buf (get-buffer-create "*keymap-popup-test*"))
+         (map (keymap-popup--build-wrapper-map
+               keymap-popup--test-wrap-cu descs buf "q")))
+    (unwind-protect
+        (should (functionp (keymap-lookup map "C-u")))
+      (kill-buffer buf))))
+
+(defvar keymap-popup--test-wrapper-entry-if-flag nil)
+
+(ert-deftest keymap-popup-test-wrapper-tracks-entry-if ()
+  "A wrapper submenu follows its entry's live :if predicate."
+  (eval '(keymap-popup-define keymap-popup--test-wrapper-entry-if-child
+           "c" ("Child" ignore))
+        t)
+  (eval '(keymap-popup-define keymap-popup--test-wrapper-entry-if
+           "s" ("Submenu" :keymap keymap-popup--test-wrapper-entry-if-child
+                :if (lambda () keymap-popup--test-wrapper-entry-if-flag)))
+        t)
+  (let* ((keymap-popup--test-wrapper-entry-if-flag t)
+         (descs (keymap-popup--meta keymap-popup--test-wrapper-entry-if
+                                    'descriptions))
+         (buf (get-buffer-create "*keymap-popup-test*"))
+         (wrapper (keymap-popup--build-wrapper-map
+                   keymap-popup--test-wrapper-entry-if descs buf "q")))
+    (unwind-protect
+        (progn
+          (should (commandp (keymap-lookup wrapper "s")))
+          (let ((keymap-popup--test-wrapper-entry-if-flag nil))
+            (should-not (keymap-lookup wrapper "s"))))
+      (kill-buffer buf))))
+
+(defvar keymap-popup--test-wrapper-group-if-flag nil)
+
+(ert-deftest keymap-popup-test-wrapper-tracks-group-if ()
+  "A wrapper switch follows its group's live :if predicate."
+  (eval '(keymap-popup-define keymap-popup--test-wrapper-group-if
+           :group ("Options"
+                   :if (lambda () keymap-popup--test-wrapper-group-if-flag))
+           "v" ("Verbose" :switch keymap-popup--test-wrapper-group-if-value))
+        t)
+  (let* ((keymap-popup--test-wrapper-group-if-flag t)
+         (descs (keymap-popup--meta keymap-popup--test-wrapper-group-if
+                                    'descriptions))
+         (buf (get-buffer-create "*keymap-popup-test*"))
+         (wrapper (keymap-popup--build-wrapper-map
+                   keymap-popup--test-wrapper-group-if descs buf "q")))
+    (unwind-protect
+        (progn
+          (should (commandp (keymap-lookup wrapper "v")))
+          (let ((keymap-popup--test-wrapper-group-if-flag nil))
+            (should-not (keymap-lookup wrapper "v"))))
+      (kill-buffer buf))))
+
+(ert-deftest keymap-popup-test-switch-override-refuses-when-inapt ()
+  "Switch override refuses an inapt press, preserving prefix-mode.
+Inaptness is read from the popup's active descriptions at keypress
+time; the switch variable must not toggle while inapt."
+  (defvar keymap-popup--test-sw-flag t)
+  (eval '(keymap-popup-define keymap-popup--test-sw-inapt
+           "v" ("Verbose" :switch keymap-popup--test-sw-inapt-var
+                :inapt-if (lambda () keymap-popup--test-sw-flag)))
+        t)
+  (let* ((descs (keymap-popup--meta keymap-popup--test-sw-inapt 'descriptions))
+         (buf (get-buffer-create keymap-popup--buffer-name)))
+    (unwind-protect
+        (progn
+          (keymap-popup-test--session
+           buf descs :keymap keymap-popup--test-sw-inapt :prefix-mode t)
+          (let* ((wrapper (keymap-popup--build-wrapper-map
+                           keymap-popup--test-sw-inapt descs buf "q"))
+                 (override (keymap-lookup wrapper "v"))
+                 (keymap-popup--test-sw-flag t))
+            (let ((prefix-arg '(4)))
+              (call-interactively override)
+              ;; Inapt: refused, var untouched, prefix-mode NOT cleared.
+              (should-not keymap-popup--test-sw-inapt-var)
+              (should (keymap-popup--session-get buf :prefix-mode)))
+            ;; Flip predicate off: toggle runs, prefix-mode is consumed.
+            (let ((keymap-popup--test-sw-flag nil)
+                  (prefix-arg '(4)))
+              (call-interactively override)
+              (should keymap-popup--test-sw-inapt-var)
+              (should-not (keymap-popup--session-get buf :prefix-mode)))))
+      (kill-buffer buf))))
+
+(ert-deftest keymap-popup-test-stay-open-override-dispatch ()
+  "Stay-open override calls the real binding and refreshes in place."
+  (let ((count 0)
+        (map (make-sparse-keymap))
+        (buf (get-buffer-create keymap-popup--buffer-name))
+        (descs '(((:name nil :entries ((:key "g" :description "Go"
+                                             :type suffix :stay-open t)))))))
+    (keymap-set map "g" (lambda () (interactive) (setq count (1+ count))))
+    (unwind-protect
+        (progn
+          (keymap-popup-test--session buf descs :keymap map)
+          (let* ((wrapper (keymap-popup--build-wrapper-map map descs buf "q"))
+                 (override (keymap-lookup wrapper "g")))
+            (call-interactively override)
+            (should (= count 1))
+            (should (buffer-live-p buf))))
+      (kill-buffer buf))))
+
+(ert-deftest keymap-popup-test-inapt-key-p-entry-level ()
+  (let ((buf (get-buffer-create keymap-popup--buffer-name))
+        (flag t))
+    (unwind-protect
+        (progn
+          (keymap-popup-test--session
+           buf `(((:name nil :entries ((:key "x" :type suffix
+                                             :inapt-if ,(lambda () flag)))))))
+          (should (keymap-popup--inapt-key-p buf "x"))
+          (setq flag nil)
+          (should-not (keymap-popup--inapt-key-p buf "x"))
+          (should-not (keymap-popup--inapt-key-p buf "unknown")))
+      (kill-buffer buf))))
+
+(ert-deftest keymap-popup-test-inapt-key-p-group-level ()
+  "A group's :inapt-if applies to its entries; group preds are unmerged."
+  (let ((buf (get-buffer-create keymap-popup--buffer-name)))
+    (unwind-protect
+        (progn
+          (keymap-popup-test--session
+           buf `(((:name "Bulk" :inapt-if ,(lambda () t)
+                          :entries ((:key "x" :type suffix))))))
+          (should (keymap-popup--inapt-key-p buf "x")))
+      (kill-buffer buf))))
+
+(ert-deftest keymap-popup-test-inapt-key-p-dead-buffer ()
+  "A dead popup buffer reports no inapt keys.
+Pins the apt-path ordering: the keep-pred tears the popup down
+before the guard override runs, which must fall through to the
+real binding."
+  (let ((buf (get-buffer-create keymap-popup--buffer-name)))
+    (kill-buffer buf)
+    (should-not (keymap-popup--inapt-key-p buf "x"))))
+
+(ert-deftest keymap-popup-test-refuse-inapt-preserves-prefix-mode ()
+  (let ((buf (get-buffer-create keymap-popup--buffer-name)))
+    (unwind-protect
+        (progn
+          (keymap-popup-test--session buf nil :prefix-mode t)
+          (dolist (argument '((4) (16) 16 -3 -))
+            (let ((prefix-arg nil)
+                  (current-prefix-arg argument))
+              (keymap-popup--refuse-inapt buf)
+              (should (equal prefix-arg argument))))
+          (keymap-popup--set-session buf :prefix-mode nil)
+          (let ((prefix-arg nil))
+            (keymap-popup--refuse-inapt buf)
+            (should-not prefix-arg)))
+      (kill-buffer buf))))
+
+(ert-deftest keymap-popup-test-wrapper-only-shadows-dispatched-entries ()
+  "Plain suffixes inherit the real binding; popup-managed entries shadow it."
+  (let* ((pred (lambda () t))
+         (map (make-sparse-keymap))
+         (buf (get-buffer-create keymap-popup--buffer-name))
+         (descs `(((:name nil
+                          :entries ((:key "a" :type suffix :inapt-if ,pred)
+                                    (:key "g" :type suffix :stay-open t :inapt-if ,pred)
+                                    (:key "v" :type switch :variable x :inapt-if ,pred)
+                                    (:key "c" :type suffix)))
+                   (:name "Bulk" :inapt-if ,pred
+                          :entries ((:key "b" :type suffix)))))))
+    (mapc (lambda (key) (keymap-set map key #'ignore))
+          '("a" "b" "c" "g" "v"))
+    (unwind-protect
+        (progn
+          (keymap-popup-test--session buf descs :keymap map)
+          (let ((wrapper (keymap-popup--build-wrapper-map map descs buf "q")))
+            (mapc (lambda (key)
+                    (should-not (eq (keymap-lookup wrapper key) #'ignore)))
+                  '("a" "b" "g" "v"))
+            (should (eq (keymap-lookup wrapper "c") #'ignore))))
+      (kill-buffer buf))))
+
+(ert-deftest keymap-popup-test-inapt-guard-refuses ()
+  (let* ((count 0)
+         (map (make-sparse-keymap))
+         (buf (get-buffer-create keymap-popup--buffer-name)))
+    (keymap-set map "x" (lambda () (interactive) (setq count (1+ count))))
+    (unwind-protect
+        (let ((descs `(((:name nil :entries
+                               ((:key "x" :type suffix
+                                      :inapt-if ,(lambda () t))))))))
+          (keymap-popup-test--session buf descs :keymap map)
+          (let* ((wrapper (keymap-popup--build-wrapper-map map descs buf "q"))
+                 (override (keymap-lookup wrapper "x")))
+            (call-interactively override)
+            (should (= count 0))))
+      (kill-buffer buf))))
+
+(ert-deftest keymap-popup-test-inapt-guard-apt-calls-real-binding ()
+  (let* ((count 0)
+         (map (make-sparse-keymap))
+         (buf (get-buffer-create keymap-popup--buffer-name)))
+    (keymap-set map "x" (lambda () (interactive) (setq count (1+ count))))
+    (unwind-protect
+        (let ((descs `(((:name nil :entries
+                               ((:key "x" :type suffix
+                                      :inapt-if ,(lambda () nil))))))))
+          (keymap-popup-test--session buf descs :keymap map)
+          (let* ((wrapper (keymap-popup--build-wrapper-map map descs buf "q"))
+                 (override (keymap-lookup wrapper "x")))
+            (call-interactively override)
+            (should (= count 1))))
+      (kill-buffer buf))))
+
+(ert-deftest keymap-popup-test-inapt-guard-runs-after-popup-close ()
+  "The guard dispatches the real binding when the popup is already dead."
+  (let* ((count 0)
+         (map (make-sparse-keymap))
+         (buf (get-buffer-create keymap-popup--buffer-name)))
+    (keymap-set map "x" (lambda () (interactive) (setq count (1+ count))))
+    (let ((descs `(((:name nil :entries
+                           ((:key "x" :type suffix
+                                  :inapt-if ,(lambda () nil))))))))
+      (keymap-popup-test--session buf descs :keymap map)
+      (let* ((wrapper (keymap-popup--build-wrapper-map map descs buf "q"))
+             (override (keymap-lookup wrapper "x")))
+        (kill-buffer buf)
+        (call-interactively override)
+        (should (= count 1))))))
+
+(ert-deftest keymap-popup-test-keep-pred-keeps-popup-open-on-inapt-key ()
+  (let ((buf (get-buffer-create keymap-popup--buffer-name))
+        (flag t))
+    (unwind-protect
+        (progn
+          (keymap-popup-test--session
+           buf `(((:name nil :entries ((:key "x" :type suffix
+                                             :inapt-if ,(lambda () flag)))))))
+          (let ((keep-pred (keymap-popup--make-keep-pred buf))
+                (this-command 'keymap-popup--test-dummy-cmd))
+            (cl-letf (((symbol-function 'this-command-keys-vector)
+                       (lambda () [?x])))
+              (should (funcall keep-pred))
+              (setq flag nil)
+              (should-not (funcall keep-pred)))))
+      (kill-buffer buf))))
+
+(ert-deftest keymap-popup-test-submenu-override-refuses-when-inapt ()
+  "An inapt submenu key is refused instead of pushed."
+  (let ((buf (get-buffer-create keymap-popup--buffer-name))
+        (pushed nil)
+        (flag t))
+    (unwind-protect
+        (let ((descs `(((:name nil :entries
+                               ((:key "s" :type keymap :target sub
+                                      :inapt-if ,(lambda () flag))))))))
+          (keymap-popup-test--session buf descs)
+          (cl-letf (((symbol-function 'keymap-popup--push-submenu)
+                     (lambda (_buf target) (setq pushed target))))
+            (let* ((wrapper (keymap-popup--build-wrapper-map
+                             (make-sparse-keymap) descs buf "q"))
+                   (override (keymap-lookup wrapper "s")))
+              (call-interactively override)
+              (should-not pushed)
+              (setq flag nil)
+              (call-interactively override)
+              (should (eq pushed 'sub)))))
+      (kill-buffer buf))))
+
+(ert-deftest keymap-popup-test-stay-open-override-refuses-when-inapt ()
+  (let* ((count 0)
+         (map (make-sparse-keymap))
+         (buf (get-buffer-create keymap-popup--buffer-name)))
+    (keymap-set map "g" (lambda () (interactive) (setq count (1+ count))))
+    (unwind-protect
+        (let ((descs `(((:name nil :entries
+                               ((:key "g" :type suffix :stay-open t
+                                      :inapt-if ,(lambda () t))))))))
+          (keymap-popup-test--session buf descs :keymap map)
+          (let* ((wrapper (keymap-popup--build-wrapper-map map descs buf "q"))
+                 (override (keymap-lookup wrapper "g")))
+            (call-interactively override)
+            (should (= count 0))
+            (should (buffer-live-p buf))))
+      (kill-buffer buf))))
+
+(ert-deftest keymap-popup-test-annotate-inapt-enforced-in-wrapper ()
+  "Annotate-path popups gain :inapt-if dispatch enforcement.
+The annotate macro never wraps bindings, so enforcement can only
+come from the wrapper."
+  (setq keymap-popup--test-annotate-map (make-sparse-keymap))
+  (keymap-set keymap-popup--test-annotate-map "a" #'forward-char)
+  (eval '(keymap-popup-annotate keymap-popup--test-annotate-map
+           :group "Move"
+           forward-char ("Forward" :inapt-if (lambda () t)))
+        t)
+  (let* ((descs (keymap-popup--resolve-descriptions
+                 (keymap-popup--collect-descriptions keymap-popup--test-annotate-map)
+                 keymap-popup--test-annotate-map))
+         (buf (get-buffer-create keymap-popup--buffer-name)))
+    (unwind-protect
+        (progn
+          (keymap-popup-test--session
+           buf descs :keymap keymap-popup--test-annotate-map)
+          (let* ((wrapper (keymap-popup--build-wrapper-map
+                           keymap-popup--test-annotate-map descs buf "q"))
+                 (binding (keymap-lookup wrapper "a")))
+            (should (functionp binding))
+            (should-not (eq binding #'forward-char))
+            (with-temp-buffer
+              (insert "ab")
+              (goto-char (point-min))
+              (call-interactively binding)
+              (should (= (point) (point-min))))))
+      (kill-buffer buf))))
+
+(ert-deftest keymap-popup-test-core-overrides-win-on-key-collision ()
+  "The popup exit and prefix bindings cannot be shadowed by entries."
+  (let* ((map (make-sparse-keymap))
+         (buf (get-buffer-create keymap-popup--buffer-name))
+         (descs '(((:name nil :entries
+                          ((:key "q" :type suffix :stay-open t)
+                           (:key "C-u" :type suffix :stay-open t)))))))
+    (unwind-protect
+        (progn
+          (keymap-popup-test--session buf descs :keymap map)
+          (let ((wrapper (keymap-popup--build-wrapper-map map descs buf "q")))
+            (should (eq (keymap-lookup wrapper "q") #'ignore))
+            (should (eq (keymap-lookup wrapper "C-u")
+                        #'keymap-popup--prefix-argument))))
+      (kill-buffer buf))))
+
+(ert-deftest keymap-popup-test-push-submenu-state ()
+  "Pushing a sub-menu stacks parent state and activates the child's wrapper."
+  (eval '(keymap-popup-define keymap-popup--test-push-child
+           "Child." "c" ("Child cmd" ignore))
+        t)
+  (let ((buf (get-buffer-create keymap-popup--buffer-name))
+        (parent-map (make-sparse-keymap))
+        (parent-wrapper (make-sparse-keymap))
+        (received nil))
+    (unwind-protect
+        (progn
+          (keymap-popup-test--session
+           buf '(((:name nil :entries nil)))
+           :keymap parent-map :wrapper-map parent-wrapper
+           :exit-function #'ignore)
+          (cl-letf (((symbol-function 'set-transient-map)
+                     (lambda (map &rest _) (setq received map))))
+            (keymap-popup--push-submenu buf keymap-popup--test-push-child))
+          (let* ((session (keymap-popup--session-state buf))
+                 (active (plist-get session :active))
+                 (parent (car (plist-get session :stack))))
+            (should (= (length (plist-get session :stack)) 1))
+            (should (eq (plist-get parent :keymap) parent-map))
+            (should (eq (plist-get parent :wrapper-map) parent-wrapper))
+            (should (eq (plist-get parent :exit-function) #'ignore))
+            (should (eq (plist-get active :keymap)
+                        keymap-popup--test-push-child))
+            (should (plist-get active :wrapper-map))
+            (should (eq received (plist-get active :wrapper-map)))))
+      (kill-buffer buf))))
+
+(ert-deftest keymap-popup-test-suspend-submenu-exposes-minibuffer-map ()
+  "Suspending a sub-menu session exposes the minibuffer's local map."
+  (let ((buf (get-buffer-create keymap-popup--buffer-name))
+        (parent-wrapper (make-sparse-keymap))
+        (child-wrapper (make-sparse-keymap))
+        (minibuffer-map (make-sparse-keymap))
+        (overriding-terminal-local-map nil))
+    (keymap-set parent-wrapper "RET" #'ignore)
+    (keymap-set minibuffer-map "RET" #'minibuffer-complete-and-exit)
+    (unwind-protect
+        (progn
+          (keymap-popup-test--session
+           buf nil :wrapper-map child-wrapper
+           :stack (list (list :wrapper-map parent-wrapper)))
+          (internal-push-keymap parent-wrapper
+                                'overriding-terminal-local-map)
+          (internal-push-keymap child-wrapper
+                                'overriding-terminal-local-map)
+          (with-temp-buffer
+            (use-local-map minibuffer-map)
+            (keymap-popup--suspend)
+            (should (eq (key-binding (kbd "RET"))
+                        #'minibuffer-complete-and-exit))))
+      (internal-pop-keymap child-wrapper 'overriding-terminal-local-map)
+      (internal-pop-keymap parent-wrapper 'overriding-terminal-local-map)
+      (kill-buffer buf))))
+
+(ert-deftest keymap-popup-test-resume-submenu-preserves-child-priority ()
+  "Resuming a sub-menu session restores the child wrapper above its parent."
+  (let ((buf (get-buffer-create keymap-popup--buffer-name))
+        (parent-wrapper (make-sparse-keymap))
+        (child-wrapper (make-sparse-keymap))
+        (overriding-terminal-local-map nil))
+    (keymap-set parent-wrapper "x" #'backward-char)
+    (keymap-set child-wrapper "x" #'forward-char)
+    (unwind-protect
+        (progn
+          (keymap-popup-test--session
+           buf nil :wrapper-map child-wrapper
+           :stack (list (list :wrapper-map parent-wrapper)))
+          (internal-push-keymap parent-wrapper
+                                'overriding-terminal-local-map)
+          (internal-push-keymap child-wrapper
+                                'overriding-terminal-local-map)
+          (keymap-popup--suspend)
+          (keymap-popup--resume)
+          (should (eq (key-binding (kbd "x")) #'forward-char)))
+      (internal-pop-keymap child-wrapper 'overriding-terminal-local-map)
+      (internal-pop-keymap parent-wrapper 'overriding-terminal-local-map)
+      (kill-buffer buf))))
+
+(ert-deftest keymap-popup-test-nested-minibuffer-keeps-session-suspended ()
+  "An inner minibuffer exit does not resume maps over its outer minibuffer."
+  (let ((buf (get-buffer-create keymap-popup--buffer-name))
+        (parent-wrapper (make-sparse-keymap))
+        (child-wrapper (make-sparse-keymap))
+        (minibuffer-map (make-sparse-keymap))
+        (depth 1)
+        (overriding-terminal-local-map nil))
+    (keymap-set parent-wrapper "RET" #'ignore)
+    (keymap-set minibuffer-map "RET" #'minibuffer-complete-and-exit)
+    (unwind-protect
+        (progn
+          (keymap-popup-test--session
+           buf nil :wrapper-map child-wrapper
+           :stack (list (list :wrapper-map parent-wrapper)))
+          (internal-push-keymap parent-wrapper
+                                'overriding-terminal-local-map)
+          (internal-push-keymap child-wrapper
+                                'overriding-terminal-local-map)
+          (cl-letf (((symbol-function 'minibuffer-depth)
+                     (lambda () depth)))
+            (keymap-popup--suspend)
+            (setq depth 2)
+            (keymap-popup--suspend)
+            (keymap-popup--resume)
+            (with-temp-buffer
+              (use-local-map minibuffer-map)
+              (should (eq (key-binding (kbd "RET"))
+                          #'minibuffer-complete-and-exit)))
+            (setq depth 1)
+            (keymap-popup--resume)
+            (should (eq (key-binding (kbd "RET")) #'ignore))))
+      (internal-pop-keymap child-wrapper 'overriding-terminal-local-map)
+      (internal-pop-keymap parent-wrapper 'overriding-terminal-local-map)
+      (kill-buffer buf))))
+
+;;; Add/remove entry tests
+
+(ert-deftest keymap-popup-test-add-entry ()
+  (eval '(keymap-popup-define keymap-popup--test-add
+           :group "Actions"
+           "c" ("Comment" ignore))
+        t)
+  (keymap-popup-add-entry keymap-popup--test-add "z" "New" #'forward-char "Actions")
+  (should (eq (keymap-lookup keymap-popup--test-add "z") #'forward-char))
+  (let* ((descs (keymap-popup--meta keymap-popup--test-add
+                                    'descriptions))
+         (output (keymap-popup--render descs)))
+    (should (string-match-p "New" output))))
+
+(ert-deftest keymap-popup-test-add-entry-replaces-existing ()
+  "Adding an entry whose key already exists replaces the prior entry."
+  (eval '(keymap-popup-define keymap-popup--test-add-replace
+           :group "Actions"
+           "c" ("Old comment" ignore))
+        t)
+  (keymap-popup-add-entry keymap-popup--test-add-replace
+                          "c" "New comment" #'backward-char "Actions")
+  (should (eq (keymap-lookup keymap-popup--test-add-replace "c") #'backward-char))
+  (let* ((descs (keymap-popup--meta keymap-popup--test-add-replace 'descriptions))
+         (output (keymap-popup--render descs)))
+    (should (string-match-p "New comment" output))
+    (should-not (string-match-p "Old comment" output))))
+
+(ert-deftest keymap-popup-test-add-entry-validates-before-binding ()
+  "Invalid runtime entries leave the keymap unchanged."
+  (eval '(keymap-popup-define keymap-popup--test-add-invalid
+           "c" ("Comment" ignore))
+        t)
+  (should-error
+   (keymap-popup-add-entry keymap-popup--test-add-invalid "z" "Bad" 42))
+  (should-not (keymap-lookup keymap-popup--test-add-invalid "z")))
+
+(ert-deftest keymap-popup-test-add-entry-accepts-forward-command-symbol ()
+  "Runtime map assembly may precede the command's defining module."
+  (eval '(keymap-popup-define keymap-popup--test-add-forward
+           "c" ("Comment" ignore))
+        t)
+  (keymap-popup-add-entry keymap-popup--test-add-forward
+                          "f" "Future" 'keymap-popup--future-command)
+  (should (eq (keymap-lookup keymap-popup--test-add-forward "f")
+              'keymap-popup--future-command)))
+
+(ert-deftest keymap-popup-test-add-entry-moves-across-groups ()
+  "Re-adding a key under a different group removes it from the original group."
+  (eval '(keymap-popup-define keymap-popup--test-add-move
+           :group "Old"
+           "x" ("X-old" ignore)
+           :group "New"
+           "n" ("Anchor" ignore))
+        t)
+  (keymap-popup-add-entry keymap-popup--test-add-move
+                          "x" "X-new" #'forward-char "New")
+  (let* ((descs (keymap-popup--meta keymap-popup--test-add-move 'descriptions))
+         (groups (cl-loop for row in descs append row))
+         (old (cl-find "Old" groups :key (lambda (g) (plist-get g :name))
+                       :test #'equal))
+         (new (cl-find "New" groups :key (lambda (g) (plist-get g :name))
+                       :test #'equal))
+         (new-keys (mapcar (lambda (e) (plist-get e :key))
+                           (plist-get new :entries))))
+    (should (null (plist-get old :entries)))
+    (should (member "x" new-keys))
+    (should (member "n" new-keys))))
+
+(ert-deftest keymap-popup-test-remove-entry ()
+  (eval '(keymap-popup-define keymap-popup--test-rm
+           :group "Actions"
+           "c" ("Comment" ignore)
+           "r" ("Reply" ignore))
+        t)
+  (keymap-popup-remove-entry keymap-popup--test-rm "r")
+  (should (null (keymap-lookup keymap-popup--test-rm "r")))
+  (let* ((descs (keymap-popup--meta keymap-popup--test-rm
+                                    'descriptions))
+         (output (keymap-popup--render descs)))
+    (should (string-match-p "Comment" output))
+    (should-not (string-match-p "Reply" output))))
+
+(ert-deftest keymap-popup-test-add-remove-preserve-group-props ()
+  "Group :if survives `keymap-popup-add-entry' and `keymap-popup-remove-entry'."
+  (eval '(keymap-popup-define keymap-popup--test-group-props
+           :group ("Actions" :if (lambda () t))
+           "c" ("Comment" ignore)
+           "r" ("Reply" ignore))
+        t)
+  (keymap-popup-add-entry keymap-popup--test-group-props
+                          "z" "New" #'forward-char "Actions")
+  (keymap-popup-remove-entry keymap-popup--test-group-props "r")
+  (let* ((descs (keymap-popup--meta keymap-popup--test-group-props
+                                    'descriptions))
+         (group (caar descs)))
+    (should (functionp (plist-get group :if)))
+    (should (equal (mapcar (lambda (e) (plist-get e :key))
+                           (plist-get group :entries))
+                   '("c" "z")))))
+
+;;; Annotate tests
+
+(ert-deftest keymap-popup-test-manual-dired-example ()
+  "The manual's Dired example opens help without replacing Dired bindings."
+  (let ((dired-mode-map (copy-keymap dired-mode-map))
+        (overriding-terminal-local-map nil)
+        (pre-command-hook nil)
+        (post-command-hook nil)
+        (minibuffer-setup-hook nil)
+        (minibuffer-exit-hook nil)
+        (keymap-popup-backend
+         (lambda () (list :show #'ignore :fit #'ignore :hide #'ignore))))
+    (unwind-protect
+        (progn
+          (with-temp-buffer
+            (insert-file-contents
+             (expand-file-name "fixtures/dired-example.eld"
+                               keymap-popup-test--directory))
+            (search-forward "(keymap-popup-annotate dired-mode-map\n")
+            (goto-char (match-beginning 0))
+            (eval (read (current-buffer)) t))
+          (should (eq (keymap-lookup dired-mode-map "?") #'dired-summary))
+          (call-interactively (keymap-lookup dired-mode-map "C-c C-p"))
+          (should (string-match-p
+                   "Open" (with-current-buffer keymap-popup--buffer-name
+                            (buffer-string)))))
+      (keymap-popup-dismiss))))
+
+(ert-deftest keymap-popup-test-add-entry-selects-one-group ()
+  "Duplicate labels and unnamed rows do not duplicate inserted entries."
+  (dolist (name '(nil "Repeated"))
+    (let ((map (make-sparse-keymap)))
+      (keymap-popup-attach
+       map (list :group name "a" '("A" ignore)
+                 :row :group name "b" '("B" forward-char)))
+      (keymap-popup-add-entry map "c" "C" #'backward-char name)
+      (let* ((rows (keymap-popup--meta map 'descriptions))
+             (first (plist-get (caar rows) :entries))
+             (second (plist-get (caadr rows) :entries)))
+        (should (equal (mapcar (lambda (e) (plist-get e :key)) first)
+                       '("a" "c")))
+        (should (equal (mapcar (lambda (e) (plist-get e :key)) second)
+                       '("b")))))))
+
+(ert-deftest keymap-popup-test-replaced-binding-drops-old-metadata ()
+  "Replacing a command does not apply its old label or popup restrictions."
+  (let ((map (make-sparse-keymap)))
+    (keymap-set map "a" #'ignore)
+    (keymap-popup-attach map '("a" ("Old action" ignore :inapt-if always)))
+    (keymap-set map "a" #'forward-char)
+    (let* ((rows (keymap-popup--resolve-descriptions
+                  (keymap-popup--collect-descriptions map) map))
+           (wrapper (keymap-popup--build-wrapper-map map rows nil "q")))
+      (should-not (keymap-popup--find-entry-by-key rows "a"))
+      (should (eq (keymap-lookup wrapper "a") #'forward-char)))))
+
+(defvar keymap-popup--test-annotate-map
+  (let ((map (make-sparse-keymap)))
+    (keymap-set map "a" #'forward-char)
+    (keymap-set map "b" #'backward-char)
+    (keymap-set map "c" #'kill-line)
+    map))
+
+(ert-deftest keymap-popup-test-annotate-parse ()
+  (let ((entry (keymap-popup--parse-entry 'forward-char '("Forward"))))
+    (should (eq (plist-get entry :command) 'forward-char))
+    (should-not (plist-get entry :key))
+    (should (equal (plist-get entry :description) "Forward"))))
+
+(ert-deftest keymap-popup-test-annotate-parse-with-props ()
+  (let ((entry (keymap-popup--parse-entry 'forward-char '("Forward" :stay-open t))))
+    (should (eq (plist-get entry :command) 'forward-char))
+    (should (plist-get entry :stay-open))))
+
+(ert-deftest keymap-popup-test-annotate-parse-bare-string ()
+  (let ((entry (keymap-popup--parse-entry 'forward-char "Forward")))
+    (should (eq (plist-get entry :command) 'forward-char))
+    (should (equal (plist-get entry :description) "Forward"))))
+
+(ert-deftest keymap-popup-test-annotate-parse-lambda-description ()
+  "Bare lambda as description is preserved, not destructured."
+  (let* ((desc '(lambda () (if t "On" "Off")))
+         (entry (keymap-popup--parse-entry 'forward-char desc)))
+    (should (equal (plist-get entry :description) desc))
+    (should (eq (plist-get entry :command) 'forward-char))))
+
+
+(ert-deftest keymap-popup-test-resolve-key ()
+  (let* ((entry (list :key nil :description "Forward" :type 'suffix
+                      :command 'forward-char))
+         (resolved (keymap-popup--resolve-key entry keymap-popup--test-annotate-map)))
+    (should resolved)
+    (should (equal (plist-get resolved :key) "a"))))
+
+(ert-deftest keymap-popup-test-resolve-key-unbound ()
+  (let ((entry (list :key nil :description "Nope" :type 'suffix
+                     :command 'some-nonexistent-command-xyz)))
+    (should-not (keymap-popup--resolve-key entry keymap-popup--test-annotate-map))))
+
+(ert-deftest keymap-popup-test-resolve-key-keeps-current-stored-key ()
+  "A stored key that still dispatches to its command is kept as-is."
+  (let ((map (make-sparse-keymap))
+        (entry (list :key "n" :description "Next" :type 'suffix
+                     :command 'next-line)))
+    (keymap-set map "n" #'next-line)
+    (should (eq (keymap-popup--resolve-key entry map) entry))))
+
+(ert-deftest keymap-popup-test-resolve-key-follows-rebinding ()
+  "A rebound command resolves to its current key, not the stored one."
+  (let ((map (make-sparse-keymap))
+        (entry (list :key "n" :description "Next" :type 'suffix
+                     :command 'next-line)))
+    (keymap-set map "j" #'next-line)
+    (should (equal (plist-get (keymap-popup--resolve-key entry map) :key)
+                   "j"))))
+
+(ert-deftest keymap-popup-test-resolve-key-stored-key-fallback ()
+  "A stored key survives when the command has no binding in the map."
+  (let ((map (make-sparse-keymap))
+        (entry (list :key "n" :description "Next" :type 'suffix
+                     :command 'next-line)))
+    (should (equal (plist-get (keymap-popup--resolve-key entry map) :key)
+                   "n"))))
+
+(ert-deftest keymap-popup-test-resolve-key-ignores-global-map ()
+  "Resolution never falls back to global bindings (C-n is global next-line)."
+  (let ((map (make-sparse-keymap))
+        (entry (list :key nil :description "Next" :type 'suffix
+                     :command 'next-line)))
+    (should-not (keymap-popup--resolve-key entry map))))
+
+(ert-deftest keymap-popup-test-resolve-key-keeps-stored-key-when-if-hidden ()
+  "An entry hidden by an :if filter keeps its stored key.
+The filter makes the key act unbound, so `where-is-internal' cannot
+find the command; the stored key must survive (render hides the
+entry independently)."
+  (let* ((map (make-sparse-keymap))
+         (wrapped (eval (keymap-popup--wrap-binding-form
+                         '(function next-line) '(lambda () nil))
+                        t))
+         (entry (list :key "n" :description "Next" :type 'suffix
+                      :command 'next-line :if (lambda () nil))))
+    (keymap-set map "n" wrapped)
+    (should (equal (plist-get (keymap-popup--resolve-key entry map) :key)
+                   "n"))))
+
+(ert-deftest keymap-popup-test-resolve-key-no-command-entry-kept ()
+  "Entries without :command (e.g. pre-groundwork metadata) pass through."
+  (let ((map (make-sparse-keymap))
+        (entry (list :key "s" :description "Sub" :type 'keymap
+                     :target (make-sparse-keymap))))
+    (should (eq (keymap-popup--resolve-key entry map) entry))))
+
+(ert-deftest keymap-popup-test-define-rebound-key-updates-popup ()
+  "Rebinding a command after keymap-popup-define updates the shown key."
+  (eval '(keymap-popup-define keymap-popup--test-rebind-map
+           :group "Nav"
+           "n" ("Next" next-line))
+        t)
+  (keymap-unset keymap-popup--test-rebind-map "n" t)
+  (keymap-set keymap-popup--test-rebind-map "j" #'next-line)
+  (let* ((resolved (keymap-popup--resolve-descriptions
+                    (keymap-popup--collect-descriptions
+                     keymap-popup--test-rebind-map)
+                    keymap-popup--test-rebind-map))
+         (entry (car (plist-get (caar resolved) :entries))))
+    (should (equal (plist-get entry :key) "j"))))
+
+(ert-deftest keymap-popup-test-define-rebound-switch-updates-popup ()
+  "Rebinding a generated toggle command updates the shown key."
+  (eval '(keymap-popup-define keymap-popup--test-rebind-sw-map
+           :group "Toggles"
+           "v" ("Verbose" :switch keymap-popup--test-rebind-sw-var))
+        t)
+  (keymap-unset keymap-popup--test-rebind-sw-map "v" t)
+  (keymap-set keymap-popup--test-rebind-sw-map "V"
+              (keymap-popup--toggle-name 'keymap-popup--test-rebind-sw-map
+                                         'keymap-popup--test-rebind-sw-var))
+  (let* ((resolved (keymap-popup--resolve-descriptions
+                    (keymap-popup--collect-descriptions
+                     keymap-popup--test-rebind-sw-map)
+                    keymap-popup--test-rebind-sw-map))
+         (entry (car (plist-get (caar resolved) :entries))))
+    (should (equal (plist-get entry :key) "V"))))
+
+(ert-deftest keymap-popup-test-resolve-descriptions ()
+  (let* ((rows (list (list (list :name "Test"
+                                 :entries (list (list :key nil :description "Forward"
+                                                      :type 'suffix :command 'forward-char)
+                                                (list :key nil :description "Nope"
+                                                      :type 'suffix :command 'nonexistent-xyz))))))
+         (resolved (keymap-popup--resolve-descriptions rows keymap-popup--test-annotate-map))
+         (entries (plist-get (car (car resolved)) :entries)))
+    (should (= (length entries) 1))
+    (should (equal (plist-get (car entries) :key) "a"))))
+
+(ert-deftest keymap-popup-test-resolve-descriptions-deduplicates-keys ()
+  "Annotated entries resolving to the same key keep the first description."
+  (let* ((map (make-sparse-keymap))
+         (rows '(((:name "Child" :entries
+                   ((:key nil :description "Child" :type suffix
+                          :command next-line)))
+                  (:name "Parent" :entries
+                   ((:key "n" :description "Parent" :type suffix
+                          :command next-line)))))))
+    (keymap-set map "n" #'next-line)
+    (let* ((resolved (keymap-popup--resolve-descriptions rows map))
+           (entries (keymap-popup--flatten-with-groups resolved)))
+      (should (= (length entries) 1))
+      (should (equal (plist-get (car entries) :description) "Child")))))
+
+(ert-deftest keymap-popup-test-annotate-macro ()
+  (eval '(keymap-popup-annotate keymap-popup--test-annotate-map
+           :group "Move"
+           forward-char "Forward"
+           backward-char "Backward")
+        t)
+  (let* ((descs (keymap-popup--meta keymap-popup--test-annotate-map
+                                    'descriptions))
+         (entries (plist-get (car (car descs)) :entries)))
+    (should (= (length entries) 2))
+    (should (eq (plist-get (car entries) :command) 'forward-char))))
+
+(ert-deftest keymap-popup-test-annotate-exit-key ()
+  "Annotate with :exit-key sets metadata."
+  (setq keymap-popup--test-annotate-map (make-sparse-keymap))
+  (keymap-set keymap-popup--test-annotate-map "a" #'forward-char)
+  (eval '(keymap-popup-annotate keymap-popup--test-annotate-map
+           :exit-key "x"
+           :group "Move"
+           forward-char "Forward")
+        t)
+  (should (equal (keymap-popup--meta keymap-popup--test-annotate-map
+                                     'exit-key)
+                 "x")))
+
+(ert-deftest keymap-popup-test-annotate-popup-key ()
+  "Annotate with :popup-key binds the popup command."
+  (setq keymap-popup--test-annotate-map (make-sparse-keymap))
+  (keymap-set keymap-popup--test-annotate-map "a" #'forward-char)
+  (eval '(keymap-popup-annotate keymap-popup--test-annotate-map
+           :popup-key "?"
+           :group "Move"
+           forward-char "Forward")
+        t)
+  (should (functionp (keymap-lookup keymap-popup--test-annotate-map "?"))))
+
+(ert-deftest keymap-popup-test-annotate-description ()
+  "Annotate with :description sets metadata."
+  (setq keymap-popup--test-annotate-map (make-sparse-keymap))
+  (keymap-set keymap-popup--test-annotate-map "a" #'forward-char)
+  (eval '(keymap-popup-annotate keymap-popup--test-annotate-map
+           :description "My commands"
+           :group "Move"
+           forward-char "Forward")
+        t)
+  (should (equal (keymap-popup--meta keymap-popup--test-annotate-map
+                                     'description)
+                 "My commands")))
+
+(ert-deftest keymap-popup-test-annotate-no-defaults-baked ()
+  "Annotate without keywords sets no exit-key or description metadata."
+  (setq keymap-popup--test-annotate-map (make-sparse-keymap))
+  (keymap-set keymap-popup--test-annotate-map "a" #'forward-char)
+  (eval '(keymap-popup-annotate keymap-popup--test-annotate-map
+           :group "Move"
+           forward-char "Forward")
+        t)
+  (should-not (keymap-popup--meta keymap-popup--test-annotate-map
+                                  'exit-key))
+  (should-not (keymap-popup--meta keymap-popup--test-annotate-map
+                                  'description)))
+
+;;; Metadata tests
+
+(ert-deftest keymap-popup-test-meta-read-write ()
+  (let ((map (make-sparse-keymap)))
+    (setf (keymap-popup--meta map 'descriptions) '(test-data))
+    (should (equal (keymap-popup--meta map 'descriptions) '(test-data)))))
+
+(ert-deftest keymap-popup-test-meta-nil-for-missing ()
+  (let ((map (make-sparse-keymap)))
+    (should (null (keymap-popup--meta map 'descriptions)))))
+
+(ert-deftest keymap-popup-test-attach-meta-stores-all ()
+  (let* ((map (make-sparse-keymap))
+         (result (keymap-popup--attach-meta map '(rows)
+                                            :exit-key "x"
+                                            :description "Doc"
+                                            :persistent t)))
+    (should (eq result map))
+    (should (equal (keymap-popup--meta map 'descriptions) '(rows)))
+    (should (equal (keymap-popup--meta map 'exit-key) "x"))
+    (should (equal (keymap-popup--meta map 'description) "Doc"))
+    (should (eq (keymap-popup--meta map 'persistent) 'yes))))
+
+(ert-deftest keymap-popup-test-attach-meta-omits-nil-opts ()
+  (let ((map (make-sparse-keymap)))
+    (keymap-popup--attach-meta map '(rows))
+    (should (equal (keymap-popup--meta map 'descriptions) '(rows)))
+    (should-not (keymap-popup--meta map 'exit-key))
+    (should-not (keymap-popup--meta map 'description))
+    (should-not (keymap-popup--meta map 'persistent))))
+
+(ert-deftest keymap-popup-test-attach-meta-stores-explicit-false ()
+  (let ((map (make-sparse-keymap)))
+    (keymap-popup--attach-meta map '(rows) :persistent nil)
+    (should (eq (keymap-popup--meta map 'persistent) 'no))))
+
+(ert-deftest keymap-popup-test-attach-meta-clears-stale-opts ()
+  "Reattaching without options removes values from the previous attachment."
+  (let ((map (make-sparse-keymap)))
+    (keymap-popup--attach-meta map '(old)
+                               :exit-key "x"
+                               :description "Old"
+                               :persistent t)
+    (keymap-popup--attach-meta map '(new))
+    (should (equal (keymap-popup--meta map 'descriptions) '(new)))
+    (should-not (keymap-popup--meta map 'exit-key))
+    (should-not (keymap-popup--meta map 'description))
+    (should-not (keymap-popup--meta map 'persistent))))
+
+(ert-deftest keymap-popup-test-attach-meta-ignores-unknown-opts ()
+  (let ((map (make-sparse-keymap)))
+    (keymap-popup--attach-meta map '(rows) :popup-key "?")
+    (should (equal (keymap-popup--meta map 'descriptions) '(rows)))
+    (should-not (keymap-popup--meta map 'popup-key))))
+
+(ert-deftest keymap-popup-test-attach-parses-keyed-bindings ()
+  "Runtime attach parses annotate-shaped bindings into description rows."
+  (let ((map (make-sparse-keymap)))
+    (keymap-set map "a" #'ignore)
+    (should (eq (keymap-popup-attach map '("a" ("Ignore" ignore))) map))
+    (let* ((rows (keymap-popup--meta map 'descriptions))
+           (entry (car (plist-get (caar rows) :entries))))
+      (should (equal (plist-get entry :key) "a"))
+      (should (equal (plist-get entry :description) "Ignore"))
+      (should (eq (plist-get entry :command) 'ignore)))))
+
+(ert-deftest keymap-popup-test-attach-stores-opts ()
+  (let ((map (make-sparse-keymap)))
+    (keymap-popup-attach map '("a" ("Ignore" ignore))
+                         :exit-key "x" :description "Doc" :persistent t)
+    (should (equal (keymap-popup--meta map 'exit-key) "x"))
+    (should (equal (keymap-popup--meta map 'description) "Doc"))
+    (should (eq (keymap-popup--meta map 'persistent) 'yes))))
+
+(ert-deftest keymap-popup-test-persistent-false-overrides-global-default ()
+  (eval '(keymap-popup-define keymap-popup--test-nonpersistent-map
+           :persistent nil
+           "x" ("Ignore" ignore))
+        t)
+  (let ((keymap-popup-persistent t))
+    (should (eq (keymap-popup--meta keymap-popup--test-nonpersistent-map
+                                    'persistent)
+                'no))
+    (should-not
+     (plist-get (keymap-popup--make-session
+                 keymap-popup--test-nonpersistent-map)
+                :persistent))))
+
+(ert-deftest keymap-popup-test-attach-runtime-built-menu ()
+  "Entries computed from data render and resolve against the live keymap."
+  (let* ((map (make-sparse-keymap))
+         (items '(("1" . next-line) ("2" . previous-line)))
+         (bindings (cl-loop for (key . cmd) in items
+                            append (list key (list (symbol-name cmd) cmd)))))
+    (cl-loop for (key . cmd) in items do (keymap-set map key cmd))
+    (keymap-popup-attach map (append '(:group "Nav") bindings))
+    (let* ((resolved (keymap-popup--resolve-descriptions
+                      (keymap-popup--collect-descriptions map) map))
+           (group (caar resolved))
+           (keys (mapcar (lambda (e) (plist-get e :key))
+                         (plist-get group :entries))))
+      (should (equal (plist-get group :name) "Nav"))
+      (should (equal keys '("1" "2"))))))
+
+(ert-deftest keymap-popup-test-attach-annotated-symbols-resolve ()
+  "Command-symbol bindings get keys from `where-is-internal' at resolve time."
+  (let ((map (make-sparse-keymap)))
+    (keymap-set map "n" #'next-line)
+    (keymap-popup-attach map '(next-line "Next"))
+    (let* ((resolved (keymap-popup--resolve-descriptions
+                      (keymap-popup--collect-descriptions map) map))
+           (entry (car (plist-get (caar resolved) :entries))))
+      (should (equal (plist-get entry :key) "n"))
+      (should (equal (plist-get entry :description) "Next")))))
+
+(ert-deftest keymap-popup-test-no-descriptions-error ()
+  (let ((map (make-sparse-keymap)))
+    (should-error (keymap-popup map) :type 'user-error)))
+
+(ert-deftest keymap-popup-test-dismiss-is-command ()
+  (should (commandp #'keymap-popup-dismiss)))
+
+(ert-deftest keymap-popup-test-popup-mouse-click-keeps-source-context ()
+  "Popup mouse events must not delete their target or select the help buffer."
+  (dolist (persistent '(nil t))
+    (dolist (nested '(nil t))
+      (let ((overriding-terminal-local-map nil)
+            (pre-command-hook nil)
+            (post-command-hook nil)
+            (minibuffer-setup-hook nil)
+            (minibuffer-exit-hook nil)
+            (keymap-popup-persistent persistent)
+            (keymap-popup-backend #'keymap-popup-backend-side-window)
+            (map (make-sparse-keymap))
+            (child (make-sparse-keymap)))
+        (save-window-excursion
+          (with-temp-buffer
+            (switch-to-buffer (current-buffer))
+            (buffer-enable-undo)
+            (insert "Draft")
+            (undo-boundary)
+            (let ((source (current-buffer))
+                  (source-window (selected-window))
+                  (undo buffer-undo-list)
+                  (action (lambda () (interactive) (insert "!"))))
+              (keymap-set map "a" action)
+              (keymap-popup-attach map `("a" ("Action" ,action)))
+              (keymap-set child "a" action)
+              (keymap-popup-attach child `("a" ("Child action" ,action)))
+              (unwind-protect
+                  (progn
+                    (keymap-popup map)
+                    (when nested
+                      (keymap-popup--push-submenu
+                       (get-buffer keymap-popup--buffer-name) child))
+                    (let* ((buf (get-buffer keymap-popup--buffer-name))
+                           (win (get-buffer-window buf))
+                           (active (keymap-popup--session-get buf :active))
+                           (stack (keymap-popup--session-get buf :stack)))
+                      ;; Include button-down, release, double-click and blank
+                      ;; space: native mouse commands must never see a window
+                      ;; destroyed by the transient map's pre-command hook.
+                      (dolist (type '(down-mouse-1 mouse-1 double-mouse-1
+                                     mouse-2 mouse-3))
+                        (dolist (position '(1 header-line))
+                          (execute-kbd-macro
+                           (vector (list type
+                                         (list win position '(0 . 0) 0))))
+                          (should (window-live-p win))
+                          (should (eq (current-buffer) source))
+                          (should (eq (selected-window) source-window))
+                          (should (eq (keymap-popup--session-get buf :source)
+                                      source))
+                          (should (eq (keymap-popup--active-get buf :keymap)
+                                      (plist-get active :keymap)))
+                          (should (eq (keymap-popup--session-get buf :stack)
+                                      stack))
+                          (should (equal (buffer-string) "Draft"))
+                          (should (= (point) 6))
+                          (should (equal buffer-undo-list undo))))
+                      ;; Back navigation's reentry grace must not survive a
+                      ;; click and keep the next ordinary suffix open.
+                      (when (and nested (not persistent))
+                        (execute-kbd-macro (kbd "q"))
+                        (execute-kbd-macro
+                         (vector (list 'down-mouse-1 (list win 1 '(0 . 0) 0))
+                                 (list 'mouse-1 (list win 1 '(0 . 0) 0)))))
+                      ;; The next keyboard action still belongs to the source.
+                      (execute-kbd-macro (kbd "a"))
+                      (should (equal (buffer-string) "Draft!"))
+                      (if persistent
+                          (progn
+                            (should (buffer-live-p buf))
+                            (when nested
+                              (execute-kbd-macro (kbd "q"))
+                              (should (buffer-live-p buf)))
+                            (execute-kbd-macro (kbd "q")))
+                        (should-not (buffer-live-p buf)))
+                      (should-not (buffer-live-p buf))
+                      (should-not overriding-terminal-local-map)
+                      (should-not pre-command-hook)
+                      (should-not post-command-hook)
+                      (should-not minibuffer-setup-hook)
+                      (should-not minibuffer-exit-hook)))
+                (keymap-popup-dismiss)))))))))
+
+(ert-deftest keymap-popup-test-source-mouse-click-dispatches ()
+  "Clicks outside the popup keep native and source-map mouse dispatch."
+  (dolist (custom '(nil t))
+    (let ((overriding-terminal-local-map nil)
+          (pre-command-hook nil)
+          (post-command-hook nil)
+          (minibuffer-setup-hook nil)
+          (minibuffer-exit-hook nil)
+          (keymap-popup-persistent nil)
+          (keymap-popup-backend #'keymap-popup-backend-side-window)
+          (map (make-sparse-keymap))
+          (received nil))
+      (save-window-excursion
+        (with-temp-buffer
+          (switch-to-buffer (current-buffer))
+          (insert "Draft")
+          (keymap-set map "a" #'ignore)
+          (keymap-popup-attach map '("a" ("Action" ignore)))
+          (when custom
+            (keymap-set map "<mouse-1>"
+                        (lambda (event)
+                          (interactive "e")
+                          (setq received (list (current-buffer) event)))))
+          (unwind-protect
+              (progn
+                (keymap-popup map)
+                (let ((event (list 'mouse-1
+                                   (list (selected-window) 2 '(1 . 0) 0))))
+                  (execute-kbd-macro (vector event))
+                  (if custom
+                      (should (equal received (list (current-buffer) event)))
+                    (should (= (point) 2))))
+                (should (equal (buffer-string) "Draft"))
+                (should-not (get-buffer keymap-popup--buffer-name))
+                (should-not overriding-terminal-local-map)
+                (should-not pre-command-hook))
+            (keymap-popup-dismiss)))))))
+
+(ert-deftest keymap-popup-test-dismiss-cleans-real-transient-maps ()
+  "Dismiss removes nested transient maps and their pre-command hooks."
+  (let ((overriding-terminal-local-map nil)
+        (pre-command-hook nil)
+        (parent (make-sparse-keymap))
+        (child (make-sparse-keymap))
+        (descriptions '(((:name nil :entries
+                                ((:key "x" :description "X" :type suffix))))))
+        (buf (get-buffer-create keymap-popup--buffer-name)))
+    (unwind-protect
+        (progn
+          (keymap-popup--attach-meta parent descriptions)
+          (keymap-popup--attach-meta child descriptions)
+          (keymap-popup-test--session buf descriptions :keymap parent)
+          (keymap-popup--activate-transient-map buf)
+          (keymap-popup--push-submenu buf child)
+          (should overriding-terminal-local-map)
+          (should (= (length pre-command-hook) 2))
+          (keymap-popup-dismiss)
+          (should-not overriding-terminal-local-map)
+          (should-not pre-command-hook)
+          (should-not (buffer-live-p buf)))
+      (when (buffer-live-p buf)
+        (kill-buffer buf)))))
+
+(ert-deftest keymap-popup-test-teardown-removes-persistent-hook ()
+  "Teardown removes the popup's persistent post-command hook immediately."
+  (let ((post-command-hook nil)
+        (buf (get-buffer-create "*keymap-popup-test-persistent*")))
+    (unwind-protect
+        (progn
+          (keymap-popup-test--session buf nil)
+          (keymap-popup--install-persistent-hook buf)
+          (should (= (length post-command-hook) 1))
+          (keymap-popup--teardown buf)
+          (should-not post-command-hook)
+          (should-not (buffer-live-p buf)))
+      (when (buffer-live-p buf)
+        (kill-buffer buf)))))
+
+(ert-deftest keymap-popup-test-new-session-replaces-active-session ()
+  "Opening another popup first removes the prior session's maps and hooks."
+  (let ((overriding-terminal-local-map nil)
+        (pre-command-hook nil)
+        (post-command-hook nil)
+        (keymap-popup-persistent t)
+        (keymap-popup-backend
+         (lambda () (list :show #'ignore :fit #'ignore :hide #'ignore)))
+        (map (make-sparse-keymap)))
+    (unwind-protect
+        (progn
+          (keymap-set map "x" #'ignore)
+          (keymap-popup-attach map '("x" ("Ignore" ignore)))
+          (with-temp-buffer
+            (keymap-popup map)
+            (should (= (length pre-command-hook) 1))
+            (should (= (length post-command-hook) 1))
+            (keymap-popup map)
+            (should (= (length pre-command-hook) 1))
+            (should (= (length post-command-hook) 1))
+            (keymap-popup-dismiss)
+            (should-not overriding-terminal-local-map)
+            (should-not pre-command-hook)
+            (should-not post-command-hook)))
+      (when (get-buffer keymap-popup--buffer-name)
+        (keymap-popup-dismiss)))))
+
+(ert-deftest keymap-popup-test-killing-buffer-releases-session-resources ()
+  "Direct buffer death removes maps and every global session hook."
+  (let ((overriding-terminal-local-map nil)
+        (pre-command-hook nil)
+        (post-command-hook nil)
+        (minibuffer-setup-hook nil)
+        (minibuffer-exit-hook nil)
+        (keymap-popup-persistent t)
+        (keymap-popup-backend
+         (lambda () (list :show #'ignore :fit #'ignore :hide #'ignore)))
+        (map (make-sparse-keymap)))
+    (keymap-set map "x" #'ignore)
+    (keymap-popup-attach map '("x" ("Ignore" ignore)))
+    (with-temp-buffer
+      (keymap-popup map)
+      (kill-buffer keymap-popup--buffer-name))
+    (should-not overriding-terminal-local-map)
+    (should-not pre-command-hook)
+    (should-not post-command-hook)
+    (should-not minibuffer-setup-hook)
+    (should-not minibuffer-exit-hook)))
+
+(ert-deftest keymap-popup-test-submenu-suffix-exit-cleans-parent-map ()
+  "A suffix from a child popup deactivates suspended parent maps too."
+  (let ((overriding-terminal-local-map nil)
+        (pre-command-hook nil)
+        (parent (make-sparse-keymap))
+        (child (make-sparse-keymap))
+        (descriptions '(((:name nil :entries
+                                ((:key "x" :description "X" :type suffix))))))
+        (buf (get-buffer-create keymap-popup--buffer-name)))
+    (unwind-protect
+        (progn
+          (keymap-popup--attach-meta parent descriptions)
+          (keymap-popup--attach-meta child descriptions)
+          (keymap-popup-test--session buf descriptions :keymap parent)
+          (keymap-popup--activate-transient-map buf)
+          (keymap-popup--push-submenu buf child)
+          (let ((exit (keymap-popup--active-get buf :exit-function)))
+            (cl-letf (((symbol-function 'this-command-keys-vector)
+                       (lambda () [?x])))
+              (funcall exit)))
+          (should-not overriding-terminal-local-map)
+          (should-not pre-command-hook)
+          (should-not (buffer-live-p buf)))
+      (when (buffer-live-p buf)
+        (kill-buffer buf)))))
+
+(ert-deftest keymap-popup-test-on-exit-tears-down-for-suffix ()
+  "On-exit tears down when a suffix (non-exit-key) caused the exit."
+  (let ((buf (get-buffer-create "*keymap-popup-test-exit*"))
+        (parent (keymap-popup--make-state nil nil nil "q")))
+    (unwind-protect
+        (progn
+          (keymap-popup-test--session buf nil :stack (list parent))
+          (let ((on-exit (keymap-popup--make-on-exit buf)))
+            (cl-letf (((symbol-function 'this-command-keys-vector)
+                       (lambda () [?a])))
+              (funcall on-exit))
+            (should-not (buffer-live-p buf))))
+      (when (buffer-live-p buf)
+        (kill-buffer buf)))))
+
+(ert-deftest keymap-popup-test-on-exit-pops-for-exit-key ()
+  "On-exit pops to parent when exit-key caused the exit."
+  (let ((buf (get-buffer-create "*keymap-popup-test-pop*"))
+        (parent-map (make-sparse-keymap))
+        (parent-wrapper (make-sparse-keymap))
+        (descs '(((:name nil :entries nil)))))
+    (unwind-protect
+        (progn
+          (let ((parent (keymap-popup--plist-with
+                         (keymap-popup--make-state parent-map descs nil "x")
+                         :wrapper-map parent-wrapper
+                         :exit-function #'ignore)))
+            (keymap-popup-test--session
+             buf descs :keymap (make-sparse-keymap) :stack (list parent)))
+          (let ((on-exit (keymap-popup--make-on-exit buf)))
+            (cl-letf (((symbol-function 'this-command-keys-vector)
+                       (lambda () [?q])))
+              (funcall on-exit))
+            (should (buffer-live-p buf))
+            (let* ((session (keymap-popup--session-state buf))
+                   (active (plist-get session :active)))
+              (should (eq (plist-get active :keymap) parent-map))
+              (should (equal (plist-get active :exit-key) "x"))
+              (should (eq (plist-get active :wrapper-map) parent-wrapper))
+              (should (eq (plist-get active :exit-function) #'ignore))
+              (should-not (plist-get session :stack)))))
+      (when (buffer-live-p buf)
+        (kill-buffer buf)))))
+
+(ert-deftest keymap-popup-test-find-entry-with-group ()
+  "Lookup returns both matching entry and containing group."
+  (let* ((entry '(:key "x" :type suffix))
+         (group (list :name "Group" :entries (list entry)))
+         (match (keymap-popup--find-entry-with-group (list (list group)) "x")))
+    (should (eq (car match) entry))
+    (should (eq (cdr match) group))
+    (should-not (keymap-popup--find-entry-with-group (list (list group)) "z"))))
+
+(ert-deftest keymap-popup-test-rows-to-columns-filters-hidden-groups ()
+  (let* ((shown '(:name "Shown" :entries ((:key "s" :description "Show"
+                                                :type suffix))))
+         (hidden '(:name "Hidden" :if ignore
+                         :entries ((:key "h" :description "Hide"
+                                          :type suffix))))
+         (columns (keymap-popup--rows-to-columns
+                   (list (list shown hidden)))))
+    (should (= (length (car columns)) 1))
+    (should (string-match-p "Shown" (caaar columns)))))
+
+(ert-deftest keymap-popup-test-render-omits-nil-descriptions ()
+  (let ((rows '(((:name nil :entries
+                         ((:key "s" :description nil :type suffix)
+                          (:key "k" :description nil :type keymap
+                                :target child)))))))
+    (should (equal (keymap-popup--render rows) "\n"))
+    (should-not (string-match-p "nil" (keymap-popup--render rows)))))
+
+(ert-deftest keymap-popup-test-resolve-description-coerces-non-strings ()
+  (should (equal (keymap-popup--resolve-description (lambda () 42)) "42"))
+  (should (equal (keymap-popup--resolve-description (lambda () 'ready)) "ready"))
+  (should-not (keymap-popup--resolve-description (lambda () nil))))
+
+(ert-deftest keymap-popup-test-remove-entry-requires-descriptions ()
+  (let ((map (make-sparse-keymap)))
+    (keymap-set map "x" #'ignore)
+    (should-error (keymap-popup-remove-entry map "x") :type 'user-error)
+    (should (eq (keymap-lookup map "x") #'ignore))))
+
+(ert-deftest keymap-popup-test-attach-rejects-switch-entry ()
+  (let ((map (make-sparse-keymap)))
+    (should-error
+     (keymap-popup-attach map '("v" ("Verbose" :switch verbose)))
+     :type 'error)
+    (should-not (keymap-popup--meta map 'descriptions))))
+
+(ert-deftest keymap-popup-test-push-submenu-rejects-empty-child ()
+  (let ((buf (get-buffer-create keymap-popup--buffer-name))
+        (parent (make-sparse-keymap))
+        (child (make-sparse-keymap))
+        (descriptions '(((:name nil :entries
+                                ((:key "x" :description "X" :type suffix)))))))
+    (unwind-protect
+        (progn
+          (keymap-popup-test--session buf descriptions :keymap parent)
+          (should-error (keymap-popup--push-submenu buf child)
+                        :type 'user-error)
+          (should (eq (keymap-popup--active-get buf :keymap) parent))
+          (should-not (keymap-popup--session-get buf :stack)))
+      (kill-buffer buf))))
+
+(ert-deftest keymap-popup-test-submenu-failure-preserves-parent ()
+  "Rendering, fitting, and activation failures preserve usable parent state."
+  (dolist (failure '(description predicate fit activation quit))
+    (let* ((overriding-terminal-local-map nil)
+           (pre-command-hook nil)
+           (post-command-hook nil)
+           (minibuffer-setup-hook nil)
+           (minibuffer-exit-hook nil)
+           (failing nil)
+           (parent (make-sparse-keymap))
+           (child (make-sparse-keymap))
+           (keymap-popup-backend
+            (lambda ()
+              (list :show #'ignore :hide #'ignore
+                    :fit (lambda (_buf)
+                           (when (and failing (eq failure 'fit))
+                             (error "Submenu failed")))))))
+      (keymap-set parent "a" #'ignore)
+      (keymap-set child "b" #'forward-char)
+      (keymap-popup-attach parent '("a" ("Parent" ignore)))
+      (keymap-popup-attach
+       child (list "b" (list (lambda ()
+                               (when failing
+                                 (pcase failure
+                                   ('description (error "Submenu failed"))
+                                   ('quit (signal 'quit nil))))
+                               "Child")
+                             #'forward-char
+                             :if (lambda ()
+                                   (when (and failing (eq failure 'predicate))
+                                     (error "Submenu failed"))
+                                   t)))
+       :exit-key "z")
+      (unwind-protect
+          (progn
+            (keymap-popup parent)
+            (let* ((buf (get-buffer keymap-popup--buffer-name))
+                   (session (keymap-popup--session-state buf))
+                   (text (with-current-buffer buf (buffer-string)))
+                   (maps overriding-terminal-local-map)
+                   (hooks (copy-sequence pre-command-hook))
+                   (build (symbol-function 'keymap-popup--build-wrapper-map)))
+              (setq failing t)
+              (cl-letf (((symbol-function 'keymap-popup--build-wrapper-map)
+                         (lambda (&rest args)
+                           (when (eq failure 'activation)
+                             (error "Submenu failed"))
+                           (apply build args))))
+                (should
+                 (equal (condition-case err
+                            (keymap-popup--push-submenu buf child)
+                          ((error quit) err))
+                        (if (eq failure 'quit)
+                            '(quit) '(error "Submenu failed")))))
+              (should (eq (keymap-popup--session-state buf) session))
+              (should (equal (with-current-buffer buf (buffer-string)) text))
+              (should (equal overriding-terminal-local-map maps))
+              (should (equal pre-command-hook hooks))
+              (should (eq (key-binding (kbd "a")) #'ignore))
+              (setq failing nil)
+              (keymap-popup--push-submenu buf child)
+              (should (eq (keymap-popup--active-get buf :keymap) child))
+              (should (eq (key-binding (kbd "b")) #'forward-char)))
+            (keymap-popup-dismiss)
+            (should-not overriding-terminal-local-map)
+            (should-not pre-command-hook))
+        (keymap-popup-dismiss)))))
+
+(ert-deftest keymap-popup-test-unresolved-menu-preserves-active-session ()
+  (let ((invalid (make-sparse-keymap))
+        (active-map (make-sparse-keymap))
+        (descriptions '(((:name nil :entries
+                                ((:key "x" :description "X" :type suffix)))))))
+    (keymap-popup-attach invalid
+                         '(keymap-popup--test-unbound-command "Missing"))
+    (when (get-buffer keymap-popup--buffer-name)
+      (kill-buffer keymap-popup--buffer-name))
+    (should-error (keymap-popup invalid) :type 'user-error)
+    (should-not (get-buffer keymap-popup--buffer-name))
+    (let ((buf (get-buffer-create keymap-popup--buffer-name)))
+      (unwind-protect
+          (progn
+            (keymap-popup-test--session buf descriptions :keymap active-map)
+            (let ((session (with-current-buffer buf keymap-popup--session)))
+              (should-error (keymap-popup invalid) :type 'user-error)
+              (should (eq (get-buffer keymap-popup--buffer-name) buf))
+              (should (eq (with-current-buffer buf keymap-popup--session)
+                          session))))
+        (kill-buffer buf)))))
+
+(ert-deftest keymap-popup-test-remove-last-entry-clears-descriptions ()
+  (eval '(keymap-popup-define keymap-popup--test-remove-last
+           "x" ("X" ignore))
+        t)
+  (keymap-popup-remove-entry keymap-popup--test-remove-last "x")
+  (should-not (keymap-popup--meta keymap-popup--test-remove-last 'descriptions))
+  (should-error (keymap-popup keymap-popup--test-remove-last)
+                :type 'user-error))
+
+(ert-deftest keymap-popup-test-define-refuses-default-popup-key-collision ()
+  (let ((keymap-popup-default-popup-key "h"))
+    (should-error
+     (eval '(keymap-popup-define keymap-popup--test-default-collision
+              "h" ("Help" ignore))
+           t)
+     :type 'error)))
+
+(ert-deftest keymap-popup-test-define-refuses-custom-popup-key-collision ()
+  (should-error
+   (eval '(keymap-popup-define keymap-popup--test-custom-collision
+            :popup-key "?"
+            "?" ("Help" ignore))
+         t)
+   :type 'error))
+
+(ert-deftest keymap-popup-test-define-allows-inherited-popup-key-collision ()
+  (eval '(keymap-popup-define keymap-popup--test-inherited-collision-child
+           :parent special-mode-map
+           "x" ("Ignore" ignore))
+        t)
+  (should
+   (eq (keymap-lookup keymap-popup--test-inherited-collision-child "h")
+       #'keymap-popup--test-inherited-collision-child-popup))
+  (should (eq (keymap-lookup special-mode-map "h") #'describe-mode)))
+
+(ert-deftest keymap-popup-test-annotate-refuses-popup-key-collision ()
+  (setq keymap-popup--test-annotate-collision (make-sparse-keymap))
+  (keymap-set keymap-popup--test-annotate-collision "c" #'forward-char)
+  (should-error
+   (eval '(keymap-popup-annotate keymap-popup--test-annotate-collision
+            :popup-key "c"
+            forward-char "Forward")
+         t)
+   :type 'error)
+  (should (eq (keymap-lookup keymap-popup--test-annotate-collision "c")
+              #'forward-char)))
+
+(ert-deftest keymap-popup-test-define-refuses-filtered-popup-key-collision ()
+  (setq keymap-popup--test-filtered-collision-enabled nil)
+  (should-error
+   (eval '(keymap-popup-define keymap-popup--test-filtered-collision
+            "h" ("Forward" forward-char
+                 :if (lambda () keymap-popup--test-filtered-collision-enabled)))
+         t)
+   :type 'error)
+  (setq keymap-popup--test-filtered-collision-enabled t)
+  (should (eq (keymap-lookup keymap-popup--test-filtered-collision "h")
+              #'forward-char)))
+
+(ert-deftest keymap-popup-test-annotate-refuses-filtered-popup-key-collision ()
+  (setq keymap-popup--test-filtered-annotate-enabled nil)
+  (setq keymap-popup--test-filtered-annotate-map (make-sparse-keymap))
+  (keymap-set
+   keymap-popup--test-filtered-annotate-map "?"
+   `(menu-item "" forward-char :filter
+               ,(lambda (_)
+                  (and keymap-popup--test-filtered-annotate-enabled
+                       #'forward-char))))
+  (should-error
+   (eval '(keymap-popup-annotate keymap-popup--test-filtered-annotate-map
+            :popup-key "?"
+            forward-char "Forward")
+         t)
+   :type 'error)
+  (setq keymap-popup--test-filtered-annotate-enabled t)
+  (should (eq (keymap-lookup keymap-popup--test-filtered-annotate-map "?")
+              #'forward-char)))
+
+(ert-deftest keymap-popup-test-define-submenu-forward-reference ()
+  (makunbound 'keymap-popup--test-forward-child)
+  (eval '(keymap-popup-define keymap-popup--test-forward-parent
+           "s" ("Sub" :keymap keymap-popup--test-forward-child))
+        t)
+  (eval '(keymap-popup-define keymap-popup--test-forward-child
+           "c" ("Child" ignore))
+        t)
+  (let* ((descriptions
+          (keymap-popup--meta keymap-popup--test-forward-parent 'descriptions))
+         (entry (keymap-popup--find-entry-by-key descriptions "s")))
+    (should (eq (plist-get entry :target)
+                'keymap-popup--test-forward-child))
+    (let (opened)
+      (cl-letf (((symbol-function 'keymap-popup)
+                 (lambda (keymap) (setq opened keymap))))
+        (call-interactively
+         #'keymap-popup--test-forward-parent--enter-keymap-popup--test-forward-child))
+      (should (eq opened keymap-popup--test-forward-child)))))
+
+(ert-deftest keymap-popup-test-define-rejects-expression-submenu-target ()
+  (should-error
+   (macroexpand-1
+    '(keymap-popup-define keymap-popup--test-expression-target
+       "s" ("Sub" :keymap (make-sparse-keymap))))
+   :type 'error))
+
+(provide 'keymap-popup-tests)
+;;; keymap-popup-tests.el ends here

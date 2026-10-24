@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Romacs
+Comment=Extensible text editor
+Exec=romacs %F
+Icon=romacs
+Terminal=false
+Categories=Development;TextEditor;
+MimeType=text/plain;text/org;
+StartupNotify=true
+StartupWMClass=romacs

@@ -1,0 +1,22 @@
+{
+  "oracle": "<recording-path-redacted>/emacs-32.0.50",
+  "sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+  "observations": [
+    {
+      "form": "(progn (fset 'alias-a 'alias-b) (fset 'alias-b 'alias-missing) (prin1 (list (condition-case e (alias-a) (error e)) (condition-case e (funcall 'alias-a) (error e)) (condition-case e (apply 'alias-a nil) (error e)))))",
+      "result": {
+        "output": "((void-function alias-a) (void-function alias-a) (void-function alias-a))",
+        "exit_code": 0,
+        "error": null
+      }
+    },
+    {
+      "form": "(let ((s (position-symbol 'hello 42))) (prin1 (list (symbol-with-pos-p 'hello) (symbol-with-pos-p s) (bare-symbol s) (symbol-with-pos-pos s) (let ((symbols-with-pos-enabled nil)) (list (symbolp s) (symbol-with-pos-p s))))))",
+      "result": {
+        "output": "(nil t hello 42 (nil t))",
+        "exit_code": 0,
+        "error": null
+      }
+    }
+  ]
+}

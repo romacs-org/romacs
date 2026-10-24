@@ -1,0 +1,121 @@
+;;; jabber-search.el --- searching by JEP-0055, with x:data support  -*- lexical-binding: t; -*-
+
+;; Copyright (C) 2002, 2003, 2004 - tom berger - object@intelectronica.net
+;; Copyright (C) 2003, 2004 - Magnus Henoch - mange@freemail.hu
+;; Copyright (C) 2026  Thanos Apollo
+
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
+
+;; This file is a part of jabber.el.
+
+;; This program is free software; you can redistribute it and/or modify
+;; it under the terms of the GNU General Public License as published by
+;; the Free Software Foundation; either version 2 of the License, or
+;; (at your option) any later version.
+
+;; This program is distributed in the hope that it will be useful,
+;; but WITHOUT ANY WARRANTY; without even the implied warranty of
+;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+;; GNU General Public License for more details.
+
+;; You should have received a copy of the GNU General Public License
+;; along with this program; if not, write to the Free Software
+;; Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+
+;;; Commentary:
+;;
+
+;;; Code:
+
+(require 'jabber-register)
+(require 'jabber-xdata)
+
+;; Global reference declarations
+
+(defvar jabber-buffer-connection)       ; jabber-chatbuffer.el
+(defvar jabber-xdata-xmlns)            ; jabber-xml.el
+
+;; Namespace constants
+
+(defconst jabber-search-xmlns "jabber:iq:search"
+  "XEP-0055 Jabber Search namespace.")
+
+;;
+
+(defun jabber-get-search (jc to)
+  "Send IQ get request to TO in namespace \"jabber:iq:search\".
+
+JC is the Jabber connection."
+  (interactive
+   (let ((jc (jabber-read-account)))
+     (list jc
+	   (jabber-read-jid-completing "Search what database: " nil nil nil nil nil jc))))
+  (jabber-send-iq jc to
+		  "get"
+		  `(query ((xmlns . ,jabber-search-xmlns)))
+		  #'jabber-process-data #'jabber-process-register-or-search
+		  #'jabber-report-success "Search field retrieval"))
+
+;; `jabber-process-register-or-search' logically comes here, rendering the
+;; search form, but since register and search are so similar, having
+;; two functions would be serious code duplication. See
+;; `jabber-register.el'.
+
+(defun jabber-process-search-result (_jc xml-data)
+  "Receive and display search results.
+
+JC is the Jabber connection.
+XML-DATA is the parsed tree data from the stream (stanzas)
+obtained from `xml-parse-region'."
+
+  ;; This function assumes that all search results come in one packet,
+  ;; which is not necessarily the case.
+  (let ((query (jabber-iq-query xml-data))
+	(have-xdata nil)
+	xdata fields)
+
+    ;; First, check for results in jabber:x:data form.
+    (dolist (x (jabber-xml-get-children query 'x))
+      (when (string= (jabber-xml-get-attribute x 'xmlns) jabber-xdata-xmlns)
+	(setq have-xdata t)
+	(setq xdata x)))
+
+    (if have-xdata
+	(jabber-xdata-render-result xdata)
+
+      (insert (propertize "Search results" 'face 'jabber-title) "\n")
+
+      (setq fields '((first . (label "First name" column 0))
+		     (last . (label "Last name" column 15))
+		     (nick . (label "Nickname" column 30))
+		     (jid . (label "JID" column 45))
+		     (email . (label "E-mail" column 65))))
+
+      (dolist (field-cons fields)
+	(indent-to (plist-get (cdr field-cons) 'column) 1)
+	(insert (propertize (plist-get (cdr field-cons) 'label) 'face 'bold)))
+      (insert "\n\n")
+
+      ;; Now, the items
+      (dolist (item (jabber-xml-get-children query 'item))
+	(let ((start-of-line (point))
+	      jid)
+
+	  (dolist (field-cons fields)
+	    (let ((field-plist (cdr field-cons))
+		  (value (if (eq (car field-cons) 'jid)
+			     (setq jid (jabber-xml-get-attribute item 'jid))
+			   (car (jabber-xml-node-children (car (jabber-xml-get-children item (car field-cons))))))))
+	      (indent-to (plist-get field-plist 'column) 1)
+	      (if value (insert value))))
+
+	  (if jid
+	      (put-text-property start-of-line (point)
+				 'jabber-jid jid))
+	  (insert "\n"))))))
+
+(setq jabber-register-search-result-function #'jabber-process-search-result)
+
+(provide 'jabber-search)
+
+;;; jabber-search.el ends here

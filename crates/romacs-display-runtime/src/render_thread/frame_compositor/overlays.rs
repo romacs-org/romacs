@@ -1,0 +1,115 @@
+//! Transient overlays owned by the compositor: visual bell,
+//! typing-speed and idle-dim state. Native tooltips live in `tooltips`.
+//!
+//! Paths here are absolute on purpose, matching the sibling submodules.
+
+use romacs_display_protocol::frame_time::EventTime;
+
+use crate::render_thread::frame_windows::GuiFrameRenderState;
+use romacs_display_protocol::effect_config::IdleDimConfig;
+
+impl GuiFrameRenderState {
+    pub(in crate::render_thread) fn menu_opened(&mut self) {
+        self.update_presented_pointer_motion(None);
+        self.mark_dirty();
+    }
+
+    pub(in crate::render_thread) fn set_visual_bell_start(&mut self, start: Option<EventTime>) {
+        self.overlays.visual_bell_start = start;
+        if start.is_some() {
+            self.compositor.dirty = true;
+        }
+    }
+
+    pub(in crate::render_thread) fn record_typing_keypress(&mut self, now: EventTime) {
+        self.overlays.typing_speed.key_press_times.push(now);
+        self.compositor.dirty = true;
+    }
+
+    pub(in crate::render_thread) fn record_idle_activity(&mut self, now: EventTime) {
+        self.overlays.idle_dim.last_activity_time = now;
+        self.compositor.dirty = true;
+    }
+
+    pub(in crate::render_thread) fn trigger_visual_bell(
+        &mut self,
+        cursor_error_pulse_enabled: bool,
+        edge_snap_enabled: bool,
+        edge_snap_duration_ms: u32,
+        now: EventTime,
+    ) {
+        self.overlays.visual_bell_start = Some(now);
+        if cursor_error_pulse_enabled {
+            self.compositor
+                .renderer_effects
+                .trigger_cursor_error_pulse(now.into_instant());
+        }
+        if edge_snap_enabled {
+            let selected_info = self.compositor.current_frame.as_ref().and_then(|frame| {
+                frame
+                    .window_infos
+                    .iter()
+                    .find(|info| info.selected && !info.is_minibuffer)
+                    .cloned()
+            });
+            if let Some(info) = selected_info {
+                let at_top = info.window_start <= 1;
+                let at_bottom = info.window_end >= info.buffer_size;
+                if at_top || at_bottom {
+                    self.compositor.renderer_effects.trigger_edge_snap(
+                        info.bounds,
+                        info.mode_line_height,
+                        at_top,
+                        at_bottom,
+                        now.into_instant(),
+                        edge_snap_duration_ms,
+                    );
+                }
+            }
+        }
+        self.compositor.dirty = true;
+    }
+
+    pub(in crate::render_thread) fn tick_idle_dim(
+        &mut self,
+        config: &IdleDimConfig,
+        now: EventTime,
+    ) -> bool {
+        let idle_time = now.saturating_since(self.overlays.idle_dim.last_activity_time);
+        let target_alpha = if idle_time >= config.delay {
+            config.opacity
+        } else {
+            0.0
+        };
+        let diff = target_alpha - self.overlays.idle_dim.current_alpha;
+        if diff.abs() > 0.001 {
+            let fade_speed = if config.fade_duration.as_secs_f32() > 0.0 {
+                1.0 / config.fade_duration.as_secs_f32() * 0.016
+            } else {
+                1.0
+            };
+            if diff > 0.0 {
+                self.overlays.idle_dim.current_alpha = (self.overlays.idle_dim.current_alpha
+                    + fade_speed * config.opacity)
+                    .min(target_alpha);
+            } else {
+                self.overlays.idle_dim.current_alpha =
+                    (self.overlays.idle_dim.current_alpha - fade_speed * config.opacity).max(0.0);
+            }
+            self.overlays.idle_dim.active = true;
+            self.compositor.dirty = true;
+            true
+        } else if self.overlays.idle_dim.current_alpha > 0.001 {
+            self.overlays.idle_dim.active = true;
+            false
+        } else {
+            self.overlays.idle_dim.active = false;
+            false
+        }
+    }
+
+    pub(in crate::render_thread) fn clear_idle_dim(&mut self) {
+        self.overlays.idle_dim.active = false;
+        self.overlays.idle_dim.current_alpha = 0.0;
+    }
+}

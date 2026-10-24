@@ -1,0 +1,41 @@
+{
+  "name": "intern",
+  "arity": [
+    1,
+    2
+  ],
+  "effect": "global",
+  "gnu_files": [
+    "lread.c"
+  ],
+  "gnu_def": "lread.c:4771",
+  "rust": "src/prims/widen.rs:43",
+  "args": [
+    "none",
+    "none"
+  ],
+  "extra": {
+    "0": [
+      "\"private\"",
+      "'private",
+      "nil",
+      "42"
+    ],
+    "1": [
+      "(obarray-make)",
+      "(vector 0)",
+      "[]",
+      "42"
+    ]
+  },
+  "probes": [
+    "(let* ((a (obarray-make)) (b (obarray-make)) (x (intern \"private\" a))) (list (eq x (intern \"private\" a)) (eq x (intern \"private\" b)) (eq x (intern \"private\"))))",
+    "(let* ((a (vector 0)) (x (intern \"legacy-private\" a))) (list (obarrayp a) (eq x (intern-soft \"legacy-private\" a)) (eq (aref a 0) 0)))",
+    "(let ((a (obarray-make))) (list (eq (intern \"nil\" a) nil) (eq (intern \"t\" a) t) (eq (intern \":kw\" a) :kw)))",
+    "(let* ((gc-cons-threshold 1) (a (obarray-make)) (x (intern \"gc-private\" a))) (put x 'marker (list 17 23)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (list (eq x (intern \"gc-private\" a)) (eq x (intern-soft \"gc-private\" a)) (get x 'marker)))",
+    "(let* ((gc-cons-threshold 1) (a (obarray-make)) (x (intern \"gc-resident\" a))) (put x 'marker (list 31 47)) (setq x nil) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (list (symbolp (intern-soft \"gc-resident\" a)) (get (intern-soft \"gc-resident\" a) 'marker)))",
+    "(let* ((gc-cons-threshold 1) (a (obarray-make)) (name (copy-sequence \"name-object\"))) (put-text-property 0 1 'marker 'retained name) (let* ((x (intern name a)) (stored (symbol-name x))) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (list (eq name stored) (eq stored (symbol-name x)) (get-text-property 0 'marker name) (get-text-property 0 'marker stored) (eq x (intern (copy-sequence name) a)))))",
+    "(let* ((a (obarray-make)) (x (intern \":custom-keyword\" a))) (list (keywordp x) (boundp x) (condition-case e (symbol-value x) (void-variable (car e))) (eq x (intern \":custom-keyword\" a)) (eq x :custom-keyword)))",
+    "(list (fboundp 'intern) (functionp 'intern))"
+  ]
+}

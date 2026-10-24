@@ -1,0 +1,170 @@
+{
+ "blob": "a51211b2b07ada9262a665aaa2f887de998d84c2",
+ "compiled": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": true,
+  "results": {
+   "rmail-undigest-test-multipart-mixed-digest": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "rmail-undigest-test-rfc1153-digest-strict": {
+    "as_expected": true,
+    "detail": "(ert-test-failed ((should (ignore-errors (undigestify-rmail-message) (should (string= ... \"Testing the undigester.\n\n\")) (should (string= ... \"This is message one.\n\n\")) (should (string= ... \"This is message two.\n\")) t)) :form (condition-case nil (progn (undigestify-rmail-message) (let* (... ...) (let ... ... value-22)) (let* (... ...) (let ... ... value-27)) (let* (... ...) (let ... ... value-32)) t) (error nil)) :value nil))",
+    "expected": ":failed",
+    "outcome": "failed",
+    "tags": []
+   },
+   "rmail-undigest-test-rfc1153-less-strict-digest": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "rmail-undigest-test-rfc1153-sloppy-digest": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "rmail-undigest-test-rfc1521-mime-digest": {
+    "as_expected": true,
+    "detail": "(ert-test-failed ((should (string= (rmail-message-content 2) \"Message one.\n\n\")) :form (string= \"------- =_aaaaaaaaaa0\nContent-Type: message/rfc822\n\nFrom: NN1 <nn1@nn1.com>\nTo: Digester <digester@digester.com>\nDate: ddd, dd mmm yy hh:mm:ss zzz\nSubject: Message one\n\nMessage one.\n\n\" \"Message one.\n\n\") :value nil :explanation (arrays-of-different-length 183 14 \"------- =_aaaaaaaaaa0\nContent-Type: message/rfc822\n\nFrom: NN1 <nn1@nn1.com>\nTo: Digester <digester@digester.com>\nDate: ddd, dd mmm yy hh:mm:ss zzz\nSubject: Message one\n\nMessage one.\n\n\" \"Message one.\n\n\" first-mismatch-at 0)))",
+    "expected": ":failed",
+    "outcome": "failed",
+    "tags": []
+   },
+   "rmail-undigest-test-rfc934-digest": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   }
+  },
+  "timed_out": false
+ },
+ "file": "lisp/mail/undigest-tests.el",
+ "gnu": {
+  "emacs": "<recording-path-redacted>/emacs-32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+  "version": "32.0.50"
+ },
+ "harness_sha256": "78c20850429a08af22faadf73b5d164c560230e83d7eb88ef60cb995670703ef",
+ "mini": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": null,
+  "results": {
+   "rmail-undigest-test-multipart-mixed-digest": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "rmail-undigest-test-rfc1153-digest-strict": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":failed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "rmail-undigest-test-rfc1153-less-strict-digest": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "rmail-undigest-test-rfc1153-sloppy-digest": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "rmail-undigest-test-rfc1521-mime-digest": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":failed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "rmail-undigest-test-rfc934-digest": {
+    "as_expected": null,
+    "detail": "(wrong-type-argument stringp nil)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   }
+  },
+  "timed_out": false
+ },
+ "read_error": null,
+ "real": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": true,
+  "results": {
+   "rmail-undigest-test-multipart-mixed-digest": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "rmail-undigest-test-rfc1153-digest-strict": {
+    "as_expected": true,
+    "detail": "(ert-test-failed ((should (ignore-errors (undigestify-rmail-message) (should (string= ... \"Testing the undigester.\n\n\")) (should (string= ... \"This is message one.\n\n\")) (should (string= ... \"This is message two.\n\")) t)) :form (condition-case nil (progn (undigestify-rmail-message) (let* (... ...) (let ... ... value-22)) (let* (... ...) (let ... ... value-27)) (let* (... ...) (let ... ... value-32)) t) (error nil)) :value nil))",
+    "expected": ":failed",
+    "outcome": "failed",
+    "tags": []
+   },
+   "rmail-undigest-test-rfc1153-less-strict-digest": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "rmail-undigest-test-rfc1153-sloppy-digest": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "rmail-undigest-test-rfc1521-mime-digest": {
+    "as_expected": true,
+    "detail": "(ert-test-failed ((should (string= (rmail-message-content 2) \"Message one.\n\n\")) :form (string= \"------- =_aaaaaaaaaa0\nContent-Type: message/rfc822\n\nFrom: NN1 <nn1@nn1.com>\nTo: Digester <digester@digester.com>\nDate: ddd, dd mmm yy hh:mm:ss zzz\nSubject: Message one\n\nMessage one.\n\n\" \"Message one.\n\n\") :value nil :explanation (arrays-of-different-length 183 14 \"------- =_aaaaaaaaaa0\nContent-Type: message/rfc822\n\nFrom: NN1 <nn1@nn1.com>\nTo: Digester <digester@digester.com>\nDate: ddd, dd mmm yy hh:mm:ss zzz\nSubject: Message one\n\nMessage one.\n\n\" \"Message one.\n\n\" first-mismatch-at 0)))",
+    "expected": ":failed",
+    "outcome": "failed",
+    "tags": []
+   },
+   "rmail-undigest-test-rfc934-digest": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   }
+  },
+  "timed_out": false
+ },
+ "schema": 1,
+ "toplevel_deftests": 6
+}

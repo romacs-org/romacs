@@ -1,0 +1,130 @@
+use super::RenderApp;
+use crate::thread_comm::{ClipboardCommand, LifecycleCommand, RenderCommand, WindowCommand};
+
+impl RenderApp {
+    /// During connection-only/GPU startup, configuration and frame lifecycle
+    /// live in CPU state. Other commands retain order in a bounded staging queue;
+    /// full staging stops GPU admission to the owner, not shutdown or daemon
+    /// CPU work. Limit each pass as well as both queues to 64 ordinary commands.
+    pub(super) fn process_startup_commands(&mut self) -> bool {
+        if self.comms.cmd_rx.take_shutdown() {
+            self.lifecycle_flags
+                .request_shutdown(super::state::RenderShutdownReason::EvaluatorShutdown);
+            return true;
+        }
+        self.retire_cancelled_frames();
+        for _ in 0..64 {
+            let Ok(command) = self.comms.cmd_rx.try_recv_startup_for(
+                self.startup_commands.len() == 64,
+                self.comms.keep_alive_without_frames,
+            ) else {
+                break;
+            };
+            // Frame transactions and their cancellation are CPU lifecycle,
+            // including the legacy owner held behind pending GPU preparation.
+            if let RenderCommand::Window(command @ WindowCommand::RealizeFrame { .. }) = command {
+                self.handle_window(command);
+                continue;
+            }
+            if !self.comms.keep_alive_without_frames {
+                if matches!(
+                    command,
+                    RenderCommand::Lifecycle(LifecycleCommand::Shutdown)
+                ) {
+                    self.lifecycle_flags
+                        .request_shutdown(super::state::RenderShutdownReason::EvaluatorShutdown);
+                    return true;
+                }
+                self.startup_commands.push_back(command);
+                continue;
+            }
+            match command {
+                RenderCommand::Lifecycle(LifecycleCommand::Shutdown) => {
+                    self.lifecycle_flags
+                        .request_shutdown(super::state::RenderShutdownReason::EvaluatorShutdown);
+                    return true;
+                }
+                RenderCommand::Config(command) => self.handle_config(command),
+                RenderCommand::Window(command) => self.handle_window(command),
+                RenderCommand::Clipboard(command) => self.handle_clipboard(command),
+                other => self.startup_commands.push_back(other),
+            }
+        }
+        self.retire_cancelled_frames();
+        false
+    }
+
+    pub(super) fn startup_control_flow(&self) -> winit::event_loop::ControlFlow {
+        if (self.startup_commands.len() < 64 && !self.comms.cmd_rx.is_empty())
+            || (self
+                .comms
+                .cmd_rx
+                .has_startup_command_for(self.comms.keep_alive_without_frames))
+        {
+            winit::event_loop::ControlFlow::Poll
+        } else {
+            winit::event_loop::ControlFlow::Wait
+        }
+    }
+
+    /// Process pending commands from Emacs.
+    #[cfg(test)]
+    pub(super) fn process_commands(&mut self) -> bool {
+        self.process_commands_with_waker(None)
+    }
+
+    pub(super) fn process_commands_with_waker(
+        &mut self,
+        _waker: Option<winit::event_loop::EventLoopProxy>,
+    ) -> bool {
+        if self.comms.cmd_rx.take_shutdown() {
+            self.lifecycle_flags
+                .request_shutdown(super::state::RenderShutdownReason::EvaluatorShutdown);
+            return true;
+        }
+        self.retire_cancelled_frames();
+        let mut should_exit = false;
+
+        while let Some(cmd) = self
+            .startup_commands
+            .pop_front()
+            .or_else(|| self.comms.cmd_rx.try_recv().ok())
+        {
+            match cmd {
+                #[cfg(feature = "core-free")]
+                RenderCommand::Paint(frame) => self.ingest_paint(*frame),
+                RenderCommand::Lifecycle(c) => {
+                    if let LifecycleCommand::Shutdown = c {
+                        tracing::info!("Render thread received shutdown command");
+                        self.lifecycle_flags.request_shutdown(
+                            super::state::RenderShutdownReason::EvaluatorShutdown,
+                        );
+                        should_exit = true;
+                        continue;
+                    }
+                }
+                RenderCommand::Window(c) => {
+                    if matches!(c, WindowCommand::ScrollBlit { .. }) {
+                        tracing::debug!("ScrollBlit ignored (full-frame rendering mode)");
+                        continue;
+                    }
+                    self.handle_window(c);
+                }
+                RenderCommand::Asset(c) => self.handle_asset(c),
+                RenderCommand::Ui(c) => self.handle_ui(c),
+                RenderCommand::Config(c) => self.handle_config(c),
+                RenderCommand::Clipboard(c) => self.handle_clipboard(c),
+            }
+        }
+
+        self.retire_cancelled_frames();
+        should_exit
+    }
+
+    fn handle_clipboard(&mut self, command: ClipboardCommand) {
+        match &self.clipboard {
+            Ok(clipboard) => clipboard.submit(command),
+            Err(err) => crate::clipboard::reject_command(command, err.clone()),
+        }
+    }
+}

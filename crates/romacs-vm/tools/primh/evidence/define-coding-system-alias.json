@@ -1,0 +1,92 @@
+{
+ "protocol": "primh-v1",
+ "primitive": "define-coding-system-alias",
+ "spec_sha256": "4aea5a80adf2a04985e5443ec2267ed3a9f37964d2a96b5b61db5f2a3ed3a49c",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
+ "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "define-coding-system-alias",
+    "subr",
+    2,
+    2
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "coding.c": "3d4158a37d3ae5fe370a6abf49c3d4754fc84efcc2b81543371693065fbbd2cb"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "define-coding-system-alias/0000",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'define-coding-system-alias '(1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr define-coding-system-alias> 1))"
+  },
+  {
+   "id": "define-coding-system-alias/0001",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'define-coding-system-alias '(1 1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr define-coding-system-alias> 3))"
+  },
+  {
+   "id": "define-coding-system-alias/0002",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-coding-system-alias 17 'no-conversion)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 17))"
+  },
+  {
+   "id": "define-coding-system-alias/0003",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-coding-system-alias 'oracle-a 'oracle-missing)) (error (list 'sig e))))",
+   "expected": "(sig (coding-system-error oracle-missing))"
+  },
+  {
+   "id": "define-coding-system-alias/0004",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-coding-system-alias 'oracle-a nil)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument coding-system-p nil))"
+  },
+  {
+   "id": "define-coding-system-alias/0005",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (define-coding-system-alias 17 17)) (error (list 'sig e))))",
+   "expected": "(sig (wrong-type-argument symbolp 17))"
+  },
+  {
+   "id": "define-coding-system-alias/0006",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (define-coding-system-internal 'oracle-cod 67 'raw-text nil t nil nil nil nil nil nil '(:probe 7) nil) (list (define-coding-system-alias 'oracle-a 'oracle-cod) (coding-system-aliases 'oracle-cod) (coding-system-aliases 'oracle-cod-unix) (coding-system-base 'oracle-a-mac) (coding-system-eol-type 'oracle-a-dos) (eq (coding-system-plist 'oracle-a) (coding-system-plist 'oracle-cod))))) (error (list 'sig e))))",
+   "expected": "(ok (nil (oracle-cod oracle-a) (oracle-cod-unix oracle-a-unix) oracle-cod 1 t))"
+  },
+  {
+   "id": "define-coding-system-alias/0007",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (define-coding-system-internal 'oracle-cod 67 'raw-text nil t nil nil nil nil nil nil '(:probe 7) nil) (define-coding-system-alias 'oracle-a 'oracle-cod) (define-coding-system-internal 'oracle-other 67 'raw-text nil t nil nil nil nil nil nil '(:probe 7) 'dos) (define-coding-system-alias 'oracle-a 'oracle-other) (list (coding-system-base 'oracle-a) (coding-system-aliases 'oracle-cod) (coding-system-aliases 'oracle-other) (coding-system-base 'oracle-a-unix)))) (error (list 'sig e))))",
+   "expected": "(ok (oracle-other (oracle-cod oracle-a) (oracle-other oracle-a) oracle-cod))"
+  },
+  {
+   "id": "define-coding-system-alias/0008",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (setq oracle-count 0) (put 'oracle-lazy 'coding-system-define-form '(progn (setq oracle-count (1+ oracle-count)) (define-coding-system-internal 'oracle-lazy 67 'raw-text nil t nil nil nil nil nil nil '(:probe 7) nil))) (list (define-coding-system-alias 'oracle-a 'oracle-lazy) oracle-count (coding-system-base 'oracle-a)))) (error (list 'sig e))))",
+   "expected": "(ok (nil 1 oracle-lazy))",
+   "gnu_regime_variant": "(ok (nil 0 oracle-lazy))"
+  },
+  {
+   "id": "define-coding-system-alias/0009",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (progn (coding-system-p 'no-conversion) (setq coding-system-alist 5) (condition-case e (define-coding-system-alias 'oracle-alist 'no-conversion) (error (list e (coding-system-p 'oracle-alist) (car coding-system-list)))))) (error (list 'sig e))))",
+   "expected": "(ok ((wrong-type-argument listp 5) t oracle-alist))"
+  }
+ ]
+}

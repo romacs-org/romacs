@@ -1,0 +1,380 @@
+{
+ "blob": "c37a879b4b2b0669512ffce9df85614af5ebe2b8",
+ "compiled": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": true,
+  "results": {
+   "fill-test-breakable-paragraph": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "fill-test-end-period": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "fill-test-fill-paragraph": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "fill-test-fill-paragraph-handle-comment": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "fill-test-fill-paragraph-semlf": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "fill-test-fill-paragraph-semlf-c-mode": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "fill-test-fill-paragraph-semlf-emacs-lisp-mode": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "fill-test-fill-paragraph-semlf-markdown-mode": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (functionp 'markdown-mode)) :form (functionp markdown-mode) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "fill-test-fill-paragraph-semlf-org-mode": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "fill-test-fill-region": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "fill-test-fill-region-as-paragraph": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "fill-test-fill-region-as-paragraph-default": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "fill-test-fill-region-as-paragraph-semlf": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "fill-test-haskell": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "fill-test-no-fill-polish-nobreak-p": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "fill-test-unbreakable-paragraph": {
+    "as_expected": true,
+    "detail": "(ert-test-failed ((should (equal (buffer-string) string)) :form (equal \"aaa =\n         baaaaaaaaaaaaaaaaaaaaaaaaaaaa\n\" \"aaa =   baaaaaaaaaaaaaaaaaaaaaaaaaaaa\n\") :value nil :explanation (arrays-of-different-length 45 38 \"aaa =\n         baaaaaaaaaaaaaaaaaaaaaaaaaaaa\n\" \"aaa =   baaaaaaaaaaaaaaaaaaaaaaaaaaaa\n\" first-mismatch-at 5)))",
+    "expected": ":failed",
+    "outcome": "failed",
+    "tags": []
+   }
+  },
+  "timed_out": false
+ },
+ "file": "lisp/textmodes/fill-tests.el",
+ "gnu": {
+  "emacs": "<recording-path-redacted>/emacs-32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+  "version": "32.0.50"
+ },
+ "harness_sha256": "78c20850429a08af22faadf73b5d164c560230e83d7eb88ef60cb995670703ef",
+ "mini": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": null,
+  "results": {
+   "fill-test-breakable-paragraph": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "fill-test-end-period": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "fill-test-fill-paragraph": {
+    "as_expected": null,
+    "detail": "(void-function ert-test-erts-file)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "fill-test-fill-paragraph-handle-comment": {
+    "as_expected": null,
+    "detail": "(void-function ert-test-erts-file)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "fill-test-fill-paragraph-semlf": {
+    "as_expected": null,
+    "detail": "(void-function ert-test-erts-file)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "fill-test-fill-paragraph-semlf-c-mode": {
+    "as_expected": null,
+    "detail": "(void-function ert-test-erts-file)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "fill-test-fill-paragraph-semlf-emacs-lisp-mode": {
+    "as_expected": null,
+    "detail": "(void-function ert-test-erts-file)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "fill-test-fill-paragraph-semlf-markdown-mode": {
+    "as_expected": null,
+    "detail": "((skip-unless (functionp 'markdown-mode)))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": null
+   },
+   "fill-test-fill-paragraph-semlf-org-mode": {
+    "as_expected": null,
+    "detail": "(void-function ert-test-erts-file)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "fill-test-fill-region": {
+    "as_expected": null,
+    "detail": "(void-function ert-test-erts-file)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "fill-test-fill-region-as-paragraph": {
+    "as_expected": null,
+    "detail": "(void-function ert-test-erts-file)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "fill-test-fill-region-as-paragraph-default": {
+    "as_expected": null,
+    "detail": "(void-function ert-test-erts-file)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "fill-test-fill-region-as-paragraph-semlf": {
+    "as_expected": null,
+    "detail": "(void-function ert-test-erts-file)",
+    "expected": ":passed",
+    "outcome": "errored",
+    "tags": null
+   },
+   "fill-test-haskell": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "fill-test-no-fill-polish-nobreak-p": {
+    "as_expected": null,
+    "detail": "nil",
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": null
+   },
+   "fill-test-unbreakable-paragraph": {
+    "as_expected": null,
+    "detail": "((should (equal (buffer-string) string) :value nil))",
+    "expected": ":failed",
+    "outcome": "failed",
+    "tags": null
+   }
+  },
+  "timed_out": false
+ },
+ "read_error": null,
+ "real": {
+  "complete": true,
+  "exit": 0,
+  "garbled_lines": 0,
+  "load_error": null,
+  "load_ok": true,
+  "results": {
+   "fill-test-breakable-paragraph": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "fill-test-end-period": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "fill-test-fill-paragraph": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "fill-test-fill-paragraph-handle-comment": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "fill-test-fill-paragraph-semlf": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "fill-test-fill-paragraph-semlf-c-mode": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "fill-test-fill-paragraph-semlf-emacs-lisp-mode": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "fill-test-fill-paragraph-semlf-markdown-mode": {
+    "as_expected": true,
+    "detail": "(ert-test-skipped ((skip-unless (functionp 'markdown-mode)) :form (functionp markdown-mode) :value nil))",
+    "expected": ":passed",
+    "outcome": "skipped",
+    "tags": []
+   },
+   "fill-test-fill-paragraph-semlf-org-mode": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "fill-test-fill-region": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "fill-test-fill-region-as-paragraph": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "fill-test-fill-region-as-paragraph-default": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "fill-test-fill-region-as-paragraph-semlf": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "fill-test-haskell": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "fill-test-no-fill-polish-nobreak-p": {
+    "as_expected": true,
+    "detail": null,
+    "expected": ":passed",
+    "outcome": "passed",
+    "tags": []
+   },
+   "fill-test-unbreakable-paragraph": {
+    "as_expected": true,
+    "detail": "(ert-test-failed ((should (equal (buffer-string) string)) :form (equal \"aaa =\n         baaaaaaaaaaaaaaaaaaaaaaaaaaaa\n\" \"aaa =   baaaaaaaaaaaaaaaaaaaaaaaaaaaa\n\") :value nil :explanation (arrays-of-different-length 45 38 \"aaa =\n         baaaaaaaaaaaaaaaaaaaaaaaaaaaa\n\" \"aaa =   baaaaaaaaaaaaaaaaaaaaaaaaaaaa\n\" first-mismatch-at 5)))",
+    "expected": ":failed",
+    "outcome": "failed",
+    "tags": []
+   }
+  },
+  "timed_out": false
+ },
+ "schema": 1,
+ "toplevel_deftests": 16
+}

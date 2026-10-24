@@ -1,0 +1,29 @@
+{
+  "name": "kill-local-variable",
+  "arity": [
+    1,
+    1
+  ],
+  "effect": "global",
+  "gnu_files": [
+    "data.c"
+  ],
+  "gnu_def": "data.c:2350",
+  "rust": "src/prims/buffer_locals.rs:8",
+  "args": [
+    "projected-buffer-locals"
+  ],
+  "probes": [
+    "(with-temp-buffer (setq major-mode 'other mode-name \"Other\") (put 'major-mode 'permanent-local t) (kill-local-variable 'major-mode) (kill-all-local-variables) (list major-mode (equal mode-name \"Fundamental\")))",
+    "(with-temp-buffer (setq fill-column 31 buffer-file-name \"visit\") (kill-local-variable 'fill-column) (list fill-column (local-variable-p 'fill-column) buffer-file-name (local-variable-p 'buffer-file-name)))",
+    "(with-temp-buffer (setq bl-p 7) (set (make-local-variable 'bl-p) 8) (put 'bl-p 'permanent-local t) (kill-local-variable 'bl-p) (list bl-p (local-variable-p 'bl-p)))",
+    "(list (condition-case e (local-variable-p 3) (wrong-type-argument (car e))) (condition-case e (buffer-local-value 'bl-void (current-buffer)) (void-variable e)) (condition-case e (kill-local-variable 3) (wrong-type-argument (car e))))",
+    "(with-temp-buffer (setq bl-x 1) (make-local-variable 'bl-x) (let ((bl-x 2)) (kill-local-variable 'bl-x)) (list bl-x (local-variable-p 'bl-x)))",
+    "(with-temp-buffer (setq fill-column 22) (let ((fill-column 33)) (kill-local-variable 'fill-column)) (list fill-column (local-variable-p 'fill-column)))",
+    "(list (kill-local-variable nil) (kill-local-variable t) (local-variable-p nil) (local-variable-p t))",
+    "(with-temp-buffer (let ((a (make-symbol \"x\"))) (set a 4) (make-local-variable a) (set a 7) (kill-local-variable a) (symbol-value a)))",
+    "(with-temp-buffer (setq bl-x 3) (defvaralias 'bl-alias 'bl-x) (make-local-variable 'bl-x) (setq bl-x 4) (kill-local-variable 'bl-alias) (list bl-x (local-variable-p 'bl-alias)))",
+    "(list (fboundp 'kill-local-variable) (functionp 'kill-local-variable))",
+    "(with-temp-buffer (funcall 'kill-local-variable 'fill-column))"
+  ]
+}

@@ -1,0 +1,28 @@
+[package]
+name = "romacs-tui-tests"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+publish = false
+
+# Independent PTY transport, terminal comparison, recording, and fixture tests.
+# Integration tests share the `tui` binary; no editor executable is required.
+autotests = false
+
+[[test]]
+name = "tui"
+path = "tests/tui.rs"
+
+
+[dependencies]
+expect-test = "1.5.1"
+
+[target.'cfg(unix)'.dependencies]
+vt100 = "0.16"
+pty-process = "0.5"
+libc = { workspace = true }
+tempfile.workspace = true
+romacs-display-protocol.workspace = true
+
+serde_json.workspace = true

@@ -1,0 +1,33 @@
+VERSION	32.0.50
+nil_alist	nil
+matching	middle
+nonmatching	nil
+greatest_position	end
+first_tie	first
+case_sensitive	nil
+operation_unrestricted	fh-unrestricted
+operation_allowed	fh-allowed
+operation_filtered	fallback
+nil_operation	fh-nil-op
+nonsymbol_handler	(handler payload)
+nil_handler	nil
+inhibition_same_operation	fallback
+inhibition_different_operation	end
+inhibition_nil_operation	fallback
+match_data_preserved	t
+match_data_nil_preserved	nil
+invalid_filename_nil	(wrong-type-argument stringp nil)
+invalid_filename_integer	(wrong-type-argument stringp 42)
+invalid_regexp	(invalid-regexp "Unmatched [ or [^")
+invalid_regexp_even_filtered	(invalid-regexp "Unmatched [ or [^")
+invalid_regexp_match_data_preserved	t
+nonlist_alist_ignored	nil
+dotted_alist_tail_ignored	middle
+malformed_entries_ignored	middle
+invalid_operations_list	(wrong-type-argument listp 42)
+dotted_operations_success	fh-dotted-ops
+dotted_operations_failure	(wrong-type-argument listp (write . 42))
+invalid_inhibition_list	(wrong-type-argument listp 42)
+invalid_inhibition_different_operation_ignored	middle
+filtered_invalid_operations_not_examined_at_earlier_position	end
+funcall	middle

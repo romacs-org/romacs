@@ -1,0 +1,52 @@
+{
+  "name": "record",
+  "arity": [
+    1,
+    "many"
+  ],
+  "effect": "pure",
+  "gnu_files": [
+    "alloc.c"
+  ],
+  "gnu_def": "alloc.c:3516",
+  "rust": "src/prims/records.rs:4",
+  "args": [
+    "record-fixture",
+    "record-fixture"
+  ],
+  "extra": {
+    "0": [
+      "'tag",
+      "nil",
+      "(record 'nested)"
+    ],
+    "1": [
+      "1",
+      "(list 7)"
+    ]
+  },
+  "probes": [
+    "(list (record 'tag) (record nil 1 2) (make-record 'tag 3 'fill) (make-record 'tag 0 nil))",
+    "(list (recordp (record 'tag)) (recordp [tag]) (recordp nil) (vectorp (record 'tag)) (arrayp (record 'tag)) (sequencep (record 'tag)) (type-of (record 'tag 1)) (type-of (record 42)))",
+    "(let ((r (record 'tag 10 20))) (list (length r) (aref r 0) (aref r 2) (aset r 1 99) (aref r 1) (aset r 0 'new-tag) (type-of r)))",
+    "(let* ((x (list 7)) (r (record 'tag x)) (c (copy-sequence r))) (list (equal r c) (eq r c) (eq (aref r 1) (aref c 1)) (equal r [tag (7)]) (equal r (record 'other x)) (progn (aset c 1 9) (aref r 1))))",
+    "(let* ((r (record 'tag 1 '(2 3))) (s (prin1-to-string r))) (list s (equal r (read s)) (recordp (read s)) (type-of (read s)) (length (read s))))",
+    "(let ((c (record 'cl-structure-class 'my-class))) (list (type-of (record c 1)) (type-of (record (record 'other 'my-class))) (type-of (record nil))))",
+    "(list (condition-case e (aref (record 'tag 1) -1) (error e)) (condition-case e (aref (record 'tag 1) 2) (error e)) (condition-case e (aset (record 'tag) 1 9) (error e)) (condition-case e (aref (record 'tag) 'bad) (error e)) (condition-case e (make-record 'tag -1 nil) (error e)) (condition-case e (make-record 'tag 'bad nil) (error e)))",
+    "(list (condition-case e (apply #'record nil) (error e)) (condition-case e (apply #'make-record '(tag 2)) (error e)) (condition-case e (apply #'make-record '(tag 2 nil extra)) (error e)) (condition-case e (apply #'recordp nil) (error e)) (condition-case e (apply #'recordp '(nil nil)) (error e)))",
+    "(list (fboundp 'record) (functionp #'record) (recordp (funcall #'record 'tag 1)) (recordp (funcall #'make-record 'tag 1 nil)) (funcall #'recordp (record 'tag)))",
+    "(let ((r (record (record 'cl-structure-class 'gc-class) (list 777) (vector (list 888))))) (list (type-of r) (car (aref r 1)) (car (aref (aref r 2) 0))))",
+    "(list (condition-case e (apply #'record nil) (error (list (car e) (nth 2 e)))) (condition-case e (apply #'make-record '(tag 2)) (error (list (car e) (nth 2 e)))) (condition-case e (apply #'make-record '(tag 2 nil extra)) (error (list (car e) (nth 2 e)))) (condition-case e (apply #'recordp nil) (error (list (car e) (nth 2 e)))) (condition-case e (apply #'recordp '(nil nil)) (error (list (car e) (nth 2 e)))))",
+    "(let* ((x (list 7)) (r (make-record 'tag 2 x)) (q (record 'tag x x))) (list (length r) (eq (aref r 1) x) (eq (aref r 1) (aref r 2)) (eq (aref q 1) x) (eq (aref q 1) (aref q 2)) (progn (setcar x 9) (car (aref r 2)))))",
+    "(list (recordp (record 'tag)) (recordp [tag]) (recordp nil) (vectorp (record 'tag)) (type-of (record 'tag 1)) (type-of (record 42)))",
+    "(let* ((r (record 'tag 1 '(2 3))) (s (prin1-to-string r))) (list s (equal r (car (read-from-string s))) (recordp (car (read-from-string s))) (type-of (car (read-from-string s))) (length (car (read-from-string s)))))",
+    "(let ((r (make-record 'tag 4094 'fill))) (list (length r) (aref r 0) (aref r 4094)))",
+    "(condition-case e (make-record 'tag 4095 nil) (error e))",
+    "(list (type-of (record (record 'short))) (type-of (record (record nil))))",
+    "(list (condition-case e (read-from-string \"#s()\") (error e)) (condition-case e (read-from-string \"#s(tag . tail)\") (error e)) (condition-case e (read-from-string \"#s(tag\") (error e)))",
+    "(let ((r (apply #'record 'tag (make-list 4094 'fill)))) (list (length r) (aref r 0) (aref r 4094)))",
+    "(condition-case e (apply #'record 'tag (make-list 4095 nil)) (error e))",
+    "(let ((r (car (read-from-string (concat \"#s(tag\" (apply #'concat (make-list 4094 \" fill\")) \")\"))))) (list (length r) (aref r 0) (aref r 4094)))",
+    "(condition-case e (read-from-string (concat \"#s(tag\" (apply #'concat (make-list 4095 \" nil\")) \")\")) (error e))"
+  ]
+}

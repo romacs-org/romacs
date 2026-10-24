@@ -1,0 +1,36 @@
+{
+  "name": "intern-soft",
+  "arity": [
+    1,
+    2
+  ],
+  "effect": "global",
+  "gnu_files": [
+    "lread.c"
+  ],
+  "gnu_def": "lread.c:4790",
+  "rust": "src/prims/obarray.rs:10",
+  "args": [
+    "none",
+    "none"
+  ],
+  "extra": {
+    "0": [
+      "\"absent\"",
+      "'absent",
+      "nil",
+      "42"
+    ],
+    "1": [
+      "(obarray-make)",
+      "(vector 0)",
+      "[]",
+      "42"
+    ]
+  },
+  "probes": [
+    "(let* ((a (obarray-make)) (b (obarray-make)) (x (intern \"private\" a))) (list (eq x (intern-soft \"private\" a)) (intern-soft \"absent\" a) (intern-soft x b) (eq x (intern-soft x a))))",
+    "(eq (intern-soft \"car\") 'car)",
+    "(list (fboundp 'intern-soft) (functionp 'intern-soft))"
+  ]
+}

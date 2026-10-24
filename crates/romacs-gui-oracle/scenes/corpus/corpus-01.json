@@ -1,0 +1,324 @@
+{
+ "name": "corpus-01",
+ "frame": {
+  "width": 480,
+  "height": 168,
+  "bg": "#ffffff",
+  "fg": "#000000"
+ },
+ "font": {
+  "family": "Liberation Mono",
+  "pixel_size": 20,
+  "regular": "/usr/share/fonts/liberation/LiberationMono-Regular.ttf",
+  "bold": "/usr/share/fonts/liberation/LiberationMono-Bold.ttf",
+  "italic": "/usr/share/fonts/liberation/LiberationMono-Italic.ttf"
+ },
+ "cursor_color": "#00a000",
+ "buffer": [
+  {
+   "text": "ΔΕΛΤΑ"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "cursor",
+   "fg": "#2e8b57",
+   "underline": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "C:\\tmp"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "ΔΕΛΤΑ",
+   "fg": "#0000ff"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "fox",
+   "fg": "#ff8c00"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "Χάος",
+   "fg": "#2e8b57"
+  },
+  {
+   "text": "\n"
+  },
+  {
+   "text": "brown",
+   "fg": "#ff0000",
+   "bold": true,
+   "bg": "#ffff00"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "Αθήνα",
+   "italic": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "world",
+   "fg": "#ff8c00"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "lazy"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "ήλιος"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "frame"
+  },
+  {
+   "text": "\n"
+  },
+  {
+   "text": "q?",
+   "fg": "#8b0000",
+   "underline": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "ΣΟΦΙΑ",
+   "fg": "#8b0000"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "q?"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "ψυχή",
+   "fg": "#0000ff",
+   "italic": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "{ok}",
+   "fg": "#ff8c00"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "[0-9]+",
+   "bold": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "world"
+  },
+  {
+   "text": "\n"
+  },
+  {
+   "text": "Χάος",
+   "fg": "#ff8c00"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "over"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "brown",
+   "underline": true,
+   "bg": "#e0e0ff"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "a&b",
+   "fg": "#b8860b",
+   "bg": "#d0ffd0"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "ΔΕΛΤΑ",
+   "bold": true
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "[0-9]+",
+   "fg": "#2e8b57"
+  },
+  {
+   "text": " "
+  },
+  {
+   "text": "fox"
+  },
+  {
+   "text": "\n"
+  }
+ ],
+ "point": 32,
+ "expect": {
+  "origin": [
+   0,
+   0
+  ],
+  "rows": [
+   {
+    "text": "ΔΕΛΤΑ cursor C:\\tmp ΔΕΛΤΑ fox Χάος",
+    "runs": [
+     {
+      "start": 6,
+      "end": 12,
+      "fg": "#2e8b57",
+      "underline": true
+     },
+     {
+      "start": 20,
+      "end": 25,
+      "fg": "#0000ff"
+     },
+     {
+      "start": 26,
+      "end": 29,
+      "fg": "#ff8c00"
+     },
+     {
+      "start": 30,
+      "end": 34,
+      "fg": "#2e8b57"
+     }
+    ]
+   },
+   {
+    "text": "brown Αθήνα world lazy ήλιος frame",
+    "runs": [
+     {
+      "start": 0,
+      "end": 5,
+      "fg": "#ff0000",
+      "bold": true,
+      "bg": "#ffff00"
+     },
+     {
+      "start": 6,
+      "end": 11,
+      "italic": true
+     },
+     {
+      "start": 12,
+      "end": 17,
+      "fg": "#ff8c00"
+     }
+    ]
+   },
+   {
+    "text": "q? ΣΟΦΙΑ q? ψυχή {ok} [0-9]+ world",
+    "runs": [
+     {
+      "start": 0,
+      "end": 2,
+      "fg": "#8b0000",
+      "underline": true
+     },
+     {
+      "start": 3,
+      "end": 8,
+      "fg": "#8b0000"
+     },
+     {
+      "start": 12,
+      "end": 16,
+      "fg": "#0000ff",
+      "italic": true
+     },
+     {
+      "start": 17,
+      "end": 21,
+      "fg": "#ff8c00"
+     },
+     {
+      "start": 22,
+      "end": 28,
+      "bold": true
+     }
+    ]
+   },
+   {
+    "text": "Χάος over brown a&b ΔΕΛΤΑ [0-9]+ fox",
+    "runs": [
+     {
+      "start": 0,
+      "end": 4,
+      "fg": "#ff8c00"
+     },
+     {
+      "start": 10,
+      "end": 15,
+      "underline": true,
+      "bg": "#e0e0ff"
+     },
+     {
+      "start": 16,
+      "end": 19,
+      "fg": "#b8860b",
+      "bg": "#d0ffd0"
+     },
+     {
+      "start": 20,
+      "end": 25,
+      "bold": true
+     },
+     {
+      "start": 26,
+      "end": 32,
+      "fg": "#2e8b57"
+     }
+    ]
+   }
+  ],
+  "cursor": {
+   "row": 0,
+   "col": 31
+  }
+ }
+}

@@ -1,0 +1,251 @@
+{
+  "blob": "1c63d2f6f9dc452ba93ca9b6af933d93256ff180",
+  "compiled": {
+    "complete": true,
+    "exit": 0,
+    "garbled_lines": 0,
+    "load_error": "(error \"byte-compile-file failed\")",
+    "load_ok": false,
+    "results": {},
+    "timed_out": false
+  },
+  "file": "src/emacs-module-tests.el",
+  "gnu": {
+    "emacs": "<recording-path-redacted>/emacs-32.0.50",
+    "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+    "sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+    "version": "32.0.50"
+  },
+  "harness_sha256": "78c20850429a08af22faadf73b5d164c560230e83d7eb88ef60cb995670703ef",
+  "mini": {
+    "complete": false,
+    "exit": null,
+    "garbled_lines": 1,
+    "load_error": null,
+    "load_ok": null,
+    "results": {
+      "mod-test-add-nanosecond/invalid": {
+        "as_expected": null,
+        "detail": "nil",
+        "expected": ":passed",
+        "outcome": "passed",
+        "tags": null,
+        "vacuous_void_function": [
+          "mod-test-add-nanosecond",
+          "mod-test-add-nanosecond",
+          "mod-test-add-nanosecond",
+          "mod-test-add-nanosecond",
+          "mod-test-add-nanosecond",
+          "mod-test-add-nanosecond",
+          "mod-test-add-nanosecond"
+        ]
+      },
+      "mod-test-add-nanosecond/nil": {
+        "as_expected": null,
+        "detail": "(void-function mod-test-add-nanosecond)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "mod-test-add-nanosecond/valid": {
+        "as_expected": null,
+        "detail": "(void-function mod-test-add-nanosecond)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "mod-test-globref-free-test": {
+        "as_expected": null,
+        "detail": "(void-function mod-test-globref-free)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "mod-test-globref-make-test": {
+        "as_expected": null,
+        "detail": "(void-function mod-test-globref-make)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "mod-test-globref-reordered": {
+        "as_expected": null,
+        "detail": "(void-function mod-test-globref-reordered)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "mod-test-nanoseconds": {
+        "as_expected": null,
+        "detail": "((skip-unless (fboundp 'mod-test-nanoseconds)))",
+        "expected": ":passed",
+        "outcome": "skipped",
+        "tags": null
+      },
+      "mod-test-non-local-exit-funcall-debug-on-error": {
+        "as_expected": null,
+        "detail": "(void-function mod-test-non-local-exit-funcall)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "mod-test-non-local-exit-funcall-normal": {
+        "as_expected": null,
+        "detail": "(void-function mod-test-non-local-exit-funcall)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "mod-test-non-local-exit-funcall-signal": {
+        "as_expected": null,
+        "detail": "(void-function mod-test-non-local-exit-funcall)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "mod-test-non-local-exit-funcall-throw": {
+        "as_expected": null,
+        "detail": "(void-function mod-test-non-local-exit-funcall)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "mod-test-non-local-exit-signal-test": {
+        "as_expected": null,
+        "detail": "((should (equal handler-err '(error 56)) :value nil))",
+        "expected": ":passed",
+        "outcome": "failed",
+        "tags": null,
+        "vacuous_void_function": [
+          "mod-test-signal",
+          "mod-test-signal"
+        ]
+      },
+      "mod-test-non-local-exit-throw-test": {
+        "as_expected": null,
+        "detail": "(void-function mod-test-throw)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "mod-test-sleep-until": {
+        "as_expected": null,
+        "detail": "((skip-unless (fboundp 'mod-test-sleep-until)))",
+        "expected": ":passed",
+        "outcome": "skipped",
+        "tags": null
+      },
+      "mod-test-string-a-to-b-test": {
+        "as_expected": null,
+        "detail": "(void-function mod-test-string-a-to-b)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "mod-test-sum-docstring": {
+        "as_expected": null,
+        "detail": "(void-function mod-test-sum)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "mod-test-sum-test": {
+        "as_expected": null,
+        "detail": "(void-function mod-test-sum)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "mod-test-userptr-fun-test": {
+        "as_expected": null,
+        "detail": "(void-function mod-test-userptr-make)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "mod-test-vector-test": {
+        "as_expected": null,
+        "detail": "(void-function mod-test-vector-fill)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "module--func-arity": {
+        "as_expected": null,
+        "detail": "(void-function mod-test-return-t)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "module--help-function-arglist": {
+        "as_expected": null,
+        "detail": "((should (equal (help-function-arglist #'mod-test-return-t :preserve-names) '(arg1)) :value nil))",
+        "expected": ":passed",
+        "outcome": "failed",
+        "tags": null
+      },
+      "module--test-assertions--call-emacs-from-gc": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "module--test-assertions--globref-invalid-free": {
+        "as_expected": null,
+        "detail": "(wrong-type-argument stringp nil)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "module--test-assertions--load-non-live-object": {
+        "as_expected": null,
+        "detail": "(void-function mod-test-invalid-store)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "module--test-assertions--load-non-live-object-with-global-copy": {
+        "as_expected": null,
+        "detail": "(void-function mod-test-invalid-store-copy)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "module-function-object": {
+        "as_expected": null,
+        "detail": "((should (module-function-p func) :value nil))",
+        "expected": ":passed",
+        "outcome": "failed",
+        "tags": null
+      },
+      "module/describe-function-1": {
+        "as_expected": null,
+        "detail": "(void-function mod-test-sum)",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      },
+      "module/load-history": {
+        "as_expected": null,
+        "detail": "(file-missing \"Cannot open load file\" \"No such file or directory\" \"<recording-home>/.cache/gnu-emacs-pin/45b0f7699df36b3849edc3bdef37d4cb9e75b9ea/test/src/emacs-module-resources/mod-test\")",
+        "expected": ":passed",
+        "outcome": "errored",
+        "tags": null
+      }
+    },
+    "timed_out": true
+  },
+  "read_error": null,
+  "real": {
+    "complete": true,
+    "exit": 0,
+    "garbled_lines": 0,
+    "load_error": "(file-missing \"Cannot open load file\" \"No such file or directory\" \"<recording-home>/.cache/gnu-emacs-pin/45b0f7699df36b3849edc3bdef37d4cb9e75b9ea/test/src/emacs-module-resources/mod-test\")",
+    "load_ok": false,
+    "results": {},
+    "timed_out": false
+  },
+  "schema": 1,
+  "toplevel_deftests": 46
+}

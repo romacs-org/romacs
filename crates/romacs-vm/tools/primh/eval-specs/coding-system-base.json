@@ -1,0 +1,30 @@
+{
+  "name": "coding-system-base",
+  "arity": [
+    1,
+    1
+  ],
+  "effect": "global",
+  "gnu_files": [
+    "coding.c"
+  ],
+  "gnu_def": "coding.c:11614",
+  "rust": "src/prims/coding.rs:63",
+  "args": [
+    "no-generated-domain"
+  ],
+  "probes": [
+    "(coding-system-base nil)",
+    "(coding-system-base 'no-conversion)",
+    "(coding-system-base 'oracle-missing)",
+    "(coding-system-base 17)",
+    "(coding-system-base \"raw-text\")",
+    "(coding-system-base '(no-conversion))",
+    "(coding-system-base [])",
+    "(progn (define-coding-system-internal 'oracle-cod 67 'raw-text nil t nil nil nil nil nil nil '(:probe 7) nil) (list (coding-system-base 'oracle-cod) (coding-system-base 'oracle-cod-unix) (coding-system-base 'oracle-cod-dos) (coding-system-base 'oracle-cod-mac)))",
+    "(progn (setq oracle-count 0) (put 'oracle-lazy 'coding-system-define-form '(progn (setq oracle-count (1+ oracle-count)) (define-coding-system-internal 'oracle-lazy 67 'raw-text nil t nil nil nil nil nil nil '(:probe 7) nil))) (list (coding-system-base 'oracle-lazy) (coding-system-base 'oracle-lazy) oracle-count (get 'oracle-lazy 'coding-system-define-form)))",
+    "(progn (setq oracle-count 0) (put 'oracle-lazy 'coding-system-define-form '(progn (setq oracle-count (1+ oracle-count)) (error \"lazy-error\"))) (condition-case e (coding-system-base 'oracle-lazy) (error (list e oracle-count (get 'oracle-lazy 'coding-system-define-form)))))",
+    "(progn (setq oracle-count 0) (put 'oracle-lazy 'coding-system-define-form '(progn (setq oracle-count (1+ oracle-count)) nil)) (condition-case e (coding-system-base 'oracle-lazy) (error (list e oracle-count))))",
+    "(progn (define-coding-system-internal 'oracle-cod 67 'raw-text nil t nil nil nil nil nil nil '(:probe 7) nil) (define-coding-system-alias 'oracle-a 'oracle-cod-dos) (list (coding-system-base 'oracle-a) (coding-system-eol-type 'oracle-a)))"
+  ]
+}

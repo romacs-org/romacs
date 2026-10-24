@@ -1,0 +1,1399 @@
+{
+  "recording_generator_sha256": "e5ab2b27ac5c3251dafd5ce26c42d5bf79e5b6427d46090c07cabe6d113eaf28",
+  "portability_note": "Setup paths only changed; original GNU observations retained, not re-recorded.",
+  "pin": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "binary": "<recording-path-redacted>/emacs-32.0.50",
+  "sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+  "source_sha256": "46abc383f18b9ec834d18850a0cad9ebdc6ab5762462f26cde248a133278dc1d",
+  "environment": {
+    "TZ": "UTC0",
+    "LC_ALL": "C"
+  },
+  "regime": "GNU -Q interpreted, fresh process per row",
+  "rows": [
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/0",
+      "form": "(format-time-string \"%Y-%m-%d %H:%M:%S %Z %z\" '(0 0 123456 789012) t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%Y-%m-%d %H:%M:%S %Z %z\" '(0 0 123456 789012) t)) (error (list 'sig e))))",
+      "expected": "(ok \"1970-01-01 00:00:00 GMT +0000\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/1",
+      "form": "(format-time-string \"%a %A %b %B %h %p %c %x %X %r\" '(0 0 123456 789012) t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%a %A %b %B %h %p %c %x %X %r\" '(0 0 123456 789012) t)) (error (list 'sig e))))",
+      "expected": "(ok \"Thu Thursday Jan January Jan AM Thu Jan  1 00:00:00 1970 01/01/70 00:00:00 12:00:00 AM\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/2",
+      "form": "(format-time-string \"%j %u %w %U %W %V %G %g\" '(0 0 123456 789012) t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%j %u %w %U %W %V %G %g\" '(0 0 123456 789012) t)) (error (list 'sig e))))",
+      "expected": "(ok \"001 4 4 00 00 01 1970 70\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/3",
+      "form": "(format-time-string \"%D %F %R %T %q %s\" '(0 0 123456 789012) t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%D %F %R %T %q %s\" '(0 0 123456 789012) t)) (error (list 'sig e))))",
+      "expected": "(ok \"01/01/70 1970-01-01 00:00 00:00:00 1 0\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/4",
+      "form": "(format-time-string \"%N %3N %6N %12N\" '(0 0 123456 789012) t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%N %3N %6N %12N\" '(0 0 123456 789012) t)) (error (list 'sig e))))",
+      "expected": "(ok \"123456789 123 123456 123456789000\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/5",
+      "form": "(format-time-string \"%-d %_d %03d %^B %#p %EY %Od\" '(0 0 123456 789012) t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%-d %_d %03d %^B %#p %EY %Od\" '(0 0 123456 789012) t)) (error (list 'sig e))))",
+      "expected": "(ok \"1  1 001 JANUARY am 1970 01\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/6",
+      "form": "(format-time-string \"%% %Q trailing%\" '(0 0 123456 789012) t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%% %Q trailing%\" '(0 0 123456 789012) t)) (error (list 'sig e))))",
+      "expected": "(ok \"% %Q trailing%\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/7",
+      "form": "(format-time-string \"hello \\u03bb\\\\0%Y\" '(0 0 123456 789012) t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"hello \\u03bb\\\\0%Y\" '(0 0 123456 789012) t)) (error (list 'sig e))))",
+      "expected": "(ok \"hello \\316\\273\\\\01970\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/t0",
+      "form": "(format-time-string \"%F %T %Z %z %:z %::z %:::z\" 0 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%F %T %Z %z %:z %::z %:::z\" 0 t)) (error (list 'sig e))))",
+      "expected": "(ok \"1970-01-01 00:00:00 GMT +0000 +00:00 +00:00:00 +00\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/t1719792000",
+      "form": "(format-time-string \"%F %T %Z %z %:z %::z %:::z\" 1719792000 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%F %T %Z %z %:z %::z %:::z\" 1719792000 t)) (error (list 'sig e))))",
+      "expected": "(ok \"2024-07-01 00:00:00 GMT +0000 +00:00 +00:00:00 +00\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/t-1",
+      "form": "(format-time-string \"%F %T %Z %z %:z %::z %:::z\" -1 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%F %T %Z %z %:z %::z %:::z\" -1 t)) (error (list 'sig e))))",
+      "expected": "(ok \"1969-12-31 23:59:59 GMT +0000 +00:00 +00:00:00 +00\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/00",
+      "form": "(format-time-string \"%F %T %Z %z %:z %::z %:::z\" 0 0)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%F %T %Z %z %:z %::z %:::z\" 0 0)) (error (list 'sig e))))",
+      "expected": "(ok \"1970-01-01 00:00:00 GMT +0000 +00:00 +00:00:00 +00\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/01719792000",
+      "form": "(format-time-string \"%F %T %Z %z %:z %::z %:::z\" 1719792000 0)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%F %T %Z %z %:z %::z %:::z\" 1719792000 0)) (error (list 'sig e))))",
+      "expected": "(ok \"2024-07-01 00:00:00 GMT +0000 +00:00 +00:00:00 +00\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/0-1",
+      "form": "(format-time-string \"%F %T %Z %z %:z %::z %:::z\" -1 0)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%F %T %Z %z %:z %::z %:::z\" -1 0)) (error (list 'sig e))))",
+      "expected": "(ok \"1969-12-31 23:59:59 GMT +0000 +00:00 +00:00:00 +00\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/36000",
+      "form": "(format-time-string \"%F %T %Z %z %:z %::z %:::z\" 0 3600)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%F %T %Z %z %:z %::z %:::z\" 0 3600)) (error (list 'sig e))))",
+      "expected": "(ok \"1970-01-01 01:00:00 +01 +0100 +01:00 +01:00:00 +01\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/36001719792000",
+      "form": "(format-time-string \"%F %T %Z %z %:z %::z %:::z\" 1719792000 3600)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%F %T %Z %z %:z %::z %:::z\" 1719792000 3600)) (error (list 'sig e))))",
+      "expected": "(ok \"2024-07-01 01:00:00 +01 +0100 +01:00 +01:00:00 +01\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/3600-1",
+      "form": "(format-time-string \"%F %T %Z %z %:z %::z %:::z\" -1 3600)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%F %T %Z %z %:z %::z %:::z\" -1 3600)) (error (list 'sig e))))",
+      "expected": "(ok \"1970-01-01 00:59:59 +01 +0100 +01:00 +01:00:00 +01\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/-198000",
+      "form": "(format-time-string \"%F %T %Z %z %:z %::z %:::z\" 0 -19800)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%F %T %Z %z %:z %::z %:::z\" 0 -19800)) (error (list 'sig e))))",
+      "expected": "(ok \"1969-12-31 18:30:00 -0530 -0530 -05:30 -05:30:00 -05:30\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/-198001719792000",
+      "form": "(format-time-string \"%F %T %Z %z %:z %::z %:::z\" 1719792000 -19800)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%F %T %Z %z %:z %::z %:::z\" 1719792000 -19800)) (error (list 'sig e))))",
+      "expected": "(ok \"2024-06-30 18:30:00 -0530 -0530 -05:30 -05:30:00 -05:30\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/-19800-1",
+      "form": "(format-time-string \"%F %T %Z %z %:z %::z %:::z\" -1 -19800)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%F %T %Z %z %:z %::z %:::z\" -1 -19800)) (error (list 'sig e))))",
+      "expected": "(ok \"1969-12-31 18:29:59 -0530 -0530 -05:30 -05:30:00 -05:30\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/'(19800 \"IST\")0",
+      "form": "(format-time-string \"%F %T %Z %z %:z %::z %:::z\" 0 '(19800 \"IST\"))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%F %T %Z %z %:z %::z %:::z\" 0 '(19800 \"IST\"))) (error (list 'sig e))))",
+      "expected": "(ok \"1970-01-01 05:30:00 IST +0530 +05:30 +05:30:00 +05:30\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/'(19800 \"IST\")1719792000",
+      "form": "(format-time-string \"%F %T %Z %z %:z %::z %:::z\" 1719792000 '(19800 \"IST\"))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%F %T %Z %z %:z %::z %:::z\" 1719792000 '(19800 \"IST\"))) (error (list 'sig e))))",
+      "expected": "(ok \"2024-07-01 05:30:00 IST +0530 +05:30 +05:30:00 +05:30\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/'(19800 \"IST\")-1",
+      "form": "(format-time-string \"%F %T %Z %z %:z %::z %:::z\" -1 '(19800 \"IST\"))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%F %T %Z %z %:z %::z %:::z\" -1 '(19800 \"IST\"))) (error (list 'sig e))))",
+      "expected": "(ok \"1970-01-01 05:29:59 IST +0530 +05:30 +05:30:00 +05:30\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/\"UTC0\"0",
+      "form": "(format-time-string \"%F %T %Z %z %:z %::z %:::z\" 0 \"UTC0\")",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%F %T %Z %z %:z %::z %:::z\" 0 \"UTC0\")) (error (list 'sig e))))",
+      "expected": "(ok \"1970-01-01 00:00:00 UTC +0000 +00:00 +00:00:00 +00\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/\"UTC0\"1719792000",
+      "form": "(format-time-string \"%F %T %Z %z %:z %::z %:::z\" 1719792000 \"UTC0\")",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%F %T %Z %z %:z %::z %:::z\" 1719792000 \"UTC0\")) (error (list 'sig e))))",
+      "expected": "(ok \"2024-07-01 00:00:00 UTC +0000 +00:00 +00:00:00 +00\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/\"UTC0\"-1",
+      "form": "(format-time-string \"%F %T %Z %z %:z %::z %:::z\" -1 \"UTC0\")",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%F %T %Z %z %:z %::z %:::z\" -1 \"UTC0\")) (error (list 'sig e))))",
+      "expected": "(ok \"1969-12-31 23:59:59 UTC +0000 +00:00 +00:00:00 +00\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/\"EST5\"0",
+      "form": "(format-time-string \"%F %T %Z %z %:z %::z %:::z\" 0 \"EST5\")",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%F %T %Z %z %:z %::z %:::z\" 0 \"EST5\")) (error (list 'sig e))))",
+      "expected": "(ok \"1969-12-31 19:00:00 EST -0500 -05:00 -05:00:00 -05\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/\"EST5\"1719792000",
+      "form": "(format-time-string \"%F %T %Z %z %:z %::z %:::z\" 1719792000 \"EST5\")",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%F %T %Z %z %:z %::z %:::z\" 1719792000 \"EST5\")) (error (list 'sig e))))",
+      "expected": "(ok \"2024-06-30 19:00:00 EST -0500 -05:00 -05:00:00 -05\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/\"EST5\"-1",
+      "form": "(format-time-string \"%F %T %Z %z %:z %::z %:::z\" -1 \"EST5\")",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%F %T %Z %z %:z %::z %:::z\" -1 \"EST5\")) (error (list 'sig e))))",
+      "expected": "(ok \"1969-12-31 18:59:59 EST -0500 -05:00 -05:00:00 -05\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/\"America/New_York\"0",
+      "form": "(format-time-string \"%F %T %Z %z %:z %::z %:::z\" 0 \"America/New_York\")",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%F %T %Z %z %:z %::z %:::z\" 0 \"America/New_York\")) (error (list 'sig e))))",
+      "expected": "(ok \"1969-12-31 19:00:00 EST -0500 -05:00 -05:00:00 -05\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/\"America/New_York\"1719792000",
+      "form": "(format-time-string \"%F %T %Z %z %:z %::z %:::z\" 1719792000 \"America/New_York\")",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%F %T %Z %z %:z %::z %:::z\" 1719792000 \"America/New_York\")) (error (list 'sig e))))",
+      "expected": "(ok \"2024-06-30 20:00:00 EDT -0400 -04:00 -04:00:00 -04\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/\"America/New_York\"-1",
+      "form": "(format-time-string \"%F %T %Z %z %:z %::z %:::z\" -1 \"America/New_York\")",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%F %T %Z %z %:z %::z %:::z\" -1 \"America/New_York\")) (error (list 'sig e))))",
+      "expected": "(ok \"1969-12-31 18:59:59 EST -0500 -05:00 -05:00:00 -05\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/nil0",
+      "form": "(format-time-string \"%F %T %Z %z %:z %::z %:::z\" 0 nil)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%F %T %Z %z %:z %::z %:::z\" 0 nil)) (error (list 'sig e))))",
+      "expected": "(ok \"1970-01-01 00:00:00 UTC +0000 +00:00 +00:00:00 +00\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/nil1719792000",
+      "form": "(format-time-string \"%F %T %Z %z %:z %::z %:::z\" 1719792000 nil)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%F %T %Z %z %:z %::z %:::z\" 1719792000 nil)) (error (list 'sig e))))",
+      "expected": "(ok \"2024-07-01 00:00:00 UTC +0000 +00:00 +00:00:00 +00\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/nil-1",
+      "form": "(format-time-string \"%F %T %Z %z %:z %::z %:::z\" -1 nil)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%F %T %Z %z %:z %::z %:::z\" -1 nil)) (error (list 'sig e))))",
+      "expected": "(ok \"1969-12-31 23:59:59 UTC +0000 +00:00 +00:00:00 +00\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/'wall0",
+      "form": "(format-time-string \"%F %T %Z %z %:z %::z %:::z\" 0 'wall)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%F %T %Z %z %:z %::z %:::z\" 0 'wall)) (error (list 'sig e))))",
+      "expected": "(ok \"1970-01-01 02:00:00 EET +0200 +02:00 +02:00:00 +02\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/'wall1719792000",
+      "form": "(format-time-string \"%F %T %Z %z %:z %::z %:::z\" 1719792000 'wall)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%F %T %Z %z %:z %::z %:::z\" 1719792000 'wall)) (error (list 'sig e))))",
+      "expected": "(ok \"2024-07-01 03:00:00 EEST +0300 +03:00 +03:00:00 +03\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/'wall-1",
+      "form": "(format-time-string \"%F %T %Z %z %:z %::z %:::z\" -1 'wall)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%F %T %Z %z %:z %::z %:::z\" -1 'wall)) (error (list 'sig e))))",
+      "expected": "(ok \"1970-01-01 01:59:59 EET +0200 +02:00 +02:00:00 +02\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/invalid-'bad",
+      "form": "(format-time-string \"%Y\" 'bad t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%Y\" 'bad t)) (error (list 'sig e))))",
+      "expected": "(sig (error \"Invalid time specification\"))"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/invalid-'(0)",
+      "form": "(format-time-string \"%Y\" '(0) t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%Y\" '(0) t)) (error (list 'sig e))))",
+      "expected": "(sig (error \"Invalid time specification\"))"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/invalid-'(0 . 0)",
+      "form": "(format-time-string \"%Y\" '(0 . 0) t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%Y\" '(0 . 0) t)) (error (list 'sig e))))",
+      "expected": "(sig (error \"Invalid time specification\"))"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/invalid-'(0 0 bad)",
+      "form": "(format-time-string \"%Y\" '(0 0 bad) t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%Y\" '(0 0 bad) t)) (error (list 'sig e))))",
+      "expected": "(sig (error \"Invalid time specification\"))"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/callable",
+      "form": "(list (fboundp 'format-time-string) (functionp #'format-time-string))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (list (fboundp 'format-time-string) (functionp #'format-time-string))) (error (list 'sig e))))",
+      "expected": "(ok (t t))"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/arity-high",
+      "form": "(apply #'format-time-string '(nil nil nil nil))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (apply #'format-time-string '(nil nil nil nil))) (error (list 'sig e))))",
+      "expected": "(sig (wrong-number-of-arguments #<subr format-time-string> 4))"
+    },
+    {
+      "primitive": "current-time-string",
+      "id": "current-time-string/invalid-'bad",
+      "form": "(current-time-string 'bad t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (current-time-string 'bad t)) (error (list 'sig e))))",
+      "expected": "(sig (error \"Invalid time specification\"))"
+    },
+    {
+      "primitive": "current-time-string",
+      "id": "current-time-string/invalid-'(0)",
+      "form": "(current-time-string '(0) t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (current-time-string '(0) t)) (error (list 'sig e))))",
+      "expected": "(sig (error \"Invalid time specification\"))"
+    },
+    {
+      "primitive": "current-time-string",
+      "id": "current-time-string/invalid-'(0 . 0)",
+      "form": "(current-time-string '(0 . 0) t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (current-time-string '(0 . 0) t)) (error (list 'sig e))))",
+      "expected": "(sig (error \"Invalid time specification\"))"
+    },
+    {
+      "primitive": "current-time-string",
+      "id": "current-time-string/invalid-'(0 0 bad)",
+      "form": "(current-time-string '(0 0 bad) t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (current-time-string '(0 0 bad) t)) (error (list 'sig e))))",
+      "expected": "(ok \"Thu Jan  1 00:00:00 1970\")"
+    },
+    {
+      "primitive": "current-time-string",
+      "id": "current-time-string/callable",
+      "form": "(list (fboundp 'current-time-string) (functionp #'current-time-string))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (list (fboundp 'current-time-string) (functionp #'current-time-string))) (error (list 'sig e))))",
+      "expected": "(ok (t t))"
+    },
+    {
+      "primitive": "current-time-string",
+      "id": "current-time-string/arity-high",
+      "form": "(apply #'current-time-string '(nil nil nil nil))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (apply #'current-time-string '(nil nil nil nil))) (error (list 'sig e))))",
+      "expected": "(sig (wrong-number-of-arguments #<subr current-time-string> 4))"
+    },
+    {
+      "primitive": "current-time-zone",
+      "id": "current-time-zone/invalid-'bad",
+      "form": "(current-time-zone 'bad t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (current-time-zone 'bad t)) (error (list 'sig e))))",
+      "expected": "(sig (error \"Invalid time specification\"))"
+    },
+    {
+      "primitive": "current-time-zone",
+      "id": "current-time-zone/invalid-'(0)",
+      "form": "(current-time-zone '(0) t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (current-time-zone '(0) t)) (error (list 'sig e))))",
+      "expected": "(sig (error \"Invalid time specification\"))"
+    },
+    {
+      "primitive": "current-time-zone",
+      "id": "current-time-zone/invalid-'(0 . 0)",
+      "form": "(current-time-zone '(0 . 0) t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (current-time-zone '(0 . 0) t)) (error (list 'sig e))))",
+      "expected": "(sig (error \"Invalid time specification\"))"
+    },
+    {
+      "primitive": "current-time-zone",
+      "id": "current-time-zone/invalid-'(0 0 bad)",
+      "form": "(current-time-zone '(0 0 bad) t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (current-time-zone '(0 0 bad) t)) (error (list 'sig e))))",
+      "expected": "(ok (0 \"GMT\"))"
+    },
+    {
+      "primitive": "current-time-zone",
+      "id": "current-time-zone/callable",
+      "form": "(list (fboundp 'current-time-zone) (functionp #'current-time-zone))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (list (fboundp 'current-time-zone) (functionp #'current-time-zone))) (error (list 'sig e))))",
+      "expected": "(ok (t t))"
+    },
+    {
+      "primitive": "current-time-zone",
+      "id": "current-time-zone/arity-high",
+      "form": "(apply #'current-time-zone '(nil nil nil nil))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (apply #'current-time-zone '(nil nil nil nil))) (error (list 'sig e))))",
+      "expected": "(sig (wrong-number-of-arguments #<subr current-time-zone> 4))"
+    },
+    {
+      "primitive": "decode-time",
+      "id": "decode-time/invalid-'bad",
+      "form": "(decode-time 'bad t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (decode-time 'bad t)) (error (list 'sig e))))",
+      "expected": "(sig (error \"Invalid time specification\"))"
+    },
+    {
+      "primitive": "decode-time",
+      "id": "decode-time/invalid-'(0)",
+      "form": "(decode-time '(0) t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (decode-time '(0) t)) (error (list 'sig e))))",
+      "expected": "(sig (error \"Invalid time specification\"))"
+    },
+    {
+      "primitive": "decode-time",
+      "id": "decode-time/invalid-'(0 . 0)",
+      "form": "(decode-time '(0 . 0) t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (decode-time '(0 . 0) t)) (error (list 'sig e))))",
+      "expected": "(sig (error \"Invalid time specification\"))"
+    },
+    {
+      "primitive": "decode-time",
+      "id": "decode-time/invalid-'(0 0 bad)",
+      "form": "(decode-time '(0 0 bad) t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (decode-time '(0 0 bad) t)) (error (list 'sig e))))",
+      "expected": "(ok (0 0 0 1 1 1970 4 nil 0))"
+    },
+    {
+      "primitive": "decode-time",
+      "id": "decode-time/callable",
+      "form": "(list (fboundp 'decode-time) (functionp #'decode-time))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (list (fboundp 'decode-time) (functionp #'decode-time))) (error (list 'sig e))))",
+      "expected": "(ok (t t))"
+    },
+    {
+      "primitive": "decode-time",
+      "id": "decode-time/arity-high",
+      "form": "(apply #'decode-time '(nil nil nil nil))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (apply #'decode-time '(nil nil nil nil))) (error (list 'sig e))))",
+      "expected": "(sig (wrong-number-of-arguments #<subr decode-time> 4))"
+    },
+    {
+      "primitive": "float-time",
+      "id": "float-time/invalid-'bad",
+      "form": "(float-time 'bad)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (float-time 'bad)) (error (list 'sig e))))",
+      "expected": "(sig (error \"Invalid time specification\"))"
+    },
+    {
+      "primitive": "float-time",
+      "id": "float-time/invalid-'(0)",
+      "form": "(float-time '(0))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (float-time '(0))) (error (list 'sig e))))",
+      "expected": "(sig (error \"Invalid time specification\"))"
+    },
+    {
+      "primitive": "float-time",
+      "id": "float-time/invalid-'(0 . 0)",
+      "form": "(float-time '(0 . 0))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (float-time '(0 . 0))) (error (list 'sig e))))",
+      "expected": "(sig (error \"Invalid time specification\"))"
+    },
+    {
+      "primitive": "float-time",
+      "id": "float-time/invalid-'(0 0 bad)",
+      "form": "(float-time '(0 0 bad))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (float-time '(0 0 bad))) (error (list 'sig e))))",
+      "expected": "(sig (error \"Invalid time specification\"))"
+    },
+    {
+      "primitive": "float-time",
+      "id": "float-time/callable",
+      "form": "(list (fboundp 'float-time) (functionp #'float-time))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (list (fboundp 'float-time) (functionp #'float-time))) (error (list 'sig e))))",
+      "expected": "(ok (t t))"
+    },
+    {
+      "primitive": "float-time",
+      "id": "float-time/arity-high",
+      "form": "(apply #'float-time '(nil nil nil nil))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (apply #'float-time '(nil nil nil nil))) (error (list 'sig e))))",
+      "expected": "(sig (wrong-number-of-arguments #<subr float-time> 4))"
+    },
+    {
+      "primitive": "current-time-string",
+      "id": "current-time-string/0",
+      "form": "(current-time-string 0 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (current-time-string 0 t)) (error (list 'sig e))))",
+      "expected": "(ok \"Thu Jan  1 00:00:00 1970\")"
+    },
+    {
+      "primitive": "current-time-zone",
+      "id": "current-time-zone/0",
+      "form": "(current-time-zone 0 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (current-time-zone 0 t)) (error (list 'sig e))))",
+      "expected": "(ok (0 \"GMT\"))"
+    },
+    {
+      "primitive": "decode-time",
+      "id": "decode-time/0",
+      "form": "(decode-time 0 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (decode-time 0 t)) (error (list 'sig e))))",
+      "expected": "(ok (0 0 0 1 1 1970 4 nil 0))"
+    },
+    {
+      "primitive": "float-time",
+      "id": "float-time/0",
+      "form": "(float-time 0)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (float-time 0)) (error (list 'sig e))))",
+      "expected": "(ok 0.0)"
+    },
+    {
+      "primitive": "current-time-string",
+      "id": "current-time-string/-1",
+      "form": "(current-time-string -1 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (current-time-string -1 t)) (error (list 'sig e))))",
+      "expected": "(ok \"Wed Dec 31 23:59:59 1969\")"
+    },
+    {
+      "primitive": "current-time-zone",
+      "id": "current-time-zone/-1",
+      "form": "(current-time-zone -1 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (current-time-zone -1 t)) (error (list 'sig e))))",
+      "expected": "(ok (0 \"GMT\"))"
+    },
+    {
+      "primitive": "decode-time",
+      "id": "decode-time/-1",
+      "form": "(decode-time -1 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (decode-time -1 t)) (error (list 'sig e))))",
+      "expected": "(ok (59 59 23 31 12 1969 3 nil 0))"
+    },
+    {
+      "primitive": "float-time",
+      "id": "float-time/-1",
+      "form": "(float-time -1)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (float-time -1)) (error (list 'sig e))))",
+      "expected": "(ok -1.0)"
+    },
+    {
+      "primitive": "current-time-string",
+      "id": "current-time-string/1.25",
+      "form": "(current-time-string 1.25 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (current-time-string 1.25 t)) (error (list 'sig e))))",
+      "expected": "(ok \"Thu Jan  1 00:00:01 1970\")"
+    },
+    {
+      "primitive": "current-time-zone",
+      "id": "current-time-zone/1.25",
+      "form": "(current-time-zone 1.25 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (current-time-zone 1.25 t)) (error (list 'sig e))))",
+      "expected": "(ok (0 \"GMT\"))"
+    },
+    {
+      "primitive": "decode-time",
+      "id": "decode-time/1.25",
+      "form": "(decode-time 1.25 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (decode-time 1.25 t)) (error (list 'sig e))))",
+      "expected": "(ok (1 0 0 1 1 1970 4 nil 0))"
+    },
+    {
+      "primitive": "float-time",
+      "id": "float-time/1.25",
+      "form": "(float-time 1.25)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (float-time 1.25)) (error (list 'sig e))))",
+      "expected": "(ok 1.25)"
+    },
+    {
+      "primitive": "current-time-string",
+      "id": "current-time-string/'(1 2 3 4)",
+      "form": "(current-time-string '(1 2 3 4) t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (current-time-string '(1 2 3 4) t)) (error (list 'sig e))))",
+      "expected": "(ok \"Thu Jan  1 18:12:18 1970\")"
+    },
+    {
+      "primitive": "current-time-zone",
+      "id": "current-time-zone/'(1 2 3 4)",
+      "form": "(current-time-zone '(1 2 3 4) t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (current-time-zone '(1 2 3 4) t)) (error (list 'sig e))))",
+      "expected": "(ok (0 \"GMT\"))"
+    },
+    {
+      "primitive": "decode-time",
+      "id": "decode-time/'(1 2 3 4)",
+      "form": "(decode-time '(1 2 3 4) t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (decode-time '(1 2 3 4) t)) (error (list 'sig e))))",
+      "expected": "(ok (18 12 18 1 1 1970 4 nil 0))"
+    },
+    {
+      "primitive": "float-time",
+      "id": "float-time/'(1 2 3 4)",
+      "form": "(float-time '(1 2 3 4))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (float-time '(1 2 3 4))) (error (list 'sig e))))",
+      "expected": "(ok 65538.00000300001)"
+    },
+    {
+      "primitive": "current-time-string",
+      "id": "current-time-string/'(-1 . 2)",
+      "form": "(current-time-string '(-1 . 2) t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (current-time-string '(-1 . 2) t)) (error (list 'sig e))))",
+      "expected": "(ok \"Wed Dec 31 23:59:59 1969\")"
+    },
+    {
+      "primitive": "current-time-zone",
+      "id": "current-time-zone/'(-1 . 2)",
+      "form": "(current-time-zone '(-1 . 2) t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (current-time-zone '(-1 . 2) t)) (error (list 'sig e))))",
+      "expected": "(ok (0 \"GMT\"))"
+    },
+    {
+      "primitive": "decode-time",
+      "id": "decode-time/'(-1 . 2)",
+      "form": "(decode-time '(-1 . 2) t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (decode-time '(-1 . 2) t)) (error (list 'sig e))))",
+      "expected": "(ok (59 59 23 31 12 1969 3 nil 0))"
+    },
+    {
+      "primitive": "float-time",
+      "id": "float-time/'(-1 . 2)",
+      "form": "(float-time '(-1 . 2))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (float-time '(-1 . 2))) (error (list 'sig e))))",
+      "expected": "(ok -0.5)"
+    },
+    {
+      "primitive": "current-time-string",
+      "id": "current-time-string/'(0 0 bad)",
+      "form": "(current-time-string '(0 0 bad) t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (current-time-string '(0 0 bad) t)) (error (list 'sig e))))",
+      "expected": "(ok \"Thu Jan  1 00:00:00 1970\")"
+    },
+    {
+      "primitive": "current-time-zone",
+      "id": "current-time-zone/'(0 0 bad)",
+      "form": "(current-time-zone '(0 0 bad) t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (current-time-zone '(0 0 bad) t)) (error (list 'sig e))))",
+      "expected": "(ok (0 \"GMT\"))"
+    },
+    {
+      "primitive": "decode-time",
+      "id": "decode-time/'(0 0 bad)",
+      "form": "(decode-time '(0 0 bad) t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (decode-time '(0 0 bad) t)) (error (list 'sig e))))",
+      "expected": "(ok (0 0 0 1 1 1970 4 nil 0))"
+    },
+    {
+      "primitive": "float-time",
+      "id": "float-time/'(0 0 bad)",
+      "form": "(float-time '(0 0 bad))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (float-time '(0 0 bad))) (error (list 'sig e))))",
+      "expected": "(sig (error \"Invalid time specification\"))"
+    },
+    {
+      "primitive": "decode-time",
+      "id": "decode-time/precision",
+      "form": "(decode-time '(5 . 2) t t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (decode-time '(5 . 2) t t)) (error (list 'sig e))))",
+      "expected": "(ok ((5 . 2) 0 0 1 1 1970 4 nil 0))"
+    },
+    {
+      "primitive": "decode-time",
+      "id": "decode-time/negative-precision",
+      "form": "(decode-time '(-1 . 3) t t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (decode-time '(-1 . 3) t t)) (error (list 'sig e))))",
+      "expected": "(ok ((179 . 3) 59 23 31 12 1969 3 nil 0))"
+    },
+    {
+      "primitive": "current-time-string",
+      "id": "current-time-string/named-zone",
+      "form": "(current-time-string 1719792000 \"America/New_York\")",
+      "source": "(prin1-to-string (condition-case e (list 'ok (current-time-string 1719792000 \"America/New_York\")) (error (list 'sig e))))",
+      "expected": "(ok \"Sun Jun 30 20:00:00 2024\")"
+    },
+    {
+      "primitive": "current-time-zone",
+      "id": "current-time-zone/named-zone",
+      "form": "(current-time-zone 1719792000 \"America/New_York\")",
+      "source": "(prin1-to-string (condition-case e (list 'ok (current-time-zone 1719792000 \"America/New_York\")) (error (list 'sig e))))",
+      "expected": "(ok (-14400 \"EDT\"))"
+    },
+    {
+      "primitive": "decode-time",
+      "id": "decode-time/named-zone",
+      "form": "(decode-time 1719792000 \"America/New_York\")",
+      "source": "(prin1-to-string (condition-case e (list 'ok (decode-time 1719792000 \"America/New_York\")) (error (list 'sig e))))",
+      "expected": "(ok (0 0 20 30 6 2024 0 t -14400))"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/funcall",
+      "form": "(funcall #'format-time-string \"%Y %Z\" 0 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (funcall #'format-time-string \"%Y %Z\" 0 t)) (error (list 'sig e))))",
+      "expected": "(ok \"1970 GMT\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/apply",
+      "form": "(apply #'format-time-string (list \"%Y %Z\" 0 t))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (apply #'format-time-string (list \"%Y %Z\" 0 t))) (error (list 'sig e))))",
+      "expected": "(ok \"1970 GMT\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/live-shape",
+      "form": "(stringp (format-time-string \"%Y\"))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (stringp (format-time-string \"%Y\"))) (error (list 'sig e))))",
+      "expected": "(ok t)"
+    },
+    {
+      "primitive": "current-time-string",
+      "id": "current-time-string/funcall",
+      "form": "(funcall #'current-time-string 0 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (funcall #'current-time-string 0 t)) (error (list 'sig e))))",
+      "expected": "(ok \"Thu Jan  1 00:00:00 1970\")"
+    },
+    {
+      "primitive": "current-time-string",
+      "id": "current-time-string/apply",
+      "form": "(apply #'current-time-string (list 0 t))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (apply #'current-time-string (list 0 t))) (error (list 'sig e))))",
+      "expected": "(ok \"Thu Jan  1 00:00:00 1970\")"
+    },
+    {
+      "primitive": "current-time-string",
+      "id": "current-time-string/live-shape",
+      "form": "(stringp (current-time-string))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (stringp (current-time-string))) (error (list 'sig e))))",
+      "expected": "(ok t)"
+    },
+    {
+      "primitive": "current-time-zone",
+      "id": "current-time-zone/funcall",
+      "form": "(funcall #'current-time-zone 0 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (funcall #'current-time-zone 0 t)) (error (list 'sig e))))",
+      "expected": "(ok (0 \"GMT\"))"
+    },
+    {
+      "primitive": "current-time-zone",
+      "id": "current-time-zone/apply",
+      "form": "(apply #'current-time-zone (list 0 t))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (apply #'current-time-zone (list 0 t))) (error (list 'sig e))))",
+      "expected": "(ok (0 \"GMT\"))"
+    },
+    {
+      "primitive": "current-time-zone",
+      "id": "current-time-zone/live-shape",
+      "form": "(= (length (current-time-zone)) 2)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (= (length (current-time-zone)) 2)) (error (list 'sig e))))",
+      "expected": "(ok t)"
+    },
+    {
+      "primitive": "decode-time",
+      "id": "decode-time/funcall",
+      "form": "(funcall #'decode-time 0 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (funcall #'decode-time 0 t)) (error (list 'sig e))))",
+      "expected": "(ok (0 0 0 1 1 1970 4 nil 0))"
+    },
+    {
+      "primitive": "decode-time",
+      "id": "decode-time/apply",
+      "form": "(apply #'decode-time (list 0 t))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (apply #'decode-time (list 0 t))) (error (list 'sig e))))",
+      "expected": "(ok (0 0 0 1 1 1970 4 nil 0))"
+    },
+    {
+      "primitive": "decode-time",
+      "id": "decode-time/live-shape",
+      "form": "(= (length (decode-time)) 9)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (= (length (decode-time)) 9)) (error (list 'sig e))))",
+      "expected": "(ok t)"
+    },
+    {
+      "primitive": "float-time",
+      "id": "float-time/funcall",
+      "form": "(funcall #'float-time 0)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (funcall #'float-time 0)) (error (list 'sig e))))",
+      "expected": "(ok 0.0)"
+    },
+    {
+      "primitive": "float-time",
+      "id": "float-time/apply",
+      "form": "(apply #'float-time (list 0))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (apply #'float-time (list 0))) (error (list 'sig e))))",
+      "expected": "(ok 0.0)"
+    },
+    {
+      "primitive": "float-time",
+      "id": "float-time/live-shape",
+      "form": "(floatp (float-time))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (floatp (float-time))) (error (list 'sig e))))",
+      "expected": "(ok t)"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/arity-low",
+      "form": "(apply #'format-time-string nil)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (apply #'format-time-string nil)) (error (list 'sig e))))",
+      "expected": "(sig (wrong-number-of-arguments #<subr format-time-string> 0))"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/wrong-format",
+      "form": "(format-time-string 3 0 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string 3 0 t)) (error (list 'sig e))))",
+      "expected": "(sig (wrong-type-argument stringp 3))"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/bad-time-before-format",
+      "form": "(format-time-string 3 'bad t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string 3 'bad t)) (error (list 'sig e))))",
+      "expected": "(sig (error \"Invalid time specification\"))"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/embedded-nul",
+      "form": "(format-time-string (concat \"%Y\" (string 0) \"%m\") 0 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string (concat \"%Y\" (string 0) \"%m\") 0 t)) (error (list 'sig e))))",
+      "expected": "(ok \"1970\u000001\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/calendar--62167219200",
+      "form": "(format-time-string \"%F %j %U %W %V %G %g\" -62167219200 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%F %j %U %W %V %G %g\" -62167219200 t)) (error (list 'sig e))))",
+      "expected": "(ok \"0000-01-01 001 00 00 52 -001 01\")"
+    },
+    {
+      "primitive": "current-time-string",
+      "id": "current-time-string/calendar--62167219200",
+      "form": "(current-time-string -62167219200 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (current-time-string -62167219200 t)) (error (list 'sig e))))",
+      "expected": "(ok \"Sat Jan  1 00:00:00 0\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/calendar--62135596800",
+      "form": "(format-time-string \"%F %j %U %W %V %G %g\" -62135596800 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%F %j %U %W %V %G %g\" -62135596800 t)) (error (list 'sig e))))",
+      "expected": "(ok \"0001-01-01 001 00 01 01 0001 01\")"
+    },
+    {
+      "primitive": "current-time-string",
+      "id": "current-time-string/calendar--62135596800",
+      "form": "(current-time-string -62135596800 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (current-time-string -62135596800 t)) (error (list 'sig e))))",
+      "expected": "(ok \"Mon Jan  1 00:00:00 1\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/calendar-951782400",
+      "form": "(format-time-string \"%F %j %U %W %V %G %g\" 951782400 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%F %j %U %W %V %G %g\" 951782400 t)) (error (list 'sig e))))",
+      "expected": "(ok \"2000-02-29 060 09 09 09 2000 00\")"
+    },
+    {
+      "primitive": "current-time-string",
+      "id": "current-time-string/calendar-951782400",
+      "form": "(current-time-string 951782400 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (current-time-string 951782400 t)) (error (list 'sig e))))",
+      "expected": "(ok \"Tue Feb 29 00:00:00 2000\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/calendar-1451606400",
+      "form": "(format-time-string \"%F %j %U %W %V %G %g\" 1451606400 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%F %j %U %W %V %G %g\" 1451606400 t)) (error (list 'sig e))))",
+      "expected": "(ok \"2016-01-01 001 00 00 53 2015 15\")"
+    },
+    {
+      "primitive": "current-time-string",
+      "id": "current-time-string/calendar-1451606400",
+      "form": "(current-time-string 1451606400 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (current-time-string 1451606400 t)) (error (list 'sig e))))",
+      "expected": "(ok \"Fri Jan  1 00:00:00 2016\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/calendar-1483228800",
+      "form": "(format-time-string \"%F %j %U %W %V %G %g\" 1483228800 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%F %j %U %W %V %G %g\" 1483228800 t)) (error (list 'sig e))))",
+      "expected": "(ok \"2017-01-01 001 01 00 52 2016 16\")"
+    },
+    {
+      "primitive": "current-time-string",
+      "id": "current-time-string/calendar-1483228800",
+      "form": "(current-time-string 1483228800 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (current-time-string 1483228800 t)) (error (list 'sig e))))",
+      "expected": "(ok \"Sun Jan  1 00:00:00 2017\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/calendar-1609459200",
+      "form": "(format-time-string \"%F %j %U %W %V %G %g\" 1609459200 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%F %j %U %W %V %G %g\" 1609459200 t)) (error (list 'sig e))))",
+      "expected": "(ok \"2021-01-01 001 00 00 53 2020 20\")"
+    },
+    {
+      "primitive": "current-time-string",
+      "id": "current-time-string/calendar-1609459200",
+      "form": "(current-time-string 1609459200 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (current-time-string 1609459200 t)) (error (list 'sig e))))",
+      "expected": "(ok \"Fri Jan  1 00:00:00 2021\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/calendar-253402300800",
+      "form": "(format-time-string \"%F %j %U %W %V %G %g\" 253402300800 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%F %j %U %W %V %G %g\" 253402300800 t)) (error (list 'sig e))))",
+      "expected": "(ok \"+10000-01-01 001 00 00 52 9999 99\")"
+    },
+    {
+      "primitive": "current-time-string",
+      "id": "current-time-string/calendar-253402300800",
+      "form": "(current-time-string 253402300800 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (current-time-string 253402300800 t)) (error (list 'sig e))))",
+      "expected": "(ok \"Sat Jan  1 00:00:00 10000\")"
+    },
+    {
+      "primitive": "decode-time",
+      "id": "decode-time/dst-1710053999",
+      "form": "(decode-time 1710053999 \"America/New_York\")",
+      "source": "(prin1-to-string (condition-case e (list 'ok (decode-time 1710053999 \"America/New_York\")) (error (list 'sig e))))",
+      "expected": "(ok (59 59 1 10 3 2024 0 nil -18000))"
+    },
+    {
+      "primitive": "decode-time",
+      "id": "decode-time/dst-1710054000",
+      "form": "(decode-time 1710054000 \"America/New_York\")",
+      "source": "(prin1-to-string (condition-case e (list 'ok (decode-time 1710054000 \"America/New_York\")) (error (list 'sig e))))",
+      "expected": "(ok (0 0 3 10 3 2024 0 t -14400))"
+    },
+    {
+      "primitive": "decode-time",
+      "id": "decode-time/dst-1730613599",
+      "form": "(decode-time 1730613599 \"America/New_York\")",
+      "source": "(prin1-to-string (condition-case e (list 'ok (decode-time 1730613599 \"America/New_York\")) (error (list 'sig e))))",
+      "expected": "(ok (59 59 1 3 11 2024 0 t -14400))"
+    },
+    {
+      "primitive": "decode-time",
+      "id": "decode-time/dst-1730613600",
+      "form": "(decode-time 1730613600 \"America/New_York\")",
+      "source": "(prin1-to-string (condition-case e (list 'ok (decode-time 1730613600 \"America/New_York\")) (error (list 'sig e))))",
+      "expected": "(ok (0 0 1 3 11 2024 0 nil -18000))"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/zone-'bad",
+      "form": "(format-time-string \"%Z\" 0 'bad)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%Z\" 0 'bad)) (error (list 'sig e))))",
+      "expected": "(sig (error \"Invalid time zone specification\" bad))"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/zone-'(0)",
+      "form": "(format-time-string \"%Z\" 0 '(0))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%Z\" 0 '(0))) (error (list 'sig e))))",
+      "expected": "(sig (error \"Invalid time zone specification\" (0)))"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/zone-'(0 bad)",
+      "form": "(format-time-string \"%Z\" 0 '(0 bad))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%Z\" 0 '(0 bad))) (error (list 'sig e))))",
+      "expected": "(sig (wrong-type-argument sequencep bad))"
+    },
+    {
+      "primitive": "float-time",
+      "id": "float-time/negative-picoseconds",
+      "form": "(float-time '(-2 65534 -3 -4))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (float-time '(-2 65534 -3 -4))) (error (list 'sig e))))",
+      "expected": "(ok -65538.00000300001)"
+    },
+    {
+      "primitive": "float-time",
+      "id": "float-time/positive-halfway-even",
+      "form": "(float-time '(9007199254740993 . 9007199254740992))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (float-time '(9007199254740993 . 9007199254740992))) (error (list 'sig e))))",
+      "expected": "(ok 1.0)"
+    },
+    {
+      "primitive": "float-time",
+      "id": "float-time/positive-halfway-odd",
+      "form": "(float-time '(9007199254740995 . 9007199254740992))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (float-time '(9007199254740995 . 9007199254740992))) (error (list 'sig e))))",
+      "expected": "(ok 1.0000000000000004)"
+    },
+    {
+      "primitive": "float-time",
+      "id": "float-time/negative-halfway-even",
+      "form": "(float-time '(-9007199254740993 . 9007199254740992))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (float-time '(-9007199254740993 . 9007199254740992))) (error (list 'sig e))))",
+      "expected": "(ok -1.0)"
+    },
+    {
+      "primitive": "float-time",
+      "id": "float-time/negative-halfway-odd",
+      "form": "(float-time '(-9007199254740995 . 9007199254740992))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (float-time '(-9007199254740995 . 9007199254740992))) (error (list 'sig e))))",
+      "expected": "(ok -1.0000000000000004)"
+    },
+    {
+      "primitive": "float-time",
+      "id": "float-time/small-picoseconds",
+      "form": "(float-time '(0 0 0 1))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (float-time '(0 0 0 1))) (error (list 'sig e))))",
+      "expected": "(ok 1e-12)"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/unicode-result-bytes",
+      "form": "(let ((s (format-time-string \"\u03bb%Y\" 0 t))) (list (aref s 0) (aref s 1) (aref s 2) (aref s 3) (aref s 4) (aref s 5)))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (let ((s (format-time-string \"\u03bb%Y\" 0 t))) (list (aref s 0) (aref s 1) (aref s 2) (aref s 3) (aref s 4) (aref s 5)))) (error (list 'sig e))))",
+      "expected": "(ok (206 187 49 57 55 48))"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/unicode-result-unibyte",
+      "form": "(multibyte-string-p (format-time-string \"\u03bb%Y\" 0 t))",
+      "source": "(prin1-to-string (condition-case e (list 'ok (multibyte-string-p (format-time-string \"\u03bb%Y\" 0 t))) (error (list 'sig e))))",
+      "expected": "(ok nil)"
+    },
+    {
+      "primitive": "decode-time",
+      "id": "decode-time/float-precision-0.0",
+      "form": "(decode-time 0.0 t t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (decode-time 0.0 t t)) (error (list 'sig e))))",
+      "expected": "(ok (0 0 0 1 1 1970 4 nil 0))"
+    },
+    {
+      "primitive": "decode-time",
+      "id": "decode-time/float-precision--0.0",
+      "form": "(decode-time -0.0 t t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (decode-time -0.0 t t)) (error (list 'sig e))))",
+      "expected": "(ok (0 0 0 1 1 1970 4 nil 0))"
+    },
+    {
+      "primitive": "decode-time",
+      "id": "decode-time/float-precision-1.0",
+      "form": "(decode-time 1.0 t t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (decode-time 1.0 t t)) (error (list 'sig e))))",
+      "expected": "(ok ((4503599627370496 . 4503599627370496) 0 0 1 1 1970 4 nil 0))"
+    },
+    {
+      "primitive": "decode-time",
+      "id": "decode-time/float-precision-3.5",
+      "form": "(decode-time 3.5 t t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (decode-time 3.5 t t)) (error (list 'sig e))))",
+      "expected": "(ok ((7881299347898368 . 2251799813685248) 0 0 1 1 1970 4 nil 0))"
+    },
+    {
+      "primitive": "decode-time",
+      "id": "decode-time/float-precision-0.000000000001",
+      "form": "(decode-time 0.000000000001 t t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (decode-time 0.000000000001 t t)) (error (list 'sig e))))",
+      "expected": "(ok ((4951760157141521 . 4951760157141521099596496896) 0 0 1 1 1970 4 nil 0))"
+    },
+    {
+      "primitive": "decode-time",
+      "id": "decode-time/float-precision--0.000000000001",
+      "form": "(decode-time -0.000000000001 t t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (decode-time -0.000000000001 t t)) (error (list 'sig e))))",
+      "expected": "(ok ((297105609428486314215632672239 . 4951760157141521099596496896) 59 23 31 12 1969 3 nil 0))"
+    },
+    {
+      "primitive": "decode-time",
+      "id": "decode-time/float-precision-5e-324",
+      "form": "(decode-time 5e-324 t t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (decode-time 5e-324 t t)) (error (list 'sig e))))",
+      "expected": "(ok ((1 . 202402253307310618352495346718917307049556649764142118356901358027430339567995346891960383701437124495187077864316811911389808737385793476867013399940738509921517424276566361364466907742093216341239767678472745068562007483424692698618103355649159556340810056512358769552333414615230502532186327508646006263307707741093494784) 0 0 1 1 1970 4 nil 0))"
+    },
+    {
+      "primitive": "decode-time",
+      "id": "decode-time/float-precision--5e-324",
+      "form": "(decode-time -5e-324 t t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (decode-time -5e-324 t t)) (error (list 'sig e))))",
+      "expected": "(ok ((12144135198438637101149720803135038422973398985848527101414081481645820374079720813517623022086227469711224671859008714683388524243147608612020803996444310595291045456593981681868014464525592980474386060708364704113720449005481561917086201338949573380448603390741526173140004876913830151931179650518760375798462464465609687039 . 202402253307310618352495346718917307049556649764142118356901358027430339567995346891960383701437124495187077864316811911389808737385793476867013399940738509921517424276566361364466907742093216341239767678472745068562007483424692698618103355649159556340810056512358769552333414615230502532186327508646006263307707741093494784) 59 23 31 12 1969 3 nil 0))"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/year-flags-0-%_5V|%+6Y",
+      "form": "(format-time-string \"%_5V|%+6Y\" 0 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%_5V|%+6Y\" 0 t)) (error (list 'sig e))))",
+      "expected": "(ok \"    1|+01970\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/year-flags-0-%Y|%y|%C|%G|%g",
+      "form": "(format-time-string \"%Y|%y|%C|%G|%g\" 0 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%Y|%y|%C|%G|%g\" 0 t)) (error (list 'sig e))))",
+      "expected": "(ok \"1970|70|19|1970|70\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/year-flags-0-%_6Y|%06Y|%-Y|%+Y|%+6G|%_5g|%+4C",
+      "form": "(format-time-string \"%_6Y|%06Y|%-Y|%+Y|%+6G|%_5g|%+4C\" 0 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%_6Y|%06Y|%-Y|%+Y|%+6G|%_5g|%+4C\" 0 t)) (error (list 'sig e))))",
+      "expected": "(ok \"  1970|001970|1970|1970|+01970|   70|+019\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/year-flags--62198755200-%_5V|%+6Y",
+      "form": "(format-time-string \"%_5V|%+6Y\" -62198755200 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%_5V|%+6Y\" -62198755200 t)) (error (list 'sig e))))",
+      "expected": "(ok \"   53|-00001\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/year-flags--62198755200-%Y|%y|%C|%G|%g",
+      "form": "(format-time-string \"%Y|%y|%C|%G|%g\" -62198755200 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%Y|%y|%C|%G|%g\" -62198755200 t)) (error (list 'sig e))))",
+      "expected": "(ok \"-001|01|-0|-002|02\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/year-flags--62198755200-%_6Y|%06Y|%-Y|%+Y|%+6G|%_5g|%+4C",
+      "form": "(format-time-string \"%_6Y|%06Y|%-Y|%+Y|%+6G|%_5g|%+4C\" -62198755200 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%_6Y|%06Y|%-Y|%+Y|%+6G|%_5g|%+4C\" -62198755200 t)) (error (list 'sig e))))",
+      "expected": "(ok \"    -1|-00001|-1|-001|-00002|    2|-000\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/year-flags--65322892800-%_5V|%+6Y",
+      "form": "(format-time-string \"%_5V|%+6Y\" -65322892800 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%_5V|%+6Y\" -65322892800 t)) (error (list 'sig e))))",
+      "expected": "(ok \"    1|-00100\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/year-flags--65322892800-%Y|%y|%C|%G|%g",
+      "form": "(format-time-string \"%Y|%y|%C|%G|%g\" -65322892800 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%Y|%y|%C|%G|%g\" -65322892800 t)) (error (list 'sig e))))",
+      "expected": "(ok \"-100|00|-1|-100|00\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/year-flags--65322892800-%_6Y|%06Y|%-Y|%+Y|%+6G|%_5g|%+4C",
+      "form": "(format-time-string \"%_6Y|%06Y|%-Y|%+Y|%+6G|%_5g|%+4C\" -65322892800 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%_6Y|%06Y|%-Y|%+Y|%+6G|%_5g|%+4C\" -65322892800 t)) (error (list 'sig e))))",
+      "expected": "(ok \"  -100|-00100|-100|-100|-00100|    0|-001\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/year-flags-253402300800-%_5V|%+6Y",
+      "form": "(format-time-string \"%_5V|%+6Y\" 253402300800 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%_5V|%+6Y\" 253402300800 t)) (error (list 'sig e))))",
+      "expected": "(ok \"   52|+10000\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/year-flags-253402300800-%Y|%y|%C|%G|%g",
+      "form": "(format-time-string \"%Y|%y|%C|%G|%g\" 253402300800 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%Y|%y|%C|%G|%g\" 253402300800 t)) (error (list 'sig e))))",
+      "expected": "(ok \"10000|00|100|9999|99\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/year-flags-253402300800-%_6Y|%06Y|%-Y|%+Y|%+6G|%_5g|%+4C",
+      "form": "(format-time-string \"%_6Y|%06Y|%-Y|%+Y|%+6G|%_5g|%+4C\" 253402300800 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%_6Y|%06Y|%-Y|%+Y|%+6G|%_5g|%+4C\" 253402300800 t)) (error (list 'sig e))))",
+      "expected": "(ok \" 10000|010000|10000|+10000|+09999|   99|+100\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/tiny-float--5e-324",
+      "form": "(format-time-string \"%F %T.%N\" -5e-324 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%F %T.%N\" -5e-324 t)) (error (list 'sig e))))",
+      "expected": "(ok \"1969-12-31 23:59:59.999999999\")"
+    },
+    {
+      "primitive": "decode-time",
+      "id": "decode-time/tiny-float--5e-324",
+      "form": "(decode-time -5e-324 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (decode-time -5e-324 t)) (error (list 'sig e))))",
+      "expected": "(ok (59 59 23 31 12 1969 3 nil 0))"
+    },
+    {
+      "primitive": "current-time-string",
+      "id": "current-time-string/tiny-float--5e-324",
+      "form": "(current-time-string -5e-324 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (current-time-string -5e-324 t)) (error (list 'sig e))))",
+      "expected": "(ok \"Wed Dec 31 23:59:59 1969\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/tiny-float--1e-20",
+      "form": "(format-time-string \"%F %T.%N\" -1e-20 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%F %T.%N\" -1e-20 t)) (error (list 'sig e))))",
+      "expected": "(ok \"1969-12-31 23:59:59.999999999\")"
+    },
+    {
+      "primitive": "decode-time",
+      "id": "decode-time/tiny-float--1e-20",
+      "form": "(decode-time -1e-20 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (decode-time -1e-20 t)) (error (list 'sig e))))",
+      "expected": "(ok (59 59 23 31 12 1969 3 nil 0))"
+    },
+    {
+      "primitive": "current-time-string",
+      "id": "current-time-string/tiny-float--1e-20",
+      "form": "(current-time-string -1e-20 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (current-time-string -1e-20 t)) (error (list 'sig e))))",
+      "expected": "(ok \"Wed Dec 31 23:59:59 1969\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/tiny-float-5e-324",
+      "form": "(format-time-string \"%F %T.%N\" 5e-324 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%F %T.%N\" 5e-324 t)) (error (list 'sig e))))",
+      "expected": "(ok \"1970-01-01 00:00:00.000000000\")"
+    },
+    {
+      "primitive": "decode-time",
+      "id": "decode-time/tiny-float-5e-324",
+      "form": "(decode-time 5e-324 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (decode-time 5e-324 t)) (error (list 'sig e))))",
+      "expected": "(ok (0 0 0 1 1 1970 4 nil 0))"
+    },
+    {
+      "primitive": "current-time-string",
+      "id": "current-time-string/tiny-float-5e-324",
+      "form": "(current-time-string 5e-324 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (current-time-string 5e-324 t)) (error (list 'sig e))))",
+      "expected": "(ok \"Thu Jan  1 00:00:00 1970\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/tiny-float-1e-20",
+      "form": "(format-time-string \"%F %T.%N\" 1e-20 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%F %T.%N\" 1e-20 t)) (error (list 'sig e))))",
+      "expected": "(ok \"1970-01-01 00:00:00.000000000\")"
+    },
+    {
+      "primitive": "decode-time",
+      "id": "decode-time/tiny-float-1e-20",
+      "form": "(decode-time 1e-20 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (decode-time 1e-20 t)) (error (list 'sig e))))",
+      "expected": "(ok (0 0 0 1 1 1970 4 nil 0))"
+    },
+    {
+      "primitive": "current-time-string",
+      "id": "current-time-string/tiny-float-1e-20",
+      "form": "(current-time-string 1e-20 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (current-time-string 1e-20 t)) (error (list 'sig e))))",
+      "expected": "(ok \"Thu Jan  1 00:00:00 1970\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/short-year-sign-0-1",
+      "form": "(format-time-string \"%+1y|%+1g\" 0 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%+1y|%+1g\" 0 t)) (error (list 'sig e))))",
+      "expected": "(ok \"70|70\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/short-year-sign-0-2",
+      "form": "(format-time-string \"%+2y|%+2g\" 0 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%+2y|%+2g\" 0 t)) (error (list 'sig e))))",
+      "expected": "(ok \"70|70\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/short-year-sign-0-3",
+      "form": "(format-time-string \"%+3y|%+3g\" 0 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%+3y|%+3g\" 0 t)) (error (list 'sig e))))",
+      "expected": "(ok \"+70|+70\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/short-year-sign-0-4",
+      "form": "(format-time-string \"%+4y|%+4g\" 0 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%+4y|%+4g\" 0 t)) (error (list 'sig e))))",
+      "expected": "(ok \"+070|+070\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/short-year-sign-0-6",
+      "form": "(format-time-string \"%+6y|%+6g\" 0 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%+6y|%+6g\" 0 t)) (error (list 'sig e))))",
+      "expected": "(ok \"+00070|+00070\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/short-year-sign--62198755200-1",
+      "form": "(format-time-string \"%+1y|%+1g\" -62198755200 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%+1y|%+1g\" -62198755200 t)) (error (list 'sig e))))",
+      "expected": "(ok \"1|2\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/short-year-sign--62198755200-2",
+      "form": "(format-time-string \"%+2y|%+2g\" -62198755200 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%+2y|%+2g\" -62198755200 t)) (error (list 'sig e))))",
+      "expected": "(ok \"01|02\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/short-year-sign--62198755200-3",
+      "form": "(format-time-string \"%+3y|%+3g\" -62198755200 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%+3y|%+3g\" -62198755200 t)) (error (list 'sig e))))",
+      "expected": "(ok \"+01|+02\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/short-year-sign--62198755200-4",
+      "form": "(format-time-string \"%+4y|%+4g\" -62198755200 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%+4y|%+4g\" -62198755200 t)) (error (list 'sig e))))",
+      "expected": "(ok \"+001|+002\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/short-year-sign--62198755200-6",
+      "form": "(format-time-string \"%+6y|%+6g\" -62198755200 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%+6y|%+6g\" -62198755200 t)) (error (list 'sig e))))",
+      "expected": "(ok \"+00001|+00002\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/short-year-sign--65322892800-1",
+      "form": "(format-time-string \"%+1y|%+1g\" -65322892800 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%+1y|%+1g\" -65322892800 t)) (error (list 'sig e))))",
+      "expected": "(ok \"0|0\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/short-year-sign--65322892800-2",
+      "form": "(format-time-string \"%+2y|%+2g\" -65322892800 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%+2y|%+2g\" -65322892800 t)) (error (list 'sig e))))",
+      "expected": "(ok \"00|00\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/short-year-sign--65322892800-3",
+      "form": "(format-time-string \"%+3y|%+3g\" -65322892800 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%+3y|%+3g\" -65322892800 t)) (error (list 'sig e))))",
+      "expected": "(ok \"+00|+00\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/short-year-sign--65322892800-4",
+      "form": "(format-time-string \"%+4y|%+4g\" -65322892800 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%+4y|%+4g\" -65322892800 t)) (error (list 'sig e))))",
+      "expected": "(ok \"+000|+000\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/short-year-sign--65322892800-6",
+      "form": "(format-time-string \"%+6y|%+6g\" -65322892800 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%+6y|%+6g\" -65322892800 t)) (error (list 'sig e))))",
+      "expected": "(ok \"+00000|+00000\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/short-year-sign-253402300800-1",
+      "form": "(format-time-string \"%+1y|%+1g\" 253402300800 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%+1y|%+1g\" 253402300800 t)) (error (list 'sig e))))",
+      "expected": "(ok \"0|99\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/short-year-sign-253402300800-2",
+      "form": "(format-time-string \"%+2y|%+2g\" 253402300800 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%+2y|%+2g\" 253402300800 t)) (error (list 'sig e))))",
+      "expected": "(ok \"00|99\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/short-year-sign-253402300800-3",
+      "form": "(format-time-string \"%+3y|%+3g\" 253402300800 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%+3y|%+3g\" 253402300800 t)) (error (list 'sig e))))",
+      "expected": "(ok \"+00|+99\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/short-year-sign-253402300800-4",
+      "form": "(format-time-string \"%+4y|%+4g\" 253402300800 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%+4y|%+4g\" 253402300800 t)) (error (list 'sig e))))",
+      "expected": "(ok \"+000|+099\")"
+    },
+    {
+      "primitive": "format-time-string",
+      "id": "format-time-string/short-year-sign-253402300800-6",
+      "form": "(format-time-string \"%+6y|%+6g\" 253402300800 t)",
+      "source": "(prin1-to-string (condition-case e (list 'ok (format-time-string \"%+6y|%+6g\" 253402300800 t)) (error (list 'sig e))))",
+      "expected": "(ok \"+00000|+00099\")"
+    }
+  ],
+  "environment_files": {
+    "/etc/localtime": "5c363e14151d751c901cdf06c502d9e1ac23b8e956973954763bfb39d5c53730",
+    "/usr/share/zoneinfo/America/New_York": "e9ed07d7bee0c76a9d442d091ef1f01668fee7c4f26014c0a868b19fe6c18a95"
+  },
+  "generator_sha256": "0e525fed99c6645a5489780e0d428bf4522af094325bd2f326a9c5e1c7c7e68c"
+}

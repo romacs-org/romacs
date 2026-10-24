@@ -1,0 +1,9 @@
+{
+ "what": "gnu-tests/test is GNU Emacs's test/ directory at the oracle pin, imported byte-for-byte and never edited.",
+ "gnu_repository": "https://git.savannah.gnu.org/git/emacs.git",
+ "gnu_local_mirror": "<recording-path-redacted>/gnu-emacs-ref",
+ "gnu_commit": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+ "test_tree": "cc4d1dbcc23b776e1eb39caef099b6a5ee26a3d1",
+ "rederive": "git -C GNU archive --format=tar --prefix=test/ 45b0f7699df:test | tar -x -C gnu-tests && git add -f gnu-tests/test && git write-tree --prefix=gnu-tests/test/  # must print test_tree",
+ "drift_check": "python3 gnu-tests/run.py verify-pin  # git rev-parse HEAD:gnu-tests/test == test_tree, and no working-tree change under it"
+}
