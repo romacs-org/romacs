@@ -294,6 +294,8 @@ pub fn initialize_files(vm: &mut Vm, files: &[std::path::PathBuf]) -> Result<Sta
     initialize_editing(vm)?;
     vm.eval_source(include_str!("../../../rlisp/romacs-dired.el"))?;
     vm.eval_source(include_str!("../../../rlisp/romacs-term.el"))?;
+    vm.eval_source(include_str!("../../../rlisp/vm/process.el"))?;
+    vm.eval_source(include_str!("../../../rlisp/romacs-notmuch.el"))?;
     vm.eval_source(include_str!("../../../rlisp/romacs-install-command.el"))?;
     crate::eval_last_sexp::define(vm)?;
     let bindings = bind_journey_keys(vm, false)?;
@@ -358,6 +360,8 @@ pub fn initialize_loadup_from(vm: &mut Vm, launch: Launch, font: Option<&str>, d
     initialize_editing(vm)?;
     vm.eval_source(include_str!("../../../rlisp/romacs-dired.el"))?;
     vm.eval_source(include_str!("../../../rlisp/romacs-term.el"))?;
+    vm.eval_source(include_str!("../../../rlisp/vm/process.el"))?;
+    vm.eval_source(include_str!("../../../rlisp/romacs-notmuch.el"))?;
     let bindings = bind_journey_keys(vm, true)?;
     let started = Started { launch, loadup: Some(loadup), bindings, gnu_mode_line };
     workspace(vm, &started, files.is_empty())?;

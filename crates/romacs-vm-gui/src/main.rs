@@ -481,13 +481,21 @@ fn evaluate(
         }
     }); }
     loop {
+        if live && vm.background_processes_ready() {
+            let changed = vm.eval_source("(if (fboundp 'romacs-process-dispatch-ready) (romacs-process-dispatch-ready) (progn (romacs--process-ready) nil))");
+            match changed {
+                Ok(value) if !value.is_nil() => live_presentation.changed(),
+                Err(error) => { echo::show(&mut vm, &format!("Background command: {error}"))?; live_presentation.changed(); },
+                _ => {},
+            }
+        }
         if live && vm.poll_terminal_output()? { live_presentation.changed(); }
         let available = sender.input().len();
         let mut batch: std::collections::VecDeque<_> = presentation::take_batch(&mut pending, sender.input().try_iter(), available).collect();
         while let Some(event) = batch.pop_front() {
             if matches!(event, InputEvent::WindowClose { .. }) {
                 if !live || live_presentation.window_close(&mut vm)? {
-                    return sender.shutdown();
+                    return shutdown_editor(&mut vm, sender);
                 }
                 terminal_modal = true;
                 continue;
@@ -546,7 +554,7 @@ fn evaluate(
                     let close_requested = std::mem::take(&mut shared.closed);
                     drop(shared);
                     if close_requested && live_presentation.window_close(&mut vm)? {
-                        return sender.shutdown();
+                        return shutdown_editor(&mut vm, sender);
                     }
                     outcome
                 } else {
@@ -554,7 +562,7 @@ fn evaluate(
                     vm.command_event(event).map(Some)
                 };
                 if live && vm.eval_source("romacs-gui-quit-requested")? != romacs_vm::Fixed::NIL {
-                    return sender.shutdown();
+                    return shutdown_editor(&mut vm, sender);
                 }
                 if live {
                     terminal_modal = vm.eval_source("(and (boundp 'romacs-gui-pending) romacs-gui-pending)")? != romacs_vm::Fixed::NIL;
@@ -681,6 +689,11 @@ fn evaluate(
             Ok(result) => reply(json!({"result":result,"presentation":presentation}))?,
         }
     }
+    shutdown_editor(&mut vm, sender)
+}
+
+fn shutdown_editor(vm: &mut Vm, sender: &PaintSender) -> Result<(), String> {
+    vm.shutdown_background_processes()?;
     sender.shutdown()
 }
 

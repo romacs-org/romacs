@@ -22,6 +22,7 @@ mod command;
 mod interpreted_closure;
 mod host_input;
 mod terminal_host;
+mod process_jobs;
 pub use command::{CommandEvent, CommandOutcome, CommandSignal};
 pub use host_input::{HostEvent, HostFrame, HostInput};
 pub use terminal_host::{TerminalColor, TerminalHost, TerminalInputState, TerminalSnapshot, TerminalStyle, TerminalStyleRun};
@@ -1041,6 +1042,7 @@ pub struct Vm {
     propagate_next: bool,
     /// The embedder's keyboard while one is attached (host_input.rs).
     host_input: Option<Box<dyn host_input::HostInput>>,
+    process_jobs: process_jobs::Jobs,
     terminal_host: Option<Box<dyn terminal_host::TerminalHost>>,
     terminal_bindings: Vec<terminal_host::TerminalBinding>,
     pending_specials: HashSet<String>,
@@ -1145,6 +1147,7 @@ impl Vm {
             propagated_escape_hooked: false,
             propagated_eval_depth: None,
             host_input: None,
+            process_jobs: process_jobs::Jobs::default(),
             terminal_host: None,
             terminal_bindings: Vec::new(),
             propagate_next: false,

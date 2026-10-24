@@ -8,14 +8,14 @@
   "provenance": {
     "generated_by": "romacs-introspect-live",
     "generated_on": "linux-x86_64",
-    "input_hash": "75d0b66e2b9c1a77c35d0a2a8bd3a49cd02a00e1e37d68350de58716ddbbca48",
+    "input_hash": "0b901a6cd8375181543e68f161c177de589e911f194a75e7eb80dd3d6e6d3309",
     "source_only_at_generation": [],
     "vm2_probe_panics": [],
-    "vm2_universe": 2351
+    "vm2_universe": 2370
   },
   "schema": 2,
   "vm2": {
-    "count": 575,
+    "count": 580,
     "entries": [
       "#:vm2-closure-document",
       "#:vm2-closure-metadata",
@@ -431,6 +431,10 @@
       "restore-buffer-modified-p",
       "reverse",
       "romacs--kill-buffer-finish",
+      "romacs--process-forget",
+      "romacs--process-ready",
+      "romacs--process-result",
+      "romacs--process-start",
       "romacs--read-host-event",
       "romacs--term-close",
       "romacs--term-create",
@@ -438,6 +442,7 @@
       "romacs--term-running-p",
       "romacs--term-send",
       "romacs-find-buffer-visiting",
+      "romacs-json-read",
       "round",
       "run-hook-with-args",
       "run-hook-with-args-until-failure",

@@ -2,6 +2,12 @@
 //! control interface, not a sandbox; subprocesses inherit the caller environment.
 use crate::{Form, Result, Value, Vm};
 impl Vm {
+    /// Whether an owned background command completed since the last drain.
+    pub fn background_processes_ready(&self) -> bool { self.process_jobs.has_ready() }
+
+    /// Cancel and settle background children before the native window shuts down.
+    pub fn shutdown_background_processes(&mut self) -> Result<()> { self.process_jobs.shutdown() }
+
     pub(super) fn process_lines(&mut self, start: usize, n: usize) -> Result<Value> {
         if n == 0 {
             return Err("wrong primitive arity".into());
