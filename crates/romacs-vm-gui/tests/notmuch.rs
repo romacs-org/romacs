@@ -25,16 +25,16 @@ fn mail_entrypoints_are_real_interactive_commands() {
 #[test]
 fn search_rows_preserve_exact_thread_identity_and_sanitize_display() {
     let mut vm = setup();
-    assert_eq!(printed(&mut vm, "(list (lookup-key romacs-notmuch-search-map [10]) (lookup-key romacs-notmuch-search-map [13]))"), "(romacs-notmuch-open romacs-notmuch-open)", "NATIVE_RETURN_AND_CARRIAGE_RETURN_OPEN_MAIL");
-    assert_eq!(printed(&mut vm,r#"(equal (romacs-notmuch-clean "a\tb\nc\177\205" t) "a b c  ")"#),"t","MAIL_CONTROLS_CANNOT_REACH_LAYOUT");
-    assert_eq!(printed(&mut vm,r#"(substring-no-properties (romacs-notmuch-search-line (romacs-json-read "{\"thread\":\"abc\",\"date_relative\":\"Today\",\"matched\":1,\"total\":2,\"authors\":\"Alice\",\"subject\":\"Hello λ\",\"tags\":[\"inbox\"]}")))"#),"\"Today         [1/2] Alice                    Hello λ (inbox)\\n\"");
+    assert_eq!(printed(&mut vm, "(list (lookup-key romacs-mail-search-map [10]) (lookup-key romacs-mail-search-map [13]))"), "(romacs-mail-open-tree romacs-mail-open-tree)", "NATIVE_RETURN_AND_CARRIAGE_RETURN_OPEN_MAIL");
+    assert_eq!(printed(&mut vm,r#"(equal (romacs-mail-clean "a\tb\nc\177\205" t) "a b c  ")"#),"t","MAIL_CONTROLS_CANNOT_REACH_LAYOUT");
+    assert_eq!(printed(&mut vm,r#"(substring-no-properties (romacs-mail-search-line (romacs-notmuch--summary 'fixture (romacs-json-read "{\"thread\":\"abc\",\"date_relative\":\"Today\",\"timestamp\":1,\"matched\":1,\"total\":2,\"authors\":\"Alice\",\"subject\":\"Hello λ\",\"tags\":[\"inbox\"]}"))))"#),"\"Today         [1/2] Alice                    Hello λ (inbox)\\n\"");
 }
 #[test]
 fn compose_is_editable_but_sending_requires_a_transport_and_preserves_draft() {
     let mut vm=setup();
-    assert_eq!(printed(&mut vm,r#"(progn (notmuch-mua-new-mail "hermes@example.invalid" "Draft λ") (insert "Body") (list major-mode buffer-read-only (buffer-modified-p)))"#),"(romacs-notmuch-compose-mode nil t)");
-    assert_eq!(printed(&mut vm,"(condition-case e (romacs-notmuch-send) (user-error 'no-transport))"),"no-transport");
-    assert_eq!(printed(&mut vm,"(list (buffer-modified-p) romacs-notmuch-send-state)"),"(t nil)");
+    assert_eq!(printed(&mut vm,r#"(progn (notmuch-mua-new-mail "hermes@example.invalid" "Draft λ") (insert "Body") (list major-mode buffer-read-only (buffer-modified-p)))"#),"(romacs-mail-compose-mode nil t)");
+    assert_eq!(printed(&mut vm,"(condition-case e (romacs-mail-send) (user-error 'no-transport))"),"no-transport");
+    assert_eq!(printed(&mut vm,"(list (buffer-modified-p) romacs-mail-send-state)"),"(t nil)");
     assert_eq!(printed(&mut vm,"(not (null (string-match \"Subject: Draft λ\" (buffer-string))))"),"t");
 }
 
@@ -63,12 +63,17 @@ fn actual_notmuch_search_show_and_hidden_callback_preserve_the_editor() {
     vm.eval_source("(switch-to-buffer (get-buffer-create \"mail-sentinel\")) (insert \"keep\") (goto-char 3) (setq sentinel (current-buffer)) (notmuch-search \"tag:inbox\") (setq search-buffer (current-buffer)) (switch-to-buffer sentinel)").unwrap();
     settle(&mut vm);
     assert_eq!(printed(&mut vm,"(list (buffer-name) (point) (buffer-string))"),"(\"mail-sentinel\" 3 \"keep\")","HIDDEN_MAIL_MUST_NOT_SELECT_OR_EDIT_ANOTHER_BUFFER");
-    assert_eq!(printed(&mut vm,"(with-current-buffer search-buffer (list (length romacs-notmuch-rows) buffer-read-only (not (null (string-match \"Actual Notmuch λ\" (buffer-string))))))"),"(1 t t)");
-    vm.eval_source("(switch-to-buffer search-buffer) (goto-char (point-min)) (romacs-notmuch-open)").unwrap();
+    assert_eq!(printed(&mut vm,"(with-current-buffer search-buffer (list (length romacs-mail-rows) buffer-read-only (not (null (string-match \"Actual Notmuch λ\" (buffer-string))))))"),"(1 t t)");
+    vm.eval_source("(switch-to-buffer search-buffer) (goto-char (point-min)) (romacs-mail-open-tree)").unwrap();
     settle(&mut vm);
-    assert_eq!(printed(&mut vm,"(list (length romacs-notmuch-messages) buffer-read-only (not (null (string-match \"Plain body λ column\" (buffer-string)))))"),"(1 t t)","REAL_NOTMUCH_JSON_REACHES_MESSAGE_BUFFER");
-    vm.eval_source("(romacs-notmuch-reply)").unwrap();
-    assert_eq!(printed(&mut vm,"(list major-mode romacs-notmuch-reply-id (not (null (string-match \"> Plain body λ column\" (buffer-string)))))"),"(romacs-notmuch-compose-mode \"romacs-fixture@example.invalid\" t)");
+    assert_eq!(printed(&mut vm,"major-mode"),"romacs-mail-tree-mode","SEARCH_RETURN_MUST_OPEN_THREAD_TREE_BEFORE_MESSAGE");
+    assert_eq!(printed(&mut vm,"(list (length romacs-mail-rows) buffer-read-only romacs-mail-pair-window)"),"(1 t nil)");
+    vm.eval_source("(romacs-mail-show-message)").unwrap();
+    settle(&mut vm);
+    assert_eq!(printed(&mut vm, r#"(list (cdr (plist-get romacs-mail-message :key)) buffer-read-only (not (null (string-match "Plain body λ column" (buffer-string)))))"#), r#"("romacs-fixture@example.invalid" t t)"#, "REAL_NOTMUCH_JSON_REACHES_MESSAGE_BUFFER");
+    vm.eval_source("(notmuch-show-reply-sender)").unwrap();
+    settle(&mut vm);
+    assert_eq!(printed(&mut vm, r#"(list major-mode (cdr (plist-get romacs-mail-envelope :source)) (not (null (string-match "> Plain body λ column" (buffer-string)))))"#), r#"(romacs-mail-compose-mode "romacs-fixture@example.invalid" t)"#);
     vm.eval_source("(notmuch-search \"tag:inbox\") (setq buffer-file-name \"/owned-elsewhere\") (let ((inhibit-read-only t)) (erase-buffer) (insert \"new owner\"))").unwrap();
     settle(&mut vm);
     assert_eq!(printed(&mut vm,"(buffer-string)"),"\"new owner\"","RETIRED_MAIL_VIEW_MUST_NOT_OVERWRITE_A_VISITING_BUFFER");
@@ -89,22 +94,22 @@ fn compose_submits_exact_bytes_once_and_keeps_uncertain_drafts() {
         romacs-notmuch-send-command (list "/bin/sh" "-c" "cat > \"$1\"" "fixture" {}))
         (notmuch-mua-new-mail "hermes@example.invalid" "Test λ") (insert "Body λ\n")"#,quote(&path.to_string_lossy()))).unwrap();
     vm.set_host_input(Some(Box::new(Confirm("yes\r".chars().map(|c|romacs_vm::HostEvent::Key(romacs_vm::CommandEvent::Character(c as i64))).collect()))));
-    vm.eval_source("(romacs-notmuch-send)").unwrap();
-    assert_eq!(printed(&mut vm,"(list romacs-notmuch-send-state buffer-read-only (kill-buffer (current-buffer)) (progn (romacs-gui-quit) romacs-gui-quit-requested))"),"(sending t nil nil)","PENDING_SUBMISSION_OWNS_ITS_DRAFT");
+    vm.eval_source("(romacs-mail-send)").unwrap();
+    assert_eq!(printed(&mut vm,"(list romacs-mail-send-state buffer-read-only (kill-buffer (current-buffer)) (progn (romacs-gui-quit) romacs-gui-quit-requested))"),"(sending t nil nil)","PENDING_SUBMISSION_OWNS_ITS_DRAFT");
     settle(&mut vm);
     let text = std::fs::read_to_string(&path).unwrap();
     assert!(text.contains("Subject: Test λ\n") && text.ends_with("\n\nBody λ\n"));
     assert!(!text.contains("--text follows this line--"));
     assert_eq!(text.matches("User-Agent: Romacs notmuch 0.1\n").count(), 1, "MAIL_IDENTIFIES_ROMACS_CLIENT");
     assert_eq!(printed(&mut vm, "(string-match \"User-Agent:\" (buffer-string))"), "nil", "CLIENT_HEADER_DOES_NOT_CLUTTER_COMPOSE");
-    assert_eq!(printed(&mut vm,"(list romacs-notmuch-send-state (buffer-modified-p))"),"(sent nil)");
-    assert_eq!(printed(&mut vm,"(condition-case e (romacs-notmuch-send) (user-error 'refused))"),"refused","SUBMISSION_CANNOT_REPEAT");
+    assert_eq!(printed(&mut vm,"(list romacs-mail-send-state (buffer-modified-p))"),"(sent nil)");
+    assert_eq!(printed(&mut vm,"(condition-case e (romacs-mail-send) (user-error 'refused))"),"refused","SUBMISSION_CANNOT_REPEAT");
     vm.eval_source("(setq romacs-notmuch-send-command '(\"/bin/sh\" \"-c\" \"cat >/dev/null; exit 7\")) (notmuch-mua-new-mail \"hermes@example.invalid\" \"Failure\") (insert \"retain me\")").unwrap();
     vm.set_host_input(Some(Box::new(Confirm("yes\r".chars().map(|c|romacs_vm::HostEvent::Key(romacs_vm::CommandEvent::Character(c as i64))).collect()))));
-    vm.eval_source("(romacs-notmuch-send)").unwrap();
+    vm.eval_source("(romacs-mail-send)").unwrap();
     settle(&mut vm);
-    assert_eq!(printed(&mut vm,"(list romacs-notmuch-send-state buffer-read-only (buffer-modified-p))"),"(uncertain nil t)");
-    assert_eq!(printed(&mut vm,"(condition-case e (romacs-notmuch-send) (user-error 'refused))"),"refused");
+    assert_eq!(printed(&mut vm,"(list romacs-mail-send-state buffer-read-only (buffer-modified-p))"),"(uncertain nil t)");
+    assert_eq!(printed(&mut vm,"(condition-case e (romacs-mail-send) (user-error 'refused))"),"refused");
     std::fs::remove_file(path).unwrap();
 }
 
@@ -116,7 +121,7 @@ fn retired_compose_settles_without_touching_the_new_document() {
       romacs-notmuch-send-command '("/bin/sh" "-c" "cat >/dev/null"))
       (notmuch-mua-new-mail "hermes@example.invalid" "Retire") (insert "Draft")"#).unwrap();
     vm.set_host_input(Some(Box::new(Confirm("yes\r".chars().map(|c|romacs_vm::HostEvent::Key(romacs_vm::CommandEvent::Character(c as i64))).collect()))));
-    vm.eval_source("(romacs-notmuch-send) (setq buffer-file-name \"/new-owner\") (let ((inhibit-read-only t)) (erase-buffer) (insert \"new document\")) (goto-char 3) (setq tick (buffer-chars-modified-tick))").unwrap();
+    vm.eval_source("(romacs-mail-send) (setq buffer-file-name \"/new-owner\") (let ((inhibit-read-only t)) (erase-buffer) (insert \"new document\")) (goto-char 3) (setq tick (buffer-chars-modified-tick))").unwrap();
     settle(&mut vm);
-    assert_eq!(printed(&mut vm,"(list (buffer-string) (point) (= tick (buffer-chars-modified-tick)) (eq romacs-notmuch-send-state 'sending))"),"(\"new document\" 3 t nil)","RETIRED_SEND_SETTLES_WITHOUT_REWRITING_NEW_OWNER");
+    assert_eq!(printed(&mut vm,"(list (buffer-string) (point) (= tick (buffer-chars-modified-tick)) (eq romacs-mail-send-state 'sending))"),"(\"new document\" 3 t nil)","RETIRED_SEND_SETTLES_WITHOUT_REWRITING_NEW_OWNER");
 }

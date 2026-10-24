@@ -448,12 +448,14 @@ fn evaluate(
                 eprintln!("romacs-binding: {key}\t{gnu}\t{}", if b.gnu_defined { gnu } else { romacs });
             }
         }
+        let face = vm.display_default_face()?;
         if let Some((_, points)) = font {
-            let face = vm.display_default_face()?;
             eprintln!("romacs: font family={} points={} pixels={}", face.family, points, face.pixel_size);
-            let (lh, cw) = romacs_layout2::frame_metrics(&face)?;
-            vm.set_frame_geometry(width, height, lh, cw)?;
+        } else {
+            eprintln!("romacs: font family={} pixels={}", face.family, face.pixel_size);
         }
+        let (lh, cw) = romacs_layout2::frame_metrics(&face)?;
+        vm.set_frame_geometry(width, height, lh, cw)?;
     } else {
         vm.eval_source(if g1 { include_str!("../g1.el") } else { SCENE })?;
     }

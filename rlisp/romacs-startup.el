@@ -13,7 +13,7 @@
 ;;; Code:
 
 (fset 'romacs-gui--window-child (symbol-function 'window-child))
-(defface default '((t (:foreground "#d4c5a0" :background "#000000"))) "Rum parchment on black.")
+(defface default '((t (:foreground "#d4c5a0" :background "#000000" :family "Iosevka"))) "Rum parchment on black.")
 (defface cursor '((t (:background "#9099d9"))) "Rum indigo cursor.")
 (defface mode-line '((t (:foreground "#d4c5a0" :background "#50269a"))) "Rum active mode line.")
 (defface mode-line-inactive '((t (:foreground "#756b59" :background "#141414"))) "Rum inactive mode line.")
@@ -107,8 +107,8 @@
     (romacs-gui-live-visits)))
 (defun romacs-gui-quit ()
   (interactive)
-  (when (or (not (fboundp 'romacs-notmuch-quit-allowed-p))
-            (romacs-notmuch-quit-allowed-p))
+  (when (or (not (fboundp 'romacs-mail-quit-allowed-p))
+            (romacs-mail-quit-allowed-p))
   (let ((buffers (romacs-gui-live-visits)) (dirty nil))
     (while buffers
       (with-current-buffer (car buffers)

@@ -295,6 +295,7 @@ pub fn initialize_files(vm: &mut Vm, files: &[std::path::PathBuf]) -> Result<Sta
     vm.eval_source(include_str!("../../../rlisp/romacs-dired.el"))?;
     vm.eval_source(include_str!("../../../rlisp/romacs-term.el"))?;
     vm.eval_source(include_str!("../../../rlisp/vm/process.el"))?;
+    vm.eval_source(include_str!("../../../rlisp/romacs-mail.el"))?;
     vm.eval_source(include_str!("../../../rlisp/romacs-notmuch.el"))?;
     vm.eval_source(include_str!("../../../rlisp/romacs-install-command.el"))?;
     crate::eval_last_sexp::define(vm)?;
@@ -361,6 +362,7 @@ pub fn initialize_loadup_from(vm: &mut Vm, launch: Launch, font: Option<&str>, d
     vm.eval_source(include_str!("../../../rlisp/romacs-dired.el"))?;
     vm.eval_source(include_str!("../../../rlisp/romacs-term.el"))?;
     vm.eval_source(include_str!("../../../rlisp/vm/process.el"))?;
+    vm.eval_source(include_str!("../../../rlisp/romacs-mail.el"))?;
     vm.eval_source(include_str!("../../../rlisp/romacs-notmuch.el"))?;
     let bindings = bind_journey_keys(vm, true)?;
     let started = Started { launch, loadup: Some(loadup), bindings, gnu_mode_line };
@@ -598,6 +600,16 @@ mod tests {
         initialize(&mut vm).unwrap();
         vm
     }
+    #[test]
+    fn workspace_defaults_to_iosevka_without_a_launcher_override() {
+        let mut vm = workspace(1);
+        let face = vm.display_default_face().unwrap();
+        assert_eq!(face.family, "Iosevka", "WORKSPACE_DEFAULT_MUST_BE_IOSEVKA");
+        assert_eq!(face.pixel_size, 20.0);
+        assert_eq!(face.foreground, [212, 197, 160]);
+        assert_eq!(face.background, [0, 0, 0]);
+    }
+
     fn key(vm: &mut Vm, code: i64) {
         let outcome = vm.command_event(CommandEvent::Character(code)).unwrap();
         assert!(outcome.signal.is_none(), "{outcome:?}");

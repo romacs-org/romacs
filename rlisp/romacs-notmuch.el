@@ -1,337 +1,344 @@
-;;; romacs-notmuch.el --- Mail search, reading and composition -*- lexical-binding: t -*-
+;;; romacs-notmuch.el --- Pure Notmuch mail provider -*- lexical-binding: t -*-
 
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 
 ;;; Commentary:
 
-;; Notmuch owns the index.  Lisp owns each view and draft; bounded background
-;; commands own external I/O.  Reading never changes tags or fetches remote content.
+;; Adapt Notmuch JSON v5 to account-qualified mail data without changing tags.
 
 ;;; Code:
 
-(defvar romacs-notmuch-command '("notmuch"))
+(defvar romacs-notmuch-command '("notmuch")
+  "Notmuch command argv, including any account configuration selector.")
 (defvar romacs-notmuch-send-command nil
-  "Argv of a mail transport accepting a complete UTF-8 message on standard input.
-Exit zero must mean accepted and stored in Sent.  Failed/uncertain attempts are
-never automatically retried.  Configure this explicitly for your account.")
-(defvar romacs-notmuch-from nil)
+  "Transport argv accepting complete UTF-8 mail on standard input.
+Exit zero must mean accepted and stored in Sent.  Uncertain submissions must
+never be automatically retried.")
+(defvar romacs-notmuch-from nil
+  "Optional From override for new mail; replies use Notmuch's inferred From.")
 (defvar romacs-notmuch-search-history nil)
-(defvar romacs-notmuch-query nil)
-(defvar romacs-notmuch-rows nil)
-(defvar romacs-notmuch-messages nil)
-(defvar romacs-notmuch-owner nil)
-(defvar romacs-notmuch-job nil)
-(defvar romacs-notmuch-send-state nil)
-(defvar romacs-notmuch-return-buffer nil)
-(defvar romacs-notmuch-reply-id nil)
 
-(defface notmuch-search-date '((t (:foreground "#00b8ad"))) "Mail dates.")
-(defface notmuch-search-subject '((t (:foreground "#d4c5a0"))) "Mail subjects.")
-(defface notmuch-tag '((t (:foreground "#72b6e4"))) "Mail tags.")
-(defface notmuch-message-summary '((t (:foreground "#b09bd2"))) "Mail headers.")
+(when (fboundp 'declare-function)
+  (declare-function romacs-mail-search "romacs-mail" (account query))
+  (declare-function romacs-mail-compose "romacs-mail" (account &optional to subject))
+  (declare-function romacs-mail-reply "romacs-mail" (all-p))
+  (declare-function romacs-mail-tree-current-query "romacs-mail" ()))
 
-(defun romacs-notmuch-get (key object) (cdr (assoc key object)))
+(defun romacs-notmuch--map (function values)
+  "Return FUNCTION applied to each element of proper list VALUES."
+  (let ((result nil))
+    (dolist (value values) (setq result (cons (funcall function value) result)))
+    (nreverse result)))
 
-(defun romacs-notmuch-user-error (format-string &rest arguments)
-  (signal 'user-error (list (apply 'format format-string arguments))))
+(defun romacs-notmuch--get (key object)
+  "Return string KEY's value from JSON OBJECT."
+  (cdr (assoc key object)))
 
-(defun romacs-notmuch-prefix-p (prefix text)
-  (and (>= (length text) (length prefix))
-       (equal prefix (substring text 0 (length prefix)))))
+(defun romacs-notmuch--array (value)
+  "Validate and return JSON array VALUE."
+  (unless (proper-list-p value) (error "Invalid Notmuch array"))
+  value)
 
-(defun romacs-notmuch-clean (text &optional line)
-  "Return inert display text, preserving newlines only outside LINE fields."
-  (mapconcat (lambda (character)
-               (if (or (and (>= character 127) (<= character 159))
-                       (and (< character 32) (or line (/= character 10))))
-                   " " (char-to-string character)))
-             (or text "") ""))
+(defun romacs-notmuch--object (value)
+  "Validate and return JSON object VALUE."
+  (unless (and (consp value) (proper-list-p value)
+               (catch 'invalid
+                 (mapc (lambda (entry)
+                         (unless (and (consp entry) (stringp (car entry)))
+                           (throw 'invalid nil))) value)
+                 t))
+    (error "Invalid Notmuch object"))
+  value)
 
-(defun romacs-notmuch-pad (text width)
-  (let ((text (romacs-notmuch-clean text t)))
-    (concat (substring text 0 (min width (length text)))
-            (make-string (max 0 (- width (length text))) 32))))
+(defun romacs-notmuch--string (value &optional nonempty)
+  "Validate string VALUE, requiring content when NONEMPTY is non-nil."
+  (unless (and (stringp value) (or (not nonempty) (> (length value) 0)))
+    (error "Invalid Notmuch string"))
+  value)
 
-(defun romacs-notmuch-search-line (row)
-  "Render ROW without deriving its identity from the displayed text."
-  (concat (propertize (romacs-notmuch-pad (romacs-notmuch-get "date_relative" row) 13)
-                      'face 'notmuch-search-date)
-          " [" (number-to-string (or (romacs-notmuch-get "matched" row) 0)) "/"
-          (number-to-string (or (romacs-notmuch-get "total" row) 0)) "] "
-          (romacs-notmuch-pad (romacs-notmuch-get "authors" row) 24) " "
-          (propertize (romacs-notmuch-clean (romacs-notmuch-get "subject" row) t)
-                      'face 'notmuch-search-subject)
-          " (" (propertize (mapconcat (lambda (tag) (romacs-notmuch-clean tag t))
-                                     (romacs-notmuch-get "tags" row) " ") 'face 'notmuch-tag) ")\n"))
+(defun romacs-notmuch--number (value)
+  "Validate nonnegative integer VALUE."
+  (unless (and (integerp value) (>= value 0))
+    (error "Invalid Notmuch number"))
+  value)
 
-(defun romacs-notmuch-cancel ()
-  (when (and romacs-notmuch-job (not (eq romacs-notmuch-send-state 'sending)))
-    (ignore-errors (romacs-process-forget romacs-notmuch-job))
-    (setq romacs-notmuch-job nil)))
+(defun romacs-notmuch--boolean (value)
+  "Normalize JSON boolean VALUE without treating JSON false as true."
+  (cond ((eq value t) t)
+        ((memq value '(nil json-false json-null)) nil)
+        (t (error "Invalid Notmuch boolean"))))
 
-(defun romacs-notmuch-query-kill ()
-  (cond ((eq romacs-notmuch-send-state 'sending)
-         (message "Mail submission is pending; keep this draft until it settles") nil)
-        ((and (eq major-mode 'romacs-notmuch-compose-mode) (buffer-modified-p))
-         (equal (read-string "Discard this mail draft? Type yes to discard: ") "yes"))
-        (t t)))
+(defun romacs-notmuch--tags (value)
+  "Validate string array VALUE."
+  (romacs-notmuch--map #'romacs-notmuch--string (romacs-notmuch--array value)))
 
-(defun romacs-notmuch-quit-allowed-p ()
-  "Protect pending submissions and unsaved mail on editor exit."
-  (let ((pending nil) (dirty nil))
-    (dolist (buffer (buffer-list))
-      (with-current-buffer buffer
-        (when (and (eq major-mode 'romacs-notmuch-compose-mode) (not buffer-file-name))
-          (when (eq romacs-notmuch-send-state 'sending) (setq pending t))
-          (when (buffer-modified-p) (setq dirty t)))))
-    (cond (pending (message "Mail submission is pending; keep the editor open until it settles") nil)
-          (dirty (equal (read-string "Discard unsaved mail drafts and continue quitting? Type yes: ") "yes"))
-          (t t))))
+(defun romacs-notmuch--header (name headers &optional required)
+  "Return NAME from HEADERS, requiring a string when REQUIRED."
+  (let ((entry (assoc name headers)))
+    (if entry (romacs-notmuch--string (cdr entry))
+      (if required (error "Missing Notmuch header: %s" name) ""))))
 
-(defun romacs-notmuch-initialize (mode label map)
-  (dolist (name '(romacs-notmuch-query romacs-notmuch-rows romacs-notmuch-messages
-                  romacs-notmuch-owner romacs-notmuch-job romacs-notmuch-send-state
-                  romacs-notmuch-return-buffer romacs-notmuch-reply-id))
-    (set (make-local-variable name) nil))
-  (setq major-mode mode mode-name label buffer-file-name nil)
-  (use-local-map map)
-  (make-local-variable 'mode-line-format)
-  (setq mode-line-format (list "%b" "  |  " label))
-  (setq romacs-notmuch-owner (list mode))
-  (make-local-variable 'mode-line-format)
-  (set (make-local-variable 'kill-buffer-hook) '(romacs-notmuch-cancel))
-  (set (make-local-variable 'kill-buffer-query-functions) '(romacs-notmuch-query-kill)))
+(defun romacs-notmuch--headers (value)
+  "Validate and copy string-key header alist VALUE."
+  (romacs-notmuch--map (lambda (entry)
+            (cons (car entry) (romacs-notmuch--string (cdr entry))))
+          (romacs-notmuch--object value)))
 
-(defun romacs-notmuch-owned-p (buffer owner mode)
-  (and (buffer-live-p buffer)
-       (with-current-buffer buffer
-         (and (eq romacs-notmuch-owner owner) (eq major-mode mode) (not buffer-file-name)))))
+(defun romacs-notmuch--identity (value)
+  "Validate opaque message identity VALUE."
+  (romacs-notmuch--string value t)
+  (when (string-match "[\000-\037\177]" value)
+    (error "Invalid Notmuch message identity"))
+  value)
 
-(defun romacs-notmuch-text (text)
-  (let ((inhibit-read-only t)) (widen) (erase-buffer) (insert text) (goto-char (point-min)))
-  (set-buffer-modified-p nil))
+(defun romacs-notmuch-id-term (id)
+  "Return an exact Notmuch query term for opaque message ID."
+  (concat "id:\""
+          (mapconcat (lambda (c) (if (= c 34) "\"\"" (char-to-string c)))
+                     (romacs-notmuch--identity id) "") "\""))
 
-(defun romacs-notmuch-result (output)
-  (unless (and (eq (car output) 0) (not (nth 3 output)))
-    (error "%s" (romacs-notmuch-clean (or (nth 3 output)
-                                         (and (not (equal (nth 2 output) "")) (nth 2 output))
-                                         "Mail command failed") t)))
-  (romacs-json-read (nth 1 output)))
+(defun romacs-notmuch--thread-id (id)
+  "Validate hexadecimal thread ID."
+  (romacs-notmuch--string id t)
+  (unless (string-match "\\`[0-9a-f]+\\'" id)
+    (error "Invalid Notmuch thread identity"))
+  id)
 
-(defvar romacs-notmuch-search-map
-  (let ((map (make-sparse-keymap)))
-    (define-key map [110] 'romacs-notmuch-next)
-    (define-key map [112] 'romacs-notmuch-previous)
-    (define-key map [13] 'romacs-notmuch-open)
-    (define-key map [10] 'romacs-notmuch-open)
-    (define-key map [103] 'romacs-notmuch-refresh)
-    (define-key map [115] 'notmuch-search)
-    (define-key map [109] 'notmuch-mua-new-mail)
-    (define-key map [113] 'romacs-notmuch-quit) map))
+(defun romacs-notmuch--argv (argv)
+  "Validate and copy command ARGV, including each string."
+  (unless (consp (romacs-notmuch--array argv))
+    (error "Missing Notmuch command"))
+  (romacs-notmuch--map (lambda (arg)
+            (romacs-notmuch--string arg)
+            (when (string-match "\000" arg) (error "Invalid command argument"))
+            (copy-sequence arg)) argv))
 
-(defvar romacs-notmuch-show-map
-  (let ((map (make-sparse-keymap)))
-    (define-key map [110] 'romacs-notmuch-next)
-    (define-key map [112] 'romacs-notmuch-previous)
-    (define-key map [114] 'romacs-notmuch-reply)
-    (define-key map [109] 'notmuch-mua-new-mail)
-    (define-key map [115] 'notmuch-search)
-    (define-key map [113] 'romacs-notmuch-quit) map))
+(defun romacs-notmuch--summary (key row)
+  "Normalize search ROW with account KEY."
+  (romacs-notmuch--object row)
+  (let* ((authors (romacs-notmuch--string (romacs-notmuch--get "authors" row)))
+         (split (string-match "|" authors)))
+    (list :thread (cons key (romacs-notmuch--thread-id (romacs-notmuch--get "thread" row)))
+          :date-label (romacs-notmuch--string (romacs-notmuch--get "date_relative" row))
+          :timestamp (romacs-notmuch--number (romacs-notmuch--get "timestamp" row))
+          :matched (romacs-notmuch--number (romacs-notmuch--get "matched" row))
+          :total (romacs-notmuch--number (romacs-notmuch--get "total" row))
+          :authors-matched (if split (substring authors 0 split) authors)
+          :authors-other (if split
+                             (let ((other (substring authors (1+ split))))
+                               (if (string-match "\\` +" other)
+                                   (substring other (match-end 0)) other))
+                           "")
+          :subject (romacs-notmuch--string (romacs-notmuch--get "subject" row))
+          :tags (romacs-notmuch--tags (romacs-notmuch--get "tags" row)))))
 
-(defun notmuch () "Search your mail without changing the index." (interactive)
+(defun romacs-notmuch--tree-row (key mail parent depth lasts)
+  "Normalize tree MAIL with KEY, PARENT, DEPTH and LASTS.
+LASTS includes the current row: its length is DEPTH plus one, root first."
+  (romacs-notmuch--object mail)
+  (let ((headers (romacs-notmuch--headers (romacs-notmuch--get "headers" mail))))
+    (list :key (cons key (romacs-notmuch--identity (romacs-notmuch--get "id" mail)))
+          :parent-id parent :depth depth :lasts lasts
+          :match (romacs-notmuch--boolean (romacs-notmuch--get "match" mail))
+          :excluded (romacs-notmuch--boolean (romacs-notmuch--get "excluded" mail))
+          :from (romacs-notmuch--header "From" headers t)
+          :date-label (romacs-notmuch--string (romacs-notmuch--get "date_relative" mail))
+          :timestamp (romacs-notmuch--number (romacs-notmuch--get "timestamp" mail))
+          :subject (romacs-notmuch--header "Subject" headers t)
+          :tags (romacs-notmuch--tags (romacs-notmuch--get "tags" mail)))))
+
+(defun romacs-notmuch--trees (key nodes parent depth lasts)
+  "Flatten sibling NODES for KEY retaining PARENT, DEPTH and LASTS."
+  (romacs-notmuch--array nodes)
+  (when (and nodes (> depth 64)) (error "Notmuch tree nesting exceeds 64"))
+  (let ((rows nil))
+    (while nodes
+      (let* ((tuple (romacs-notmuch--array (car nodes)))
+             (mail (car tuple))
+             (path (append lasts (list (null (cdr nodes)))))
+             (placeholder (memq mail '(nil json-null)))
+             (row (unless placeholder (romacs-notmuch--tree-row key mail parent depth path))))
+        (unless (= (length tuple) 2) (error "Invalid Notmuch tree tuple"))
+        (when row (setq rows (cons row rows)))
+        (dolist (child (romacs-notmuch--trees key (nth 1 tuple)
+                                            (if row (cdr (plist-get row :key)) parent)
+                                            (1+ depth) path))
+          (setq rows (cons child rows))))
+      (setq nodes (cdr nodes)))
+    (nreverse rows)))
+
+(defun romacs-notmuch--forest (key forest)
+  "Normalize FOREST for KEY without losing thread boundaries."
+  (apply #'append
+         (romacs-notmuch--map (lambda (thread)
+                   (let ((rows (romacs-notmuch--trees key thread nil 0 nil)))
+                     (if rows
+                         (cons (append (car rows) '(:thread-start t)) (cdr rows))
+                       nil)))
+                 (romacs-notmuch--array forest))))
+
+(defun romacs-notmuch--parts (parts depth)
+  "Normalize MIME PARTS at DEPTH; HTML stays inert."
+  (when (> depth 32) (error "Notmuch MIME nesting exceeds 32"))
+  (romacs-notmuch--map
+   (lambda (part)
+     (romacs-notmuch--object part)
+     (let* ((type (romacs-notmuch--string (romacs-notmuch--get "content-type" part) t))
+            (content (romacs-notmuch--get "content" part))
+            (multipart (and (>= (length type) 10) (equal (substring type 0 10) "multipart/")))
+            (disposition (romacs-notmuch--get "content-disposition" part))
+            (filename (romacs-notmuch--get "filename" part))
+            (size (romacs-notmuch--get "content-length" part)))
+       (when (and (equal type "text/plain") content
+                  (not (eq content 'json-null)) (not (stringp content)))
+         (error "Invalid Notmuch plain text content"))
+       (list :id (romacs-notmuch--number (romacs-notmuch--get "id" part))
+             :type type
+             :disposition (when disposition (romacs-notmuch--string disposition))
+             :filename (when filename (romacs-notmuch--string filename))
+             :size (when size (romacs-notmuch--number size))
+             :content (when (and (equal type "text/plain") (stringp content)) content)
+             :children (when multipart (romacs-notmuch--parts content (1+ depth))))))
+   (romacs-notmuch--array parts)))
+
+(defun romacs-notmuch--message (key id mail)
+  "Normalize exact MAIL object for account KEY and requested ID."
+  (romacs-notmuch--object mail)
+  (unless (and (assoc "body" mail) (assoc "tags" mail))
+    (error "Notmuch message is missing body or tags"))
+  (unless (equal id (romacs-notmuch--identity (romacs-notmuch--get "id" mail)))
+    (error "Notmuch returned a different message identity"))
+  (list :key (cons key id)
+        :headers (romacs-notmuch--headers (romacs-notmuch--get "headers" mail))
+        :tags (romacs-notmuch--tags (romacs-notmuch--get "tags" mail))
+        :parts (romacs-notmuch--parts (romacs-notmuch--get "body" mail) 0)))
+
+(defun romacs-notmuch--quote (parts)
+  "Return plain quote text from normalized PARTS, preferring plain alternatives."
+  (mapconcat
+   (lambda (part)
+     (let ((type (plist-get part :type)) (children (plist-get part :children)))
+       (cond ((equal (plist-get part :disposition) "attachment") "")
+             ((equal type "text/plain") (or (plist-get part :content) ""))
+             ((equal type "multipart/alternative")
+              (let ((plain (catch 'plain
+                             (mapc (lambda (child)
+                                     (when (equal (plist-get child :type) "text/plain")
+                                       (throw 'plain child))) children)
+                             nil)))
+                (if plain (romacs-notmuch--quote (list plain))
+                  (romacs-notmuch--quote children))))
+             (children (romacs-notmuch--quote children))
+             ((equal type "text/html") "[HTML message not quoted]")
+             (t "")))) parts "\n"))
+
+(defun romacs-notmuch--reply (key id json)
+  "Normalize authoritative reply JSON for KEY and source ID."
+  (romacs-notmuch--object json)
+  (let* ((original (romacs-notmuch--message key id (romacs-notmuch--get "original" json)))
+         (headers (romacs-notmuch--headers (romacs-notmuch--get "reply-headers" json)))
+         (source-headers (plist-get original :headers))
+         (in-reply-to (romacs-notmuch--header "In-reply-to" headers t))
+         (references (romacs-notmuch--header "References" headers t)))
+    (unless (equal in-reply-to (concat "<" id ">"))
+      (error "Notmuch reply has a different source identity"))
+    (list :source (cons key id)
+          :headers (romacs-notmuch--map (lambda (name) (cons name (romacs-notmuch--header name headers (not (equal name "Cc")))))
+                           '("From" "To" "Cc" "Subject"))
+          :in-reply-to in-reply-to :references references
+          :quote-attribution (format "On %s, %s wrote:"
+                                     (romacs-notmuch--header "Date" source-headers)
+                                     (romacs-notmuch--header "From" source-headers t))
+          :quote-text (romacs-notmuch--quote (plist-get original :parts)))))
+
+(defun romacs-notmuch-account ()
+  "Capture a Notmuch account and return its pure request builders.
+Each builder returns (ARGV . NORMALIZER).  Commands and account identity are
+copied now, never read from ambient configuration by retained callbacks."
+  (let* ((command (romacs-notmuch--argv romacs-notmuch-command))
+         (key (list 'notmuch (romacs-notmuch--argv command))))
+    (list :name "notmuch" :key key :capabilities '(:search :tree :message :reply)
+          :from (when romacs-notmuch-from (copy-sequence (romacs-notmuch--string romacs-notmuch-from)))
+          :send (when romacs-notmuch-send-command (romacs-notmuch--argv romacs-notmuch-send-command))
+          :search
+          (lambda (query offset limit order)
+            (romacs-notmuch--string query)
+            (romacs-notmuch--number offset)
+            (romacs-notmuch--number limit)
+            (unless (and (> limit 0) (memq order '(newest oldest)))
+              (error "Invalid Notmuch search bounds or order"))
+            (cons (append (romacs-notmuch--argv command)
+                          (list "search" "--format=json" "--format-version=5" "--output=summary"
+                                (if (eq order 'oldest) "--sort=oldest-first" "--sort=newest-first")
+                                (format "--offset=%d" offset) (format "--limit=%d" limit) "--" query))
+                  (lambda (json)
+                    (romacs-notmuch--map (lambda (row) (romacs-notmuch--summary key row))
+                            (romacs-notmuch--array json)))))
+          :tree
+          (lambda (thread query)
+            (romacs-notmuch--thread-id thread)
+            (when query (romacs-notmuch--string query))
+            (cons (append (romacs-notmuch--argv command)
+                          (list "show" "--format=json" "--format-version=5" "--body=false"
+                                "--entire-thread=true" "--exclude=true" "--decrypt=false" "--"
+                                (concat "thread:" thread (if query (concat " and (" query ")") ""))))
+                  (lambda (json) (romacs-notmuch--forest key json))))
+          :message
+          (lambda (id)
+            (let ((id (copy-sequence (romacs-notmuch--identity id))))
+              (cons (append (romacs-notmuch--argv command)
+                            (list "show" "--format=json" "--format-version=5" "--part=0"
+                                  "--exclude=false" "--body=true" "--decrypt=false" "--"
+                                  (romacs-notmuch-id-term id)))
+                    (lambda (json) (romacs-notmuch--message key id json)))))
+          :reply
+          (lambda (id all-p)
+            (let ((id (copy-sequence (romacs-notmuch--identity id))))
+              (cons (append (romacs-notmuch--argv command)
+                            (list "reply" "--format=json" "--format-version=5"
+                                  (if all-p "--reply-to=all" "--reply-to=sender")
+                                  "--decrypt=false" "--" (romacs-notmuch-id-term id)))
+                    (lambda (json) (romacs-notmuch--reply key id json))))))))
+
+(defun notmuch ()
+  "Search the inbox without changing the index."
+  (interactive)
   (notmuch-search "tag:inbox"))
 
 (defun notmuch-search (query)
-  "Search QUERY; show up to 50 newest threads.  Tags remain unchanged."
+  "Search QUERY using a freshly captured Notmuch account."
   (interactive (list (read-string "Notmuch search: " nil 'romacs-notmuch-search-history)))
-  (let ((return (current-buffer)))
-    (switch-to-buffer (get-buffer-create (generate-new-buffer-name "*notmuch-search*")))
-    (romacs-notmuch-initialize 'romacs-notmuch-search-mode "Notmuch Search" romacs-notmuch-search-map)
-    (setq romacs-notmuch-query query romacs-notmuch-return-buffer return buffer-read-only t)
-    (romacs-notmuch-refresh)))
+  (romacs-mail-search (romacs-notmuch-account) query))
 
-(defun romacs-notmuch-refresh ()
-  "Refresh this search asynchronously, retaining buffer ownership."
+(defun notmuch-tree ()
+  "Open a tree retaining the current mail query and message identity."
   (interactive)
-  (unless (eq major-mode 'romacs-notmuch-search-mode) (romacs-notmuch-user-error "Not a mail search"))
-  (romacs-notmuch-cancel)
-  (setq romacs-notmuch-owner (list romacs-notmuch-query))
-  (let ((buffer (current-buffer)) (owner romacs-notmuch-owner))
-    (setq romacs-notmuch-job
-          (romacs-process-start
-           (append romacs-notmuch-command
-                   (list "search" "--format=json" "--limit=50" "--sort=newest-first" "--" romacs-notmuch-query))
-           "" default-directory 30
-           (lambda (output)
-             (when (romacs-notmuch-owned-p buffer owner 'romacs-notmuch-search-mode)
-               (with-current-buffer buffer
-                 (setq romacs-notmuch-job nil)
-                 (condition-case err
-                     (let ((rows (romacs-notmuch-result output)) (positions nil))
-                       (let ((inhibit-read-only t))
-                         (widen) (erase-buffer)
-                         (dolist (row rows)
-                           (setq positions (cons (cons (point) (romacs-notmuch-get "thread" row)) positions))
-                           (insert (romacs-notmuch-search-line row)))
-                         (insert (if (= (length rows) 50) "Showing 50 threads; narrow the search for more.\n" "End of search results.\n")))
-                       (setq romacs-notmuch-rows (nreverse positions))
-                       (goto-char (point-min)) (set-buffer-modified-p nil))
-                   (error (romacs-notmuch-text (format "Search failed: %s\n" (romacs-notmuch-clean (format "%s" err) t)))))
-                 (not (null (get-buffer-window buffer))))))))
-    (unless romacs-notmuch-rows (romacs-notmuch-text "Searching…\n"))))
+  (romacs-mail-tree-current-query))
 
-(defun romacs-notmuch-next () (interactive) (forward-line 1))
-(defun romacs-notmuch-previous () (interactive) (forward-line -1))
-(defun romacs-notmuch-quit () (interactive)
-  (if (buffer-live-p romacs-notmuch-return-buffer)
-      (switch-to-buffer romacs-notmuch-return-buffer)
-    (switch-to-buffer "*scratch*")))
-
-(defun romacs-notmuch-collect (node &optional depth)
-  "Flatten Notmuch's thread tuples, not message body parts."
-  (when (> (or depth 0) 64) (error "Mail thread nesting is too deep"))
-  (cond ((and (listp node) (assoc "id" node)) (list node))
-        ((listp node)
-         (let ((messages nil))
-           (dolist (child node)
-             (setq messages (append messages (romacs-notmuch-collect child (1+ (or depth 0))))))
-           messages))))
-
-(defun romacs-notmuch-body (parts &optional depth)
-  "Render inert plain MIME parts.  HTML, attachments and encrypted parts stay inert."
-  (when (> (or depth 0) 32) (error "MIME nesting is too deep"))
-  (mapconcat
-   (lambda (part)
-     (let ((type (romacs-notmuch-get "content-type" part)) (content (romacs-notmuch-get "content" part)))
-       (cond ((equal (romacs-notmuch-get "content-disposition" part) "attachment")
-              (concat "[Attachment: " (romacs-notmuch-clean (romacs-notmuch-get "filename" part) t) "]\n"))
-             ((equal type "text/plain") (romacs-notmuch-clean content))
-             ((and (stringp type) (romacs-notmuch-prefix-p "multipart/" type) (listp content))
-              (romacs-notmuch-body content (1+ (or depth 0))))
-             (t (concat "[" (romacs-notmuch-clean type t) " not displayed]\n"))))) parts "\n"))
-
-(defun romacs-notmuch-message-text (mail)
-  (let ((headers (romacs-notmuch-get "headers" mail)))
-    (concat (propertize (romacs-notmuch-clean (romacs-notmuch-get "From" headers) t) 'face 'notmuch-message-summary)
-            " (" (propertize (mapconcat (lambda (tag) (romacs-notmuch-clean tag t)) (romacs-notmuch-get "tags" mail) " ") 'face 'notmuch-tag) ")\n"
-            "Subject: " (romacs-notmuch-clean (romacs-notmuch-get "Subject" headers) t) "\n"
-            "To: " (romacs-notmuch-clean (romacs-notmuch-get "To" headers) t) "\n"
-            "Date: " (romacs-notmuch-clean (romacs-notmuch-get "Date" headers) t) "\n\n"
-            (romacs-notmuch-body (romacs-notmuch-get "body" mail)) "\n\n")))
-
-(defun romacs-notmuch-open ()
-  "Open the exact thread stored at this row, without marking messages read."
+(defun notmuch-tree-from-show-current-query ()
+  "Open a tree retaining the current message and query context."
   (interactive)
-  (let ((thread (cdr (assoc (line-beginning-position) romacs-notmuch-rows)))
-        (return (current-buffer)))
-    (unless thread (romacs-notmuch-user-error "No thread on this row"))
-    (switch-to-buffer (get-buffer-create (generate-new-buffer-name "*notmuch-show*")))
-    (romacs-notmuch-initialize 'romacs-notmuch-show-mode "Notmuch Show" romacs-notmuch-show-map)
-    (setq buffer-read-only t romacs-notmuch-return-buffer return)
-    (romacs-notmuch-text "Loading message…\n")
-    (let ((buffer (current-buffer)) (owner romacs-notmuch-owner))
-      (setq romacs-notmuch-job
-            (romacs-process-start
-             (append romacs-notmuch-command (list "show" "--format=json" "--body=true" "--decrypt=false" "--" (concat "thread:" thread)))
-             "" default-directory 30
-             (lambda (output)
-               (when (romacs-notmuch-owned-p buffer owner 'romacs-notmuch-show-mode)
-                 (with-current-buffer buffer
-                   (setq romacs-notmuch-job nil)
-                   (condition-case err
-                       (progn (setq romacs-notmuch-messages (romacs-notmuch-collect (romacs-notmuch-result output)))
-                              (romacs-notmuch-text (mapconcat 'romacs-notmuch-message-text romacs-notmuch-messages "")))
-                     (error (romacs-notmuch-text (format "Message failed: %s\n" (romacs-notmuch-clean (format "%s" err) t)))))
-                   (not (null (get-buffer-window buffer)))))))))))
-
-(defvar romacs-notmuch-compose-map
-  (let ((map (make-sparse-keymap)))
-    (define-key map [3 3] 'romacs-notmuch-send)
-    (define-key map [3 19] 'romacs-notmuch-send)
-    (define-key map [3 11] 'romacs-notmuch-abort) map))
+  (romacs-mail-tree-current-query))
 
 (defun notmuch-mua-new-mail (&optional to subject)
-  "Compose editable plain-text mail.  C-c C-c submits; C-c C-k aborts."
+  "Compose editable plain-text mail addressed to TO with SUBJECT."
   (interactive)
-  (switch-to-buffer (get-buffer-create (generate-new-buffer-name "*unsent mail*")))
-  (romacs-notmuch-initialize 'romacs-notmuch-compose-mode "Notmuch Compose" romacs-notmuch-compose-map)
-  (setq buffer-read-only nil)
-  (insert "From: " (or romacs-notmuch-from (and (boundp 'user-mail-address) user-mail-address) "")
-          "\nTo: " (romacs-notmuch-clean to t) "\nSubject: " (romacs-notmuch-clean subject t)
-          "\n--text follows this line--\n")
-  (set-buffer-modified-p t))
+  (romacs-mail-compose (romacs-notmuch-account) to subject))
+
+(defun notmuch-show-reply ()
+  "Reply to all recipients of the exact current message."
+  (interactive)
+  (romacs-mail-reply t))
+
+(defun notmuch-show-reply-sender ()
+  "Reply to the sender of the exact current message."
+  (interactive)
+  (romacs-mail-reply nil))
 
 (defun romacs-notmuch-reply ()
-  "Compose a plain reply to the first displayed message."
+  "Reply to the sender of the exact current message."
   (interactive)
-  (let* ((mail (car romacs-notmuch-messages)) (headers (romacs-notmuch-get "headers" mail))
-         (subject (or (romacs-notmuch-get "Subject" headers) ""))
-         (body (romacs-notmuch-body (romacs-notmuch-get "body" mail)))
-         (id (romacs-notmuch-get "id" mail)))
-    (unless mail (romacs-notmuch-user-error "No message to reply to"))
-    (notmuch-mua-new-mail (or (romacs-notmuch-get "Reply-To" headers) (romacs-notmuch-get "From" headers))
-                          (if (romacs-notmuch-prefix-p "Re:" subject) subject (concat "Re: " subject)))
-    (setq romacs-notmuch-reply-id id)
-    (insert "\n" (concat "> " (mapconcat (lambda (c) (if (= c 10) "\n> " (char-to-string c))) body "")) "\n")))
-
-(defun romacs-notmuch-message ()
-  "Validate this draft and return its frozen RFC822 submission text."
-  (let ((text (buffer-string)))
-    (unless (string-match "\n--text follows this line--\n" text) (romacs-notmuch-user-error "Mail separator is missing"))
-    (let ((headers (substring text 0 (match-beginning 0))) (body (substring text (match-end 0))))
-      (dolist (name '("From" "To" "Subject"))
-        (unless (string-match (concat "^" name ": [^\n\r]+$") headers)
-          (romacs-notmuch-user-error "Missing or invalid %s header" name)))
-      (when (string-match "\r" headers) (romacs-notmuch-user-error "Invalid carriage return in headers"))
-      (when (and romacs-notmuch-reply-id
-                 (string-match "[<>\000-\040\177]" romacs-notmuch-reply-id))
-        (romacs-notmuch-user-error "Invalid reply message identity"))
-      (concat headers
-              "\nDate: " (format-time-string "%a, %d %b %Y %T +0000" nil t)
-              "\nMessage-ID: <" (make-temp-name "romacs-") "@localhost>"
-              (if romacs-notmuch-reply-id (concat "\nIn-Reply-To: <" romacs-notmuch-reply-id ">") "")
-              "\nUser-Agent: Romacs notmuch 0.1\nMIME-Version: 1.0\nContent-Type: text/plain; charset=utf-8\nContent-Transfer-Encoding: 8bit\n\n" body))))
-
-(defun romacs-notmuch-settle-send (buffer owner output)
-  "Settle submission ownership independently from presentation ownership."
-  (when (and (buffer-live-p buffer)
-             (with-current-buffer buffer (eq romacs-notmuch-owner owner)))
-    (with-current-buffer buffer
-      (setq romacs-notmuch-job nil)
-      (if (not (romacs-notmuch-owned-p buffer owner 'romacs-notmuch-compose-mode))
-          (progn
-            (setq romacs-notmuch-send-state 'uncertain)
-            (message "Mail submission settled after its draft was retired; check transport receipts")
-            nil)
-        (if (and (eq (car output) 0) (not (nth 3 output)))
-            (progn (setq romacs-notmuch-send-state 'sent mode-line-format '("%b" " | Mail sent"))
-                   (set-buffer-modified-p nil) (message "Mail transport confirmed submission and Sent storage"))
-          (setq romacs-notmuch-send-state 'uncertain buffer-read-only nil
-                mode-line-format '("%b" " | Mail submission uncertain — draft retained"))
-          (message "Mail submission failed or uncertain; draft retained. Check transport receipts before retrying"))
-        (not (null (get-buffer-window buffer)))))))
-
-(defun romacs-notmuch-send ()
-  "Submit once through the configured transport, preserving uncertain drafts."
-  (interactive)
-  (unless (eq major-mode 'romacs-notmuch-compose-mode) (romacs-notmuch-user-error "Not a mail draft"))
-  (unless romacs-notmuch-send-command (romacs-notmuch-user-error "Set romacs-notmuch-send-command before sending"))
-  (when romacs-notmuch-send-state (romacs-notmuch-user-error "This draft already has a submission; reconcile it before sending again"))
-  (let ((text (romacs-notmuch-message)) (buffer (current-buffer)) (owner romacs-notmuch-owner))
-    (when (equal (read-string "Submit this message? Type yes to send: ") "yes")
-      (setq romacs-notmuch-job
-            (romacs-process-start
-             romacs-notmuch-send-command text default-directory 120
-             (lambda (output) (romacs-notmuch-settle-send buffer owner output))))
-      (setq romacs-notmuch-send-state 'sending buffer-read-only t
-            mode-line-format '("%b" " | Sending mail…")))))
-
-(defun romacs-notmuch-abort ()
-  "Retain a pending submission; otherwise use the ordinary dirty-buffer consent."
-  (interactive)
-  (if (eq romacs-notmuch-send-state 'sending)
-      (romacs-notmuch-user-error "Mail is being submitted; wait for the transport result")
-    (romacs-gui-kill-buffer)))
+  (notmuch-show-reply-sender))
 
 (provide 'romacs-notmuch)
 ;;; romacs-notmuch.el ends here

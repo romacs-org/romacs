@@ -25,18 +25,22 @@ CALLBACK receives (STATUS STDOUT STDERR ERROR) on evaluator-side completion."
   (romacs--process-forget id))
 
 (defun romacs-process-dispatch-ready ()
-  "Apply completed callbacks; return non-nil only for visible changes."
-  (let ((changed nil))
+  "Apply completed callbacks; return non-nil only for visible changes.
+A callback's quit propagates after the other acknowledged completions settle."
+  (let ((changed nil) (quit-condition nil))
     (dolist (id (romacs--process-ready))
       (let ((entry (assq id romacs-process-handlers)))
         (when entry
           (setq romacs-process-handlers (delq entry romacs-process-handlers))
           (unwind-protect
               (condition-case err
-                  (when (funcall (cdr entry) (romacs--process-result id))
-                    (setq changed t))
-                (error (message "Background command: %s" err)))
+                  (save-current-buffer
+                    (when (funcall (cdr entry) (romacs--process-result id))
+                      (setq changed t)))
+                (error (message "Background command: %s" err))
+                (quit (setq quit-condition err)))
             (romacs--process-forget id)))))
+    (when quit-condition (signal (car quit-condition) (cdr quit-condition)))
     changed))
 
 (provide 'romacs-process)

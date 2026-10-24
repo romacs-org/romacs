@@ -23,6 +23,41 @@ Shared by interactive and programmatic file visits and buffer switches."
     (set-window-point (selected-window) (point))
     buffer))
 
+(defun romacs-display-buffer-paired (buffer anchor paired fraction)
+  "Display BUFFER below ANCHOR without selecting its window.
+Reuse live ordinary PAIRED when distinct from ANCHOR; the caller validates
+its buffer ownership.  Otherwise keep FRACTION of ANCHOR above a new pane,
+with at least four text lines and a mode line each, or use ANCHOR itself.
+Return the displaying window."
+  (unless (buffer-live-p buffer)
+    (signal 'error (list "Cannot display a dead buffer" buffer)))
+  (unless (and (window-live-p anchor) (not (window-minibuffer-p anchor)))
+    (signal 'error (list "Cannot pair an invalid anchor window" anchor)))
+  (unless (and (numberp fraction) (> fraction 0) (< fraction 1))
+    (signal 'error (list "Pair fraction must be between zero and one" fraction)))
+  (let ((target
+         (if (and paired (window-live-p paired)
+                  (not (window-minibuffer-p paired)) (not (eq paired anchor)))
+             paired
+           (let* ((height (window-pixel-height anchor))
+                  (minimum (* 5 (frame-char-height (window-frame anchor))))
+                  (top (max minimum (min (- height minimum)
+                                         (round (* height fraction))))))
+             (if (< height (* 2 minimum)) anchor
+               (let ((window-combination-limit t))
+                 (set-window-new-pixel anchor top)
+                 (split-window-internal anchor (- height top) nil (- 1.0 fraction))))))))
+    (set-window-buffer target buffer)
+    target))
+
+(defun romacs-delete-paired-window (window)
+  "Delete live ordinary nonsole WINDOW, returning non-nil if deleted.
+The caller validates its buffer ownership before calling."
+  (when (and window (window-live-p window)
+             (not (window-minibuffer-p window)) (window-parent window))
+    (romacs-gui-delete window)
+    t))
+
 (defun romacs-buffer-default ()
   "Return the last live displayed buffer, or another ordinary live buffer."
   (if (and (buffer-live-p romacs-buffer--previous)
