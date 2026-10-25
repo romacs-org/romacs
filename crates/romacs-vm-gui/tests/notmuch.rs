@@ -87,30 +87,33 @@ impl romacs_vm::HostInput for Confirm {
     fn next_event(&mut self) -> Result<romacs_vm::HostEvent,String> { self.0.pop_front().ok_or_else(|| "confirmation exhausted".into()) }
 }
 #[test]
-fn compose_submits_exact_bytes_once_and_keeps_uncertain_drafts() {
+fn compose_submits_exact_bytes_once_and_saves_failed_drafts() {
     let path = std::env::temp_dir().join(format!("romacs-submission-{}", std::process::id()));
     let mut vm = setup();
+    let drafts = path.with_extension("drafts");
+    vm.eval_source(&format!("(setq romacs-mail-draft-directory {})", quote(&format!("{}/", drafts.display())))).unwrap();
     vm.eval_source(&format!(r#"(setq romacs-notmuch-from "Fixture <fixture@example.invalid>"
         romacs-notmuch-send-command (list "/bin/sh" "-c" "cat > \"$1\"" "fixture" {}))
         (notmuch-mua-new-mail "hermes@example.invalid" "Test λ") (insert "Body λ\n")"#,quote(&path.to_string_lossy()))).unwrap();
+    assert_eq!(printed(&mut vm, "(string-match \"User-Agent:\" (buffer-string))"), "nil", "CLIENT_HEADER_DOES_NOT_CLUTTER_COMPOSE");
     vm.set_host_input(Some(Box::new(Confirm("yes\r".chars().map(|c|romacs_vm::HostEvent::Key(romacs_vm::CommandEvent::Character(c as i64))).collect()))));
-    vm.eval_source("(romacs-mail-send)").unwrap();
-    assert_eq!(printed(&mut vm,"(list romacs-mail-send-state buffer-read-only)"),"(sending t)","PENDING_SUBMISSION_FREEZES_ITS_WIRE_SNAPSHOT");
+    vm.eval_source("(setq submitted-buffer (current-buffer)) (romacs-mail-send)").unwrap();
+    assert_eq!(printed(&mut vm,"(with-current-buffer submitted-buffer (list romacs-mail-send-state buffer-read-only))"),"(sending t)","PENDING_SUBMISSION_FREEZES_ITS_WIRE_SNAPSHOT");
     settle(&mut vm);
     let text = std::fs::read_to_string(&path).unwrap();
     assert!(text.contains("Subject: Test λ\n") && text.ends_with("\n\nBody λ\n"));
     assert!(!text.contains("--text follows this line--"));
     assert_eq!(text.matches("User-Agent: Romacs notmuch 0.1\n").count(), 1, "MAIL_IDENTIFIES_ROMACS_CLIENT");
-    assert_eq!(printed(&mut vm, "(string-match \"User-Agent:\" (buffer-string))"), "nil", "CLIENT_HEADER_DOES_NOT_CLUTTER_COMPOSE");
-    assert_eq!(printed(&mut vm,"(list romacs-mail-send-state (buffer-modified-p))"),"(sent nil)");
+    assert_eq!(printed(&mut vm,"(buffer-live-p submitted-buffer)"),"nil","VERIFIED_SEND_REMOVES_ITS_COMPOSE_BUFFER");
     assert_eq!(printed(&mut vm,"(condition-case e (romacs-mail-send) (user-error 'refused))"),"refused","SUBMISSION_CANNOT_REPEAT");
     vm.eval_source("(setq romacs-notmuch-send-command '(\"/bin/sh\" \"-c\" \"cat >/dev/null; exit 7\")) (notmuch-mua-new-mail \"hermes@example.invalid\" \"Failure\") (insert \"retain me\")").unwrap();
     vm.set_host_input(Some(Box::new(Confirm("yes\r".chars().map(|c|romacs_vm::HostEvent::Key(romacs_vm::CommandEvent::Character(c as i64))).collect()))));
-    vm.eval_source("(romacs-mail-send)").unwrap();
+    vm.eval_source("(setq failed-buffer (current-buffer)) (romacs-mail-send)").unwrap();
     settle(&mut vm);
-    assert_eq!(printed(&mut vm,"(list romacs-mail-send-state buffer-read-only (buffer-modified-p))"),"(uncertain nil t)");
+    assert_eq!(printed(&mut vm,"(with-current-buffer failed-buffer (list romacs-mail-send-state buffer-read-only (buffer-modified-p) (not (null (file-attributes romacs-mail-draft-file)))))"),"(nil nil t t)");
     assert_eq!(printed(&mut vm,"(condition-case e (romacs-mail-send) (user-error 'refused))"),"refused");
     std::fs::remove_file(path).unwrap();
+    std::fs::remove_dir_all(drafts).unwrap();
 }
 
 
@@ -121,7 +124,7 @@ fn retired_compose_settles_without_touching_the_new_document() {
       romacs-notmuch-send-command '("/bin/sh" "-c" "cat >/dev/null"))
       (notmuch-mua-new-mail "hermes@example.invalid" "Retire") (insert "Draft")"#).unwrap();
     vm.set_host_input(Some(Box::new(Confirm("yes\r".chars().map(|c|romacs_vm::HostEvent::Key(romacs_vm::CommandEvent::Character(c as i64))).collect()))));
-    vm.eval_source("(romacs-mail-send) (setq buffer-file-name \"/new-owner\") (let ((inhibit-read-only t)) (erase-buffer) (insert \"new document\")) (goto-char 3) (setq tick (buffer-chars-modified-tick))").unwrap();
+    vm.eval_source("(setq retired-buffer (current-buffer)) (romacs-mail-send) (set-buffer retired-buffer) (setq buffer-file-name \"/new-owner\") (let ((inhibit-read-only t)) (erase-buffer) (insert \"new document\")) (goto-char 3) (setq tick (buffer-chars-modified-tick))").unwrap();
     settle(&mut vm);
     assert_eq!(printed(&mut vm,"(list (buffer-string) (point) (= tick (buffer-chars-modified-tick)) (eq romacs-mail-send-state 'sending))"),"(\"new document\" 3 t nil)","RETIRED_SEND_SETTLES_WITHOUT_REWRITING_NEW_OWNER");
 }

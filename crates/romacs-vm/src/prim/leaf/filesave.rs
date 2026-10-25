@@ -1,6 +1,12 @@
 use super::*;
 
 impl Leaf<'_> {
+    pub fn filesave_mkdir(&self, path: &str) -> std::io::Result<()> {
+        std::fs::create_dir(path)
+    }
+    pub fn filesave_unlink(&self, path: &str) -> std::io::Result<()> {
+        std::fs::remove_file(path)
+    }
     pub fn filesave_access(&self, path: &str, mode: i32) -> std::io::Result<()> {
         let path = std::ffi::CString::new(path).map_err(|_| std::io::Error::from_raw_os_error(libc::EINVAL))?;
         if unsafe { libc::faccessat(libc::AT_FDCWD, path.as_ptr(), mode, libc::AT_EACCESS) } == 0 { Ok(()) }

@@ -116,19 +116,21 @@ fn tagged_arithmetic_checks_both_sign_boundaries() {
     ] {
         assert_eq!(run(form), expected);
     }
-    for form in [
-        json!(["+", hi, 1]),
-        json!(["+", lo, -1]),
-        json!(["-", lo, 1]),
-        json!(["-", hi, -1]),
-        json!(["*", lo, -1]),
-        json!(["*", hi, hi]),
-        json!(["1-", lo]),
-        json!(["1+", hi]),
+    for (form, expected) in [
+        (json!(["+", hi, 1]), "2305843009213693952"),
+        (json!(["+", lo, -1]), "-2305843009213693953"),
+        (json!(["-", lo, 1]), "-2305843009213693953"),
+        (json!(["-", hi, -1]), "2305843009213693952"),
+        (json!(["*", lo, -1]), "2305843009213693952"),
+        (json!(["*", hi, hi]), "5316911983139663487003542222693990401"),
+        (json!(["1-", lo]), "-2305843009213693953"),
+        (json!(["1+", hi]), "2305843009213693952"),
     ] {
         let mut vm = Vm::new();
+        let context = form.to_string();
         let f = vm.compile(&Form::from_json(form).unwrap()).unwrap();
-        assert!(vm.execute(f).is_err());
+        let actual = vm.execute(f).unwrap().display().unwrap();
+        assert_eq!(actual, expected, "compiled overflow form {context}");
     }
 }
 

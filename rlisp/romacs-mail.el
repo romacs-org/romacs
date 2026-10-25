@@ -10,6 +10,9 @@
 ;;; Code:
 
 (defvar romacs-mail-runner 'romacs-process-start)
+(defvar romacs-mail-draft-directory "~/.local/state/romacs/drafts/"
+  "Directory containing drafts saved only after failed or unknown submissions.")
+(defvar romacs-mail-draft-file nil)
 (defvar romacs-mail-account nil)
 (defvar romacs-mail-owner nil)
 (defvar romacs-mail-job nil)
@@ -77,7 +80,7 @@
                   romacs-mail-rows romacs-mail-thread romacs-mail-message romacs-mail-parent
                   romacs-mail-children romacs-mail-active-key romacs-mail-pair-window
                   romacs-mail-pair-buffer romacs-mail-tree-window romacs-mail-envelope
-                  romacs-mail-send-state))
+                  romacs-mail-send-state romacs-mail-draft-file))
     (set (make-local-variable name) nil))
   (setq romacs-mail-account account romacs-mail-owner (list mode) romacs-mail-parent parent
         major-mode mode mode-name label buffer-file-name nil)
@@ -393,6 +396,21 @@
                                             "> " (mapconcat (lambda (c) (if (= c 10) "\n> " (char-to-string c)))
                                                               (romacs-mail-clean (plist-get envelope :quote-text)) "") "\n\n"))))))))
 
+(defun romacs-mail-header-text (name value)
+  "Return a header for NAME and VALUE using GNU's mail formatter."
+  (if value
+      (with-temp-buffer
+        (funcall mail-header-format-function name value)
+        (buffer-string))
+    ""))
+
+(defun romacs-mail-recipient (text)
+  "Extract the To field from draft TEXT with GNU's header parser."
+  (with-temp-buffer
+    (insert text)
+    (goto-char (point-min))
+    (cdr (assq 'to (mail-header-extract)))))
+
 (defun romacs-mail-freeze (text envelope date message-id)
   "Return RFC text from TEXT and ENVELOPE using explicit DATE and MESSAGE-ID."
   (unless (string-match "\n--text follows this line--\n" text) (romacs-mail-error "Mail separator is missing"))
@@ -404,11 +422,11 @@
     (dolist (name '("Date" "Message-ID" "In-Reply-To" "References" "User-Agent" "MIME-Version" "Content-Type" "Content-Transfer-Encoding"))
       (when (string-match (concat "^" name ":") headers) (romacs-mail-error (format "Reserved %s header" name))))
     (dolist (value (list (plist-get envelope :in-reply-to) (plist-get envelope :references)))
-      (when (and value (string-match "[\000-\037\177]" value)) (romacs-mail-error "Invalid reply threading header")))
-    (concat headers "\nDate: " date "\nMessage-ID: <" message-id ">"
-            (if (plist-get envelope :in-reply-to) (concat "\nIn-Reply-To: " (plist-get envelope :in-reply-to)) "")
-            (if (plist-get envelope :references) (concat "\nReferences: " (plist-get envelope :references)) "")
-            "\nUser-Agent: Romacs notmuch 0.1\nMIME-Version: 1.0\nContent-Type: text/plain; charset=utf-8\nContent-Transfer-Encoding: 8bit\n\n" body)))
+      (when (and value (string-match "[\000-\010\012-\037\177]" value)) (romacs-mail-error "Invalid reply threading header")))
+    (concat headers "\nDate: " date "\nMessage-ID: <" message-id ">\n"
+            (romacs-mail-header-text 'In-Reply-To (plist-get envelope :in-reply-to))
+            (romacs-mail-header-text 'References (plist-get envelope :references))
+            "User-Agent: Romacs notmuch 0.1\nMIME-Version: 1.0\nContent-Type: text/plain; charset=utf-8\nContent-Transfer-Encoding: 8bit\n\n" body)))
 
 (defun romacs-mail-message ()
   "Freeze the current draft for one explicit submission."
@@ -416,37 +434,100 @@
                      (format-time-string "%a, %d %b %Y %T +0000" nil t)
                      (concat (make-temp-name "romacs-") "@localhost")))
 
-(defun romacs-mail-settle-send (buffer owner output)
-  "Settle submission ownership without rewriting a retired document."
-  (when (and (buffer-live-p buffer) (with-current-buffer buffer (eq romacs-mail-owner owner)))
-    (with-current-buffer buffer
-      (setq romacs-mail-job nil)
-      (if (not (romacs-mail-owned-p buffer owner 'romacs-mail-compose-mode))
-          (progn (setq romacs-mail-send-state 'uncertain)
-                 (message "Mail submission settled after its draft was retired; check transport receipts") nil)
-        (if (and (eq (car output) 0) (not (nth 3 output)))
-            (progn (setq romacs-mail-send-state 'sent mode-line-format '("%b" " | Mail sent"))
-                   (set-buffer-modified-p nil) (message "Mail transport confirmed submission and Sent storage"))
-          (setq romacs-mail-send-state 'uncertain buffer-read-only nil
-                mode-line-format '("%b" " | Mail submission uncertain — draft retained"))
-          (message "Mail submission failed or uncertain; draft retained. Check receipts before retrying"))
-        (not (null (get-buffer-window buffer)))))))
+(defun romacs-mail-send-outcome (output)
+  "Classify OUTPUT as sent, accepted, failed or unknown."
+  (cond ((nth 3 output) 'unknown)
+        ((eq (car output) 0) 'sent)
+        ((eq (car output) 75) 'accepted)
+        ((eq (car output) 76) 'unknown)
+        (t 'failed)))
+
+(defun romacs-mail-notify (text)
+  "Publish TEXT in the message log and the GUI echo area."
+  (message "%s" text)
+  (when (fboundp 'romacs-gui-echo) (romacs-gui-echo text))
+  t)
+
+(defun romacs-mail-save-failed-draft (text file)
+  "Save TEXT to FILE or one new private draft; return its absolute name."
+  (let* ((directory (expand-file-name romacs-mail-draft-directory))
+         (path (or file (expand-file-name (concat (make-temp-name "mail-") ".draft") directory))))
+    (make-directory directory t)
+    (set-file-modes directory #o700)
+    (write-region text nil path nil 'silent nil (unless file 'excl))
+    (set-file-modes path #o600)
+    path))
+
+(defun romacs-mail-settle-send (buffer owner output &optional submission)
+  "Settle OUTPUT once, without selecting or changing a successor document.
+SUBMISSION retains the recipient, exact draft and account independently of BUFFER."
+  (let ((submission (or submission (list nil :to "recipient"))))
+    (unless (car submission)
+      (setcar submission t)
+      (let* ((data (cdr submission)) (to (plist-get data :to))
+             (outcome (romacs-mail-send-outcome output))
+             (current-owner (romacs-mail-owned-p buffer owner 'romacs-mail-compose-mode))
+             (owned (and current-owner
+                         (or (not (plist-get data :draft))
+                             (with-current-buffer buffer (equal (buffer-string) (plist-get data :draft))))))
+             (file (plist-get data :file)))
+        (when (and (buffer-live-p buffer) (with-current-buffer buffer (eq romacs-mail-owner owner)))
+          (with-current-buffer buffer
+            (setq romacs-mail-job nil)
+            (cond ((not current-owner) (setq romacs-mail-send-state outcome))
+                  ((not owned) (setq buffer-read-only nil romacs-mail-send-state nil)))))
+        (if (memq outcome '(sent accepted))
+            (progn
+              (when (and file (file-attributes file)) (delete-file file))
+              (when owned
+                (with-current-buffer buffer
+                  (setq romacs-mail-send-state 'sent)
+                  (set-buffer-modified-p nil))
+                (kill-buffer buffer))
+              (romacs-mail-notify
+               (if (eq outcome 'sent) (format "Email to %s sent successfully" to)
+                 (format "Email to %s sent; Sent copy verification failed" to))))
+          (let* ((saved nil)
+                 (clean (romacs-mail-clean
+                         (or (nth 3 output) (and (not (equal (nth 2 output) "")) (nth 2 output))
+                             "Transport failed") t))
+                 (detail (if (string-match " +\\'" clean) (substring clean 0 (match-beginning 0)) clean)))
+            (condition-case err
+                (setq saved (romacs-mail-save-failed-draft (or (plist-get data :draft) "") file))
+              (error (setq detail (format "%s; saving draft failed: %s" detail err))))
+            (when owned
+              (with-current-buffer buffer
+                (setq buffer-read-only nil romacs-mail-job nil romacs-mail-draft-file saved
+                      romacs-mail-send-state (when (eq outcome 'unknown) 'uncertain)
+                      mode-line-format '("%b" " | Mail Draft"))))
+            (romacs-mail-notify
+             (format "Email to %s %s: %s; %s" to
+                     (if (eq outcome 'unknown) "delivery unconfirmed" "failed") detail
+                     (if saved (concat "saved as draft: " saved)
+                       (if (buffer-live-p buffer) "could not save; draft buffer retained"
+                         "could not save draft"))))))))))
 
 (defun romacs-mail-send ()
-  "Submit once after confirmation, retaining uncertain drafts without retry."
+  "Submit once, hide the draft, and settle through the existing background runner."
   (interactive)
   (unless (eq major-mode 'romacs-mail-compose-mode) (romacs-mail-error "Not a mail draft"))
   (unless (plist-get romacs-mail-account :send) (romacs-mail-error "Configure the account mail transport before sending"))
-  (when romacs-mail-send-state (romacs-mail-error "This draft already has a submission; reconcile it before sending again"))
-  (let ((text (romacs-mail-message)) (draft (buffer-string))
-        (buffer (current-buffer)) (owner romacs-mail-owner) (transport (plist-get romacs-mail-account :send)))
-    (when (equal (read-string "Submit this message? Type yes to send: ") "yes")
+  (when (eq romacs-mail-send-state 'sending) (romacs-mail-error "This draft is already being submitted"))
+  (let* ((draft (buffer-string)) (text (romacs-mail-message))
+         (buffer (current-buffer)) (owner romacs-mail-owner)
+         (parent romacs-mail-parent) (transport (plist-get romacs-mail-account :send))
+         (submission (list nil :to (romacs-mail-recipient draft) :draft draft :file romacs-mail-draft-file)))
+    (when (equal (read-string (if (eq romacs-mail-send-state 'uncertain)
+                                  "Previous delivery unconfirmed. Type yes to send again: "
+                                "Submit this message? Type yes to send: ")) "yes")
       (unless (and (romacs-mail-owned-p buffer owner 'romacs-mail-compose-mode) (equal draft (buffer-string)))
         (romacs-mail-error "The draft changed during confirmation"))
       (setq romacs-mail-job
-            (romacs-process-start transport text default-directory 120
-                                  (lambda (output) (romacs-mail-settle-send buffer owner output))))
-      (setq romacs-mail-send-state 'sending buffer-read-only t mode-line-format '("%b" " | Sending mail…")))))
+            (funcall romacs-mail-runner transport text default-directory 120
+                     (lambda (output) (romacs-mail-settle-send buffer owner output submission))))
+      (setq romacs-mail-send-state 'sending buffer-read-only t mode-line-format '("%b" " | Sending mail…"))
+      (when (eq (window-buffer (selected-window)) buffer)
+        (switch-to-buffer (if (buffer-live-p parent) parent "*scratch*"))))))
 
 (defun romacs-mail-abort ()
   "Kill this draft when requested, without imposing a mail-specific veto."

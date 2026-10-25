@@ -37,8 +37,10 @@ struct Fixture {
 }
 impl Fixture {
     fn new(name: &str) -> Self {
-        let root =
-            std::env::temp_dir().join(format!("romacs-find-file-{}-{name}", std::process::id()));
+        Self::in_directory(std::env::temp_dir(), name)
+    }
+    fn in_directory(directory: PathBuf, name: &str) -> Self {
+        let root = directory.join(format!("romacs-find-file-{}-{name}", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
         Self { root }
     }
@@ -227,9 +229,9 @@ fn find_file_interactive_completion_and_abort() {
 
 #[test]
 fn find_file_tilde_errors_and_hooks() {
-    let fixture = Fixture::new("errors");
-    let mut vm = fixture.vm();
     let home = std::env::var("HOME").unwrap();
+    let fixture = Fixture::in_directory(PathBuf::from(&home), "errors");
+    let mut vm = fixture.vm();
     let relative = fixture.root.strip_prefix(&home).unwrap();
     let filename = format!("~/{}/tilde.txt", relative.display());
     std::fs::write(fixture.root.join("tilde.txt"), "home").unwrap();

@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "a55fc8d9559e1ef129c454377666d703da46e835190298cd78f1e9dab980c372",
+  "source_fingerprint": "a63c2777f706a87c71029ac22bf172cc11aff21891c27709d40d911ff267a973",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 579,
-  "parsed_vm2_only": 579
+  "parsed_total": 581,
+  "parsed_vm2_only": 581
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -813,6 +813,11 @@
    "variant": "Primitive::DeleteChar",
    "registered_at": "crates/romacs-vm/src/lib.rs:525"
   },
+  "delete-file": {
+   "name": "delete-file",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:130"
+  },
   "delete-other-windows-internal": {
    "name": "delete-other-windows-internal",
    "implementation": "vm2",
@@ -999,7 +1004,7 @@
   "file-modes": {
    "name": "file-modes",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:138"
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:162"
   },
   "file-name-as-directory": {
    "name": "file-name-as-directory",
@@ -1034,7 +1039,7 @@
   "file-writable-p": {
    "name": "file-writable-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:121"
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:145"
   },
   "fillarray": {
    "name": "fillarray",
@@ -1619,6 +1624,11 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/char_table.rs:4"
   },
+  "make-directory-internal": {
+   "name": "make-directory-internal",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:121"
+  },
   "make-hash-table": {
    "name": "make-hash-table",
    "implementation": "vm2",
@@ -1695,7 +1705,7 @@
   "make-temp-name": {
    "name": "make-temp-name",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:201"
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:225"
   },
   "make-variable-buffer-local": {
    "name": "make-variable-buffer-local",
@@ -2222,7 +2232,7 @@
   "rename-file": {
    "name": "rename-file",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:163"
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:187"
   },
   "replace-match": {
    "name": "replace-match",
@@ -2463,7 +2473,7 @@
   "set-file-modes": {
    "name": "set-file-modes",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:152"
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:176"
   },
   "set-frame-selected-window": {
    "name": "set-frame-selected-window",

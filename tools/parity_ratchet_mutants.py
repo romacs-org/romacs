@@ -28,7 +28,7 @@ import tempfile
 
 HERE = pathlib.Path(__file__).resolve().parent
 ROOT = HERE.parent
-COPY = ['lisp', 'gnu-tests/test', 'gnu-tests/baseline', 'gnu-tests/member-evidence-policy.json', 'parity-reference.toml',
+COPY = ['gnu-lisp', 'rlisp', 'gnu-tests/test', 'gnu-tests/baseline', 'gnu-tests/member-evidence-policy.json', 'parity-reference.toml',
         'scripts/gnu_oracle.py', 'gnu-tests/harness', 'gnu-tests/tools', 'gnu-tests/run.py',
         'gnu-tests/PIN.json', 'gnu-tests/EXCLUSIONS.toml', 'gnu-tests/SUSPECT-DIVERGENCES.toml', 'tools',
         'scripts/lisp-census.py', 'scripts/lisp-census-oracle.el', 'parity-ratchet.json', 'DIVERGENCES.md',
@@ -49,7 +49,7 @@ def first_cold_failing_gnu(root: pathlib.Path) -> str:
     out = subprocess.run(['git', '-C', str(_PortablePath(_portable_os.environ.get('ROMACS_GNU_SOURCE', _PortablePath(_portable_os.environ.get('GNU_ORACLE_ROOT', _PortablePath(_portable_os.environ.get('XDG_CACHE_HOME', _PortablePath.home() / '.cache')) / 'gnu-emacs-pin')) / 'src')) / ''), 'ls-tree', '-r', '--name-only',
                           '45b0f7699df36b3849edc3bdef37d4cb9e75b9ea', '--', 'lisp/emacs-lisp'],
                          capture_output=True, text=True, check=True).stdout.split()
-    return next(p for p in sorted(out) if p.endswith('.el') and p not in loaded and (root / p).is_file())
+    return next(p for p in sorted(out) if p.endswith('.el') and p not in loaded and (root / ('gnu-lisp' + p[len('lisp'):])).is_file())
 
 
 # name: (kind, file (callable on root or str), old, new, how to run, expected exit, required output)
@@ -58,19 +58,19 @@ def mutants(root: pathlib.Path) -> dict:
     failing = first_cold_failing_gnu(root)
     return {
         'product-drops-a-gnu-pass': (
-            'lisp/subr.el', '  (car (car (car x))))', '  (car (car x)))',
+            'gnu-lisp/subr.el', '  (car (car (car x))))', '  (car (car x)))',
             ['check', '--unit', SUBR_FILES], 1, ['FAIL gnu:lisp/subr-tests.el', '- subr-test-caaar: now']),
         'product-raises-a-gnu-count': (
-            'lisp/subr.el', '\n;;; Code:\n',
+            'gnu-lisp/subr.el', '\n;;; Code:\n',
             "\n;;; Code:\n(defun char-uppercase-p (c) (and (memq c (list ?R ?S ?\u03a9 ?\u03a8)) t))\n",
             ['check', '--unit', SUBR_FILES], 3,
             ['HIGHER gnu:lisp/subr-tests.el', 'test-char-uppercase-p', 'FAIL-WITH-INSTRUCTION',
              'python3 tools/parity_ratchet.py record']),
         'product-census-file-stops-loading': (
-            loaded, None, '(error "parity-ratchet mutant")\n',
+            'gnu-lisp' + loaded[len('lisp'):], None, '(error "parity-ratchet mutant")\n',
             ['check', '--unit', 'census-cold'], 1, [f'FAIL census-cold', f'- {loaded}: now']),
         'product-census-file-starts-loading': (
-            failing, 'WHOLE', ';;; -*- lexical-binding: t -*-\nnil\n',
+            'gnu-lisp' + failing[len('lisp'):], 'WHOLE', ';;; -*- lexical-binding: t -*-\nnil\n',
             ['check', '--unit', 'census-cold'], 3, ['HIGHER census-cold', failing, 'FAIL-WITH-INSTRUCTION']),
         'adapter-runs-nothing': (
             None, None, None, ['check', '--unit', SUBR_FILES, '--gnu-ert', '/bin/true'], 4,

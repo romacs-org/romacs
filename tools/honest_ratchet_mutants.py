@@ -25,7 +25,7 @@ COPY = ['tools/parity_ratchet.py', 'tools/parity_ratchet_test.py', 'tools/honest
         'gnu-tests/run.py', 'gnu-tests/tests', 'gnu-tests/README.md', 'gnu-tests/member-evidence-policy.json', 'gnu-tests/PIN.json',
         'gnu-tests/EXCLUSIONS.toml', 'gnu-tests/SUSPECT-DIVERGENCES.toml', 'gnu-tests/harness', 'gnu-tests/tools',
         'gnu-tests/ert_report.py', 'parity-reference.toml', 'scripts/gnu_oracle.py']
-LINK = ['gnu-tests/test', 'gnu-tests/baseline', 'gnu-tests/runner', 'lisp']
+LINK = ['gnu-tests/test', 'gnu-tests/baseline', 'gnu-tests/runner', 'gnu-lisp', 'rlisp']
 PR, RUN = 'tools/parity_ratchet.py', 'gnu-tests/run.py'
 HR = ('tools', 'honest_ratchet_test.HonestRatchet')
 HON = ('gnu-tests/tests', 'test_run.Honesty')

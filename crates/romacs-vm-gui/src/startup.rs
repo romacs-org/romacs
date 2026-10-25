@@ -400,7 +400,13 @@ fn initialize_editing_from_sources(vm: &mut Vm, root: Option<&std::path::Path>) 
     policy(vm, root, "romacs-editing.el", include_str!("../../../rlisp/romacs-editing.el"))?;
     for (source, names) in [
         (include_str!("../../../gnu-lisp/subr.el"), &[
-            "plusp", "add-to-history",
+            "plusp", "add-to-history", "ignore", "string=",
+        ][..]),
+        (include_str!("../../../gnu-lisp/files.el"), &[
+            "files--ensure-directory", "make-directory",
+        ][..]),
+        (include_str!("../../../gnu-lisp/mail/mailheader.el"), &[
+            "mail-header-extract", "mail-header-format-function",
         ][..]),
         (include_str!("../../../gnu-lisp/simple.el"), &[
             "mark", "set-mark", "push-mark", "pop-mark", "push-mark-command",
@@ -408,14 +414,14 @@ fn initialize_editing_from_sources(vm: &mut Vm, root: Option<&std::path::Path>) 
             "kill-new", "current-kill", "backward-word", "kill-word", "backward-kill-word",
         ][..]),
     ] {
-        let (spans, _) = crate::loadup::load_sites(source)?;
+        let spans = crate::loadup::form_spans(source)?;
         for name in names {
             if !matches!(*name, "kill-new" | "current-kill")
                 && vm.eval_source(&format!("(fboundp '{name})"))? != romacs_vm::Fixed::NIL { continue; }
-            let prefix = format!("(defun {name}");
+            let prefixes = [format!("(defun {name}"), format!("(defvar {name}"), format!("(defalias '{name}")];
             let definitions: Vec<_> = spans.iter().filter(|&&(start, end, _)| {
-                source[start..end].strip_prefix(&prefix)
-                    .is_some_and(|tail| tail.starts_with(char::is_whitespace))
+                prefixes.iter().any(|prefix| source[start..end].strip_prefix(prefix)
+                    .is_some_and(|tail| tail.starts_with(char::is_whitespace)))
             }).collect();
             if definitions.len() != 1 { return Err(format!("Expected one GNU editing definition: {name}")); }
             let &&(start, end, _) = definitions.first().unwrap();

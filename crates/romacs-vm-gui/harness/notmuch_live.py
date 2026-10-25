@@ -96,9 +96,23 @@ def prepare_fixture(root, env):
     assert len(selected) == 1 and selected[0]['matched'] == 1 and selected[0]['total'] == 5
     transport = root / 'capture_mail.py'
     captured = root / 'captured.eml'
-    transport.write_text('from pathlib import Path\nimport sys\n'
-                         'Path(sys.argv[1]).write_bytes(sys.stdin.buffer.read())\n', encoding='utf-8')
-    return command, [sys.executable, str(transport), str(captured)], captured
+    transport.write_text(
+        'from pathlib import Path\nimport os\nimport select\nimport sys\n'
+        'Path(sys.argv[1]).write_bytes(sys.stdin.buffer.read())\n'
+        'gate = os.open(sys.argv[3], os.O_RDWR)\n'
+        'Path(sys.argv[2]).write_text("ready\\n")\n'
+        'if not select.select([gate], [], [], 110)[0]:\n'
+        '    sys.stderr.write("PRIVATE_TRANSPORT_GATE_TIMEOUT\\n")\n'
+        '    sys.exit(24)\n'
+        'os.read(gate, 1)\n'
+        'os.close(gate)\n'
+        'if int(sys.argv[4]):\n'
+        '    sys.stderr.write("PRIVATE_TRANSPORT_FAILURE\\n")\n'
+        'sys.exit(int(sys.argv[4]))\n', encoding='utf-8')
+    gate = root / 'send-release.fifo'
+    os.mkfifo(gate, 0o600)
+    return command, [sys.executable, str(transport), str(captured),
+                     str(root / 'send-ready'), str(gate), '0'], captured
 
 
 def reply_expectation(command, env, all_recipients):
@@ -203,7 +217,8 @@ def main():
                     return log_path.read_text(errors='replace')
 
                 def keys(*parts):
-                    subprocess.run(['/usr/bin/wtype', '-d', '40', *parts], env=env, check=True, timeout=30)
+                    subprocess.run(['/usr/bin/wtype', '-d', '1', *parts], env=env, check=True,
+                                   timeout=30 + sum(len(part) for part in parts) / 1000)
                     time.sleep(.15)
 
                 def control(key):
@@ -250,10 +265,21 @@ def main():
                             + json.dumps(identifier) + ')', marker)
 
                 def discard_draft():
+                    evaluate('(setq mail-harness-discard (current-buffer))', 'DRAFT_TO_KILL_SAVED')
                     control('c')
                     control('k')
-                    visible('Discard this mail draft? Type yes to discard: ')
-                    keys('yes', '-k', 'Return')
+                    require('(not (buffer-live-p mail-harness-discard))', 'EXPLICIT_DRAFT_KILL_HAS_NO_MAIL_VETO')
+
+                def release(transport_argv):
+                    # Readiness is published only after the child opens the FIFO.
+                    descriptor = os.open(transport_argv[4], os.O_WRONLY | os.O_NONBLOCK)
+                    try:
+                        os.write(descriptor, b'!')
+                    finally:
+                        os.close(descriptor)
+
+                def no_drafts():
+                    return not list((home / '.local/state/romacs/drafts').glob('*.draft'))
 
                 visible('Ordinary sentinel')
                 control('x')
@@ -375,6 +401,8 @@ def main():
                 require('(not (string-match "carol@example.invalid" (buffer-string)))', 'PUBLIC_SENDER_WRAPPER')
                 discard_draft()
                 switch('*mail-message*')
+                require('(not (buffer-live-p mail-harness-message))', 'OLD_MESSAGE_IDENTITY_RETIRED_AFTER_Q')
+                evaluate('(setq mail-harness-message (current-buffer))', 'REOPENED_MESSAGE_PARENT_SAVED')
                 keys('R')
                 visible('Subject: Re: ' + SUBJECT)
                 visible('From: ' + all_headers['From'])
@@ -390,23 +418,101 @@ def main():
                 meta('<')
                 capture('compose-reply-all')
                 report['checks'].append('NATIVE_R_SENDER_PUBLIC_WRAPPER_AND_R_ALL_BACKEND_INFERRED_FROM_CC_QUOTED_GRANDCHILD')
+                evaluate('(setq mail-harness-sent (current-buffer))', 'SUCCESS_COMPOSE_SAVED')
                 control('c')
                 control('c')
                 visible('Submit this message? Type yes to send: ')
                 capture('fake-send-confirmation')
                 assert not captured.exists(), 'NO_TRANSPORT_BEFORE_EXPLICIT_YES'
                 keys('yes', '-k', 'Return')
-                fio.wait(lambda: 'Mail sent' in ''.join(
-                    g['char'] for g in (fio.last_scene(trace()) or {}).get('glyphs', [])
-                    if g['role'] == 'ModeLine'), args.timeout, 'visible Mail sent mode line', process)
-                fio.wait(captured.exists, args.timeout, 'fake RFC stdin captured', process)
+                fio.wait(Path(transport[3]).exists, args.timeout, 'fake transport ready and gated', process)
+                require('(and (buffer-live-p mail-harness-sent) '
+                        '(not (get-buffer-window mail-harness-sent)) '
+                        '(eq (current-buffer) mail-harness-message) '
+                        '(with-current-buffer mail-harness-sent '
+                        "(and (eq romacs-mail-send-state 'sending) buffer-read-only)))",
+                        'PENDING_SEND_COMPOSE_HIDDEN_BEFORE_COMPLETION')
+                assert no_drafts(), 'PENDING_SUCCESS_WRITES_NO_DRAFT'
+                switch('ordinary.txt')
+                visible('Ordinary sentinel DIRTY!')
+                keys('+')
+                visible('Ordinary sentinel DIRTY!+')
+                evaluate('(setq mail-harness-ordinary (current-buffer) '
+                         'mail-harness-ordinary-point (point) mail-harness-ordinary-text (buffer-string))',
+                         'PENDING_ORDINARY_STATE_SAVED')
+                capture('pending-send-hidden-ordinary-edit-responsive')
+                assert no_drafts(), 'ORDINARY_EDIT_DURING_PENDING_SEND_WRITES_NO_DRAFT'
+                release(transport)
+                success_echo = 'Email to ' + all_headers['To'] + ' sent successfully'
+                visible(success_echo)
+                capture('sent-echo-compose-deleted-ordinary-selected')
+                require('(and (not (buffer-live-p mail-harness-sent)) '
+                        '(eq (current-buffer) mail-harness-ordinary) '
+                        '(= (point) mail-harness-ordinary-point) '
+                        '(equal (buffer-string) mail-harness-ordinary-text))',
+                        'SUCCESS_KILLS_COMPOSE_WITHOUT_FOCUS_OR_ORDINARY_MUTATION')
                 data = captured.read_bytes()
                 validate_wire(data, all_headers, quote + REPLY)
                 (output / 'fake-transport-captured.eml').write_bytes(data)
-                scene = fio.last_scene(trace())
-                assert scene and 'Mail sent' in ''.join(g['char'] for g in scene['glyphs']), 'VISIBLE_MAIL_SENT_STATE'
-                capture('sent')
-                report['checks'].append('NATIVE_C_C_C_C_YES_FAKE_TRANSPORT_EXACT_RFC_AND_VISIBLE_SENT_STATE')
+                assert no_drafts(), 'SUCCESS_LEAVES_NO_DRAFT_FILES'
+                report['checks'].append('NATIVE_C_C_C_C_YES_PENDING_HIDDEN_ORDINARY_EDIT_EXACT_RFC_SUCCESS_KILLS_COMPOSE_AND_EXACT_RECIPIENT_ECHO')
+
+                failed_capture = root / 'failed-captured.eml'
+                failed_ready, failed_gate = root / 'failed-ready', root / 'failed-release.fifo'
+                os.mkfifo(failed_gate, 0o600)
+                failed_transport = transport[:2] + [str(failed_capture), str(failed_ready), str(failed_gate), '1']
+                switch('*mail-message*')
+                evaluate('(setq romacs-mail-account (plist-put (copy-sequence romacs-mail-account) :send '
+                         + lisp_list(failed_transport) + '))', 'PRIVATE_FAILURE_TRANSPORT_CONFIGURED')
+                keys('R')
+                visible('Subject: Re: ' + SUBJECT)
+                visible('Cc: ' + all_headers['Cc'])
+                meta('>')
+                keys(REPLY)
+                evaluate('(setq mail-harness-failed (current-buffer) '
+                         'mail-harness-failed-text (buffer-string))', 'FAILURE_COMPOSE_SAVED')
+                control('c')
+                control('c')
+                visible('Submit this message? Type yes to send: ')
+                assert not failed_capture.exists(), 'NO_FAILURE_TRANSPORT_BEFORE_EXPLICIT_YES'
+                keys('yes', '-k', 'Return')
+                fio.wait(failed_ready.exists, args.timeout, 'failure transport ready and gated', process)
+                require('(and (buffer-live-p mail-harness-failed) '
+                        '(not (get-buffer-window mail-harness-failed)) '
+                        '(eq (current-buffer) mail-harness-message))', 'FAILURE_PENDING_COMPOSE_HIDDEN')
+                switch('ordinary.txt')
+                keys('-k', 'minus')
+                visible('Ordinary sentinel DIRTY!+-')
+                evaluate('(setq mail-harness-ordinary-point (point) '
+                         'mail-harness-ordinary-text (buffer-string))', 'FAILURE_ORDINARY_STATE_SAVED')
+                assert no_drafts(), 'PENDING_FAILURE_WRITES_NO_DRAFT'
+                release(failed_transport)
+                visible('Email to ' + all_headers['To'] + ' failed: PRIVATE_TRANSPORT_FAILURE; saved as draft:')
+                capture('failed-send-echo-hidden-draft-ordinary-selected')
+                draft_directory = home / '.local/state/romacs/drafts'
+                drafts = list(draft_directory.glob('*.draft'))
+                assert len(drafts) == 1, 'FAILURE_PERSISTS_EXACTLY_ONE_PRIVATE_DRAFT'
+                draft = drafts[0]
+                expected_draft = (''.join(name + ': ' + all_headers[name] + '\n'
+                                          for name in ('From', 'To', 'Cc', 'Subject'))
+                                  + '--text follows this line--\n' + quote + REPLY).encode('utf-8')
+                assert draft.read_bytes() == expected_draft, 'FAILURE_DRAFT_EXACT_COMPOSE_BYTES'
+                assert draft.stat().st_mode & 0o777 == 0o600, 'FAILURE_DRAFT_MODE_0600'
+                assert draft_directory.stat().st_mode & 0o777 == 0o700, 'FAILURE_DRAFT_DIRECTORY_MODE_0700'
+                (output / 'failed-draft.eml').write_bytes(draft.read_bytes())
+                validate_wire(failed_capture.read_bytes(), all_headers, quote + REPLY)
+                require('(and (eq (current-buffer) mail-harness-ordinary) '
+                        '(= (point) mail-harness-ordinary-point) '
+                        '(equal (buffer-string) mail-harness-ordinary-text) '
+                        '(buffer-live-p mail-harness-failed) (not (get-buffer-window mail-harness-failed)) '
+                        '(with-current-buffer mail-harness-failed '
+                        '(and (not buffer-read-only) (not romacs-mail-job) '
+                        '(not romacs-mail-send-state) '
+                        '(equal (buffer-string) mail-harness-failed-text) '
+                        '(equal romacs-mail-draft-file ' + json.dumps(str(draft)) + '))))',
+                        'FAILURE_ONE_EDITABLE_HIDDEN_EXACT_DRAFT_NO_FOCUS_OR_ORDINARY_MUTATION')
+                assert original.read_text() == INITIAL, 'FAILURE_PRESERVES_ORDINARY_DISK_BYTES'
+                report['checks'].append('NATIVE_DEFINITE_FAILURE_ONE_EXACT_PRIVATE_DRAFT_EDITABLE_HIDDEN_NO_FOCUS_STEAL_OR_ORDINARY_MUTATION')
                 broken = root / 'failing_notmuch.py'
                 broken.write_text('import sys\nsys.stderr.write("PRIVATE_NOTMUCH_FAILURE\\n")\nsys.exit(23)\n',
                                   encoding='utf-8')
@@ -421,9 +527,9 @@ def main():
                 assert tags_after == tags_before, 'ALL_FIXTURE_TAGS_BYTE_IDENTICAL_AFTER_MAIL_AND_FAILURE'
                 report['checks'].append('NEW_ACCOUNT_BACKEND_FAILURE_TRUTHFUL_AND_ALL_TAGS_UNCHANGED')
                 switch('ordinary.txt')
-                visible('Ordinary sentinel DIRTY!')
+                visible('Ordinary sentinel DIRTY!+-')
                 keys('?')
-                visible('Ordinary sentinel DIRTY!?')
+                visible('Ordinary sentinel DIRTY!+-?')
                 assert original.read_text() == INITIAL, 'INITIAL_DISK_FILE_PRESERVED_AFTER_MAIL'
                 capture('ordinary-buffer-preserved-after-mail')
                 report['checks'].append('ORDINARY_BUFFER_TEXT_POINT_AND_DISK_PRESERVED_AFTER_MAIL')

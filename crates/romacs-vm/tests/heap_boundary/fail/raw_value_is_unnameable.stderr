@@ -1,8 +1,8 @@
 error[E0603]: struct `Value` is private
- --> tests/heap_boundary/fail/raw_value_is_unnameable.rs:2:17
+ --> tests/heap_boundary/fail/raw_value_is_unnameable.rs:2:16
   |
 2 | use romacs_vm::Value;
-  |                 ^^^^^ private struct
+  |                ^^^^^ private struct
   |
 note: the struct `Value` is defined here
  --> src/lib.rs

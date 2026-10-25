@@ -12,8 +12,9 @@
   "Notmuch command argv, including any account configuration selector.")
 (defvar romacs-notmuch-send-command nil
   "Transport argv accepting complete UTF-8 mail on standard input.
-Exit zero must mean accepted and stored in Sent.  Uncertain submissions must
-never be automatically retried.")
+Exit zero means SMTP accepted and Sent storage verified.  Exit 75 means SMTP
+accepted but Sent verification failed; 76 means submission could not be confirmed.
+Other nonzero statuses report failure.  No outcome is automatically retried.")
 (defvar romacs-notmuch-from nil
   "Optional From override for new mail; replies use Notmuch's inferred From.")
 (defvar romacs-notmuch-search-history nil)

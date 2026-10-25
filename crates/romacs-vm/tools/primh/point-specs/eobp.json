@@ -9,7 +9,7 @@
     "editfns.c"
   ],
   "gnu_def": "editfns.c:1009",
-  "rust": "src/prims/point_predicates.rs:22",
+  "rust": "src/prims/point_predicates.rs:25",
   "args": [],
   "probes": [
     "(with-temp-buffer (eobp))",

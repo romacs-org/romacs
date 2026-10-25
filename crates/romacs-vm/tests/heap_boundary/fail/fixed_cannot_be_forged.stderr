@@ -2,7 +2,7 @@ error[E0423]: cannot initialize a tuple struct which contains private fields
  --> tests/heap_boundary/fail/fixed_cannot_be_forged.rs:4:13
   |
 4 |     let _ = romacs_vm::Fixed(8);
-  |             ^^^^^^^^^^^^^^^^^
+  |             ^^^^^^^^^^^^^^^^
   |
 note: constructor is not visible here due to private fields
  --> src/handle.rs
@@ -12,4 +12,4 @@ note: constructor is not visible here due to private fields
 help: you might have meant to use the `image` associated function
   |
 4 |     let _ = romacs_vm::Fixed::image(8);
-  |                              +++++++
+  |                             +++++++

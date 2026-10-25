@@ -1373,7 +1373,7 @@ GATE_TESTS = {
     'gnu-tests/runner/tests/parity_ratchet.rs':
         'd9f4d0502178b1d1c21eca18949c2b6ba10c98494b481adba4fe37996fcdf005',
     'crates/romacs-vm/tests/parity_ratchet.rs':
-        '9a84973b67cde8ccb2e3af793fc08dc279464ee064bdcf68d65aa47346e59b05',
+        '43ced4188fdb6b2929503d0b29b0c519bdc6e57ae470327e1e12240822144366',
 }
 
 

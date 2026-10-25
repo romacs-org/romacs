@@ -215,6 +215,15 @@ fn one_line(text: &str, max: usize) -> String {
 /// Top-level form spans of `source` and the load sites inside them.
 /// Returns `(spans, sites)`; a span is `(start, end, line)` of one top-level form.
 pub fn load_sites(source: &str) -> Result<(Vec<(usize, usize, usize)>, Vec<Site>), String> {
+    scan_forms(source, true)
+}
+
+/// Read top-level form boundaries without interpreting nested load calls.
+pub fn form_spans(source: &str) -> Result<Vec<(usize, usize, usize)>, String> {
+    scan_forms(source, false).map(|(spans, _)| spans)
+}
+
+fn scan_forms(source: &str, collect_loads: bool) -> Result<(Vec<(usize, usize, usize)>, Vec<Site>), String> {
     let bytes = source.as_bytes();
     let mut spans = vec![];
     let mut sites = vec![];
@@ -269,7 +278,7 @@ pub fn load_sites(source: &str) -> Result<(Vec<(usize, usize, usize)>, Vec<Site>
                 if depth == 0 { start = Some((i, line)); }
                 depth += 1;
                 let rest = &source[i + 1..];
-                if rest.starts_with("load") && rest[4..].starts_with(|c: char| c.is_ascii_whitespace()) {
+                if collect_loads && rest.starts_with("load") && rest[4..].starts_with(|c: char| c.is_ascii_whitespace()) {
                     let arg = rest[4..].trim_start();
                     let name = arg.strip_prefix('"').and_then(|a| a.split_once('"')).map(|(n, _)| n.to_owned())
                         .ok_or_else(|| format!("loadup.el line {line}: load site without a literal file name"))?;
@@ -725,6 +734,15 @@ fn total_forms(vm: &mut Vm, path: &Path) -> Total {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn definition_spans_do_not_interpret_dynamic_loads() {
+        let source = "(defun example (file) (load file))\n(defvar example-format (lambda (x) x))";
+        let spans = form_spans(source).unwrap();
+        assert_eq!(spans.len(), 2);
+        assert_eq!(&source[spans[0].0..spans[0].1], "(defun example (file) (load file))");
+        assert!(load_sites(source).unwrap_err().contains("without a literal file name"));
+    }
 
     #[test]
     fn native_declarations_exclude_custom_and_face_load_sites() {

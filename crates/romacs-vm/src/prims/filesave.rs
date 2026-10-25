@@ -118,6 +118,30 @@ fn metadata_missing(error: &std::io::Error) -> bool {
     matches!(error.raw_os_error(), Some(libc::ENOENT | libc::ENOTDIR))
 }
 
+defsubr! { name = "make-directory-internal", gnu = "fileio.c", effect = Global,
+fn make_directory_internal(cx, directory: Value) -> Step {
+    let (path, expanded) = name(cx, directory, false)?;
+    // GNU dispatches make-directory handlers in the Lisp wrapper, not here.
+    native_encoding(cx)?;
+    cx.filesave_mkdir(&path).map_err(|e| errno(cx, "Creating directory", &[expanded], e))?;
+    Ok(Step::Done(Value::NIL))
+}}
+
+defsubr! { name = "delete-file", gnu = "fileio.c", effect = Global,
+fn delete_file(cx, filename: Value; optional trash: Value) -> Step {
+    let (_, expanded) = name(cx, filename, false)?;
+    if let Some(call) = handler(cx, expanded, "delete-file", vec![expanded, trash])? { return call; }
+    if trash != Value::NIL { return Err(refusal("delete-file trash")); }
+    let (path, _) = name(cx, expanded, true)?;
+    native_encoding(cx)?;
+    match cx.filesave_unlink(&path) {
+        Ok(()) => (),
+        Err(e) if e.raw_os_error() == Some(libc::ENOENT) => (),
+        Err(e) => return Err(errno(cx, "Removing old name", &[expanded], e)),
+    }
+    Ok(Step::Done(Value::NIL))
+}}
+
 defsubr! { name = "file-writable-p", gnu = "fileio.c:3040", effect = Global,
 fn file_writable_p(cx, filename: Value) -> Step {
     let (path, expanded) = name(cx, filename, false)?;

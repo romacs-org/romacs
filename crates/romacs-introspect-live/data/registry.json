@@ -8,14 +8,14 @@
   "provenance": {
     "generated_by": "romacs-introspect-live",
     "generated_on": "linux-x86_64",
-    "input_hash": "6720f3da03f1fdb605e63e53e6186e9c6cd6177664cb44e783ed187ec1b96d05",
+    "input_hash": "0cef54683ffb5bb92557b8857e126e4a9d17cef7263af96a1048ed89be945ce6",
     "source_only_at_generation": [],
     "vm2_probe_panics": [],
-    "vm2_universe": 2384
+    "vm2_universe": 2387
   },
   "schema": 2,
   "vm2": {
-    "count": 587,
+    "count": 589,
     "entries": [
       "#:vm2-closure-document",
       "#:vm2-closure-metadata",
@@ -165,6 +165,7 @@
       "delete-all-overlays",
       "delete-backward-char",
       "delete-char",
+      "delete-file",
       "delete-other-windows-internal",
       "delete-overlay",
       "delete-region",
@@ -318,6 +319,7 @@
       "macroexpand",
       "make-bool-vector",
       "make-char-table",
+      "make-directory-internal",
       "make-hash-table",
       "make-interpreted-closure",
       "make-keymap",
