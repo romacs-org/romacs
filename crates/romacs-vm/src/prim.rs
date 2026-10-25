@@ -1362,6 +1362,7 @@ mod leaf {
     mod skip_chars;
     mod word_motion;
     mod face;
+    mod value_order;
 }
 pub(crate) use leaf::{Leaf, Kind};
 
