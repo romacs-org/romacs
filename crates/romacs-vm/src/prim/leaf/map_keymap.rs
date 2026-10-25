@@ -1,5 +1,82 @@
 use super::*;
 impl Leaf<'_> {
+    fn unicode_property_table(&self, table: Value) -> Option<&crate::char_table::CharTable> {
+        let data::Object::CharTable(table) = self.vm.object_if(table)? else {
+            return None;
+        };
+        let slot = *self.vm.names.get("char-code-property-table")?;
+        (table.purpose == Value::reference(slot + 1, 7) && table.extras.len() == 5).then_some(table)
+    }
+    pub(crate) fn map_table_has_decoder(&self, table: Value) -> bool {
+        self.unicode_property_table(table)
+            .is_some_and(|table| table.extras[1].integer_value() == Some(0))
+    }
+    pub(crate) fn map_table_decode(&self, table: Value, value: Value) -> super::super::Out {
+        let Some(data::Object::CharTable(table)) = self.vm.object_if(table) else {
+            unreachable!()
+        };
+        let Some(data::Object::Vector(values)) =
+            table.extras.get(4).and_then(|&v| self.vm.object_if(v))
+        else {
+            return Ok(value);
+        };
+        let index = value
+            .integer_value()
+            .ok_or(Fault::Wrong("integerp", value))?;
+        Ok(usize::try_from(index)
+            .ok()
+            .and_then(|index| values.get(index))
+            .copied()
+            .unwrap_or(value))
+    }
+    pub(crate) fn map_table_slot(
+        &mut self,
+        table: Value,
+        node: &char_table::CharTableNodeHandle,
+        index: usize,
+    ) -> std::result::Result<char_table::CharTableSlot, Fault> {
+        let slot = node.lock().unwrap().slots[index].clone();
+        let char_table::CharTableSlot::Value(value) = slot else {
+            return Ok(slot);
+        };
+        if self.unicode_property_table(table).is_none() {
+            return Ok(slot);
+        }
+        let Ok(text) = self.string_view(value) else {
+            return Ok(slot);
+        };
+        let codes: Vec<_> = text.chars().collect();
+        if !matches!(codes.first(), Some(1 | 2)) {
+            return Ok(slot);
+        }
+        let (depth, from) = {
+            let node = node.lock().unwrap();
+            (
+                node.depth,
+                node.min_char + index * char_table::CharTableNode::WIDTHS[node.depth],
+            )
+        };
+        if depth != 2 {
+            return Err(Fault::Error(
+                "compressed Unicode property requires a 128-character block".into(),
+            ));
+        }
+        let slots = uncompress_property(&codes)?;
+        let expanded = char_table::CharTableSlot::Node(std::sync::Arc::new(std::sync::Mutex::new(
+            char_table::CharTableNode {
+                depth: 3,
+                min_char: from,
+                slots,
+            },
+        )));
+        node.lock().unwrap().slots[index] = expanded.clone();
+        let table = table.index_if(0).unwrap() - 1;
+        let data::Object::CharTable(table) = &mut self.vm.objects[table] else {
+            unreachable!()
+        };
+        table.ascii = char_table::CharTable::ascii_from_root(&table.root);
+        Ok(expanded)
+    }
     /// GNU get_keymap: non-loading predicates recognize keymap autoloads;
     /// loading callers return the descriptor for a traced T2 call.
     pub(crate) fn map_resolve(
@@ -58,7 +135,14 @@ impl Leaf<'_> {
         let data::Object::CharTable(t) = self.vm.object_if(value).expect("rooted chartab") else {
             unreachable!()
         };
-        if matches!(self.vm.object_if(t.parent), Some(data::Object::CharTable(_))) { t.parent } else { Value::NIL }
+        if matches!(
+            self.vm.object_if(t.parent),
+            Some(data::Object::CharTable(_))
+        ) {
+            t.parent
+        } else {
+            Value::NIL
+        }
     }
     pub(crate) fn map_table_validate(&self, value: Value) -> std::result::Result<(), Fault> {
         let Some(data::Object::CharTable(t)) = self.vm.object_if(value) else {
@@ -66,17 +150,37 @@ impl Leaf<'_> {
         };
         t.validate_mapping().map_err(Fault::Error)
     }
-    pub(crate) fn map_table_raw_default(&self, value: Value, index: usize) -> super::super::Out {
-        let data::Object::CharTable(t) = self.vm.object_if(value).expect("rooted chartab") else {
-            unreachable!()
-        };
-        t.get(index).map_err(Fault::Error)
+    fn map_table_entry(&mut self, table: Value, index: usize) -> super::super::Out {
+        let mut node = self.map_table_root(table);
+        loop {
+            let at = {
+                let current = node.lock().unwrap();
+                (index - current.min_char) / char_table::CharTableNode::WIDTHS[current.depth]
+            };
+            match self.map_table_slot(table, &node, at)? {
+                char_table::CharTableSlot::Value(value) => return Ok(value),
+                char_table::CharTableSlot::Node(child) => node = child,
+            }
+        }
+    }
+    pub(crate) fn map_table_first(&mut self, table: Value) -> super::super::Out {
+        self.map_table_entry(table, 0)
+    }
+    pub(crate) fn map_table_raw_default(&mut self, table: Value, index: usize) -> super::super::Out {
+        let value = self.map_table_entry(table, index)?;
+        Ok(if value == Value::NIL { self.map_table_default(table) } else { value })
     }
     pub(crate) fn map_cursor(&mut self, map: Value, internal: bool) -> Value {
         self.vm
             .allocate_object(data::Object::MapKeymapCursor(Box::new(
                 crate::map_keymap::Cursor::new(map, internal),
             )))
+    }
+    pub(crate) fn char_table_cursor(&mut self, table: Value) -> super::super::Out {
+        let cursor = crate::map_keymap::Cursor::char_table(self, table)?;
+        Ok(self
+            .vm
+            .allocate_object(data::Object::MapKeymapCursor(Box::new(cursor))))
     }
     pub(crate) fn map_cursor_next(
         &mut self,
@@ -93,4 +197,43 @@ impl Leaf<'_> {
         self.vm.objects[index] = data::Object::MapKeymapCursor(cursor);
         Ok(next)
     }
+}
+
+fn uncompress_property(
+    codes: &[u32],
+) -> std::result::Result<Vec<char_table::CharTableSlot>, Fault> {
+    let mut slots = vec![char_table::CharTableSlot::Value(Value::NIL); 128];
+    let mut chars = codes[1..].iter().copied().peekable();
+    if codes[0] == 1 {
+        let start = chars
+            .next()
+            .ok_or_else(|| Fault::Error("incomplete Unicode property block".into()))?
+            as usize;
+        for (index, code) in (start..128).zip(chars) {
+            slots[index] = char_table::CharTableSlot::Value(if code == 0 {
+                Value::NIL
+            } else {
+                Value::integer(i64::from(code)).unwrap()
+            });
+        }
+    } else {
+        let mut index = 0;
+        while let Some(code) = chars.next() {
+            let count = if chars.peek().is_some_and(|&next| next >= 128) {
+                chars.next().unwrap() as usize - 128
+            } else {
+                1
+            };
+            if index + count > 128 {
+                return Err(Fault::Error(
+                    "Unicode property block exceeds 128 characters".into(),
+                ));
+            }
+            for slot in &mut slots[index..index + count] {
+                *slot = char_table::CharTableSlot::Value(Value::integer(i64::from(code)).unwrap());
+            }
+            index += count;
+        }
+    }
+    Ok(slots)
 }

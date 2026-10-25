@@ -25,6 +25,7 @@ struct Frame {
     to: i64,
     index: usize,
     phase: Phase,
+    decoder: bool,
 }
 impl Frame {
     fn new(node: CharTableNodeHandle, top: Value, from: usize, to: i64) -> Self {
@@ -38,6 +39,7 @@ impl Frame {
             to,
             index,
             phase: Phase::Read,
+            decoder: false,
         }
     }
 }
@@ -49,14 +51,16 @@ struct Chartab {
     from: usize,
     to: i64,
     final_emitted: bool,
+    range: Option<Value>,
+    final_decoder: bool,
 }
 impl Chartab {
-    fn new(cx: &Leaf<'_>, table: Value) -> std::result::Result<Self, Fault> {
+    fn new(cx: &mut Leaf<'_>, table: Value) -> std::result::Result<Self, Fault> {
         cx.map_table_validate(table)?;
         let root = cx.map_table_root(table);
         Ok(Self {
             table,
-            val: CharTableNode::checked_get(&root, 0).map_err(Fault::Error)?,
+            val: cx.map_table_first(table)?,
             frames: vec![Frame::new(
                 root,
                 table,
@@ -66,9 +70,17 @@ impl Chartab {
             from: 0,
             to: char_table::CharTable::LEN as i64 - 1,
             final_emitted: false,
+            range: None,
+            final_decoder: false,
         })
     }
-    fn parent(&mut self, cx: &Leaf<'_>, top: Value, from: usize, to: i64) -> std::result::Result<bool, Fault> {
+    fn parent(
+        &mut self,
+        cx: &mut Leaf<'_>,
+        top: Value,
+        from: usize,
+        to: i64,
+    ) -> std::result::Result<bool, Fault> {
         let parent = cx.map_table_parent(top);
         if parent == Value::NIL {
             return Ok(false);
@@ -78,14 +90,17 @@ impl Chartab {
         // the shared range car, which a nested child may already have advanced.
         self.val = cx.map_table_raw_default(parent, from)?;
         self.frames
-            .push(Frame::new(cx.map_table_root(parent), parent, self.from, to));
+            .push(self.frame(cx, cx.map_table_root(parent), parent, self.from, to));
         Ok(true)
     }
     fn next(&mut self, cx: &mut Leaf<'_>) -> std::result::Result<Option<(Value, Value)>, Fault> {
         // Callbacks may mutate or detach retained nodes between resumptions.
         cx.map_table_validate(self.table)?;
         for frame in &self.frames {
-            let (depth, min) = { let n = frame.node.lock().unwrap(); (n.depth, n.min_char) };
+            let (depth, min) = {
+                let n = frame.node.lock().unwrap();
+                (n.depth, n.min_char)
+            };
             CharTableNode::validate_traversal(&frame.node, depth, min).map_err(Fault::Error)?;
         }
         loop {
@@ -99,7 +114,12 @@ impl Chartab {
                     continue;
                 }
                 self.final_emitted = true;
-                return Ok((self.val != Value::NIL).then(|| (key(cx, self.from, self.to), self.val)));
+                self.sync_range(cx);
+                return if self.val == Value::NIL {
+                    Ok(None)
+                } else {
+                    Ok(Some(self.binding(cx, self.table, self.final_decoder)?))
+                };
             }
             let n = self.frames.len() - 1;
             let f = &self.frames[n];
@@ -114,31 +134,39 @@ impl Chartab {
             }
             match f.phase.clone() {
                 Phase::Child => {
-                    self.advance(n);
+                    self.advance(cx, n);
                 }
                 Phase::Emitted(this) => {
-                    self.transition(n, c, this);
+                    self.transition(cx, n, c, this);
                 }
                 Phase::Parent(this) => {
                     if self.val != Value::NIL && self.val != this {
                         self.to = c as i64 - 1;
                         self.frames[n].phase = Phase::Emitted(this);
-                        return Ok(Some((key(cx, self.from, self.to), self.val)));
+                        return Ok(Some(self.binding(
+                            cx,
+                            self.frames[n].top,
+                            self.frames[n].decoder,
+                        )?));
                     }
-                    self.transition(n, c, this);
+                    self.transition(cx, n, c, this);
                 }
                 Phase::Read => {
                     // Snapshot THIS before any callback for the preceding run.
                     // Child identity is retained, not looked up again on resume.
-                    let slot =
-                        self.frames[n].node.lock().unwrap().slots[self.frames[n].index].clone();
+                    let slot = cx.map_table_slot(
+                        self.frames[n].top,
+                        &self.frames[n].node,
+                        self.frames[n].index,
+                    )?;
                     match slot {
                         CharTableSlot::Node(node) => {
                             if self.frames[n].to >= (c + width) as i64 {
                                 self.to = (c + width) as i64 - 1;
                             }
                             self.frames[n].phase = Phase::Child;
-                            self.frames.push(Frame::new(
+                            self.frames.push(self.frame(
+                                cx,
                                 node,
                                 self.frames[n].top,
                                 self.from,
@@ -150,43 +178,96 @@ impl Chartab {
                                 this = cx.map_table_default(self.frames[n].top);
                             }
                             if this == self.val {
-                                self.advance(n);
+                                self.advance(cx, n);
                                 continue;
                             }
                             self.frames[n].phase = Phase::Parent(this);
                             if self.val == Value::NIL {
                                 self.to = c as i64 - 1;
-                                if self.parent(cx, self.frames[n].top, self.frames[n].from, self.to)?
-                                {
+                                if self.parent(
+                                    cx,
+                                    self.frames[n].top,
+                                    self.frames[n].from,
+                                    self.to,
+                                )? {
                                     continue;
                                 }
                             }
                             if self.val != Value::NIL {
                                 self.to = c as i64 - 1;
                                 self.frames[n].phase = Phase::Emitted(this);
-                                return Ok(Some((key(cx, self.from, self.to), self.val)));
+                                return Ok(Some(self.binding(
+                                    cx,
+                                    self.frames[n].top,
+                                    self.frames[n].decoder,
+                                )?));
                             }
-                            self.transition(n, c, this);
+                            self.transition(cx, n, c, this);
                         }
                     }
                 }
             }
         }
     }
-    fn advance(&mut self, n: usize) {
+    fn frame(
+        &self,
+        cx: &Leaf<'_>,
+        node: CharTableNodeHandle,
+        top: Value,
+        from: usize,
+        to: i64,
+    ) -> Frame {
+        let mut frame = Frame::new(node, top, from, to);
+        frame.decoder = self.range.is_some() && cx.map_table_has_decoder(top);
+        frame
+    }
+    fn binding(
+        &self,
+        cx: &mut Leaf<'_>,
+        top: Value,
+        decoder: bool,
+    ) -> std::result::Result<(Value, Value), Fault> {
+        let value = if decoder {
+            cx.map_table_decode(top, self.val)?
+        } else {
+            self.val
+        };
+        Ok((self.key(cx), value))
+    }
+    fn sync_range(&self, cx: &mut Leaf<'_>) {
+        if let Some(range) = self.range {
+            cx.setcar(range, Value::integer(self.from as i64).unwrap())
+                .unwrap_or_else(|_| unreachable!("live traversal range"));
+            cx.setcdr(range, Value::integer(self.to).unwrap())
+                .unwrap_or_else(|_| unreachable!("live traversal range"));
+        }
+    }
+    fn key(&self, cx: &mut Leaf<'_>) -> Value {
+        self.sync_range(cx);
+        if self.from as i64 == self.to {
+            Value::integer(self.to).unwrap()
+        } else {
+            self.range.unwrap_or_else(|| key(cx, self.from, self.to))
+        }
+    }
+    fn advance(&mut self, cx: &mut Leaf<'_>, n: usize) {
         self.to = self.frames[n].to;
         self.frames[n].index += 1;
         self.frames[n].phase = Phase::Read;
+        self.sync_range(cx);
     }
-    fn transition(&mut self, n: usize, c: usize, this: Value) {
+    fn transition(&mut self, cx: &mut Leaf<'_>, n: usize, c: usize, this: Value) {
         self.val = this;
         self.from = c;
         self.frames[n].from = c;
-        self.advance(n);
+        self.advance(cx, n);
     }
     fn visit(&mut self, seen: &mut HashSet<usize>, visit: &mut impl FnMut(&mut Value)) {
         visit(&mut self.table);
         visit(&mut self.val);
+        if let Some(range) = &mut self.range {
+            visit(range);
+        }
         for f in &mut self.frames {
             visit(&mut f.top);
             match &mut f.phase {
@@ -244,6 +325,23 @@ impl Cursor {
             internal,
             result: Value::NIL,
         }
+    }
+    pub(super) fn char_table(cx: &mut Leaf<'_>, value: Value) -> std::result::Result<Self, Fault> {
+        let mut table = Chartab::new(cx, value)?;
+        table.final_decoder = cx.map_table_has_decoder(value);
+        table.frames[0].decoder = table.final_decoder;
+        table.range = Some(cx.cons(
+            Value::integer(0).unwrap(),
+            Value::integer(char_table::CharTable::LEN as i64 - 1).unwrap(),
+        ));
+        Ok(Self {
+            stack: vec![MapFrame::Table {
+                tail: Value::NIL,
+                table,
+            }],
+            internal: false,
+            result: Value::NIL,
+        })
     }
     pub(super) fn next(&mut self, cx: &mut Leaf<'_>) -> std::result::Result<Advance, Fault> {
         while let Some(frame) = self.stack.pop() {

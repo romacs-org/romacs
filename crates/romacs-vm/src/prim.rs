@@ -251,7 +251,7 @@ mod leaf {
         }
         pub(crate) fn closure_document(&self, closure: Value) -> Value {
             closure.index_if(4).and_then(|i| self.vm.closures.get(i))
-                .and_then(|c| c.metadata.get(4)).copied().unwrap_or(Value::NIL)
+                .map(|c| c.metadata.get(4).copied().unwrap_or(c.document)).unwrap_or(Value::NIL)
         }
         pub(crate) fn set_interactive_spec(&mut self, closure: Value, spec: Value, thunk: Value) -> std::result::Result<(), Fault> {
             let slot = self.vm.slot(super::INTERACTIVE_TABLE);

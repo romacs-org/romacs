@@ -62,6 +62,7 @@ impl Vm {
         args: &Form,
         body: &[Form],
         definition: bool,
+        exposed: bool,
     ) -> Result<usize> {
         let head_is = |form: Option<&Form>, name: &str| match form {
             Some(Form::List(items) | Form::Dotted(items, _)) => {
@@ -128,12 +129,18 @@ impl Vm {
             Some(form) if self.form_is_string(form) && !documented && body.len() > 1 => 1,
             _ => 0,
         };
+        if i == 1 && doc_register.is_none() {
+            let doc = self.literal(&body[0])?;
+            let register = builder.reg();
+            builder.emit(Op::Const(register, doc));
+            doc_register = Some(register);
+        }
         if body.is_empty() {
-            let result = self.lambda(builder, args.list()?, &[sym("nil")])?;
+            let result = self.lambda_with_metadata(builder, args.list()?, &[sym("nil")], exposed)?;
             return Ok(if let Some(doc) = doc_register { self.closure_native_call(builder, Primitive::ClosureDocument, &[result, doc]) } else { result });
         }
         if !head_is(body.get(i), "interactive") {
-            let result = self.lambda(builder, args.list()?, body)?;
+            let result = self.lambda_with_metadata(builder, args.list()?, body, exposed)?;
             return Ok(if let Some(doc) = doc_register { self.closure_native_call(builder, Primitive::ClosureDocument, &[result, doc]) } else { result });
         }
         // make-interpreted-closure (eval.c:539-544): the spec is (car (cdr
@@ -159,13 +166,18 @@ impl Vm {
             Form::Sym(s) if s == "nil" => sym("nil"),
             form => call("function", vec![Form::List(vec![sym("lambda"), Form::List(vec![]), form.clone()])]),
         };
+        let executable = lambda[2..].to_vec();
+        let saved_captures = std::mem::replace(&mut self.keep_captures, exposed);
         let result = self.expr(
             builder,
             &call(
                 "#:vm2-set-interactive-form",
                 vec![call("function", vec![Form::List(lambda)]), quote(spec.clone()), thunk],
             ),
-        )?;
+        );
+        self.keep_captures = saved_captures;
+        let result = result?;
+        let result = if exposed { self.expose_closure(builder, args.list()?, &executable, result)? } else { result };
         let spec_value = self.literal(&spec)?;
         let spec_reg = builder.reg();
         builder.emit(Op::Const(spec_reg, spec_value));

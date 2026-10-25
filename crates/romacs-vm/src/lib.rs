@@ -20,6 +20,7 @@ mod charset;
 mod obarray;
 mod command;
 mod interpreted_closure;
+mod oclosure;
 mod host_input;
 mod terminal_host;
 mod process_jobs;
@@ -991,6 +992,7 @@ struct Closure {
     function: usize,
     captures: Vec<Value>,
     metadata: Vec<Value>,
+    document: Value,
 }
 
 /// Source interning is compiler-owned; cold faults intern diagnostics. Hot calls use slots and guards.
@@ -1533,7 +1535,7 @@ impl Vm {
         let capture_mutations = mutations[..names.len()]
             .iter()
             .zip(&used)
-            .filter_map(|(&mutated, &keep)| keep.then_some(mutated))
+            .filter_map(|(&mutated, &keep)| keep.then_some(mutated || keep_captures))
             .collect();
         if keep_captures {
             used.fill(true);
@@ -1890,13 +1892,13 @@ impl Vm {
                         b.emit(Op::Const(r, value));
                         Ok(r)
                     }
-                    "lambda" if rest.len() >= 2 => self.closure(b, &rest[0], &rest[1..], false),
+                    "lambda" if rest.len() >= 2 => self.closure(b, &rest[0], &rest[1..], false, false),
                     "function" if rest.len() == 1 => match &rest[0] {
                         Form::List(l) if l.first().and_then(|v| v.sym().ok()) == Some("lambda") => {
                             if l.len() < 2 {
                                 return Err("lambda needs an argument list".into());
                             }
-                            self.closure(b, &l[1], &l[2..], false)
+                            self.closure(b, &l[1], &l[2..], false, false)
                         }
                         Form::Sym(_) => self.expr(
                             b,
@@ -1965,7 +1967,7 @@ impl Vm {
                         let closure = if head == "defmacro" {
                             self.lambda(b, rest[1].list()?, &rest[2..])?
                         } else {
-                            self.closure(b, &rest[1], &rest[2..], true)?
+                            self.closure(b, &rest[1], &rest[2..], true, false)?
                         };
                         b.emit(if head == "defmacro" {
                             Op::DefineMacro(slot, closure)
@@ -2039,6 +2041,11 @@ impl Vm {
                                 }
                                 _ => return Err("bad let binding".into()),
                             };
+                            if name.source() == Some("lexical-binding")
+                                && matches!(init, Some(Form::Sym(value)) if value == "t")
+                            {
+                                continue;
+                            }
                             if matches!(name.source(), Some("nil" | "t" | "lexical-binding")) {
                                 return Err("cannot bind a constant".into());
                             }
@@ -2116,8 +2123,10 @@ impl Vm {
                         // Reserve consecutive argument registers before compiling nested calls.
                         let start = b.next;
                         b.next += args.len();
+                        let oclosure = head == "oclosure--fix-type" && args.len() == 2
+                            && matches!(&args[0], Form::List(parts) if matches!(parts.first(), Some(Form::Sym(s)) if s == "ignore"));
                         for (i, f) in args.iter().enumerate() {
-                            let r = self.expr(b, f)?;
+                            let r = if oclosure && i == 1 { self.oclosure_argument(b, f)? } else { self.expr(b, f)? };
                             b.emit(Op::Move(start + i, r));
                         }
                         let r = b.reg();

@@ -2,6 +2,14 @@ use super::*;
 impl Leaf<'_> {
     pub(crate) fn format_message(&mut self, template: Value, arguments: &[Value]) -> std::result::Result<Value, Fault> {
         self.string_view(template)?;
+        let style = self.text_quoting_style()?;
+        let mut values = Vec::with_capacity(arguments.len() + 1);
+        values.push(template);
+        values.extend_from_slice(arguments);
+        self.vm.format_values(&values, Some(style)).map_err(Fault::Error)
+    }
+
+    pub(crate) fn text_quoting_style(&mut self) -> std::result::Result<&'static str, Fault> {
         let variable = self.intern("text-quoting-style");
         let value = self.variable_value(variable)?.unwrap_or(Value::NIL);
         // GNU doc.c default_to_grave_quoting_style and Ftext_quoting_style.
@@ -40,10 +48,7 @@ impl Leaf<'_> {
                 "curve"
             }
         };
-        let mut values = Vec::with_capacity(arguments.len() + 1);
-        values.push(template);
-        values.extend_from_slice(arguments);
-        self.vm.format_values(&values, Some(style)).map_err(Fault::Error)
+        Ok(style)
     }
 
     pub(crate) fn print_text(&mut self, object: Value, quoted: bool, overrides: Value) -> std::result::Result<Value, Fault> {

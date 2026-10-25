@@ -167,7 +167,7 @@ impl Vm {
             self.closures.push(Closure {
                 function,
                 captures: vec![],
-                metadata: vec![],
+                metadata: vec![], document: Value::NIL,
             });
             self.define_function(slot, value, false)
                 .expect("built-in annotation function publication");

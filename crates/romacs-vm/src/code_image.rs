@@ -5,8 +5,7 @@ use super::*;
 use serde_json::{Value as Json, json};
 use std::{collections::BTreeMap, path::Path};
 
-// VM2CODE7: interpreted closure metadata retains code/data aliases.
-const ABI: &str = "VM2CODE7";
+const ABI: &str = "VM2CODE8";
 fn array(v: &Json) -> Result<&[Json]> {
     v.as_array()
         .map(Vec::as_slice)
@@ -157,7 +156,7 @@ impl Vm {
                     .map(|&v| relocate(v).map(|v| v.0))
                     .collect();
                 let metadata = c.metadata.iter().map(|&v| relocate(v).map(|v| v.0)).collect::<Result<Vec<_>>>()?;
-                Ok(json!([c.function, captures?, metadata]))
+                Ok(json!([c.function, captures?, metadata, relocate(c.document)?.0]))
             })
             .collect::<Result<_>>()?;
         let mut macros: Vec<_> = self.macros.iter().copied().collect();
@@ -287,7 +286,7 @@ impl Vm {
         }
         for closure in array(field(&directory, "closures")?)? {
             let c = array(closure)?;
-            if c.len() != 3 {
+            if c.len() != 4 {
                 return Err("invalid closure record".into());
             }
             let function = number(&c[0])?;
@@ -303,7 +302,7 @@ impl Vm {
                 return Err("invalid closure metadata".into());
             }
             let metadata = array(&c[2])?.iter().map(value).collect::<Result<Vec<_>>>()?;
-            vm.closures.push(Closure { function, captures, metadata });
+            vm.closures.push(Closure { function, captures, metadata, document: value(&c[3])? });
         }
         vm.request_code.image_caches = number(field(&directory, "caches")?)?;
         vm.caches = (0..vm.request_code.image_caches)
@@ -347,7 +346,7 @@ impl Vm {
             vm.validate_code_value(s.plist)?;
         }
         for c in &vm.closures {
-            for &v in c.captures.iter().chain(c.metadata.iter()) {
+            for &v in c.captures.iter().chain(c.metadata.iter()).chain(std::iter::once(&c.document)) {
                 vm.validate_code_value(v)?;
             }
         }
@@ -375,6 +374,7 @@ impl Vm {
             self.slots[slot].plist = self.private_image_root(self.slots[slot].plist, &mut copies, &mut pending)?;
         }
         for index in 0..self.closures.len() {
+            self.closures[index].document = self.private_image_root(self.closures[index].document, &mut copies, &mut pending)?;
             for slot in 0..self.closures[index].metadata.len() {
                 self.closures[index].metadata[slot] = self.private_image_root(self.closures[index].metadata[slot], &mut copies, &mut pending)?;
             }

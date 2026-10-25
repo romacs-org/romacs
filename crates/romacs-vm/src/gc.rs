@@ -489,6 +489,7 @@ impl Vm {
             } else if tag == 4 {
                 pending.extend_from_slice(&self.closures[i].captures);
                 pending.extend_from_slice(&self.closures[i].metadata);
+                pending.push(self.closures[i].document);
                 code_pending.push(self.closures[i].function);
             } else {
                 if let Some(&pair) = self.cell_pairs.get(&i) {
@@ -605,6 +606,7 @@ impl Vm {
                 for v in c.captures.iter_mut().chain(c.metadata.iter_mut()) {
                     rewrite(v);
                 }
+                rewrite(&mut c.document);
             }
             live
         });
@@ -815,7 +817,7 @@ mod tests {
                 vm.closures.push(Closure {
                     function: 0,
                     captures: vec![string],
-                    metadata: vec![],
+                    metadata: vec![], document: Value::NIL,
                 });
                 vm.objects.push(Object::Vector(vec![
                     string,
@@ -898,7 +900,7 @@ mod tests {
         vm.closures.push(Closure {
             function: 0,
             captures: vec![Value::reference(0, 5)],
-            metadata: vec![],
+            metadata: vec![], document: Value::NIL,
         });
         vm.conses
             .push((Value::reference(0, 5), Value::reference(1, 3)));

@@ -3587,7 +3587,7 @@ unsafe fn cold_step(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> bool 
                         .map(|&reg| *r.add(reg))
                         .collect();
                     let index = e.vm.closures.len();
-                    e.vm.closures.push(Closure { function, captures, metadata: vec![] });
+                    e.vm.closures.push(Closure { function, captures, metadata: vec![], document: Value::NIL });
                     *r.add(reg) = Value::reference(index, 4);
                 }
                 Op::DeclareSpecial(slot) => {

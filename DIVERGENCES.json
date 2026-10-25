@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "b7547bbdf0d940bc627347c386f29bb3ac0e3d4053ad6e4d1945cfa56d099b17",
+  "input_hash": "b5cade4cac372d7d2cced8aebc0acc2ecdf7a7d5e30f80b878021cf1587cefdf",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -12,8 +12,8 @@
   "note": "Derived from the prose ledgers. Do not edit; edit those and regenerate."
  },
  "counts": {
-  "rows": 244,
-  "symbols": 447,
+  "rows": 245,
+  "symbols": 453,
   "rows_without_symbols": 16
  },
  "by_symbol": {
@@ -42,7 +42,7 @@
    65
   ],
   "[:class:]": [
-   243
+   244
   ],
   "abort-minibuffers": [
    60
@@ -173,6 +173,9 @@
   "characterp": [
    82
   ],
+  "cl-type-of": [
+   234
+  ],
   "closurep": [
    102
   ],
@@ -293,8 +296,8 @@
    119,
    120,
    144,
-   235,
-   239
+   236,
+   240
   ],
   "define-category": [
    203
@@ -367,7 +370,7 @@
    98
   ],
   "downcase_char_code_emacs_compat": [
-   242
+   243
   ],
   "elt": [
    21,
@@ -379,7 +382,7 @@
    151
   ],
   "emacs_downcase_compat": [
-   242
+   243
   ],
   "enable-recursive-minibuffers": [
    219
@@ -455,23 +458,23 @@
    117,
    118,
    119,
-   235,
    236,
-   239
+   237,
+   240
   ],
   "face-family": [
    115,
-   238
+   239
   ],
   "face-font": [
    114,
-   237
+   238
   ],
   "face-remapping-alist": [
    109,
    118,
    119,
-   241
+   242
   ],
   "fboundp": [
    159,
@@ -835,6 +838,9 @@
   "make-hash-table": [
    126
   ],
+  "make-interpreted-closure": [
+   234
+  ],
   "make-local-variable": [
    150,
    219
@@ -999,6 +1005,9 @@
   "obarrayp": [
    226
   ],
+  "oclosure-type": [
+   234
+  ],
   "overlays-at": [
    121
   ],
@@ -1104,6 +1113,9 @@
    222,
    224
   ],
+  "purify-flag": [
+   234
+  ],
   "push macroexp-let2 gv-letplace": [
    27
   ],
@@ -1195,7 +1207,7 @@
   ],
   "reset": [
    117,
-   234
+   235
   ],
   "reverse": [
    54,
@@ -1203,6 +1215,9 @@
   ],
   "romacs--host-input": [
    61
+  ],
+  "romacs--oclosure-type": [
+   234
   ],
   "romacs--read-host-event": [
    61
@@ -1272,10 +1287,10 @@
    113,
    114,
    115,
-   236,
    237,
    238,
-   240
+   239,
+   241
   ],
   "set-match-data": [
    67
@@ -1330,10 +1345,10 @@
    87
   ],
   "skip-chars-backward": [
-   243
+   244
   ],
   "skip-chars-forward": [
-   243
+   244
   ],
   "sort": [
    17
@@ -1450,6 +1465,9 @@
    77,
    180,
    191
+  ],
+  "text-quoting-style": [
+   230
   ],
   "theme-face": [
    111
@@ -2944,8 +2962,8 @@
    "planned": false,
    "mechanism": "`lexical-binding` is a constant in VM2",
    "gnu": "GNU declares `lexical-binding` a special variable (`src/lread.c` `DEFVAR_LISP (\"lexical-binding\", ...)` + `Fmake_variable_buffer_local`): live GNU 32.0.50 `(list (let ((lexical-binding t)) lexical-binding) (progn (setq lexical-binding nil) lexical-binding) (special-variable-p 'lexical-binding))` => `(t nil t)`",
-   "romacs": "VM2's compiler treats the symbol like `nil`/`t` (`crates/romacs-vm/src/lib.rs:890,1344,1649,1833,1890,1972`): `let` of it fails `vm2: cannot bind a constant`, `setq` fails `vm2: cannot set a constant`, both uncatchable (not Lisp signals), and `special-variable-p` answers nil (probes `reference/lisp-oracle/probes/g06-*.el`, receipts in `reference/lisp-oracle/VM-GAPS.md` G6)",
-   "why": "**Package-observable, accidental, not designed:** exposed when `lisp/` became GNU's own (Phase 0, R221); an in-place sweep of GNU's files had hidden it. Breaks every GNU site that binds or sets it, about 20 in the pinned `lisp/` including `simple.el:2176` (loadup) and the ERT runner `ert.el:844`. Open as gap G6 / worklist W20; owner decision pending (the dropped sweep is `git show 63495afe:lisp-overlay/proposed/lexical-binding-sweep.patch`). Recorded here so the gap has a row; no fix in this lane",
+   "romacs": "VM2's compiler treats the symbol like `nil`/`t` (`crates/romacs-vm/src/lib.rs:890,1344,1649,1833,1890,1972`): a redundant literal `(let ((lexical-binding t)) ...)` or `let*` binding is accepted without changing the VM's lexical mode, while other bindings fail `vm2: cannot bind a constant`; `setq` fails `vm2: cannot set a constant`, both uncatchable (not Lisp signals), and `special-variable-p` answers nil (probes `reference/lisp-oracle/probes/g06-*.el`, receipts in `reference/lisp-oracle/VM-GAPS.md` G6)",
+   "why": "**Package-observable, accidental, not designed:** exposed when `lisp/` became GNU's own (Phase 0, R221); an in-place sweep of GNU's files had hidden it. Still breaks GNU sites that change its value; the literal-true assertion used by `cl-generic` now works. There are about 20 in the pinned `lisp/` including `simple.el:2176` (loadup) and the ERT runner `ert.el:844`. Open as gap G6 / worklist W20; owner decision pending (the dropped sweep is `git show 63495afe:lisp-overlay/proposed/lexical-binding-sweep.patch`). Recorded here so the gap has a row; no fix in this lane",
    "symbols": [
     "lexical-binding",
     "special-variable-p"
@@ -3258,8 +3276,8 @@
    "planned": false,
    "mechanism": "a closure is not a sequence in VM2",
    "gnu": "A closure is a vector-like object in GNU 32.0.50, so `length`, `append` and `mapcar` accept it as a sequence: `(length (lambda (x) x))` is 5 for the byte-compiled closure and 3 for the interpreted one (both regimes recorded; `src/fns.c:154` at pin `45b0f7699df`, `Flength` counts a `CLOSUREP` object's slots).",
-   "romacs": "VM2 closures are opaque objects: all three signal `wrong-type-argument`. Pinned in the bulk `core` corpus as `length/0071`, `append/1041`, `mapcar/0257` (class `VALUE`; the probes catch the type error as -99 so the closure is never printed).",
-   "why": "**Package-observable, rarely:** only code that measures or walks a function object's slots (OClosure internals, some debuggers/`cl-print`) sees the difference. Treating closures as sequences needs a GNU-compatible closure layout and is out of scope for the primitive batch.",
+   "romacs": "Ordinary VM2 closures remain opaque objects: all three signal `wrong-type-argument`. Explicit `make-interpreted-closure` values and marked OClosures expose their supported metadata slots; this does not make ordinary closures sequences. Pinned in the bulk `core` corpus as `length/0071`, `append/1041`, `mapcar/0257` (class `VALUE`; the probes catch the type error as -99 so the closure is never printed).",
+   "why": "**Package-observable, rarely:** only code that measures or walks a function object's slots (OClosure internals, some debuggers/`cl-print`) sees the difference. General closure sequence operations remain out of scope. OClosure uses the explicit metadata boundary described in VM2-OCLOSURE1.",
    "symbols": [
     "length",
     "append",
@@ -5474,7 +5492,8 @@
    "romacs": "Quote selection, template-only substitution, explicit capability bindings, display-table fallback and byte8 promotion are implemented. Formatting shares the existing `%s`, `%S`, `%d`, `%%` subset; widths/precision, other conversions and text properties are not implemented. Initial capability is the VM's UTF-8 default (`t`), not host non-UTF-8 locale detection, and the capability binding is not boolean-normalized.",
    "why": "Existing formatter/locale substrate limits; the 64-case pinned corpus covers the supported quote behavior, not all formatting.",
    "symbols": [
-    "format-message"
+    "format-message",
+    "text-quoting-style"
    ],
    "symbols_derived": false
   },
@@ -5528,6 +5547,25 @@
     "all-completions",
     "test-completion",
     "compare-strings"
+   ],
+   "symbols_derived": false
+  },
+  {
+   "id": "VM2-OCLOSURE1",
+   "source": "DIVERGENCES.md",
+   "section": "Explicit OClosure compatibility",
+   "observable": false,
+   "planned": false,
+   "mechanism": "Closure metadata and GNU generic dispatch",
+   "gnu": "GNU OClosure inspects closure documentation and captured environment slots.",
+   "romacs": "Ordinary closures retain a private traced documentation value. The explicit `oclosure--fix-type` marker emitted by GNU's macro retains named capture cells and exposes the supported interpreter metadata. `romacs-cl-generic` loads the owned `romacs-oclosure` type-query bridge before unchanged GNU `cl-generic`.",
+   "why": "Compatibility callers must load the named entry after GNU core prerequisites; this is not an automatic GUI startup addition. Ordinary closure array access remains rejected. Explicit OClosure capture retention may include bindings GNU optimizes away. Existing code-image restrictions on mutable captured cells remain. Code images use VM2CODE8 to serialize private documentation. `tests/oclosure.rs` covers accessors, copying, inheritance, identity, GC, dispatch, replacement and method combination.",
+   "symbols": [
+    "oclosure-type",
+    "romacs--oclosure-type",
+    "make-interpreted-closure",
+    "cl-type-of",
+    "purify-flag"
    ],
    "symbols_derived": false
   },

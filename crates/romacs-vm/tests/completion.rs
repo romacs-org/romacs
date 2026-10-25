@@ -266,6 +266,20 @@ fn unmodified_gnu_regexp_opt_uses_native_completion() {
               '("alpha" "alpine" "beta" "αβx" "αγy" "alp" "alphas" "bet" "αδ")))"#;
     let value = vm.eval_source(source).unwrap();
     assert_eq!(value.display().unwrap(), "(t t t t t nil nil nil nil)");
+    for source in [
+        r#"(equal (regexp-opt-charset '(97 98 99 100 122)) "[a-dz]")"#,
+        r#"(equal (regexp-opt-charset '(93 94 45)) "[]^-]")"#,
+        r#"(let ((pattern (concat "\\`" (regexp-opt '("foo" "food" "fool" "bar" "baz" "αβ" "αγ")) "\\'")))
+             (equal (mapcar (lambda (s) (if (string-match pattern s) t nil))
+                            '("foo" "food" "fool" "bar" "baz" "αβ" "αγ" "fo" "foods" "ba" "αδ"))
+                    '(t t t t t t t nil nil nil nil)))"#,
+    ] {
+        assert_eq!(
+            vm.eval_source(source).unwrap().display().unwrap(),
+            "t",
+            "{source}"
+        );
+    }
 }
 
 #[test]

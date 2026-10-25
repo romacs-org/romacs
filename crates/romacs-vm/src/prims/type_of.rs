@@ -3,9 +3,22 @@ use super::*;
 
 defsubr! { name = "type-of", gnu = "data.c:187", effect = Pure,
 fn type_of(cx, object: Value) {
+    classify(cx, object, false)
+}}
+
+defsubr! { name = "cl-type-of", gnu = "data.c:202", effect = Pure,
+fn cl_type_of(cx, object: Value) {
+    classify(cx, object, true)
+}}
+
+fn classify(cx: &mut Leaf<'_>, object: Value, precise: bool) -> Out {
     use crate::prim::leaf::Kind;
     let name = match cx.kind(object) {
+        Kind::Integer if precise => "fixnum",
+        Kind::Bignum if precise => "bignum",
         Kind::Integer | Kind::Bignum => "integer",
+        Kind::Symbol if precise && object == Value::NIL => "null",
+        Kind::Symbol if precise && object == Value::TRUE => "boolean",
         Kind::Symbol => "symbol",
         Kind::Float => "float",
         Kind::Cons => "cons",
@@ -23,6 +36,7 @@ fn type_of(cx, object: Value) {
         Kind::Window => "window",
         Kind::Frame => "frame",
         Kind::Terminal => "terminal",
+        Kind::Subr if precise => "primitive-function",
         Kind::Subr => "subr",
         Kind::Closure => "interpreted-function",
         Kind::Cell | Kind::Unbound | Kind::Invalid => {
@@ -30,4 +44,4 @@ fn type_of(cx, object: Value) {
         }
     };
     Ok(cx.intern(name))
-}}
+}

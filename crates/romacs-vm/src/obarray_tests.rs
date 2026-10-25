@@ -20,7 +20,7 @@ fn obarray_compiled_call_retains_symbol_slot() {
         function.code = vec![op];
         vm.caches.push(Cache { version: 0, target: Value::NIL });
         let index = vm.closures.len();
-        vm.closures.push(Closure { function: id, captures: vec![], metadata: vec![] });
+        vm.closures.push(Closure { function: id, captures: vec![], metadata: vec![], document: Value::NIL });
         let mut roots = [Value::reference(index, 4)];
         vm.collect(&mut roots);
         assert!(vm.obarray_symbol_names.contains_key(&slot), "compiled custom-symbol operand retains its original slot: {kind}");

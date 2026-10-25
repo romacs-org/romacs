@@ -8,14 +8,14 @@
   "provenance": {
     "generated_by": "romacs-introspect-live",
     "generated_on": "linux-x86_64",
-    "input_hash": "ed30b2e07635c177c64710068811e1a0a096f9af447ce414f0e507b30463e0e3",
+    "input_hash": "ec9c6d27e46de0cb88c3ec6928a2c5d3cbd91f63bbee5f8268c182beda38def2",
     "source_only_at_generation": [],
     "vm2_probe_panics": [],
-    "vm2_universe": 2399
+    "vm2_universe": 2419
   },
   "schema": 2,
   "vm2": {
-    "count": 595,
+    "count": 600,
     "entries": [
       "#:vm2-closure-document",
       "#:vm2-closure-metadata",
@@ -115,6 +115,7 @@
       "characterp",
       "charset-plist",
       "check-coding-system",
+      "cl-type-of",
       "clear-string",
       "closurep",
       "clrhash",
@@ -340,6 +341,7 @@
       "make-variable-buffer-local",
       "make-vector",
       "makunbound",
+      "map-char-table",
       "map-keymap",
       "map-keymap-internal",
       "mapatoms",
@@ -400,6 +402,7 @@
       "overlays-at",
       "overlays-in",
       "plist-get",
+      "plist-member",
       "plist-put",
       "point",
       "point-max",
@@ -441,6 +444,7 @@
       "romacs--clipboard-set",
       "romacs--clipboard-text",
       "romacs--kill-buffer-finish",
+      "romacs--oclosure-type",
       "romacs--process-forget",
       "romacs--process-ready",
       "romacs--process-result",
@@ -545,6 +549,7 @@
       "terpri",
       "test-completion",
       "text-properties-at",
+      "text-quoting-style",
       "this-command-keys",
       "throw",
       "try-completion",

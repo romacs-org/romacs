@@ -8,6 +8,39 @@ mod tests {
         assert_eq!(vm.display(value).unwrap(), expected, "{source}");
     }
     #[test]
+    fn ordinary_document_is_traced_without_exposing_metadata() {
+        for lazy in [false, true] {
+            let mut vm = Vm::new();
+            vm.lazy_regime = lazy;
+            vm.eval_source_raw("(make-vector 20 nil) (defalias 'private-document (lambda () (:documentation (copy-sequence \"κείμενο\")) 7))").unwrap();
+            vm.collect(&mut []);
+            let value = vm.slots[vm.names["private-document"]].function;
+            let closure = &vm.closures[value.index(4).unwrap()];
+            assert!(closure.metadata.is_empty());
+            assert_eq!(vm.str_view(closure.document).unwrap().bytes(), "κείμενο".as_bytes());
+        }
+    }
+    #[test]
+    fn ordinary_document_survives_a_code_image() {
+        let mut vm = Vm::new();
+        vm.eval_source_raw("(defalias 'image-document (lambda () (:documentation 'image-kind) 7)) (defalias 'image-string-document (lambda () \"κείμενο\" 8))").unwrap();
+        let entry = vm.compile_source("(if (eq (romacs--oclosure-type (symbol-function 'image-document)) 'image-kind) (image-document) -1)").unwrap();
+        let path = std::env::temp_dir().join(format!("romacs-document-image-{}", std::process::id()));
+        std::fs::create_dir_all(&path).unwrap();
+        let key = vm.publish_code_image(&path, entry, [93; 32]).unwrap();
+        let image = unsafe { ImageRegion::open(&path, &key) }.unwrap();
+        let (mut loaded, entry) = Vm::from_code_image(image, [93; 32]).unwrap();
+        loaded.collect(&mut []);
+        assert_eq!(loaded.execute_raw(entry).unwrap().as_integer().unwrap(), 7);
+        let f = loaded.slots[loaded.names["image-document"]].function;
+        assert!(loaded.closures[f.index(4).unwrap()].metadata.is_empty());
+        let f = loaded.slots[loaded.names["image-string-document"]].function;
+        let document = loaded.closures[f.index(4).unwrap()].document;
+        assert!(!Vm::image_value(document));
+        assert_eq!(loaded.str_view(document).unwrap().bytes(), "κείμενο".as_bytes());
+        std::fs::remove_dir_all(path).unwrap();
+    }
+    #[test]
     fn interpreted_metadata_and_document_evaluation() {
         let mut vm = Vm::new();
         check(
@@ -258,6 +291,7 @@ impl Vm {
                     metadata.extend([Value::NIL, a[4]]);
                 }
                 self.closures[index].metadata = metadata;
+                self.closures[index].document = a[4];
                 Ok(a[0])
             }
             Primitive::ClosureDocument => {
@@ -265,6 +299,7 @@ impl Vm {
                     return Err("wrong primitive arity".into());
                 }
                 let closure = &mut self.closures[a[0].index(4)?];
+                closure.document = a[1];
                 if closure.metadata.is_empty() {
                     return Ok(a[0]);
                 }
@@ -386,6 +421,7 @@ impl Vm {
                     function,
                     captures,
                     metadata,
+                    document: a[3],
                 });
                 if a[4] != Value::NIL {
                     let spec = self.closures[result.index(4)?].metadata[5];
@@ -402,6 +438,7 @@ impl Vm {
                             function,
                             captures,
                             metadata: vec![Value::NIL, body, a[2]],
+                            document: Value::NIL,
                         });
                         thunk
                     };

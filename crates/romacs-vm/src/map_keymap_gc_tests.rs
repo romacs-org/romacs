@@ -3,6 +3,40 @@ mod tests {
     use crate::map_keymap::*;
     use crate::*;
     #[test]
+    fn map_char_table_cursor_roots_its_shared_range() {
+        let mut vm = Vm::new();
+        let table = char_table::CharTable::new(Value::NIL);
+        let root = table.root.clone();
+        let table = vm.allocate_object(data::Object::CharTable(Box::new(table)));
+        let range = vm.eval_source_raw("'(0 . 4194303)").unwrap();
+        let cursor = Cursor {
+            stack: vec![MapFrame::Table {
+                tail: Value::NIL,
+                table: Chartab {
+                    table,
+                    frames: vec![Frame::new(root, table, 0, 4194303)],
+                    val: Value::NIL,
+                    from: 0,
+                    to: 4194303,
+                    final_emitted: false,
+                    range: Some(range),
+                    final_decoder: false,
+                },
+            }],
+            internal: false,
+            result: Value::NIL,
+        };
+        let cursor = vm.allocate_object(data::Object::MapKeymapCursor(Box::new(cursor)));
+        let mut roots = [cursor];
+        vm.collect(&mut roots);
+        let data::Object::MapKeymapCursor(cursor) = vm.object_if(roots[0]).unwrap() else { panic!("cursor") };
+        let MapFrame::Table { table, .. } = &cursor.stack[0] else { panic!("table frame") };
+        assert_eq!(vm.cons_pair(table.range.unwrap()).unwrap(), (Value::integer(0).unwrap(), Value::integer(4194303).unwrap()));
+        vm.collect(&mut []);
+        assert_eq!(vm.heap_objects(), 0);
+    }
+
+    #[test]
     fn map_keymap_cursor_only_detached_subtree_moves_and_deduplicates() {
         for detached in [false, true] {
             let mut vm = Vm::new();
@@ -37,6 +71,8 @@ mod tests {
                         from: 65536,
                         to: 131071,
                         final_emitted: false,
+                        range: None,
+                        final_decoder: false,
                     },
                 }],
                 internal: false,

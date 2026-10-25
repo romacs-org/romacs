@@ -98,6 +98,10 @@ pub(crate) struct CVariable {
 /// only those the bootstrap chain, the census or the variable harness
 /// actually reached (ruling R216: no speculative ports).
 pub(crate) static C_VARIABLES: &[CVariable] = &[
+    // cl-generic's dispatcher compiler checks whether GNU is being dumped.
+    CVariable { name: "purify-flag", gnu: "alloc.c:7487", kind: Kind::Lisp(Init::Nil) },
+    // GNU warning text expands command keys while compiling obsolete method calls.
+    CVariable { name: "overriding-local-map", gnu: "keyboard.c:14137", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "tab-width", gnu: "buffer.c:5284", kind: Kind::PerBuffer { default: Init::Fixnum(8), predicate: Some(Predicate::Integerp) } },
     CVariable { name: "noninteractive", gnu: "emacs.c:3534", kind: Kind::Bool(false) },
     CVariable { name: "auto-window-vscroll", gnu: "window.c:9296", kind: Kind::Bool(true) },
