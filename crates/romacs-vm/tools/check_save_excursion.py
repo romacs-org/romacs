@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Focused excursion evidence; run mutations inside lane-run + gate-slot.
+"""Focused excursion evidence; run mutations in an owned isolated checkout.
 
 No GNU lookup/fallback: --record-gnu uses only the owner's pinned binary.
 Mutations are killed only by their named behavioral assertion (not build faults).
@@ -53,7 +53,6 @@ MUTANTS = [
 
 
 def mutants():
-    assert os.environ.get('CARGO_TARGET_DIR'), 'Run through scripts/lane-run inside gate-slot'
     original = SOURCE.read_text()
     EVIDENCE.mkdir(parents=True, exist_ok=True)
     rows = []

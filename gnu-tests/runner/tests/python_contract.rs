@@ -96,4 +96,17 @@ fn subject_vacuity_classifier_contract() {
 #[test]
 fn run_local_evidence_contract() {
     python_contract("test_evidence_local.py", "EvidenceLocalTests");
+    python_contract("test_evidence_local.py", "TreeEvidenceLocalTests");
+}
+
+#[test]
+fn source_manifest_contract() {
+    python_contract("test_audit_manifest.py", "LegacyRefusal");
+    python_contract("test_audit_manifest.py", "ManifestTests");
+    python_contract("test_audit_manifest.py", "FocusedImporterTests");
+}
+
+#[test]
+fn gate_subject_preparation_contract() {
+    python_contract("test_gate_vacuity.py", "GateVacuityTests");
 }

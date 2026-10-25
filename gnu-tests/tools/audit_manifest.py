@@ -10,7 +10,7 @@ nonempty argv lists, recorded as supplied, not proof that they were executed.
 Binaries map role names to {path, provenance}. Native GNU provenance is
 {kind: 'native-gnu-pin', revision: FULL_SHA, sha256: EXPECTED_SHA256}.
 Other binaries require {kind: 'build-receipt', path: RECEIPT_JSON}. A receipt
-has schema=1, source={revision, tree}, binary_sha256, command=[...], exit_code=0,
+has schema=1, source={revision, tree, optional kind}, binary_sha256, command=[...], exit_code=0,
 tracked_clean_start=true, tracked_clean_end=true. The build producer must write
 it from actual build observations; this API validates and binds those claims,
 not independently proves that compilation happened. Never fabricate a receipt
@@ -19,6 +19,8 @@ for an ambient executable. All receipt/input/output bytes remain available.
 Source checks compare raw tracked bytes/modes against the Git object, bypassing
 index stat caches, filters, assume-unchanged and skip-worktree. They establish
 start/end snapshots, not continuous observation between those boundaries.
+Gate archives bind kind=git-tree to their submitted tree object. Ordinary
+repositories continue to require clean committed source and index snapshots.
 """
 from __future__ import annotations
 
@@ -51,11 +53,12 @@ def _oid(value):
 
 
 def _source(repo):
-    from vacuity_binding import git_root
+    from vacuity_binding import git_root, snapshot_tree
 
     repo = Path(repo).resolve(strict=True)
     metadata = git_root(repo)
-    revision = _git(metadata, 'rev-parse', '--verify', 'HEAD').decode().strip()
+    captured = snapshot_tree(repo)
+    revision = captured or _git(metadata, 'rev-parse', '--verify', 'HEAD').decode().strip()
     tree = _git(metadata, 'rev-parse', '--verify', f'{revision}^{{tree}}').decode().strip()
     algorithm = _git(metadata, 'rev-parse', '--show-object-format').decode().strip()
     for row in _git(metadata, 'ls-tree', '-rz', '--full-tree', revision).split(b'\0'):
@@ -82,13 +85,16 @@ def _source(repo):
         actual = hashlib.new(algorithm, b'blob ' + str(len(data)).encode() + b'\0' + data).hexdigest()
         if kind != b'blob' or actual != oid.decode():
             _fail(f'tracked bytes mismatch: {name!r}')
-    # Staged additions/deletions are dirty even if the HEAD files still match.
-    if _git(metadata, 'diff', '--cached', '--name-only', revision, '--'):
-        _fail('tracked index differs from source HEAD')
-    if _git(metadata, 'rev-parse', '--verify', 'HEAD').decode().strip() != revision:
-        _fail('source revision changed during snapshot')
-    return {'repo': str(repo), 'revision': revision, 'tree': tree,
-            'tracked_clean_start': True, 'tracked_clean_end': True}
+    if captured is None:
+        if _git(metadata, 'diff', '--cached', '--name-only', revision, '--'):
+            _fail('tracked index differs from source HEAD')
+        if _git(metadata, 'rev-parse', '--verify', 'HEAD').decode().strip() != revision:
+            _fail('source revision changed during snapshot')
+    source = {'repo': str(repo), 'revision': revision, 'tree': tree,
+              'tracked_clean_start': True, 'tracked_clean_end': True}
+    if captured is not None:
+        source['kind'] = 'git-tree'
+    return source
 
 
 def _file(path):
@@ -131,7 +137,8 @@ def _binary(record, source):
     elif provenance.get('kind') == 'build-receipt':
         _check_file(provenance['receipt'])
         receipt = json.loads(Path(provenance['receipt']['path']).read_text())
-        expected_source = {k: source[k] for k in ('revision', 'tree')}
+        from vacuity_binding import source_identity
+        expected_source = source_identity(source)
         if (receipt.get('schema') != 1 or receipt.get('source') != expected_source
                 or receipt.get('binary_sha256') != record['file']['sha256']
                 or type(receipt.get('exit_code')) is not int or receipt['exit_code'] != 0

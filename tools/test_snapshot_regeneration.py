@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Exercise the real generator in an isolated Git clone; never change source refs.
 
-Run through lane-run to reuse its build cache. Fixtures/evidence stay outside the
+Keep CARGO_TARGET_DIR when reusing a build cache. Fixtures/evidence stay outside the
 worktree. --mutant restores volatile provenance and accepts only the invariant's
 own assertion, never a build failure or an arbitrary nonzero exit, as a kill.
 """

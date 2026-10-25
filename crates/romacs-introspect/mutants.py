@@ -8,8 +8,8 @@ Each mutant replaces one exact string in one file, runs the named test target,
 and counts as KILLED only if the expected test is reported FAILED. The file is
 restored from memory in a `finally`, so an interrupted run leaves no mutant
 behind; `git status` should be clean afterwards either way. Exit 1 if any
-mutant survives. Run inside the lane environment (pinned toolchain, private
-CARGO_TARGET_DIR); it builds incrementally against that target.
+mutant survives. Run in an owned checkout with the pinned project toolchain.
+Cargo reuses the checkout's target or the supplied CARGO_TARGET_DIR.
 """
 from __future__ import annotations
 import pathlib, subprocess, sys

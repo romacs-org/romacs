@@ -2,7 +2,6 @@
 """Kill logior mutants only at BITWISE_GNU_MISMATCH and the named oracle row.
 Logs must be outside the worktree. Every mutation is restored even on failure.
 """
-from pathlib import Path as _PortablePath
 import pathlib
 import subprocess
 import sys
@@ -30,7 +29,7 @@ try:
         mutated = original.replace(old, new)
         assert mutated != original
         SOURCE.write_text(mutated)
-        run = subprocess.run([str(next(p for p in _PortablePath(__file__).resolve().parents if (p / 'parity-reference.toml').is_file()) / 'scripts/lane-run'), "bitboot", "-C", str(ROOT), "--", "cargo", "test", "-p", "romacs-vm", "--test", "bitwise", "bitwise_matches_pinned_gnu", "--", "--nocapture"], capture_output=True, text=True)
+        run = subprocess.run(["cargo", "test", "-p", "romacs-vm", "--test", "bitwise", "bitwise_matches_pinned_gnu", "--", "--nocapture"], cwd=ROOT, capture_output=True, text=True)
         output = run.stdout + run.stderr
         (LOG / (name + ".log")).write_text(output)
         killed = run.returncode != 0 and "BITWISE_GNU_MISMATCH" in output and f'"{row}": GNU' in output and "ours" in output

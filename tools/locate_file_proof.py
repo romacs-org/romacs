@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Focused red/green and assertion-message-keyed production mutation proof.
-Run in an isolated worktree through scripts/lane-run and gate-slot.sh.
+Run in an owned isolated worktree with the prepared project environment.
 """
 import json
 import pathlib

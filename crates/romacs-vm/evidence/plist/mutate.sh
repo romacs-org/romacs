@@ -2,7 +2,7 @@
 # Mutation harness for the symbol-plist lane. Each mutant edits one line that
 # a test protects, runs the protecting tests, records whether they FAILED
 # (killed), and restores the file byte-for-byte from a copy taken first. Run from the repository root with
-# the lane environment sourced. Exit status is non-zero if any mutant survives.
+# the project environment prepared. Exit status is non-zero if any mutant survives.
 set -u
 cd "$(git rev-parse --show-toplevel)"
 out=crates/romacs-vm/evidence/plist/mutants

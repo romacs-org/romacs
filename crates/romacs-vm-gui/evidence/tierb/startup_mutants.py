@@ -5,7 +5,7 @@ gets its own labelled stand-in. Apply one mutant at a time, run the startup
 tests, restore. A kill counts only if the named target test FAILED by an
 assertion panic (a compile error is not a kill).
 
-    lane-run gtb -C <worktree> -- python3 startup_mutants.py OUT.json
+    python3 startup_mutants.py OUT.json
 """
 import json, pathlib, subprocess, sys
 root = pathlib.Path(__file__).resolve().parents[4]

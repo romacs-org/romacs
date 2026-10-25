@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Focused compiling mutants; restore every edited byte even on failure.
-Run from the repository root with the lane environment exported.
+Run from an owned checkout with the prepared project environment.
 Raw command output and a machine-readable receipt go to --out (scratch).
 """
 import argparse

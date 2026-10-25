@@ -53,6 +53,18 @@ class GraphicalOracleEnvironment(unittest.TestCase):
 
 
 class PortableToolTrust(unittest.TestCase):
+    def test_slot_defaults_are_adjacent_even_with_legacy_tools_on_path(self):
+        environment = {k: v for k, v in os.environ.items()
+                       if k not in ('ROMACS_SLOT', 'ROMACS_SLOT_RUNNER')}
+        with mock.patch.dict(os.environ, environment, clear=True), \
+             mock.patch.object(shutil, 'which', return_value='/retired/bin/tool'):
+            local_loader = importlib.machinery.SourceFileLoader('local_gate', gate.__file__)
+            module = importlib.util.module_from_spec(importlib.util.spec_from_loader('local_gate', local_loader))
+            local_loader.exec_module(module)
+        root = pathlib.Path(gate.__file__).resolve().parent
+        self.assertEqual(pathlib.Path(module.SLOT), root / 'neomacs-slot')
+        self.assertEqual(pathlib.Path(module.RUNNER), root / 'neomacs-slot-runner.py')
+
     def test_mutable_usr_directory_is_not_an_immutable_tool_closure(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
@@ -422,6 +434,12 @@ class GateArguments(unittest.TestCase):
         self.oracle = pinned_fixture(self, self.root)
         (self.root / 'scripts').mkdir()
         (self.root / 'scripts/gate').write_bytes(pathlib.Path(gate.__file__).read_bytes())
+        for source, name in ((gate.SLOT, 'neomacs-slot'), (gate.RUNNER, 'neomacs-slot-runner.py')):
+            target = self.root / 'scripts' / name
+            target.write_bytes(pathlib.Path(source).read_bytes())
+            target.chmod(0o755)
+        self.enterContext(mock.patch.multiple(gate, SLOT=str(self.root / 'scripts/neomacs-slot'),
+                                             RUNNER=str(self.root / 'scripts/neomacs-slot-runner.py')))
         subprocess.run(['git', 'init', '-b', 'master', str(self.root)], check=True, stdout=subprocess.DEVNULL)
         for key, value in [('user.name', 'Fixture'), ('user.email', 'fixture@example.invalid'), ('commit.gpgsign', 'false')]:
             subprocess.run(['git', 'config', key, value], cwd=self.root, check=True)
@@ -438,6 +456,28 @@ class GateArguments(unittest.TestCase):
         self.assertEqual(payload[payload.index('--oracle') + 1], str(self.oracle))
         self.assertEqual(payload[payload.index('--require') + 1], 'pkg::bin$probe')
         self.assertEqual(payload[-1], 'focused')
+
+    def test_staged_snapshot_excludes_other_work_without_changing_the_index(self):
+        (self.root / 'captured-new').write_text('staged')
+        subprocess.run(['git', 'add', 'captured-new'], cwd=self.root, check=True)
+        (self.root / 'README.org').write_text('owner work')
+        (self.root / 'untracked').write_text('not staged')
+        path = self.root / 'scripts/gate'
+        path.write_bytes(path.read_bytes() + b'\n# unstaged fixture\n')
+        before = (self.root / '.git/index').read_bytes()
+        staged = gate.freeze(self.root, staged=True)
+        self.assertEqual((self.root / '.git/index').read_bytes(), before)
+        names = gate.out('git', 'ls-tree', '-r', '--name-only', staged, cwd=self.root).decode().splitlines()
+        self.assertIn('captured-new', names)
+        self.assertNotIn('README.org', names)
+        self.assertNotIn('untracked', names)
+        self.assertNotIn(b'unstaged fixture', gate.out('git', 'show', staged + ':scripts/gate', cwd=self.root))
+        total = gate.freeze(self.root)
+        self.assertEqual((self.root / '.git/index').read_bytes(), before)
+        names = gate.out('git', 'ls-tree', '-r', '--name-only', total, cwd=self.root).decode().splitlines()
+        self.assertIn('README.org', names)
+        self.assertIn('untracked', names)
+        self.assertIn(b'unstaged fixture', gate.out('git', 'show', total + ':scripts/gate', cwd=self.root))
 
     def test_repeat_count_is_forwarded_and_invalid_counts_are_rejected(self):
         cmd = self.slot_command(['--repeat', '60'])
@@ -457,7 +497,13 @@ class GateArguments(unittest.TestCase):
             self.assertEqual(gate.main(), 23)
         call.assert_called_once()
         cmd = call.call_args.args[0]
-        self.assertEqual(cmd[:2], [gate.SLOT, 'velocity-N4'])
+        run_dir = pathlib.Path(cmd[0]).parent
+        self.assertEqual(cmd[:2], [str(run_dir / 'neomacs-slot'), 'velocity-N4'])
+        self.assertEqual((run_dir / 'neomacs-slot').read_bytes(), pathlib.Path(gate.SLOT).read_bytes())
+        self.assertEqual((run_dir / 'neomacs-slot-runner.py').read_bytes(), pathlib.Path(gate.RUNNER).read_bytes())
+        environment = call.call_args.kwargs['env']
+        self.assertEqual(environment['ROMACS_SLOT_RUNNER'], str(run_dir / 'neomacs-slot-runner.py'))
+        self.assertEqual(environment['ROMACS_SLOT'], cmd[0])
         return cmd
 
     def assert_nextest_threads(self, cmd, core, display):
@@ -538,7 +584,19 @@ class GateArguments(unittest.TestCase):
         self.assertNotIn('--jobs', cmd[:cmd.index('--')])
 
     def test_default_threads_reach_inner_nextest(self):
-        self.assert_nextest_threads(self.slot_command([]), 8, 4)
+        self.assert_nextest_threads(self.slot_command([]), 1, 1)
+
+    def test_admission_keeps_the_frozen_runner_after_source_edits(self):
+        cmd = self.slot_command([])
+        pathlib.Path(gate.RUNNER).write_text('raise RuntimeError("edited after freeze")\n')
+        result = subprocess.run([cmd[0], 'fixture', '--help', '--', 'true'],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('MemoryMax', result.stdout)
+
+    def test_default_memory_limit_reaches_admission(self):
+        cmd = self.slot_command([])
+        self.assertEqual(cmd[cmd.index('--mem') + 1], '34G')
 
     def test_explicit_jobs_is_forwarded_unchanged(self):
         for jobs in (3, 8):
@@ -549,8 +607,8 @@ class GateArguments(unittest.TestCase):
                 self.assertEqual(slot[slot.index('--jobs') + 1], str(jobs))
 
     def test_explicit_threads_reach_inner_nextest_unchanged(self):
-        for options, core, display in ((['--threads', '2'], 2, 4),
-                                       (['--display-threads', '1'], 8, 1),
+        for options, core, display in ((['--threads', '2'], 2, 1),
+                                       (['--display-threads', '2'], 1, 2),
                                        (['--jobs', '3', '--threads', '2', '--display-threads', '1'], 2, 1)):
             with self.subTest(options=options):
                 self.assert_nextest_threads(self.slot_command(options), core, display)
@@ -602,14 +660,15 @@ class Receipts(unittest.TestCase):
             os.chdir(previous)
 
     def submit(self, mode='full', *options):
-        def slot(cmd):
+        def slot(cmd, env):
             self.after_submission()
             payload = cmd[cmd.index('--') + 1:]
             self.run_dir = pathlib.Path(payload[payload.index('--run-dir') + 1])
             self.assertEqual(pathlib.Path(payload[1]).read_bytes(), (self.wt / 'scripts/gate').read_bytes())
             def admitted():
                 with mock.patch.object(gate.sys, 'argv', payload[1:]), \
-                     mock.patch.dict(os.environ, self.slot_env):
+                     mock.patch.dict(os.environ, dict(env, **self.slot_env)), \
+                     mock.patch.multiple(gate, SLOT=env['ROMACS_SLOT'], RUNNER=env['ROMACS_SLOT_RUNNER']):
                     return gate.main()
             if self.slot_env:
 
@@ -655,7 +714,7 @@ class Receipts(unittest.TestCase):
         receipt = json.loads((self.run_dir / 'receipt.json').read_text())
         revision = self.git('rev-parse', '--verify', 'HEAD').decode().strip()
         tree = self.git('rev-parse', '--verify', 'HEAD^{tree}').decode().strip()
-        expected = __import__('hashlib').sha256((revision + '\n' + tree).encode()).hexdigest()
+        expected = __import__('hashlib').sha256(tree.encode()).hexdigest()
         for phase in ('build', 'test'):
             self.assertEqual(receipt['env_hashes'][phase].get('ROMACS_VACUITY_GIT_ROOT'),
                              expected, 'VACUITY_ROOT_REMAINS_FINGERPRINTED: ' + phase)
@@ -668,20 +727,29 @@ class Receipts(unittest.TestCase):
         with mock.patch.dict(os.environ, ROMACS_VACUITY_GIT_ROOT='/wrong-caller-root'):
             self.assertEqual(self.reuse(), 0, 'REUSE_RECONSTRUCTS_CANDIDATE_ROOT')
 
-    def test_vacuity_root_different_revision_refuses(self):
+    def test_vacuity_root_same_tree_revision_reuses(self):
         self.slot_env = {'HERMES_SESSION_ID': 'separate-admission'}
         self.assertEqual(self.submit(), 0)
-        # An empty commit changes ancestry, not the tree, gate or tools. Only
-        # the semantic metadata-root binding can refuse this receipt.
         self.git('commit', '--allow-empty', '-m', 'different revision, same tree')
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
             result = self.reuse()
-        self.assertEqual(result, 1, 'DIFFERENT_REVISION_REFUSES / CONSTANT_IDENTITY_REFUSES: ' + output.getvalue())
-        self.assertEqual(output.getvalue(),
-                         'gate: reuse refused (environment: build changed: ROMACS_VACUITY_GIT_ROOT; '
-                         'test changed: ROMACS_VACUITY_GIT_ROOT)\n',
-                         'CONSTANT_IDENTITY_REFUSES')
+        self.assertEqual(result, 0, output.getvalue())
+        self.assertEqual(output.getvalue(), 'gate: reuse GREEN\n')
+
+    def test_staged_candidate_and_receipt_preserve_unrelated_work(self):
+        (self.wt / 'f.rs').write_text('candidate')
+        self.git('add', 'f.rs')
+        (self.wt / 'README.org').write_text('owner work')
+        self.assertEqual(self.submit('full', '--staged'), 0)
+        self.assertEqual(self.captured, ['candidate'])
+        receipt = json.loads((self.run_dir / 'receipt.json').read_text())
+        names = self.git('ls-tree', '-r', '--name-only', receipt['tree']).decode().splitlines()
+        self.assertNotIn('README.org', names)
+        self.assertEqual(self.reuse('--staged'), 0)
+        self.git('commit', '-m', 'candidate')
+        self.assertEqual(self.reuse('--staged'), 0)
+        self.assertEqual((self.wt / 'README.org').read_text(), 'owner work')
 
     def test_vacuity_root_absent_or_invalid_refuses(self):
         with mock.patch.dict(os.environ, ROMACS_VACUITY_GIT_ROOT=str(self.wt)):
@@ -916,6 +984,15 @@ sys.exit(g['main']())
         with mock.patch.dict(os.environ, {'NEOMACS_SLOT_INDEX': '2'}):
             self.assertNotIn('NEOMACS_SLOT_INDEX', gate.env(names=set()))
             self.assertEqual(gate.env(names={'NEOMACS_SLOT_INDEX'})['NEOMACS_SLOT_INDEX'], '2')
+
+    def test_scheduler_tool_paths_do_not_change_build_inputs(self):
+        selectors = {'ROMACS_SLOT': '/run/one/slot', 'ROMACS_SLOT_RUNNER': '/run/one/runner'}
+        with mock.patch.dict(os.environ, selectors):
+            effective = gate.env(names=set())
+            declared = gate.env(names=set(selectors))
+        for key, value in selectors.items():
+            self.assertNotIn(key, effective)
+            self.assertEqual(declared[key], value)
 
     def test_source_declared_slot_index_still_refuses_cross_slot_reuse(self):
         (self.wt / 'f.rs').write_text('const INDEX: &str = env!("NEOMACS_SLOT_INDEX");')

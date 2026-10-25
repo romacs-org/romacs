@@ -11,7 +11,7 @@ Kinds:
   compile  - trybuild must report EXPECT for the named case (the property is
              that the program stops being rejected), or the library itself
              must fail to compile with EXPECT.
-Run from the repository root with the lane environment sourced:
+Run from an owned checkout with the prepared project environment:
   python3 crates/romacs-vm/evidence/heapbound/mutants.py [LABEL...]
 """
 import json, pathlib, re, subprocess, sys, time

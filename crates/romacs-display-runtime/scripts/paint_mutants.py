@@ -5,7 +5,7 @@ Usage: python crates/romacs-display-runtime/scripts/paint_mutants.py WORKTREE
 The caller provides an idle disposable checkout containing this candidate. This
 script never mutates the checkout it is invoked from. It restores every mutant
 in finally, requires the baseline to pass, and rejects compile failures as kills.
-Source scripts/lane-env.sh s115 first and use a private sccache port/target.
+Use the prepared project environment in an owned isolated checkout.
 """
 import os
 from pathlib import Path

@@ -27,9 +27,7 @@ _lane_cache=${ROMACS_REAL_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}}
 
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 KEEP="$REPO $_lane_cache/romacs-warm-tree"
-# Lanes in progress. An unmerged branch is NOT evidence of abandonment -- every
-# live lane is unmerged by definition -- so --include-unmerged alone would have
-# retired six working lanes. The orchestrator keeps this file; lane-new.sh appends.
+# Historical active entries remain protected until their owner retires them.
 ACTIVE_FILE=$_lane_cache/lanes/ACTIVE
 active=$(grep -vE '^\s*(#|$)' "$ACTIVE_FILE" 2>/dev/null || true)
 

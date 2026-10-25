@@ -2,7 +2,7 @@
 """Source mutants of the assoc/delete/nlistp bodies; each must fail the primh
 replay assertion of tests/primh_fns_equal.rs. Restores the source afterwards.
 
-Run from the repository root inside the lane environment:
+Run from an owned checkout with the prepared project environment:
   python3 crates/romacs-vm/tools/primh/logs/assoc/mutants.py
 """
 import re, subprocess, sys

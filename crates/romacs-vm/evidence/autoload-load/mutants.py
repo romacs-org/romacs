@@ -2,7 +2,7 @@
 """Mutation proof for VM2-AUTOLOAD1: tests/autoload_load.rs and the unit
 tests in src/autoload.rs. Each mutant edits one protected line, runs both
 test sets, records which tests fail, and restores the file byte-for-byte.
-SURVIVED means a gap. Run from the repository root with the lane env."""
+SURVIVED means a gap. Run from an owned checkout with the project environment."""
 import subprocess, sys, pathlib, re, json
 
 ROOT = pathlib.Path(__file__).resolve().parents[4]

@@ -24,7 +24,7 @@ C-realized and Lisp-query heights separately. Regeneration:
 
 ```sh
 # GNU at the pin only: scripts/gnu_oracle.py refuses anything else (R228).
-"$(python3 scripts/gnu_oracle.py path)" -Q --batch -l crates/romacs-face/tests/gnu/redisplay.el > "$TMPDIR/redisplay.eld"
+"$(python3 scripts/gnu_oracle.py path)" -Q --batch -l crates/romacs-face/tests/gnu/redisplay.el > "${TMPDIR:-/tmp}/redisplay.eld"
 # Check exit status directly, then review the diff before replacing the fixture.
 ```
 
@@ -53,12 +53,10 @@ expected assertion markers. `mutants.py` applies one at a time, demands an
 executed assertion-red (never a crate compile error), restores byte-for-byte
 source snapshots in `finally`, then demands restored-green. Core dumps are
 disabled for the two isolated stack-overflow mutants. Run only in an owned
-worktree, with a private target directory and sccache port:
+worktree with the prepared project environment:
 
 ```sh
-. scripts/lane-env.sh face-mutants >/dev/null
-export SCCACHE_SERVER_PORT=4302
-python3 crates/romacs-face/tests/mutants.py --apply --logs "$TMPDIR/face-mutants"
+python3 crates/romacs-face/tests/mutants.py --apply --logs "${TMPDIR:-/tmp}/face-mutants"
 ```
 
 Use `--only M19-default-underline` for one mutant; `--results PATH` writes

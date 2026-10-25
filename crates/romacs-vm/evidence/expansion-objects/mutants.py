@@ -4,7 +4,7 @@
 Each mutant edits one protected line of the subject, runs the test binary,
 records which tests fail, and restores the file byte-for-byte. A mutant
 that leaves every test green is reported as SURVIVED (a gap). Run from the
-repository root with the lane environment (cargo on PATH)."""
+owned checkout with the project toolchain on PATH."""
 import subprocess, sys, pathlib, re, json
 
 ROOT = pathlib.Path(__file__).resolve().parents[4]

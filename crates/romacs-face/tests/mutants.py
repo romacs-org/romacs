@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Replay surgical face mutants, require assertion reds, restore, prove green.
 
-Run only in an owned worktree, after sourcing scripts/lane-env.sh:
-  python3 crates/romacs-face/tests/mutants.py --apply --logs "$TMPDIR/face-mutants"
+Run only in an owned worktree with the prepared project environment:
+  python3 crates/romacs-face/tests/mutants.py --apply --logs "${TMPDIR:-/tmp}/face-mutants"
 
 No gate, benchmark, TRYBUILD overwrite, pipeline, or dependency on scratch inputs.
 """
@@ -22,8 +22,6 @@ def main():
     parser.add_argument("--only")
     parser.add_argument("--results", type=Path)
     args = parser.parse_args()
-    if not os.environ.get("CARGO_TARGET_DIR"):
-        parser.error("source lane-env first; an isolated CARGO_TARGET_DIR is required")
     if os.environ.get("TRYBUILD"):
         parser.error("TRYBUILD must be unset")
     root = Path(__file__).resolve().parents[3]

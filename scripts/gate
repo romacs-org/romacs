@@ -23,8 +23,8 @@ Build-only receipts and stress runs cannot substitute for full acceptance.
 """
 import argparse, fcntl, hashlib, json, os, pathlib, re, shlex, shutil, subprocess, sys, tempfile, time, tomllib
 
-SLOT = os.environ.get('ROMACS_SLOT', shutil.which('neomacs-slot') or 'neomacs-slot')
-RUNNER = os.environ.get('ROMACS_SLOT_RUNNER', shutil.which('neomacs-slot-runner.py') or 'neomacs-slot-runner.py')
+SLOT = os.environ.get('ROMACS_SLOT', str(pathlib.Path(__file__).resolve().with_name('neomacs-slot')))
+RUNNER = os.environ.get('ROMACS_SLOT_RUNNER', str(pathlib.Path(__file__).resolve().with_name('neomacs-slot-runner.py')))
 
 
 def _pinned_oracle(repo):
@@ -180,6 +180,9 @@ def env(src=None, names=None):
     e.pop('CARGO_INCREMENTAL', None)
     if 'NEOMACS_SLOT_INDEX' not in names:
         e.pop('NEOMACS_SLOT_INDEX', None)  # scheduler location, not a build input
+    for selector in ('ROMACS_SLOT', 'ROMACS_SLOT_RUNNER'):
+        if selector not in names:
+            e.pop(selector, None)
     for k in list(e):
         if k.startswith('CARGO_PROFILE_'):
             e.pop(k)
@@ -195,19 +198,28 @@ def digest(path):
     return hashlib.sha256(pathlib.Path(path).read_bytes()).hexdigest()
 
 
+def source_metadata_identity(root, captured=None):
+    if captured is not None:
+        if not re.fullmatch(r'[0-9a-f]{40}|[0-9a-f]{64}', captured):
+            raise ValueError('invalid captured source context')
+        if out('git', 'cat-file', '-t', captured, cwd=root).strip() != b'tree':
+            raise ValueError('captured source object is not a tree')
+        return captured
+    revision = out('git', 'rev-parse', '--verify', 'HEAD', cwd=root).decode().strip()
+    tree = out('git', 'rev-parse', '--verify', 'HEAD^{tree}', cwd=root).decode().strip()
+    return revision + '\n' + tree
+
+
 def environment_identity(src, inputs=None):
     names = source_env_names(inputs if inputs is not None else src)
     e = env(names=names)
     excluded = {'CARGO_TARGET_DIR', 'CARGO_BUILD_JOBS',
                 'NEXTEST_TEST_THREADS', 'RUST_TEST_THREADS'} - names
-    # This root supplies Git revision metadata for an archive without .git.
-    # Its location is incidental: independent worktrees at the same revision
-    # must agree, but different commit ancestry or tree identity must not.
-    # Keep the key (including presence/absence) in both phase fingerprints.
     root_name = 'ROMACS_VACUITY_GIT_ROOT'
-    root_identity = (out('git', 'rev-parse', '--verify', 'HEAD', cwd=e[root_name]).decode().strip()
-                     + '\n' + out('git', 'rev-parse', '--verify', 'HEAD^{tree}',
-                                 cwd=e[root_name]).decode().strip()) if root_name in e else None
+    captured = e.get('ROMACS_VACUITY_GIT_TREE') if not (src / '.git').exists() else None
+    if captured is not None and root_name not in e:
+        raise ValueError('captured source requires a metadata root')
+    root_identity = source_metadata_identity(e[root_name], captured) if root_name in e else None
     hashes = {label: {k: hashlib.sha256(
                          (root_identity if k == root_name else v).encode()).hexdigest()
                       for k, v in effective.items() if k not in excluded}
@@ -338,15 +350,14 @@ def environment_difference(receipt, current):
     return '; '.join(differences) or 'toolchain/Cargo configuration'
 
 
-def freeze(wt):
+def freeze(wt, staged=False):
     CACHE.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=CACHE) as tmp:
         e = dict(os.environ, GIT_INDEX_FILE=f'{tmp}/index')
         index = out('git', 'rev-parse', '--git-path', 'index', cwd=wt).decode().strip()
         shutil.copyfile(wt / index, e['GIT_INDEX_FILE'])
-        tree = out('git', 'write-tree', cwd=wt, env=e).decode().strip()
-        sh('git', 'read-tree', tree, cwd=wt, env=e)
-        sh('git', 'add', '-A', cwd=wt, env=e)
+        if not staged:
+            sh('git', 'add', '-A', cwd=wt, env=e)
         return subprocess.check_output(['git', 'write-tree'], cwd=wt, env=e).decode().strip()
 
 
@@ -627,8 +638,8 @@ def reuse(wt, args, group):
         expr = args.rest[2] if len(args.rest) > 2 else 'all()'
         if len(args.rest) > 3 or mode not in ('full', 'focused', 'changed'):
             raise ValueError('unsupported coverage')
-        tree = out('git', 'rev-parse', 'HEAD^{tree}', cwd=wt).decode().strip()
-        if out('git', 'status', '--porcelain', cwd=wt):
+        tree = freeze(wt, staged=True) if args.staged else out('git', 'rev-parse', 'HEAD^{tree}', cwd=wt).decode().strip()
+        if not args.staged and out('git', 'status', '--porcelain', cwd=wt):
             reason = 'dirty worktree'
         elif not (receipt['schema'] == 2 and receipt['verdict'] == 'GREEN' and receipt['complete']):
             reason = 'receipt status/schema'
@@ -651,6 +662,7 @@ def reuse(wt, args, group):
             # recording and reuse must bind the same effective environment,
             # even when the caller has no root (or supplies a different one).
             os.environ['ROMACS_VACUITY_GIT_ROOT'] = str(wt)
+            os.environ['ROMACS_VACUITY_GIT_TREE'] = tree
             if receipt['env_fp'] != (current := environment_identity(mirror(group), wt))[0]:
                 reason = 'environment: ' + environment_difference(receipt, current)
             elif not (receipt['mode'] == 'full' or
@@ -678,6 +690,7 @@ def inner(args):
     # ROMACS_* is already carried into the test environment and the environment
     # fingerprint by env(), so this is visible to the receipt, not hidden from it.
     os.environ['ROMACS_VACUITY_GIT_ROOT'] = str(wt)
+    os.environ['ROMACS_VACUITY_GIT_TREE'] = args.tree
     run_dir.mkdir(parents=True, exist_ok=True)
     t0 = time.monotonic()
     src = mirror(args.group)
@@ -755,10 +768,11 @@ def gate_main():
     ap.add_argument('--lane')
     ap.add_argument('--group')
     ap.add_argument('--jobs', type=int)
+    ap.add_argument('--staged', action='store_true', help='verify the index snapshot; preserve unstaged and untracked work')
     ap.add_argument('--repeat', type=int, default=1)
-    ap.add_argument('--threads', type=int, default=8)
-    ap.add_argument('--display-threads', type=int, default=4)
-    ap.add_argument('--mem', default='12G')
+    ap.add_argument('--threads', type=int, default=1, help='VM/support workers (default: 1; GNU tests have inner workers)')
+    ap.add_argument('--display-threads', type=int, default=1, help='display workers (default: 1)')
+    ap.add_argument('--mem', default='34G', help='heavy-job memory cap (default: 34G)')
     ap.add_argument('--oracle', metavar='PATH')
     ap.add_argument('--require', action='append', default=[], metavar='TEST')
     for hidden in ('--worktree', '--run-dir', '--tree'):
@@ -786,21 +800,27 @@ def gate_main():
     if args.mode == 'reuse':
         ORACLE = _override_oracle(args.oracle) if args.oracle else _pinned_oracle(wt)
         return reuse(wt, args, group)
-    tree = freeze(wt)
+    tree = freeze(wt, staged=args.staged)
     expr = args.rest[0] if args.mode == 'focused' else changed_filter(wt) or 'all()' if args.mode == 'changed' else 'all()'
     (CACHE / 'runs').mkdir(parents=True, exist_ok=True)
     run_dir = pathlib.Path(tempfile.mkdtemp(prefix=f'{lane}-{time.strftime("%Y%m%d-%H%M%S")}-', dir=CACHE / 'runs'))
     (run_dir / 'gate').write_bytes(out('git', 'show', f'{tree}:scripts/gate', cwd=wt))
+    for source, name in ((SLOT, 'neomacs-slot'), (RUNNER, 'neomacs-slot-runner.py')):
+        target = run_dir / name
+        target.write_bytes(pathlib.Path(source).read_bytes())
+        target.chmod(0o755)
+    admission_env = dict(os.environ, ROMACS_SLOT=str(run_dir / 'neomacs-slot'),
+                         ROMACS_SLOT_RUNNER=str(run_dir / 'neomacs-slot-runner.py'))
     jobs = ['--jobs', str(args.jobs)] if args.jobs is not None else []
     required = [x for name in args.require for x in ('--require', name)]
     oracle = ['--oracle', ORACLE] if args.oracle else []
-    return subprocess.call([SLOT, lane, '--group', group, *jobs, '--test-threads',
+    return subprocess.call([str(run_dir / 'neomacs-slot'), lane, '--group', group, *jobs, '--test-threads',
                             str(args.threads + args.display_threads), '--mem', args.mem, '--',
                             sys.executable, str(run_dir / 'gate'), '--inner', '--worktree', str(wt),
                             '--run-dir', str(run_dir), '--tree', tree, '--group', group,
                             '--expr', expr, '--threads', str(args.threads),
                             '--display-threads', str(args.display_threads), '--repeat', str(args.repeat),
-                            *required, *oracle, args.mode])
+                            *required, *oracle, args.mode], env=admission_env)
 
 
 def main():
@@ -819,7 +839,7 @@ def entry_main():
     try:
         if not any(arg in ('--inner', '-h', '--help') for arg in sys.argv[1:]):
             if not pathlib.Path(RUNNER).is_file() or not shutil.which(SLOT):
-                raise SystemExit('gate: external slot tools required; set ROMACS_SLOT and ROMACS_SLOT_RUNNER')
+                raise SystemExit('gate: missing slot tools; restore scripts/neomacs-slot and scripts/neomacs-slot-runner.py')
             from gate_limits import run
             result = run([sys.executable, *sys.orig_argv[1:]])
             if result is not None:

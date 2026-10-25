@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Compile/exercise production pure time helpers, NOT VM/registration proof.
-No Cargo invocation. Run after time_oracle.py. Requires rustc in lane environment.
+No Cargo invocation. Run after time_oracle.py with the project toolchain on PATH.
 """
 import hashlib
 import json

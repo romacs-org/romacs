@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # R209 mutation evidence for evaluator_stack_tests. Run from the worktree root
-# after sourcing the lane env. Restores main.rs on exit.
+# with the prepared project environment. Restores main.rs on exit.
 set -u
 src=crates/romacs-vm-gui/src/main.rs
 out=${1:?evidence dir}

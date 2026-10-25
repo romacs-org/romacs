@@ -8,6 +8,7 @@ import hashlib
 import json
 from pathlib import Path
 import os
+import re
 import subprocess
 
 from vacuity_classifier import replay
@@ -24,9 +25,9 @@ def git_root(root):
     The gate measures an extracted archive that has no .git, so revision identity
     cannot be read there. scripts/gate exports ROMACS_VACUITY_GIT_ROOT naming the
     candidate worktree; use it ONLY when the measured tree genuinely has no .git,
-    so a real repository is never silently overridden. ls-tree reads committed
-    trees rather than working files, so this verifies the same committed bytes the
-    archive was extracted from. The variable is part of the gate's environment
+    so a real repository is never silently overridden. ls-tree reads Git objects
+    rather than working files, including an explicitly captured uncommitted tree.
+    The variable is part of the gate's environment
     fingerprint, so its use is recorded in the receipt rather than hidden.
     """
     root = Path(root)
@@ -35,9 +36,31 @@ def git_root(root):
     external = os.environ.get('ROMACS_VACUITY_GIT_ROOT')
     return Path(external) if external else root
 
+
+def snapshot_tree(root):
+    """Return the gate's captured tree for an extracted source archive."""
+    root = Path(root)
+    value = os.environ.get('ROMACS_VACUITY_GIT_TREE')
+    if value is None or (root / '.git').exists():
+        return None
+    if not re.fullmatch(r'[0-9a-f]{40}|[0-9a-f]{64}', value):
+        raise ValueError('invalid captured source tree')
+    kind = subprocess.check_output(['git', '-C', str(git_root(root)), 'cat-file', '-t', value])
+    if kind.strip() != b'tree':
+        raise ValueError('captured source object is not a tree')
+    return value
+
+
+def source_identity(source):
+    """The source fields bound by the build receipt."""
+    keys = ('revision', 'tree', 'kind') if 'kind' in source else ('revision', 'tree')
+    return {key: source[key] for key in keys}
+
+
 def projection(root, revision=None):
     root = Path(root)
-    revision = revision or 'HEAD'
+    working = revision is None or revision == 'HEAD'
+    revision = revision or snapshot_tree(root) or 'HEAD'
     rows = subprocess.check_output(['git', '-C', str(git_root(root)), 'ls-tree', '-rz', revision])
     algorithm = subprocess.check_output(['git', '-C', str(git_root(root)), 'rev-parse', '--show-object-format']).decode().strip()
     digest = hashlib.sha256()
@@ -50,7 +73,9 @@ def projection(root, revision=None):
             continue
         mode, kind, oid = metadata.split()
         path = root / name
-        if revision == 'HEAD':
+        if working:
+            if any(p.is_symlink() for p in path.parents if p != root and p.is_relative_to(root)):
+                raise ValueError('stale subject evidence: tracked parent is a symlink: ' + name)
             if path.is_symlink():
                 import os
                 content = os.fsencode(os.readlink(path))
@@ -105,10 +130,17 @@ def verify_receipt(root, path=None):
             or manifest['binaries']['romacs']['provenance']['kind'] != 'build-receipt'):
         raise ValueError('subject evidence binary provenance mismatch')
     source = manifest['source']
+    captured = snapshot_tree(root)
+    if source.get('kind') == 'git-tree':
+        if captured is None or source['revision'] != captured or source['tree'] != captured:
+            raise ValueError('subject evidence captured source tree mismatch')
+    elif source.get('kind') is not None or captured is not None:
+        raise ValueError('subject evidence source regime mismatch')
     tree = subprocess.check_output(['git', '-C', str(git_root(root)), 'rev-parse', source['revision'] + '^{tree}']).decode().strip()
     if tree != source['tree']:
         raise ValueError('subject evidence source tree mismatch')
-    subprocess.run(['git', '-C', str(git_root(root)), 'merge-base', '--is-ancestor', source['revision'], 'HEAD'], check=True)
+    if captured is None:
+        subprocess.run(['git', '-C', str(git_root(root)), 'merge-base', '--is-ancestor', source['revision'], 'HEAD'], check=True)
     if projection(root, source['revision']) != receipt['projection'] or projection(root) != receipt['projection']:
         raise ValueError('stale subject evidence: source inputs changed')
 

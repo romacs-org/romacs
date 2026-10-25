@@ -30,10 +30,8 @@ def resolve_font(family: str = 'Liberation Mono') -> Path:
     """Resolve FAMILY to a file, refusing a host-specific substitution.
 
     `fc-match` consults the *user's* fontconfig, so this resolution is not
-    hermetic: with XDG_CONFIG_HOME pointing at a lane's empty config it returns
-    the system Liberation Mono the scene expectations were authored against,
-    while outside a lane environment ~/.config/fontconfig/fonts.conf can remap
-    the same query to a personal typeface. The substitution is silent, and its
+    hermetic: ~/.config/fontconfig/fonts.conf can remap the system Liberation
+    Mono query to a personal typeface. The substitution is silent, and its
     only symptom is a pixel read that disagrees by a pixel and template-matches
     neighbouring glyphs into garbage -- a deterministic false RED ten minutes
     into a run, blamed on the editor rather than on the font.
@@ -53,9 +51,8 @@ def resolve_font(family: str = 'Liberation Mono') -> Path:
             f'The scene expectations are authored against {expected}, so the '
             f'pixel templates would be built for the wrong typeface and every '
             f'glyph read would fail misleadingly.\n'
-            f'Pass --font explicitly, or run under scripts/lane-env.sh (which '
-            f'points XDG_CONFIG_HOME at an empty config so the system font '
-            f'wins over a personal fonts.conf remap).')
+            f'Pass --font explicitly, or provide isolated fontconfig settings '
+            f'for this test process that resolve the expected system font.')
     return path
 
 

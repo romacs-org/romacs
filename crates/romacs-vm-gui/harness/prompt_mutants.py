@@ -12,7 +12,6 @@ import subprocess
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[3]
-LR = str(ROOT / 'scripts/lane-run')
 VM = 'crates/romacs-vm/src/'
 HOST_TEST = ['cargo', 'test', '-p', 'romacs-vm', '--test', 'host_input']
 LIB_TEST = ['cargo', 'test', '-p', 'romacs-vm', '--lib', 'host_input']
@@ -75,7 +74,7 @@ def main():
         applied = file.read_bytes() != original
         assert applied, (name, 'mutant did not change the file')
         try:
-            run = subprocess.run([LR, 'gpr', '-C', str(ROOT), '--', *test], capture_output=True, text=True, timeout=900)
+            run = subprocess.run(test, cwd=ROOT, capture_output=True, text=True, timeout=900)
             out = run.stdout + run.stderr
             failed = [l for l in out.splitlines() if l.startswith('test ') and l.endswith('FAILED')]
             panics = [l.strip() for l in out.splitlines() if 'panicked at' in l or l.startswith('  left') or l.startswith(' right')][:6]

@@ -3,7 +3,7 @@
 
 Default tests use real Python index generators and a small snapshot-generator
 fixture. --real additionally runs the production Rust generator in a disposable
-clone containing the current candidate, and must be invoked through lane-run.
+clone containing the current candidate, using the prepared project environment.
 """
 import argparse
 import json
@@ -96,7 +96,7 @@ def regenerate(root, env):
 
 class DerivedTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory(prefix='derived-test-', dir=os.environ['TMPDIR'])
+        self.tmp = tempfile.TemporaryDirectory(prefix='derived-test-', dir=os.environ.get('TMPDIR'))
         self.root = Path(self.tmp.name) / 'repo'
         self.env = fixture(self.root)
 
@@ -286,7 +286,7 @@ def main():
     parser.add_argument('--baseline-commit', default='8dabc1a174d6cc1d4ffbda6966c4d56b18432ff9')
     args, extra = parser.parse_known_args()
     if args.baseline:
-        with tempfile.TemporaryDirectory(prefix='derived-baseline-', dir=os.environ['TMPDIR']) as tmp:
+        with tempfile.TemporaryDirectory(prefix='derived-baseline-', dir=os.environ.get('TMPDIR')) as tmp:
             root = Path(tmp) / 'repo'
             env = fixture(root)
             baseline = git(ROOT, 'show', args.baseline_commit + ':scripts/check-derived').stdout
@@ -323,7 +323,7 @@ def main():
             print('CANDIDATE GREEN: same corruption refused before healing for all four artifacts')
             return 0
     if args.real or args.mutant:
-        with tempfile.TemporaryDirectory(prefix='derived-merge-', dir=os.environ['TMPDIR']) as tmp:
+        with tempfile.TemporaryDirectory(prefix='derived-merge-', dir=os.environ.get('TMPDIR')) as tmp:
             if args.mutant:
                 baseline_root = Path(tmp) / 'baseline'
                 baseline_env = fixture(baseline_root, real=args.real)

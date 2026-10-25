@@ -9,7 +9,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from test_vacuity_classifier import receipt_fixture
+from test_vacuity_classifier import receipt_fixture, captured_receipt_fixture
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'gnu-tests/tools'))
@@ -17,6 +17,34 @@ import member_evidence
 import vacuity_binding as binding
 sys.path.insert(0, str(ROOT / 'tools'))
 import parity_ratchet
+
+
+class TreeEvidenceLocalTests(unittest.TestCase):
+    def test_captured_receipt_reaches_member_consumers_and_refuses_drift(self):
+        root, _, _, receipt = captured_receipt_fixture(self)
+        path = root.parent / binding.RECEIPT
+        path.write_text(json.dumps(receipt))
+        self.enterContext(patch.dict(os.environ, ROMACS_VACUITY_RECEIPT=str(path),
+                                    ROMACS_MEMBER_EVIDENCE=str(path.parent / binding.MEMBERS)))
+        policy = (root / binding.POLICY).read_bytes()
+        member_evidence.write(root, path)
+        expected = member_evidence.build(root, receipt)['members']
+        self.assertEqual(member_evidence.load(root), expected)
+        self.assertEqual(parity_ratchet.load_evidence(root), expected)
+        spec = importlib.util.spec_from_file_location('captured_gnu_run', ROOT / 'gnu-tests/run.py')
+        runner = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(runner)
+        with patch.object(runner, 'ROOT', root):
+            self.assertEqual(runner.load_member_evidence(), expected)
+        self.assertEqual((root / binding.POLICY).read_bytes(), policy)
+        (root / 'source').write_text('tampered')
+        with self.assertRaisesRegex(ValueError, 'tracked bytes'):
+            member_evidence.load(root)
+        (root / 'source').write_text('candidate')
+        receipt['artifacts']['member-results.json'] += 'tampered'
+        path.write_text(json.dumps(receipt))
+        with self.assertRaisesRegex(ValueError, 'artifact digest'):
+            member_evidence.load(root)
 
 
 class EvidenceLocalTests(unittest.TestCase):
@@ -28,7 +56,8 @@ class EvidenceLocalTests(unittest.TestCase):
         self.data = receipt_fixture()
         self.receipt.write_text(json.dumps(self.data))
         environment = {key: value for key, value in os.environ.items()
-                       if key not in ('ROMACS_MEMBER_EVIDENCE', 'ROMACS_VACUITY_RECEIPT')}
+                       if key not in ('ROMACS_MEMBER_EVIDENCE', 'ROMACS_VACUITY_RECEIPT',
+                                      'ROMACS_VACUITY_GIT_TREE')}
         environment['ROMACS_VACUITY_RECEIPT'] = str(self.receipt)
         self.enterContext(patch.dict(os.environ, environment, clear=True))
         self.enterContext(patch.object(binding, 'projection', return_value=self.data['projection']))

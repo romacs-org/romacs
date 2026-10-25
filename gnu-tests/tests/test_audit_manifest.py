@@ -10,6 +10,8 @@ import unittest
 from unittest.mock import patch
 import copy
 import hashlib
+import io
+import tarfile
 
 TOOLS = Path(__file__).resolve().parents[1] / 'tools'
 sys.path.insert(0, str(TOOLS))
@@ -74,6 +76,112 @@ class ManifestTests(unittest.TestCase):
         self.assertEqual(manifest['source']['revision'], self.git('rev-parse', 'HEAD'))
         self.assertEqual(manifest['source']['tree'], self.git('rev-parse', 'HEAD^{tree}'))
         self.assertEqual(manifest['commands'], [['gnu', '--batch']])
+
+    def capture_tree(self):
+        metadata = self.repo
+        (metadata / 'source').write_text('candidate\n')
+        (metadata / 'captured-new').write_text('new file\n')
+        (metadata / 'directory').mkdir()
+        (metadata / 'directory/member').write_text('member\n')
+        self.git('add', '.')
+        tree = self.git('write-tree')
+        archive = subprocess.check_output(['git', '-C', str(metadata), 'archive', tree])
+        self.repo = self.root / 'captured'
+        self.repo.mkdir()
+        with tarfile.open(fileobj=io.BytesIO(archive)) as files:
+            files.extractall(self.repo, filter='data')
+        self.enterContext(patch.dict(os.environ, ROMACS_VACUITY_GIT_ROOT=str(metadata),
+                                    ROMACS_VACUITY_GIT_TREE=tree))
+        return metadata, tree
+
+    def test_captured_tree_binds_dirty_candidate_and_survives_its_commit(self):
+        metadata, tree = self.capture_tree()
+        with self.assertRaisesRegex(ValueError, 'tracked'):
+            self.api._source(metadata)
+        manifest = self.seal()
+        self.assertEqual(manifest['source']['kind'], 'git-tree')
+        self.assertEqual(manifest['source']['revision'], tree)
+        self.assertEqual(manifest['source']['tree'], tree)
+        self.assertTrue((self.repo / 'captured-new').exists())
+        subprocess.run(['git', '-C', str(metadata), '-c', 'commit.gpgsign=false',
+                        'commit', '-qm', 'candidate'], check=True)
+        self.assertEqual(self.api.verify_manifest(self.audit, repo=self.repo), manifest)
+
+    def test_captured_tree_rejects_byte_missing_mode_and_parent_alias_changes(self):
+        import vacuity_binding
+        self.capture_tree()
+        start = self.begin()
+        (self.audit / 'result.json').write_text('{}')
+        source = self.repo / 'source'
+        original = source.read_bytes()
+        for mutation in ('bytes', 'missing', 'mode', 'symlink'):
+            with self.subTest(mutation=mutation):
+                if mutation == 'bytes':
+                    source.write_bytes(b'changed')
+                elif mutation == 'missing':
+                    source.unlink()
+                elif mutation == 'mode':
+                    source.chmod(0o755)
+                else:
+                    source.unlink()
+                    source.symlink_to(self.root / 'repo/source')
+                with self.assertRaises(ValueError):
+                    self.api.finish_run(start, self.audit, result_files=['result.json'])
+                with self.assertRaises((ValueError, OSError)):
+                    vacuity_binding.projection(self.repo)
+                if source.is_symlink():
+                    source.unlink()
+                source.write_bytes(original)
+                source.chmod(0o644)
+        directory = self.repo / 'directory'
+        outside = self.root / 'outside'
+        directory.rename(outside)
+        directory.symlink_to(outside, target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, 'parent'):
+            self.api._source(self.repo)
+        with self.assertRaisesRegex(ValueError, 'parent'):
+            vacuity_binding.projection(self.repo)
+
+    def test_captured_source_requires_a_tree_object_and_authentic_kind(self):
+        metadata, tree = self.capture_tree()
+        head = subprocess.check_output(['git', '-C', str(metadata), 'rev-parse', 'HEAD']).decode().strip()
+        for invalid in ('HEAD', head, '0' * len(tree)):
+            with self.subTest(invalid=invalid), patch.dict(os.environ, ROMACS_VACUITY_GIT_TREE=invalid), \
+                    self.assertRaises((ValueError, subprocess.CalledProcessError)):
+                self.api._source(self.repo)
+        self.seal()
+        path = self.audit / self.api.NAME
+        original = json.loads(path.read_text())
+        for key, value in (('kind', 'unknown'), ('kind', None), ('revision', head), ('tree', head)):
+            changed = copy.deepcopy(original)
+            changed['source'][key] = value
+            path.write_text(json.dumps(changed))
+            with self.subTest(key=key, value=value), self.assertRaisesRegex(ValueError, 'source'):
+                self.api.verify_manifest(self.audit, repo=self.repo)
+
+    def test_build_receipt_must_bind_the_captured_source_kind(self):
+        from vacuity_binding import source_identity
+        self.capture_tree()
+        source = self.api._source(self.repo)
+        receipt = self.root / 'build.json'
+        data = dict(schema=1, source=source_identity(source),
+                    binary_sha256=hashlib.sha256(self.binary.read_bytes()).hexdigest(),
+                    command=['cargo', 'build'], exit_code=0,
+                    tracked_clean_start=True, tracked_clean_end=True)
+        for kind in ('git-tree', None, 'unknown'):
+            changed = copy.deepcopy(data)
+            if kind is None:
+                del changed['source']['kind']
+            else:
+                changed['source']['kind'] = kind
+            receipt.write_text(json.dumps(changed))
+            record = dict(file=self.api._file(self.binary), provenance=dict(
+                kind='build-receipt', receipt=self.api._file(receipt)))
+            if kind == 'git-tree':
+                self.api._binary(record, source)
+            else:
+                with self.assertRaisesRegex(ValueError, 'source/binary'):
+                    self.api._binary(record, source)
 
     def test_dirty_at_start_refused_even_assume_unchanged(self):
         self.git('update-index', '--assume-unchanged', 'source')

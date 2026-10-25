@@ -2,7 +2,7 @@
 """Mutation check of the oracle itself: each mutant weakens one assertion or
 one reading step; the crate's tests must fail on every one.
 
-usage (from the workspace root, lane env sourced):
+usage (from an owned checkout with the prepared project environment):
     python3 crates/romacs-gui-oracle/harness/mutants.py [ID ...]
 
 Each mutant is applied in place, the suite is run, and the file is restored

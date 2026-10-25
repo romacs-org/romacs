@@ -4,7 +4,8 @@
 Uses unchanged source-extracted deftests and disposable in-memory mutants.
 The whole-body control intentionally deletes assertions: survival is NOT a
 vacuity classifier. See R239-VACUITY-EVIDENCE.md for the stopping boundary.
-Run on a clean committed tree with --output an absent directory. Builds the
+Run on a clean committed tree or a gate-owned frozen archive, with --output
+an absent directory. Builds the
 adapter itself or consumes a prebuilt adapter with observed build provenance,
 then seals every artifact.
 """
@@ -134,7 +135,8 @@ def main():
                              'CARGO_ENCODED_RUSTFLAGS', 'PATH', 'HOME')},
             'reported_executable': artifacts[0],
         })
-        receipt = {'schema': 1, 'source': {k: source[k] for k in ('revision', 'tree')},
+        from vacuity_binding import source_identity
+        receipt = {'schema': 1, 'source': source_identity(source),
                    'binary_sha256': hashlib.sha256(binary.read_bytes()).hexdigest(),
                    'command': build, 'exit_code': built.returncode,
                    'tracked_clean_start': True, 'tracked_clean_end': True}

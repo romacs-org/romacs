@@ -5,9 +5,8 @@ Each mutant must apply exactly once, compile, and fail the named test AT ITS
 TARGET ASSERTION: the panic location must be the named line in the named test
 file and the panic message must contain the marker. A compile failure, a panic
 anywhere else (a collector invariant, an unwrap, a recursion abort) or a pass is
-NOT KILLED. Run from the repository root through lane-run. Restores every file.
+NOT KILLED. Run in an owned checkout with the project environment. Restores every file.
 """
-from pathlib import Path as _PortablePath
 import re, subprocess, sys
 from pathlib import Path
 
@@ -79,9 +78,7 @@ MUTANTS = [
      "primh_window", "primh_window_use_time", CHECK, "window-use-time"),
 ]
 
-LR = str(next(p for p in _PortablePath(__file__).resolve().parents if (p / 'parity-reference.toml').is_file()) / 'scripts/lane-run')
-LANE = sys.argv[1] if len(sys.argv) > 1 else "win"
-only = set(sys.argv[2:])
+only = set(sys.argv[1:])
 # A typo in a selector used to select nothing and report 0/0 with exit 0.
 unknown = only - {m[0] for m in MUTANTS}
 if unknown:
@@ -98,8 +95,8 @@ for name, path, old, new, binary, test, (tfile, tline), marker in MUTANTS:
         continue
     p.write_text(text.replace(old, new))
     try:
-        r = subprocess.run([LR, LANE, "-C", str(ROOT), "--", "cargo", "test", "-p", "romacs-vm", "--test", binary, "--", test, "--exact"],
-                           capture_output=True, text=True, timeout=1500)
+        r = subprocess.run(["cargo", "test", "-p", "romacs-vm", "--test", binary, "--", test, "--exact"],
+                           cwd=ROOT, capture_output=True, text=True, timeout=1500)
         out = r.stdout + r.stderr
         log = ROOT / "crates/romacs-vm/tools/primh/logs/window-prims" / ("mutant-" + name.replace("/", "_") + ".log")
         log.parent.mkdir(parents=True, exist_ok=True)

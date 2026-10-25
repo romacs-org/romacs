@@ -52,7 +52,7 @@ for name, path, old, new, row in mutants:
     assert changed != original
     try:
         path.write_text(changed)
-        run = subprocess.run([str(root / 'scripts/lane-run'), 'headeval', '--', 'cargo', 'test', '-p', 'romacs-vm', '--test', 'head_order', '--', '--nocapture'], cwd=root, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        run = subprocess.run(['cargo', 'test', '-p', 'romacs-vm', '--test', 'head_order', '--', '--nocapture'], cwd=root, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         (out / (name + '.log')).write_text(run.stdout)
         killed = run.returncode != 0 and 'HEAD_ORDER_GNU_MISMATCH' in run.stdout and f'"{row}": GNU' in run.stdout
         results.append(dict(name=name, row=row, status='KILLED-AT-TARGET' if killed else 'FAILED-PROOF', exit=run.returncode))

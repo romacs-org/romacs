@@ -2,8 +2,8 @@
 """Run targeted reverse semantic mutants; require named behavioral mismatches."""
 import json
 from pathlib import Path
-import os
 import subprocess
+import tempfile
 
 ROOT = Path(__file__).resolve().parents[3]
 SOURCE = ROOT / "crates/romacs-vm/src/prims/reverse.rs"
@@ -21,13 +21,13 @@ MUTANTS = [
 
 
 def run():
-    return subprocess.run([str(ROOT / "scripts/lane-run"), "reverseboot", "--", "cargo", "test", "-p", "romacs-vm", "--test", "reverse", "reverse_matches_pinned_gnu", "--", "--nocapture"], cwd=ROOT, capture_output=True, text=True, timeout=180)
+    return subprocess.run(["cargo", "test", "-p", "romacs-vm", "--test", "reverse", "reverse_matches_pinned_gnu", "--", "--nocapture"], cwd=ROOT, capture_output=True, text=True, timeout=180)
 
 
 if __name__ == "__main__":
     original = SOURCE.read_text()
     rows = []
-    logs = Path(os.environ["TMPDIR"]) / "reverseboot-evidence"
+    logs = Path(tempfile.gettempdir()) / "reverseboot-evidence"
     logs.mkdir(exist_ok=True)
     try:
         for name, old, new, key in MUTANTS:

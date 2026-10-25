@@ -41,15 +41,17 @@ def main():
     binary = paths[0].resolve(strict=True)
     digest = hashlib.sha256(binary.read_bytes()).hexdigest()
     receipt = run / 'subject-build.json'
+    from vacuity_binding import MEMBERS, source_identity
     receipt.write_text(json.dumps(dict(schema=1,
-        source={k: source[k] for k in ('revision', 'tree')}, binary_sha256=digest,
+        source=source_identity(source), binary_sha256=digest,
         command=json.loads(args.command), exit_code=0,
         tracked_clean_start=True, tracked_clean_end=True)))
     start = time.monotonic()
     audit = run / 'subject-audit'
     output = run / 'VACUITY-VERDICT.json'
     cache = run.parent.parent / 'subject-cache' / source['tree'] / (digest + '.json')
-    os.environ['ROMACS_VACUITY_RECEIPT'] = str(output)
+    os.environ.update(ROMACS_VACUITY_RECEIPT=str(output),
+                      ROMACS_MEMBER_EVIDENCE=str(run / MEMBERS))
     from vacuity_binding import verify_receipt
     from member_evidence import write
     def verify():

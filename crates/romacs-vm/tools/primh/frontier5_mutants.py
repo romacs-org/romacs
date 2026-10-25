@@ -5,7 +5,7 @@ Each mutant must apply exactly once, compile, and fail the named test AT ITS
 TARGET ASSERTION: the panic location must be the named assertion line in
 tests/frontier5.rs and the message must contain the expected marker. A
 compile failure, a panic elsewhere, or a pass is reported as NOT KILLED.
-Run from the repository root through lane-run. Restores every file.
+Run in an owned checkout with the project environment. Restores every file.
 """
 import json, re, subprocess, sys
 from pathlib import Path

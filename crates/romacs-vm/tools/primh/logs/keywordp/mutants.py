@@ -2,7 +2,7 @@
 """Source mutants of the keywordp body; each must fail the primh replay
 assertion of tests/primh_data_kw.rs. Restores the source afterwards.
 
-Run from the repository root inside the lane environment:
+Run from an owned checkout with the prepared project environment:
   python3 crates/romacs-vm/tools/primh/logs/keywordp/mutants.py
 """
 import re, subprocess, sys

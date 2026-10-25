@@ -4,6 +4,11 @@ import unittest
 import subprocess
 import tempfile
 import json
+import hashlib
+import io
+import os
+import tarfile
+from unittest.mock import patch
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
@@ -41,6 +46,41 @@ def receipt_fixture():
     return {'schema': 1, 'projection': '4' * 64, 'excluded_outputs': sorted(binding.OUTPUTS),
             'manifest': text, 'manifest_sha256': hashlib.sha256(text.encode()).hexdigest(),
             'artifacts': artifacts, 'verdicts': classifier.classify(data)}
+
+
+def captured_receipt_fixture(test):
+    directory = Path(test.enterContext(tempfile.TemporaryDirectory()))
+    metadata = directory / 'metadata'
+    metadata.mkdir()
+    def git(*args):
+        return subprocess.check_output(['git', '-C', str(metadata), *args], stderr=subprocess.PIPE).decode().strip()
+    git('init', '-q')
+    git('config', 'user.name', 'Test')
+    git('config', 'user.email', 'test@example.invalid')
+    (metadata / 'source').write_text('initial')
+    policy = metadata / binding.POLICY
+    policy.parent.mkdir(parents=True)
+    policy.write_text('{"schema":1,"members":{}}')
+    git('add', '.')
+    git('-c', 'commit.gpgsign=false', 'commit', '-qm', 'initial')
+    (metadata / 'source').write_text('candidate')
+    (metadata / 'new-source').write_text('captured new source')
+    git('add', '.')
+    tree = git('write-tree')
+    root = directory / 'captured'
+    root.mkdir()
+    archive = subprocess.check_output(['git', '-C', str(metadata), 'archive', tree])
+    with tarfile.open(fileobj=io.BytesIO(archive)) as files:
+        files.extractall(root, filter='data')
+    test.enterContext(patch.dict(os.environ, ROMACS_VACUITY_GIT_ROOT=str(metadata),
+                                ROMACS_VACUITY_GIT_TREE=tree))
+    receipt = receipt_fixture()
+    manifest = json.loads(receipt['manifest'])
+    manifest['source'] = dict(kind='git-tree', revision=tree, tree=tree)
+    receipt['manifest'] = json.dumps(manifest)
+    receipt['manifest_sha256'] = hashlib.sha256(receipt['manifest'].encode()).hexdigest()
+    receipt['projection'] = binding.projection(root)
+    return root, metadata, tree, receipt
 
 
 class ClassifierTests(unittest.TestCase):
@@ -96,6 +136,57 @@ class ClassifierTests(unittest.TestCase):
 
 
 class BindingTests(unittest.TestCase):
+    def test_tree_receipt_replays_and_survives_commit_without_rebinding(self):
+        root, metadata, tree, receipt = captured_receipt_fixture(self)
+        path = root.parent / binding.RECEIPT
+        path.write_text(json.dumps(receipt))
+        self.assertEqual(binding.verify_receipt(root, path)[0], receipt)
+        subprocess.run(['git', '-C', str(metadata), '-c', 'commit.gpgsign=false',
+                        'commit', '-qm', 'candidate'], check=True)
+        self.assertEqual(binding.verify_receipt(root, path)[0], receipt)
+        (root / 'new-source').write_text('tampered')
+        with self.assertRaisesRegex(ValueError, 'tracked bytes'):
+            binding.verify_receipt(root, path)
+
+    def test_tree_receipt_requires_matching_authoritative_context(self):
+        root, metadata, tree, receipt = captured_receipt_fixture(self)
+        path = root.parent / binding.RECEIPT
+        path.write_text(json.dumps(receipt))
+        initial = subprocess.check_output(['git', '-C', str(metadata), 'rev-parse', 'HEAD^{tree}']).decode().strip()
+        head = subprocess.check_output(['git', '-C', str(metadata), 'rev-parse', 'HEAD']).decode().strip()
+        for context in (None, initial, head, 'HEAD'):
+            with self.subTest(context=context), patch.dict(os.environ):
+                if context is None:
+                    os.environ.pop('ROMACS_VACUITY_GIT_TREE')
+                else:
+                    os.environ['ROMACS_VACUITY_GIT_TREE'] = context
+                with self.assertRaises((ValueError, subprocess.CalledProcessError)):
+                    binding.verify_receipt(root, path)
+        manifest = json.loads(receipt['manifest'])
+        manifest['source']['kind'] = 'unknown'
+        receipt['manifest'] = json.dumps(manifest)
+        receipt['manifest_sha256'] = hashlib.sha256(receipt['manifest'].encode()).hexdigest()
+        path.write_text(json.dumps(receipt))
+        with self.assertRaisesRegex(ValueError, 'regime'):
+            binding.verify_receipt(root, path)
+
+    def test_ordinary_commit_receipt_retains_ancestry_requirement(self):
+        _, metadata, _, receipt = captured_receipt_fixture(self)
+        def git(*args):
+            return subprocess.check_output(['git', '-C', str(metadata), *args]).decode().strip()
+        head, tree = git('rev-parse', 'HEAD'), git('rev-parse', 'HEAD^{tree}')
+        manifest = json.loads(receipt['manifest'])
+        manifest['source'] = dict(revision=head, tree=tree)
+        receipt['manifest'] = json.dumps(manifest)
+        receipt['manifest_sha256'] = hashlib.sha256(receipt['manifest'].encode()).hexdigest()
+        receipt['projection'] = binding.projection(metadata, head)
+        path = metadata.parent / binding.RECEIPT
+        path.write_text(json.dumps(receipt))
+        unrelated = git('-c', 'commit.gpgsign=false', 'commit-tree', tree, '-m', 'unrelated')
+        git('update-ref', 'refs/heads/unrelated', unrelated)
+        git('symbolic-ref', 'HEAD', 'refs/heads/unrelated')
+        with self.assertRaises(subprocess.CalledProcessError):
+            binding.verify_receipt(metadata, path)
     def test_repeat_record_preserves_only_identical_input_provenance(self):
         import copy
         sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'tools'))
@@ -127,8 +218,11 @@ class BindingTests(unittest.TestCase):
         manifest = json.loads(original['manifest'])
         with tempfile.TemporaryDirectory() as directory:
             external = Path(directory) / 'subject.json'
-            with patch.dict(os.environ, ROMACS_VACUITY_RECEIPT=str(external),
-                            ROMACS_MEMBER_EVIDENCE=str(external.parent / binding.MEMBERS)), \
+            environment = {key: value for key, value in os.environ.items()
+                           if key != 'ROMACS_VACUITY_GIT_TREE'}
+            environment.update(ROMACS_VACUITY_RECEIPT=str(external),
+                               ROMACS_MEMBER_EVIDENCE=str(external.parent / binding.MEMBERS))
+            with patch.dict(os.environ, environment, clear=True), \
                     patch.object(binding, 'projection', return_value=original['projection']), \
                     patch.object(binding.subprocess, 'check_output', return_value=(manifest['source']['tree'] + '\n').encode()), \
                     patch.object(binding.subprocess, 'run'):
