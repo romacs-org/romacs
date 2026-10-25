@@ -164,6 +164,37 @@ impl Leaf<'_> {
         Ok(roots[if down { 0 } else { 1 }])
     }
 
+    pub(crate) fn completion_case_ranges(&mut self) -> std::result::Result<Vec<(u32, u32, i64)>, Fault> {
+        self.current_case_mapping(true)?;
+        let index = self.vm.buffer_index().map_err(Fault::Error)?;
+        let canon = match &self.vm.objects[index] {
+            Object::Buffer(b) => b.case_tables[2],
+            Object::ByteBuffer(b) => b.case_tables[2],
+            _ => unreachable!(),
+        };
+        let native = self.native_case_mapping(canon, 2);
+        Ok(self.case_ranges(canon)?.into_iter().filter_map(|(start, end, value)| {
+            if native && value == Value::NIL {
+                (start < 128).then_some((start as u32, end.min(127) as u32, -1))
+            } else {
+                Some((start as u32, end as u32, value.integer_value().filter(|&n| n >= 0).unwrap_or(-1)))
+            }
+        }).collect())
+    }
+
+    fn native_case_mapping(&self, table: Value, kind: usize) -> bool {
+        let Some(Object::CharTable(table)) = self.vm.object_if(table) else { return false };
+        self.vm.native_case_roots[kind].upgrade().is_some_and(|root| std::sync::Arc::ptr_eq(&root, &table.root))
+    }
+
+    pub(crate) fn completion_upcase(&mut self, code: u32) -> std::result::Result<u32, Fault> {
+        let table = self.current_case_mapping(false)?;
+        if self.char_table_element(table, code as usize)? == Value::NIL && (code < 128 || !self.native_case_mapping(table, 1)) {
+            return Ok(code);
+        }
+        Ok(self.case_convert(Value::integer(i64::from(code)).unwrap(), false)?.integer_value().unwrap() as u32)
+    }
+
     fn case_set(
         &mut self,
         table: Value,

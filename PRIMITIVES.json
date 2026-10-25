@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "a63c2777f706a87c71029ac22bf172cc11aff21891c27709d40d911ff267a973",
+  "source_fingerprint": "6cb44a88aab025933c951258a9cc05d71b86de3dd876031c69ac04995f7978ca",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 581,
-  "parsed_vm2_only": 581
+  "parsed_total": 587,
+  "parsed_vm2_only": 587
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -176,6 +176,11 @@
    "name": "active-minibuffer-window",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/window.rs:207"
+  },
+  "all-completions": {
+   "name": "all-completions",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/completion.rs:17"
   },
   "append": {
    "name": "append",
@@ -584,6 +589,16 @@
    "name": "coding-system-put",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/coding.rs:71"
+  },
+  "commandp": {
+   "name": "commandp",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/callint.rs:708"
+  },
+  "compare-strings": {
+   "name": "compare-strings",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/string_compare.rs:6"
   },
   "completing-read": {
    "name": "completing-read",
@@ -2814,6 +2829,11 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/printing.rs:18"
   },
+  "test-completion": {
+   "name": "test-completion",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/completion.rs:21"
+  },
   "text-properties-at": {
    "name": "text-properties-at",
    "implementation": "vm2",
@@ -2831,6 +2851,11 @@
    "implementation": "vm2",
    "variant": "Primitive::Throw",
    "registered_at": "crates/romacs-vm/src/lib.rs:499"
+  },
+  "try-completion": {
+   "name": "try-completion",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/completion.rs:13"
   },
   "tty-top-frame": {
    "name": "tty-top-frame",
@@ -2878,6 +2903,11 @@
    "implementation": "vm2",
    "variant": "Primitive::UseLocalMap",
    "registered_at": "crates/romacs-vm/src/lib.rs:702"
+  },
+  "value<": {
+   "name": "value<",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/value_order.rs:6"
   },
   "vconcat": {
    "name": "vconcat",

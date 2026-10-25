@@ -1080,6 +1080,8 @@ pub struct Vm {
     names: HashMap<String, usize>,
     symbol_names: Vec<String>,
     obarray_symbol_names: HashMap<usize, Value>,
+    permanent_symbol_names: HashMap<u64, Value>,
+    native_case_roots: [std::sync::Weak<std::sync::Mutex<char_table::CharTableNode>>; 4],
     obarray_free_slots: Vec<usize>,
     generated_symbols: HashMap<GeneratedName, usize>,
     generated_slots: HashMap<usize, GeneratedName>,
@@ -1175,6 +1177,8 @@ impl Vm {
             names: HashMap::new(),
             symbol_names: vec![],
             obarray_symbol_names: HashMap::new(),
+            permanent_symbol_names: HashMap::new(),
+            native_case_roots: std::array::from_fn(|_| std::sync::Weak::new()),
             obarray_free_slots: Vec::new(),
             generated_symbols: HashMap::new(),
             generated_slots: HashMap::new(),
@@ -1262,6 +1266,8 @@ impl Vm {
         // minibuf.c: DEFVAR_LISP ("history-length", ...) = make_fixnum (100).
         vm.declare_special_raw("history-length", Value::integer(100).unwrap());
         vm.declare_special_raw("case-fold-search", Value::TRUE);
+        vm.declare_special_raw("completion-ignore-case", Value::NIL);
+        vm.declare_special_raw("completion-regexp-list", Value::NIL);
         vm.declare_special_raw("case-symbols-as-words", Value::NIL);
         // The automatic local table is initialized lazily by variable_binding_slot.
         vm.declare_special_raw("inhibit-changing-match-data", Value::NIL);

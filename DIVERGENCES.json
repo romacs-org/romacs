@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "69e57c28e4db5c6cf8c0f1d41e313a6c66f8d0a1c8801d83dd466ecaa6bc3c68",
+  "input_hash": "b7547bbdf0d940bc627347c386f29bb3ac0e3d4053ad6e4d1945cfa56d099b17",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -12,8 +12,8 @@
   "note": "Derived from the prose ledgers. Do not edit; edit those and regenerate."
  },
  "counts": {
-  "rows": 242,
-  "symbols": 443,
+  "rows": 244,
+  "symbols": 447,
   "rows_without_symbols": 16
  },
  "by_symbol": {
@@ -42,7 +42,7 @@
    65
   ],
   "[:class:]": [
-   241
+   243
   ],
   "abort-minibuffers": [
    60
@@ -55,6 +55,10 @@
   ],
   "after-load-alist": [
    222
+  ],
+  "all-completions": [
+   232,
+   233
   ],
   "append": [
    102
@@ -187,6 +191,9 @@
   "command-line-args": [
    85
   ],
+  "compare-strings": [
+   233
+  ],
   "compiled-function-p": [
    214
   ],
@@ -286,8 +293,8 @@
    119,
    120,
    144,
-   233,
-   237
+   235,
+   239
   ],
   "define-category": [
    203
@@ -360,7 +367,7 @@
    98
   ],
   "downcase_char_code_emacs_compat": [
-   240
+   242
   ],
   "elt": [
    21,
@@ -372,7 +379,7 @@
    151
   ],
   "emacs_downcase_compat": [
-   240
+   242
   ],
   "enable-recursive-minibuffers": [
    219
@@ -448,23 +455,23 @@
    117,
    118,
    119,
-   233,
-   234,
-   237
+   235,
+   236,
+   239
   ],
   "face-family": [
    115,
-   236
+   238
   ],
   "face-font": [
    114,
-   235
+   237
   ],
   "face-remapping-alist": [
    109,
    118,
    119,
-   239
+   241
   ],
   "fboundp": [
    159,
@@ -1188,7 +1195,7 @@
   ],
   "reset": [
    117,
-   232
+   234
   ],
   "reverse": [
    54,
@@ -1265,10 +1272,10 @@
    113,
    114,
    115,
-   234,
-   235,
    236,
-   238
+   237,
+   238,
+   240
   ],
   "set-match-data": [
    67
@@ -1323,10 +1330,10 @@
    87
   ],
   "skip-chars-backward": [
-   241
+   243
   ],
   "skip-chars-forward": [
-   241
+   243
   ],
   "sort": [
    17
@@ -1435,6 +1442,10 @@
   "terpri": [
    153
   ],
+  "test-completion": [
+   232,
+   233
+  ],
   "text-properties-at": [
    77,
    180,
@@ -1458,6 +1469,10 @@
   ],
   "truncate-lines": [
    151
+  ],
+  "try-completion": [
+   232,
+   233
   ],
   "tty-top-frame": [
    168
@@ -5478,6 +5493,41 @@
     "find-file-name-handler",
     "inhibit-file-name-handlers",
     "inhibit-file-name-operation"
+   ],
+   "symbols_derived": false
+  },
+  {
+   "id": "VM2-COMPLETION-CYCLE",
+   "source": "DIVERGENCES.md",
+   "section": "Observable by a package: circular completion tables",
+   "observable": true,
+   "planned": false,
+   "mechanism": "Circular list completion tables",
+   "gnu": "GNU traverses until an exact test match, a decisive common prefix, or user quit; some circular inputs never finish.",
+   "romacs": "Decisive early results are preserved. Traversal that would revisit a detected cycle signals `circular-list`.",
+   "why": "Bounded native traversal with callback state traced across GC. `tests/completion.rs` covers both early-result cases.",
+   "symbols": [
+    "try-completion",
+    "all-completions",
+    "test-completion"
+   ],
+   "symbols_derived": false
+  },
+  {
+   "id": "VM2-COMPLETION-CASE",
+   "source": "DIVERGENCES.md",
+   "section": "Observable by a package: circular completion tables",
+   "observable": true,
+   "planned": false,
+   "mechanism": "Completion case folding and string comparison",
+   "gnu": "GNU uses its current case tables, with nil entries meaning identity.",
+   "romacs": "Original native tables retain Unicode fallback for nil entries above ASCII before GNU enrichment. Explicit non-nil entries override it; ASCII and replacement-table nil entries mean identity.",
+   "why": "Preserve the native Unicode startup policy while respecting explicit ASCII edits and replacement tables. Range-crossing and replacement-table tests cover the boundary.",
+   "symbols": [
+    "try-completion",
+    "all-completions",
+    "test-completion",
+    "compare-strings"
    ],
    "symbols_derived": false
   },

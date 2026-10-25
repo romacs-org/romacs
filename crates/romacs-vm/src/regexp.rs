@@ -88,12 +88,16 @@ type SearchResult<T> = std::result::Result<T, Fault>;
 impl Vm {
     /// GNU fast_string_match: case-sensitive, current syntax, no match-data writes.
     pub(crate) fn file_name_match(&mut self, pattern: Value, string: Value) -> std::result::Result<Option<usize>, prim::Fault> {
+        self.string_match_no_data(pattern, string, None)
+    }
+
+    pub(crate) fn string_match_no_data(&mut self, pattern: Value, string: Value, translation: Option<regex::CaseTranslation>) -> std::result::Result<Option<usize>, prim::Fault> {
         let run = |vm: &mut Self| -> SearchResult<Option<usize>> {
             let pattern = vm.regexp_input(pattern)?;
             let input = vm.regexp_input(string)?;
             let syntax = vm.regexp_syntax(Some(string))?;
             let mut compiled = regex::regex_compile_lisp_with_translation(
-                &EmacsStr::new(&pattern.bytes, pattern.multibyte), false, None,
+                &EmacsStr::new(&pattern.bytes, pattern.multibyte), false, translation,
             ).map_err(|e| Fault::Text("invalid-regexp", e.to_string()))?;
             compiled.set_target_multibyte(input.multibyte);
             compiled.rebind_syntax_table(&syntax);

@@ -8,14 +8,14 @@
   "provenance": {
     "generated_by": "romacs-introspect-live",
     "generated_on": "linux-x86_64",
-    "input_hash": "44cc822fd426d94cea735dd0fba1a5cd3ec46645438df0191acab1a0b56b9dc5",
+    "input_hash": "ed30b2e07635c177c64710068811e1a0a096f9af447ce414f0e507b30463e0e3",
     "source_only_at_generation": [],
     "vm2_probe_panics": [],
-    "vm2_universe": 2388
+    "vm2_universe": 2399
   },
   "schema": 2,
   "vm2": {
-    "count": 590,
+    "count": 595,
     "entries": [
       "#:vm2-closure-document",
       "#:vm2-closure-metadata",
@@ -46,6 +46,7 @@
       ">=",
       "abs",
       "active-minibuffer-window",
+      "all-completions",
       "append",
       "apply",
       "aref",
@@ -123,6 +124,8 @@
       "coding-system-p",
       "coding-system-plist",
       "coding-system-put",
+      "commandp",
+      "compare-strings",
       "completing-read",
       "concat",
       "cons",
@@ -540,9 +543,11 @@
       "terminal-list",
       "terminal-live-p",
       "terpri",
+      "test-completion",
       "text-properties-at",
       "this-command-keys",
       "throw",
+      "try-completion",
       "tty-top-frame",
       "type-of",
       "unibyte-char-to-multibyte",

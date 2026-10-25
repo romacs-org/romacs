@@ -307,6 +307,7 @@ impl Vm {
         let mut pending = roots.to_vec();
         pending.extend_from_slice(&self.stack);
         pending.extend_from_slice(&self.external_roots);
+        pending.extend(self.permanent_symbol_names.values().copied());
         pending.extend(self.terminal_bindings.iter().map(|binding| binding.buffer));
         if let Some(escape) = &mut self.propagated_escape {
             escape.visit_values(&mut |v| pending.push(*v));
@@ -649,6 +650,7 @@ impl Vm {
                 self.obarray_free_slots.push(slot);
             }
         }
+        for name in self.permanent_symbol_names.values_mut() { rewrite(name); }
         self.obarray_symbol_names.retain(|slot, _| obarray_symbols_live.contains(slot));
         for s in &mut self.slots {
             rewrite(&mut s.value);

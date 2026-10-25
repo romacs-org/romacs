@@ -722,6 +722,19 @@ impl Vm {
             .map_err(|_| "hash table required")?;
         Ok(found.map(|slot| self.table_mut(i).values[slot]))
     }
+
+    pub(crate) fn completion_hash_find(&mut self, table: Value, key: Value) -> std::result::Result<Option<(Value, Value)>, prim::Fault> {
+        let (index, found, _, _) = self.table_lookup(table, key).map_err(|fault| match fault {
+            HashFault::Wrong(predicate, value) => prim::Fault::Wrong(predicate, value),
+            HashFault::Error(message, value) => match value {
+                Some(value) if message == "circular-list" => prim::Fault::Circular(value),
+                _ => prim::Fault::Error(message.into()),
+            },
+            HashFault::Internal(message) => prim::Fault::Error(message),
+            HashFault::Arity(_, _) => unreachable!(),
+        })?;
+        Ok(found.and_then(|slot| self.table_mut(index).entry(slot)))
+    }
     pub(super) fn declaration_hash_remove(&mut self, table: Value, key: Value) -> Result<()> {
         let (i, found, _, _) = self.table_lookup(table, key).map_err(|_| "hash table required")?;
         if let Some(slot) = found {

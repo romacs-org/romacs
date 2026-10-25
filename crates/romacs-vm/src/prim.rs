@@ -249,6 +249,10 @@ mod leaf {
             let entry = self.vm.declaration_hash_get(table, closure).ok()??;
             self.pair(entry)
         }
+        pub(crate) fn closure_document(&self, closure: Value) -> Value {
+            closure.index_if(4).and_then(|i| self.vm.closures.get(i))
+                .and_then(|c| c.metadata.get(4)).copied().unwrap_or(Value::NIL)
+        }
         pub(crate) fn set_interactive_spec(&mut self, closure: Value, spec: Value, thunk: Value) -> std::result::Result<(), Fault> {
             let slot = self.vm.slot(super::INTERACTIVE_TABLE);
             if self.vm.slots[slot].value == Value::UNBOUND {
@@ -1082,11 +1086,14 @@ mod leaf {
             self.vm.obarray_next(table, bucket, current)
         }
         pub fn symbol_name_value(&mut self, symbol: Value) -> super::Out {
+            if let Some(&name) = self.vm.permanent_symbol_names.get(&symbol.0) { return Ok(name); }
             if let Ok(slot) = self.symbol_slot(symbol) {
                 if let Some(&name) = self.vm.obarray_symbol_names.get(&slot) { return Ok(name); }
             }
             let name = self.symbol_name(symbol)?;
-            Ok(if name.is_ascii() { self.byte_string(name.as_bytes()) } else { self.string(&name) })
+            let value = if name.is_ascii() { self.byte_string(name.as_bytes()) } else { self.string(&name) };
+            self.vm.permanent_symbol_names.insert(symbol.0, value);
+            Ok(value)
         }
         pub fn intern(&mut self, name: &str) -> Value {
             self.vm.intern(name)
@@ -1207,6 +1214,7 @@ mod leaf {
             }
             let mut values = [Value::NIL; 4];
             for (i, table) in tables.into_iter().enumerate() {
+                self.vm.native_case_roots[i] = std::sync::Arc::downgrade(&table.root);
                 values[i] = self.vm.allocate_object(data::Object::CharTable(Box::new(table)));
             }
             let data::Object::CharTable(down) = &mut self.vm.objects[values[0].index(0).unwrap() - 1] else { unreachable!() };
@@ -1363,6 +1371,7 @@ mod leaf {
     mod word_motion;
     mod face;
     mod value_order;
+    mod completion;
 }
 pub(crate) use leaf::{Leaf, Kind};
 

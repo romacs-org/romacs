@@ -24,6 +24,9 @@ impl Leaf<'_> {
                 return self.string_view(name);
             }
         }
+        if let Some(&name) = self.vm.permanent_symbol_names.get(&value.0) {
+            return self.string_view(name);
+        }
         let name = self.symbol_name(value)?;
         Ok(crate::lstring::OwnedStr {
             chars: name.chars().count(),

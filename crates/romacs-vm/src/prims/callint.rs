@@ -704,3 +704,64 @@ fn set_interactive_form(cx, closure: Value, spec: Value, thunk: Value) {
     cx.set_interactive_spec(closure, spec, thunk)?;
     Ok(closure)
 }}
+
+defsubr! { name = "commandp", gnu = "eval.c:2301", effect = Global,
+fn commandp(cx, function: Value; optional for_call_interactively: Value) -> Step {
+    command_predicate(cx, function, for_call_interactively, command_result, vec![])
+}}
+
+fn command_result(_: &mut Leaf<'_>, value: Value, _: &[Value]) -> Next {
+    Ok(Step::Done(if value == Value::NIL { Value::NIL } else { Value::TRUE }))
+}
+
+pub(super) fn command_predicate(
+    cx: &mut Leaf<'_>, function: Value, for_call: Value,
+    then: crate::prim::Then, saved: Vec<Value>,
+) -> Next {
+    let fun = indirect(cx, function)?;
+    let mut generic = false;
+    let accepted = match cx.kind(fun) {
+        Kind::Subr => subr_intspec(fun).is_some(),
+        Kind::Closure => {
+            if cx.interactive_spec(fun).is_some() {
+                true
+            } else {
+                let doc = cx.closure_document(fun);
+                let saved_doc = cx.pair(doc).is_some_and(|(file, offset)|
+                    matches!(cx.kind(file), Kind::String | Kind::Bytes) && offset.integer_value().is_some());
+                generic = doc != Value::NIL && !matches!(cx.kind(doc), Kind::String | Kind::Bytes)
+                    && doc.integer_value().is_none() && !saved_doc;
+                false
+            }
+        }
+        Kind::String | Kind::Bytes | Kind::Vector => return then(cx, if for_call == Value::NIL { Value::TRUE } else { Value::NIL }, &saved),
+        Kind::Cons => {
+            let head = car(cx, fun)?;
+            if head == cx.intern("autoload") {
+                car(cx, cdr(cx, cdr(cx, cdr(cx, fun)?)?)?)? != Value::NIL
+            } else if head == cx.intern("lambda") {
+                let interactive = cx.intern("interactive");
+                let body = cdr(cx, cdr(cx, fun)?)?;
+                return then(cx, if assq(cx, interactive, body)? == Value::NIL { Value::NIL } else { Value::TRUE }, &saved);
+            } else {
+                return then(cx, Value::NIL, &saved);
+            }
+        }
+        _ => return then(cx, Value::NIL, &saved),
+    };
+    if accepted { return then(cx, Value::TRUE, &saved); }
+    let property = cx.intern("interactive-form");
+    let mut symbol = function;
+    while symbolp(cx, symbol) {
+        if get(cx, symbol, property)? != Value::NIL {
+            return Err(Fault::Error("Found an 'interactive-form' property!".into()));
+        }
+        symbol = cx.symbol_function(symbol)?;
+    }
+    if generic {
+        let f = cx.intern("interactive-form");
+        Ok(Step::Call { f, args: vec![fun], then, saved })
+    } else {
+        then(cx, Value::NIL, &saved)
+    }
+}
