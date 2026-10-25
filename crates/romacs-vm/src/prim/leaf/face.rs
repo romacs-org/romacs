@@ -2,6 +2,29 @@
 use super::*;
 
 impl Vm {
+    pub(crate) fn register_declared_face(&mut self, face: Value, definition: romacs_face::FaceDef) -> crate::Result<()> {
+        use romacs_face::{Attribute, Datum};
+        let slots = romacs_face::registry::LFACE_ATTRIBUTES.iter().map(|name| {
+            if *name == ":inherit" {
+                definition.inherit().map_or("unspecified".to_owned(), |parents| {
+                    Datum::List(parents.iter().map(|name| Datum::symbol(name)).collect()).to_lisp()
+                })
+            } else {
+                Attribute::from_keyword(name).map_or("unspecified".to_owned(), |attribute| {
+                    definition.attrs().get(attribute).to_lisp()
+                })
+            }
+        }).collect::<Vec<_>>().join(" ");
+        let source = format!("[face {slots}]");
+        let global = self.read_source_raw(&source)?.ok_or("missing face vector")?.0;
+        let local = self.read_source_raw(&source)?.ok_or("missing face vector")?.0;
+        let frame = self.selected_frame_value()?;
+        let mut leaf = Leaf { vm: self };
+        leaf.face_insert(face, Value::NIL, global).map_err(|_| "cannot register declared face")?;
+        leaf.face_insert(face, frame, local).map_err(|_| "cannot register frame face")?;
+        Ok(())
+    }
+
     // Like obarray, materialize the C-initialized hash on first symbol use,
     // keeping construction heap-free without making boundp observe a void cell.
     pub(crate) fn initialize_face_slot(&mut self, name: &str, slot: usize) {

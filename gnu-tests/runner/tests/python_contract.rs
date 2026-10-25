@@ -73,6 +73,16 @@ fn real_ert_native_contract() {
 }
 
 #[test]
+fn real_ert_romacs_contract() {
+    python_contract("test_real_romacs.py", "RealRomacs");
+}
+
+#[test]
+fn real_ert_batch_adapter_contract() {
+    python_contract("test_ert_adapter.py", "BatchAdapter");
+}
+
+#[test]
 fn real_ert_scoreboard_contract() {
     python_contract("test_scoreboard.py", "Scoreboard");
 }

@@ -62,7 +62,7 @@ pub(super) fn int_float_cmp(i: &BigInt, f: f64) -> Option<Ordering> {
     0.0f64.partial_cmp(&f.fract())
 }
 
-fn integer_float(n: &BigInt) -> f64 {
+pub(super) fn integer_float(n: &BigInt) -> f64 {
     n.to_string().parse().expect("decimal integer is a float")
 }
 

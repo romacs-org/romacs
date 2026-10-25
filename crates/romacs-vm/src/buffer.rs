@@ -1312,3 +1312,407 @@ mod tests {
         assert_eq!(vm.heap_stats().reclaimed, 4);
     }
 }
+
+impl Vm {
+    pub(crate) fn add_text_properties_native(
+        &mut self,
+        start: Value,
+        end: Value,
+        plist: Value,
+        object: Value,
+    ) -> crate::prim::Out {
+        use crate::prim::Fault;
+        let pairs = self.text_property_pairs(plist)?;
+        if pairs.is_empty() {
+            return Ok(Value::NIL);
+        }
+        let object = if object == Value::NIL {
+            self.buffer_index().map_err(Fault::Error)?;
+            self.slots[self.buffer_slot].value
+        } else {
+            object
+        };
+        let Some((range, mut properties)) = self.text_property_region(start, end, object)? else {
+            return Ok(Value::NIL);
+        };
+        let pairs = pairs
+            .into_iter()
+            .map(|(key, value)| self.text_property_key(key).map(|key| (key, value)))
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let mut changed = false;
+        for (key, value) in pairs {
+            let mut at = range.start;
+            while at < range.end {
+                changed |= properties.get_property(at, &key) != Some(value);
+                at = properties.next_change(at, range.end);
+            }
+            properties.put(range.clone(), &key, value);
+        }
+        if !changed {
+            return Ok(Value::NIL);
+        }
+        if Self::image_value(object) {
+            return Err(Fault::Error("immutable image string".into()));
+        }
+        if matches!(self.object_if(object), Some(Object::Buffer(_))) {
+            let current = self.slots[self.buffer_slot].value;
+            self.slots[self.buffer_slot].value = object;
+            let result = self.check_text_property_edit(object, range.clone());
+            self.slots[self.buffer_slot].value = current;
+            result?;
+        }
+        let index = object.index(0).map_err(Fault::Error)? - 1;
+        match &mut self.objects[index] {
+            Object::Buffer(buffer) => {
+                buffer.properties = properties;
+                buffer.state.record_change(false);
+                self.display_state.version += 1;
+            }
+            Object::String(string) | Object::RawString(string) => string.properties = properties,
+            Object::Bytes(bytes) => {
+                let mut string = Box::new(data::LispString::from_bytes(bytes.clone(), false));
+                string.properties = properties;
+                self.objects[index] = if string.is_utf8() {
+                    Object::String(string)
+                } else {
+                    Object::RawString(string)
+                };
+            }
+            Object::ByteBuffer(_) => {
+                return Err(Fault::Error(
+                    "bulk text properties in unibyte buffers are not implemented".into(),
+                ));
+            }
+            _ => unreachable!(),
+        }
+        Ok(Value::TRUE)
+    }
+
+    fn text_property_pairs(
+        &self,
+        plist: Value,
+    ) -> std::result::Result<Vec<(Value, Value)>, crate::prim::Fault> {
+        use crate::prim::Fault;
+        if plist == Value::NIL {
+            return Ok(vec![]);
+        }
+        if !matches!(self.cons_pair(plist), Ok(_)) {
+            return Ok(vec![(plist, Value::NIL)]);
+        }
+        let mut pairs = Vec::new();
+        let mut tail = plist;
+        let mut seen = HashSet::new();
+        while let Ok((key, rest)) = self.cons_pair(tail) {
+            if !seen.insert(tail.0) {
+                return Err(Fault::Circular(plist));
+            }
+            let (value, next) = self
+                .cons_pair(rest)
+                .map_err(|_| Fault::Error("Odd length text property list".into()))?;
+            pairs.push((key, value));
+            tail = next;
+        }
+        Ok(pairs)
+    }
+
+    fn text_property_name(&self, key: Value) -> Option<&str> {
+        if key == Value::NIL {
+            return Some("nil");
+        }
+        if key == Value::TRUE {
+            return Some("t");
+        }
+        let slot = key.index_if(7)?.checked_sub(1)?;
+        let name = self.symbol_names.get(slot)?;
+        (self.names.get(name) == Some(&slot)).then_some(name.as_str())
+    }
+
+    fn text_property_key(&self, key: Value) -> std::result::Result<String, crate::prim::Fault> {
+        self.text_property_name(key)
+            .map(str::to_owned)
+            .ok_or_else(|| {
+                crate::prim::Fault::Error(
+                    "text property keys other than interned symbols are not implemented".into(),
+                )
+            })
+    }
+
+    pub(super) fn text_property_position(
+        &self,
+        value: Value,
+    ) -> std::result::Result<i64, crate::prim::Fault> {
+        if let Some(number) = value.integer_value() {
+            return Ok(number);
+        }
+        if let Some(Object::Bignum(number)) = self.object_if(value) {
+            return Ok(if number.sign() == num_bigint::Sign::Minus {
+                Value::MIN_FIXNUM
+            } else {
+                Value::MAX_FIXNUM
+            });
+        }
+        if matches!(self.object_if(value), Some(Object::Marker(_))) {
+            return self
+                .marker_position_value(value)
+                .map_err(crate::prim::Fault::Error)?
+                .integer_value()
+                .ok_or_else(|| crate::prim::Fault::Error("Marker does not point anywhere".into()));
+        }
+        Err(crate::prim::Fault::Wrong("integer-or-marker-p", value))
+    }
+
+    fn text_property_region(
+        &self,
+        start: Value,
+        end: Value,
+        object: Value,
+    ) -> std::result::Result<
+        Option<(std::ops::Range<ByteOffset>, properties::Properties)>,
+        crate::prim::Fault,
+    > {
+        use crate::prim::Fault;
+        let string = self.str_view(object);
+        if string.is_none()
+            && !matches!(
+                self.object_if(object),
+                Some(Object::Buffer(_) | Object::ByteBuffer(_))
+            )
+        {
+            return Err(Fault::Wrong("buffer-or-string-p", object));
+        }
+        let (a, z) = (
+            self.text_property_position(start)?,
+            self.text_property_position(end)?,
+        );
+        if a == z {
+            return Ok(None);
+        }
+        let (a, z) = (a.min(z), a.max(z));
+        let range_error = || Fault::Range(start, end);
+        let (range, properties) = if let Some(string) = string {
+            if a < 0 || z as u64 > string.len() as u64 {
+                return Err(range_error());
+            }
+            let offset = |index| {
+                ByteOffset(if string.is_multibyte() {
+                    string
+                        .chars()
+                        .take(index)
+                        .map(|code| crate::lstring::char_string(code, &mut [0; 5]))
+                        .sum()
+                } else {
+                    index
+                })
+            };
+            let properties = match self.object_if(object) {
+                Some(Object::String(s) | Object::RawString(s)) => s.properties.clone(),
+                _ => properties::Properties::new(),
+            };
+            (offset(a as usize)..offset(z as usize), properties)
+        } else {
+            if a < 1 {
+                return Err(range_error());
+            }
+            match self.object_if(object).unwrap() {
+                Object::Buffer(buffer) => {
+                    let a = buffer
+                        .byte_of_char(CharOffset(a as usize - 1))
+                        .map_err(|_| range_error())?;
+                    let z = buffer
+                        .byte_of_char(CharOffset(z as usize - 1))
+                        .map_err(|_| range_error())?;
+                    if a < buffer.accessible().start || z > buffer.accessible().end {
+                        return Err(range_error());
+                    }
+                    (a..z, buffer.properties.clone())
+                }
+                Object::ByteBuffer(buffer) => {
+                    let range = ByteOffset(a as usize - 1)..ByteOffset(z as usize - 1);
+                    if range.start < buffer.restriction.start || range.end > buffer.restriction.end
+                    {
+                        return Err(range_error());
+                    }
+                    (range, properties::Properties::from_map(&buffer.properties))
+                }
+                _ => unreachable!(),
+            }
+        };
+        Ok(Some((range, properties)))
+    }
+
+    fn text_property_variable(
+        &mut self,
+        name: &str,
+    ) -> std::result::Result<Value, crate::prim::Fault> {
+        let slot = self.slot(name);
+        let value = self
+            .variable_value(slot)
+            .map_err(crate::prim::Fault::Error)?;
+        Ok(if value == Value::UNBOUND {
+            Value::NIL
+        } else {
+            value
+        })
+    }
+
+    fn text_property_find(
+        &self,
+        list: Value,
+        matches: impl Fn(Value) -> bool,
+    ) -> std::result::Result<Option<Value>, crate::prim::Fault> {
+        let mut tail = list;
+        let mut walk = annotations::TailWalk::new(list);
+        while let Ok((value, next)) = self.cons_pair(tail) {
+            if matches(value) {
+                return Ok(Some(value));
+            }
+            tail = next;
+            if walk.cycle(tail) {
+                return Err(crate::prim::Fault::Circular(list));
+            }
+        }
+        if tail != Value::NIL {
+            return Err(crate::prim::Fault::Wrong("listp", list));
+        }
+        Ok(None)
+    }
+
+    fn text_property_category(
+        &mut self,
+        category: Value,
+        property: Value,
+    ) -> std::result::Result<Value, crate::prim::Fault> {
+        use crate::prim::Fault;
+        let environment = self.text_property_variable("overriding-plist-environment")?;
+        if let Some(entry) = self.text_property_find(environment, |entry| {
+            self.cons_pair(entry).is_ok_and(|(key, _)| key == category)
+        })? {
+            let (_, plist) = self.cons_pair(entry).map_err(Fault::Error)?;
+            let value = self.plist_lookup(plist, property);
+            if value != Value::NIL {
+                return Ok(value);
+            }
+        }
+        self.symbol_property(category, property)
+            .map_err(Fault::Error)
+    }
+
+    fn text_property_at(
+        &mut self,
+        properties: &properties::Properties,
+        at: ByteOffset,
+        key: &str,
+    ) -> std::result::Result<Value, crate::prim::Fault> {
+        use crate::prim::Fault;
+        if let Some(value) = properties.get_property(at, key) {
+            return Ok(value);
+        }
+        let symbol = Value::reference(self.slot(key) + 1, 7);
+        if let Some(category) = properties.get_property(at, "category")
+            && (category == Value::NIL
+                || category == Value::TRUE
+                || (category.tag() == 7 && category != Value::UNBOUND))
+        {
+            let value = self.text_property_category(category, symbol)?;
+            if value != Value::NIL {
+                return Ok(value);
+            }
+        }
+        let aliases = self.text_property_variable("char-property-alias-alist")?;
+        if let Some(entry) = self.text_property_find(aliases, |entry| {
+            self.cons_pair(entry).is_ok_and(|(key, _)| key == symbol)
+        })? {
+            let (_, mut tail) = self.cons_pair(entry).map_err(Fault::Error)?;
+            let mut walk = annotations::TailWalk::new(tail);
+            while let Ok((alias, next)) = self.cons_pair(tail) {
+                // GNU aliases consult the direct plist, never the category.
+                if let Some(name) = self.text_property_name(alias)
+                    && let Some(value) = properties.get_property(at, name)
+                    && value != Value::NIL
+                {
+                    return Ok(value);
+                }
+                tail = next;
+                if walk.cycle(tail) {
+                    return Err(Fault::Circular(tail));
+                }
+            }
+        }
+        let defaults = self.text_property_variable("default-text-properties")?;
+        Ok(self.plist_lookup(defaults, symbol))
+    }
+
+    fn text_property_signal(&mut self, name: &str, data: &[Value]) -> crate::prim::Fault {
+        let symbol = Value::reference(self.slot(name) + 1, 7);
+        crate::prim::Fault::Signal(symbol, self.list_value(data))
+    }
+
+    fn check_text_property_edit(
+        &mut self,
+        object: Value,
+        range: std::ops::Range<ByteOffset>,
+    ) -> std::result::Result<(), crate::prim::Fault> {
+        use crate::prim::Fault;
+        let Object::Buffer(buffer) = self.object(object).map_err(Fault::Error)? else {
+            unreachable!()
+        };
+        let properties = buffer.properties.clone();
+        let modified = buffer.state.modified();
+        let inhibit = self.text_property_variable("inhibit-read-only")?;
+        let read_only =
+            self.text_property_variable("buffer-read-only")? != Value::NIL && inhibit == Value::NIL;
+        if read_only
+            && self.text_property_at(&properties, range.start, "inhibit-read-only")? == Value::NIL
+        {
+            return Err(self.text_property_signal("buffer-read-only", &[object]));
+        }
+        let selective = self.cons_pair(inhibit).is_ok();
+        let ignore = inhibit != Value::NIL && !selective;
+        let hooks = self.text_property_variable("inhibit-modification-hooks")? == Value::NIL;
+        let mut property_hooks = false;
+        let mut at = range.start;
+        while at < range.end {
+            let value = self.text_property_at(&properties, at, "read-only")?;
+            let express = self.text_property_at(&properties, at, "inhibit-read-only")?
+                != Value::NIL
+                || (value != Value::NIL
+                    && selective
+                    && self
+                        .text_property_find(inhibit, |item| item == value)?
+                        .is_some());
+            if value != Value::NIL && !ignore && !express {
+                let data = if self.str_view(value).is_some() {
+                    vec![value]
+                } else {
+                    vec![]
+                };
+                return Err(self.text_property_signal("text-read-only", &data));
+            }
+            if read_only && !express {
+                return Err(self.text_property_signal("buffer-read-only", &[object]));
+            }
+            property_hooks |= hooks
+                && self.text_property_at(&properties, at, "modification-hooks")? != Value::NIL;
+            at = properties.next_change(at, range.end);
+        }
+        if hooks {
+            for name in [
+                "before-change-functions",
+                "after-change-functions",
+                "first-change-hook",
+            ] {
+                if (name != "first-change-hook" || !modified)
+                    && self.text_property_variable(name)? != Value::NIL
+                {
+                    property_hooks = true;
+                }
+            }
+        }
+        if property_hooks {
+            return Err(Fault::Error(
+                "text property changes with modification hooks are not implemented".into(),
+            ));
+        }
+        Ok(())
+    }
+}

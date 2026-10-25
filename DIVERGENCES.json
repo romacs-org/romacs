@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "b5cade4cac372d7d2cced8aebc0acc2ecdf7a7d5e30f80b878021cf1587cefdf",
+  "input_hash": "d9642bac1a1645539ba6e6420e5a2d2f546b4609d1bdb99d9ce8265a65bc3632",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -12,8 +12,8 @@
   "note": "Derived from the prose ledgers. Do not edit; edit those and regenerate."
  },
  "counts": {
-  "rows": 245,
-  "symbols": 453,
+  "rows": 247,
+  "symbols": 466,
   "rows_without_symbols": 16
  },
  "by_symbol": {
@@ -42,13 +42,14 @@
    65
   ],
   "[:class:]": [
-   244
+   246
   ],
   "abort-minibuffers": [
    60
   ],
   "add-text-properties": [
-   191
+   191,
+   236
   ],
   "add-variable-watcher": [
    208
@@ -89,6 +90,9 @@
   ],
   "b->last_window_start": [
    162
+  ],
+  "backtrace--locals": [
+   235
   ],
   "backward-char": [
    136
@@ -149,11 +153,11 @@
    69,
    139
   ],
+  "capitalize": [
+   52
+  ],
   "capitalize case-symbols-as-words": [
    53
-  ],
-  "capitalize copy-case-table current-case-table set-case-table": [
-   52
   ],
   "car": [
    206
@@ -172,6 +176,9 @@
   ],
   "characterp": [
    82
+  ],
+  "cl-print-object": [
+   235
   ],
   "cl-type-of": [
    234
@@ -211,6 +218,9 @@
    215,
    223
   ],
+  "copy-case-table": [
+   52
+  ],
   "copy-sequence": [
    73,
    100,
@@ -224,6 +234,9 @@
   ],
   "ctl-x-map": [
    134
+  ],
+  "current-case-table": [
+   52
   ],
   "current-global-map": [
    96
@@ -267,6 +280,9 @@
   "debug-on-error": [
    19
   ],
+  "decode-coding-string": [
+   11
+  ],
   "decode-time": [
    81
   ],
@@ -296,8 +312,8 @@
    119,
    120,
    144,
-   236,
-   240
+   238,
+   242
   ],
   "define-category": [
    203
@@ -370,7 +386,7 @@
    98
   ],
   "downcase_char_code_emacs_compat": [
-   243
+   245
   ],
   "elt": [
    21,
@@ -382,10 +398,13 @@
    151
   ],
   "emacs_downcase_compat": [
-   243
+   245
   ],
   "enable-recursive-minibuffers": [
    219
+  ],
+  "encode-coding-string": [
+   11
   ],
   "end-of-line": [
    136
@@ -405,13 +424,15 @@
    1
   ],
   "error": [
-   10,
-   11
+   10
   ],
   "error-message-string": [
    138,
    139,
    205
+  ],
+  "ert--run-test-internal": [
+   235
   ],
   "esc-map": [
    134
@@ -458,23 +479,23 @@
    117,
    118,
    119,
-   236,
-   237,
-   240
+   238,
+   239,
+   242
   ],
   "face-family": [
    115,
-   239
+   241
   ],
   "face-font": [
    114,
-   238
+   240
   ],
   "face-remapping-alist": [
    109,
    118,
    119,
-   242
+   244
   ],
   "fboundp": [
    159,
@@ -523,7 +544,8 @@
    89,
    91,
    101,
-   105
+   105,
+   230
   ],
   "format-message": [
    71,
@@ -882,6 +904,9 @@
   "mapatoms": [
    226
   ],
+  "mapbacktrace": [
+   235
+  ],
   "mapc": [
    50,
    51
@@ -983,6 +1008,12 @@
   ],
   "next-overlay-change": [
    121
+  ],
+  "next-property-change": [
+   236
+  ],
+  "next-single-char-property-change": [
+   236
   ],
   "normal-top-level-add-to-load-path": [
    86
@@ -1207,7 +1238,7 @@
   ],
   "reset": [
    117,
-   235
+   237
   ],
   "reverse": [
    54,
@@ -1271,6 +1302,9 @@
    82,
    218
   ],
+  "set-case-table": [
+   52
+  ],
   "set-char-table-range": [
    73
   ],
@@ -1287,10 +1321,10 @@
    113,
    114,
    115,
-   237,
-   238,
    239,
-   241
+   240,
+   241,
+   243
   ],
   "set-match-data": [
    67
@@ -1345,10 +1379,10 @@
    87
   ],
   "skip-chars-backward": [
-   244
+   246
   ],
   "skip-chars-forward": [
-   244
+   246
   ],
   "sort": [
    17
@@ -1485,6 +1519,9 @@
   "transient": [
    107
   ],
+  "truncate": [
+   173
+  ],
   "truncate-lines": [
    151
   ],
@@ -1514,6 +1551,9 @@
   "unread-command-events": [
    60,
    61
+  ],
+  "upcase-initials": [
+   52
   ],
   "usize": [
    82
@@ -1782,14 +1822,15 @@
    "section": "Observable by a package: save batch (WIP, not accepted)",
    "observable": true,
    "planned": false,
-   "mechanism": "decode-coding-string",
+   "mechanism": "String coding conversion",
    "gnu": "GNU performs full codec conversion.",
-   "romacs": "Only nil coding with nil destination is implemented; other requests signal `error` with `VM2 decode-coding-string supports nil coding and nil destination only`.",
-   "why": "Exact independent GNU nil-codec branch, not general decoding. `crates/romacs-vm/evidence/savejourney/README.md`.",
+   "romacs": "`encode-coding-string` and `decode-coding-string` support nil/no-conversion, UTF-8 and raw-text coding systems, aliases, EOL conversion, simple BOM handling, NOCOPY and last-coding-system-used. GNU ASCII fast paths are retained. Other conversion codecs, coding hooks, BOM-pair detection and buffer destinations explicitly refuse.",
+   "why": "This is a bounded string-conversion domain, checked against pinned GNU in `tests/coding_strings.rs`; it does not establish general codec or file-coding parity.",
    "symbols": [
-    "error"
+    "encode-coding-string",
+    "decode-coding-string"
    ],
-   "symbols_derived": true
+   "symbols_derived": false
   },
   {
    "id": "VM2-SAVE-ATTRS",
@@ -2236,8 +2277,8 @@
    "planned": false,
    "mechanism": "`replace-match` buffer/case operations",
    "gnu": "`search.c:2344` replaces buffer matches and applies current-buffer case/syntax tables when FIXEDCASE is nil.",
-   "romacs": "String replacement supports non-nil FIXEDCASE and empty replacements with either FIXEDCASE; buffer replacement and nonempty case conversion explicitly signal errors.",
-   "why": "Buffer mutation and case-table integration remain unimplemented.",
+   "romacs": "String replacement now infers all-caps/initial casing from the match using supported current case/syntax tables, including tested explicit nil overrides. Conversion of initial letters shares VM2-CASE1 pinned titlecase limitations. Buffer replacement still explicitly signals before mutation.",
+   "why": "Buffer mutation and unrestricted custom titlecase conversion remain unsupported; string casing comparisons are in `tests/replace_match.rs`.",
    "symbols": [
     "replace-match"
    ],
@@ -2415,12 +2456,16 @@
    "section": "Observable by a package",
    "observable": true,
    "planned": false,
-   "mechanism": "`capitalize` custom case tables",
-   "gnu": "GNU `casefiddle.c:prepare_casing_context` and `casify_object` consult the current buffer case tables and Unicode special/titlecase properties.",
-   "romacs": "Native `capitalize` uses the pinned GNU default mappings and honors current syntax tables, but VM2 has no `copy-case-table`/`current-case-table`/`set-case-table` API. Live `capitalize/0054` returns `(ok \"Abc\")` on GNU and `(sig (void-function copy-case-table))` on VM2, pinned `MISSING`.",
-   "why": "**Package-observable unresolved case-table substrate**, not complete locale/custom-case parity. Evidence: `crates/romacs-vm/tools/primh/evidence/capitalize.json`. Region/word siblings, upcase/downcase and upcase-initials are deliberately not introduced by this slice.",
+   "mechanism": "Custom casing and pinned titlecase mappings",
+   "gnu": "GNU `casefiddle.c:prepare_casing_context` and `casify_object` consult current-buffer case/syntax tables and Unicode special/titlecase properties.",
+   "romacs": "`capitalize` retains pinned GNU default mappings and current syntax-table word boundaries. `upcase-initials` is available; its fallback uses supported current-case mappings, but known pinned mapping rows take precedence. `current-case-table` and `set-case-table` exist; `copy-case-table` remains unavailable.",
+   "why": "General custom capitalization and region/word mutation siblings remain outside this slice. `tests/capitalize.rs` keeps the explicit custom-case divergence and tests the supported titlecase/initials domain.",
    "symbols": [
-    "capitalize copy-case-table current-case-table set-case-table"
+    "capitalize",
+    "upcase-initials",
+    "copy-case-table",
+    "current-case-table",
+    "set-case-table"
    ],
    "symbols_derived": false
   },
@@ -2628,7 +2673,7 @@
    "planned": false,
    "mechanism": "Consumers of radix bignums",
    "gnu": "Pinned GNU accepts `(+ #x2000000000000000 1)` => `2305843009213693953`, numeric `=`/`<=` of that integer with itself => t, and `(car (read-from-string (prin1-to-string #x2000000000000000)))` => the same integer.",
-   "romacs": "VM2 reads, prints and structurally compares radix bignums, but arithmetic, numeric comparison and min still reject them through the fixnum/float-only numeric consumers. The printed decimal spelling cannot be read back: decimal-token overflow is still VM2-READ4. `%d` is fixnum-only (VM2-FMT1). Integerp/numberp returning t does not imply those consumers support the new representation.",
+   "romacs": "VM2 reads, prints and structurally compares radix bignums, but arithmetic, numeric comparison and min still reject them through the fixnum/float-only numeric consumers. The printed decimal spelling cannot be read back: decimal-token overflow is still VM2-READ4. `%d` now accepts bignums and floating coercions (VM2-FMT1). Integerp/numberp returning t does not imply those consumers support the new representation.",
    "why": "**Package-observable staged numeric consumers:** real arbitrary-precision reader storage, not general bignum arithmetic or serialization parity; reject rather than silently round.",
    "symbols": [
     "read-from-string",
@@ -3015,7 +3060,7 @@
    "mechanism": "Lisp evaluation depth accounting and native stack exhaustion",
    "gnu": "GNU eval.c:2604-2609,3196-3201 checks the dynamically bound integer limit (default 1600, floor 100 on overflow), signals `(excessive-lisp-nesting DEPTH)`, and restores depth on unwind; bytecode.c:783-788 signals plain `error` at compiled call overflow. loadup.el:106 raises the limit to 4200 and :156 doubles it. eval.c:255-277 restores borrowed reserve from CURRENT limit/reserve values; signal_or_quit borrows 20 (eval.c:1969). Per level at limit 100, measured at the pin: interpreted code reaches 30 `eval`-reentry and 45 call levels, byte-compiled 48 and 96. GNU has no recoverable native-stack condition (a C stack overflow is caught and Emacs returns to top level, `keyboard.c:166-169,13426` \"Re-entering top level after C stack overflow\")",
    "romacs": "VM2 consults the forwarded limit at every Lisp activation and shares one budget across eval/load/macro engines; register storage grows and rebases; `eval`/load/lazy-compile/autoload reentry runs on heap stack segments grown on demand (`stacker`), so reentry depth is bounded by the Lisp counter, not by the thread stack. Separately (R193), every activation and every compiler `expr` step refuses when fewer than 256 KiB of native stack remain, with a recoverable `(error \"native stack exhausted during Lisp evaluation\")` or `... while compiling Lisp` (compiler recursion is refused, not grown). Accounting is GNU bytecode's: 50 and 99 levels at limit 100 (`tests/eval_depth.rs` `reentry_and_call_levels_follow_gnu_bytecode_accounting`). Measured sustainable depth (exactly 4200 and 8400 reached, then `excessive-lisp-nesting`): on the GUI evaluator's explicit 64 MiB stack for plain calls, `apply` and `run-hooks` recursion and `eval` reentry in debug, gate (optimized, no LTO) and release (LTO) builds; on a 2 MiB thread in debug and release for every shape. `signal-hook-function` borrows twenty levels from `lisp-eval-depth-reserve` (default 200), restoring on normal/error/throw exits",
-   "why": "**Package-observable:** (1) VM2 always signals `excessive-lisp-nesting`, also where GNU bytecode signals plain `error`; recursion reaches more levels than GNU's interpreter (50 vs 30, 99 vs 45). (2) GNU's debugger and `handler-bind` reserve borrowers are not implemented. (3) In the gap between the native guard and the Lisp limit -- reached only on small threads in optimized non-LTO builds (2 MiB: `apply` recursion refused before depth 4200, `run-hooks` before 8400; 8 MiB: 8400 reached) or with a raised limit (50000 levels on 2 MiB) -- code sees a plain `error` with that message instead of `excessive-lisp-nesting`, and a handler for `excessive-lisp-nesting` alone does not catch it; it is never a process abort. GNU's 4200/8400 loadup raises are effective at the GUI's 64 MiB. See `src/eval_depth.rs` and `tests/eval_depth.rs`.",
+   "why": "**Package-observable:** (1) VM2 always signals `excessive-lisp-nesting`, also where GNU bytecode signals plain `error`; recursion reaches more levels than GNU's interpreter (50 vs 30, 99 vs 45). (2) GNU's debugger reserve borrower is not implemented. Returning `handler-bind` callbacks borrow 200 levels and restore the current limit/reserve after normal or nonlocal exit. (3) In the gap between the native guard and the Lisp limit -- reached only on small threads in optimized non-LTO builds (2 MiB: `apply` recursion refused before depth 4200, `run-hooks` before 8400; 8 MiB: 8400 reached) or with a raised limit (50000 levels on 2 MiB) -- code sees a plain `error` with that message instead of `excessive-lisp-nesting`, and a handler for `excessive-lisp-nesting` alone does not catch it; it is never a process abort. GNU's 4200/8400 loadup raises are effective at the GUI's 64 MiB. See `src/eval_depth.rs` and `tests/eval_depth.rs`.",
    "symbols": [
     "max-lisp-eval-depth",
     "lisp-eval-depth-reserve",
@@ -3081,9 +3126,9 @@
    "observable": true,
    "planned": false,
    "mechanism": "`format` conversion language and numeric arguments",
-   "gnu": "Parses positional `N$`, flags `-`, `+`, space, `#`, `0`, width and precision (`src/editfns.c:3611-3653`); accepts floating `e/f/g` and integer/character `c/d/i/o/x/X/b/B` conversions and numeric coercions (`:3729-3730,3829-3845`)",
-   "romacs": "VM2 accepts only literal text, bare `%s`, `%S`, `%d` and `%%`; arguments are consumed sequentially, `%%` consumes none, and `%d` requires a VM2 fixnum (a radix bignum, e.g. `(format \"%d\" #x2000000000000000)`, is rejected although GNU prints its decimal digits) (`crates/romacs-vm/src/productivity.rs:50-85`). No flags, width, precision, positional fields or other conversions: `(format \"%04d\" 7)` signals `unsupported format specifier (supported: %s %S %d %%)`; `(format \"%d\" 7.5)` signals `integer required`",
-   "why": "**Package-observable staged formatter subset:** padded/truncated labels, positional translations, character/radix/float formatting and float-to-decimal coercion fail rather than producing GNU output. Use the bare conversions with already-prepared values; D002/D004 separately cover octets and escaping",
+   "gnu": "GNU parses positional `N$`, flags, width and precision and accepts floating and integer/character conversions (`src/editfns.c:3611-3653,3729-3730,3829-3845`).",
+   "romacs": "The shared formatter supports those fields and `%s`, `%S`, `%c`, `%d`, `%i`, `%b`, `%B`, `%o`, `%x`, `%X`, `%e`, `%f`, `%g` and `%%`, including exact bignum integer output and float coercion/rounding. Width, precision and field-number components above 2^20 refuse; text-property propagation and GNU string-identity behavior remain unsupported.",
+   "why": "Live GNU comparisons are in `tests/format_numeric.rs`. Locale/quoting capability limits remain VM2-FORMAT-MESSAGE1; this is not full GNU formatting parity.",
    "symbols": [
     "format"
    ],
@@ -4150,7 +4195,7 @@
    "planned": false,
    "mechanism": "GNU printing subset (`prin1`, `princ`, `print`, `prin1-to-string`)",
    "gnu": "`print.c:738-915`, `print_object` support all GNU objects, controls and graphs.",
-   "romacs": "VM2 now honors list/vector length, list level, quote/function shorthand, newline/control/multibyte escapes, supported overrides and shared/cyclic cons/vector/nonempty-string numbering with `print-circle`. NaN payloads are preserved by these entry points. Without `print-circle`, cyclic lists and vectors still refuse instead of GNU's `#0` ancestor notation; depth over 100 refuses. Hash-table print-length refuses; circular/shared hash-table traversal is not modeled. Backquote/comma shorthand and full GNU symbol-number recognition remain incomplete. Obarrays, text-property strings and fresh/uniform character tables are represented, including property-value cycles with `print-circle`; sparse/historical table layout remains VM2-CT1. Unsupported layouts (syntax tables, markers, overlays, frames, terminals) and compiled closures still refuse rather than emit placeholder representations.",
+   "romacs": "VM2 now honors list/vector length, list level, quote/function shorthand, newline/control/multibyte escapes, supported overrides and shared/cyclic cons/vector/nonempty-string numbering with `print-circle`. NaN payloads are preserved by these entry points. Without `print-circle`, cyclic lists and vectors still refuse instead of GNU's `#0` ancestor notation; depth over 100 refuses. Hash-table print-length refuses; circular/shared hash-table traversal is not modeled. Backquote/comma shorthand and full GNU symbol-number recognition remain incomplete. Obarrays, text-property strings and fresh/uniform character tables are represented, including property-value cycles with `print-circle`; sparse/historical table layout remains VM2-CT1. Unsupported structural layouts still refuse, including marker objects themselves (distinct from supported marker stream destinations); ordinary compiled closures print opaquely as `#<interpreted-function>`, without exposing source, capture cells or array slots. The owned cl-print method delegates to this native printer. Existing frame/terminal diagnostic representations remain VM2-FRAME-PRINT.",
    "why": "Partial serialization contract, not full GNU printing parity. Existing circular-printer pins in other corpora remain distinct from the new `tools/primh/printing-specs` finite live-GNU matrix.",
    "symbols": [
     "prin1",
@@ -4172,8 +4217,8 @@
    "planned": false,
    "mechanism": "Output destinations and callback timing",
    "gnu": "GNU `print.c:print_prepare`, `Fterpri` and `printchar` accept buffer/marker streams, preserve point, run modification hooks and output objects incrementally.",
-   "romacs": "VM2 emits to callback functions/symbols through rooted T2 continuations and to batch stdout; buffer/marker destinations explicitly refuse. `terpri` with non-nil ENSURE refuses, including non-function streams (only the function refusal matches GNU). Rendering is snapshotted before callbacks, so callback mutation of remaining graph/print controls is not reflected. Quoted non-ASCII unibyte strings to callback/stdout streams refuse; `princ` raw strings retain their actual character codes. `write-char` matches GNU's uint32 callback conversion, but unsupported stdout character codes refuse.",
-   "why": "No claim of buffer/marker output or incremental callback mutation parity; live cases and pins in printing-specs cover these refusals.",
+   "romacs": "Romacs emits to buffer streams, markers in multibyte buffers, rooted T2 callback functions/symbols and batch stdout. Buffer/marker output follows GNU point motion and restores the current buffer on errors; unibyte-buffer markers and uninhibited change hooks explicitly refuse. `terpri` with non-nil ENSURE refuses, including non-function streams (only the function refusal matches GNU). Rendering is snapshotted before callbacks, so callback mutation of remaining graph/print controls is not reflected. Quoted non-ASCII unibyte strings to callback/stdout streams refuse; `princ` raw strings retain their actual character codes. `write-char` matches GNU uint32 callback conversion, but unsupported stdout character codes refuse.",
+   "why": "Buffer/marker comparisons are in `tests/printing_streams.rs`; change-hook, ENSURE and incremental callback mutation parity remain outside the supported boundary.",
    "symbols": [
     "prin1",
     "princ",
@@ -4519,13 +4564,14 @@
    "section": "Observable by a package",
    "observable": true,
    "planned": false,
-   "mechanism": "`round` / `ceiling` beyond the fixnum range",
+   "mechanism": "`round` / `ceiling` / `truncate` accept fixnum/float operands and return fixnums",
    "gnu": "GNU `rounding_driver` (`src/floatfns.c:404`) divides exactly and returns a bignum when the integral result exceeds the fixnum range, e.g. `(round 1e300)`",
-   "romacs": "VM2 divides exactly too (an odd mantissa times a power of two, u128 long division), but does not promote its result into the radix reader's bignum representation: such a result signals `overflow-error`. Every other row matches GNU. Pins in `tools/primh/evidence/round.json` and `ceiling.json`: 48 SIGNAL-VS-VALUE (bignum results), 3 VALUE (the same signal caught by a probe), 1 VALUE (`5e-324` printed by VM2's float printer as `4.94065645841247e-324`), 72 PRINTER (GNU's message names a circular list VM2 cannot print without `print-circle`). The same missing arithmetic promotion pins `set-window-new-total/0016` (VALUE): its argument `(1+ most-positive-fixnum)` signals `arith-error` in VM2 before the call, where GNU passes a bignum that `CHECK_FIXNUM` rejects with `wrong-type-argument`",
-   "why": "**Package-observable** for integral results outside the fixnum range",
+   "romacs": "Romacs shares exact quotient rounding for these operations (an odd mantissa times a power of two and u128 long division), but this path accepts only fixnum/float operands and does not promote integral results outside the fixnum range into bignum storage: such results signal `overflow-error`. Bignum operands remain unsupported. Existing pins in `tools/primh/evidence/round.json` and `ceiling.json` retain their recorded result, printer and signal differences. `truncate` has a separate live GNU comparison over its supported numeric domain.",
+   "why": "**Package-observable** for bignum operands and integral results outside the fixnum range",
    "symbols": [
     "round",
-    "ceiling"
+    "ceiling",
+    "truncate"
    ],
    "symbols_derived": false
   },
@@ -4751,10 +4797,10 @@
    "section": "Observable by a package",
    "observable": true,
    "planned": false,
-   "mechanism": "NOESCAPE printing of unibyte high bytes and output capture",
-   "gnu": "Fresh GNU `(let ((s (prin1-to-string (unibyte-string 255) t))) (list (length s) (aref s 0) (multibyte-string-p s) (string-bytes s)))` returns `(4 92 nil 4)` (ASCII octal text). The same inspection of `(with-output-to-string (princ (unibyte-string 255)))` returns `(4 92 t 4)`",
-   "romacs": "VM2 returns `(1 255 t 2)` for the first witness: NOESCAPE substitutes Latin-1 Unicode instead of octal text. The capture witness signals `(void-function)` because `princ`/`with-output-to-string` are not installed in the bare VM2 runtime",
-   "why": "Pre-existing printer debt, not D004 control escaping. Removing the quoted guard alone corrects the characters but still returns multibyte output; full parity also needs P1b printer-result kinds and an output-stream/capture implementation outside this printer-only repair. Recorded rather than claiming partial parity; literal/result kinds remain unchanged in P1a",
+   "mechanism": "NOESCAPE printing of unibyte high bytes",
+   "gnu": "Fresh GNU `(let ((s (prin1-to-string (unibyte-string 255) t))) (list (length s) (aref s 0) (multibyte-string-p s) (string-bytes s)))` returns `(4 92 nil 4)` (ASCII octal text). Buffer-backed `(with-output-to-string (princ (unibyte-string 255)))` returns `(4 92 t 4)` under the same inspection.",
+   "romacs": "Romacs still returns `(1 255 t 2)` for the first witness: NOESCAPE substitutes Latin-1 Unicode instead of octal text. The buffer-backed capture witness now matches GNU after loading its `with-output-to-string` macro from subr.el; princ and buffer output are native.",
+   "why": "Remaining debt is the NOESCAPE printer-result characters and string kind. The unchanged GNU capture macro is an explicit source prerequisite, not a bare-native definition.",
    "symbols": [
     "prin1-to-string",
     "princ",
@@ -4885,9 +4931,9 @@
    "observable": true,
    "planned": false,
    "mechanism": "`replace-match` inferred casing",
-   "gnu": "GNU `search.c:2430-2509,2607-2613` derives all-caps/initials conversion from the matched text and current syntax/case tables; live `replace-match/0023` returns `\"NEW\"`.",
-   "romacs": "Nil FIXEDCASE with nonempty NEWTEXT signals `(error \"VM2 replace-match unsupported: case inference with nonempty replacement\")`, even when GNU would leave it unchanged. Empty NEWTEXT is accepted because every casing action leaves it empty; non-nil FIXEDCASE preserves NEWTEXT.",
-   "why": "**Explicit conservative refusal**; no new case-table approximation or Lisp stand-in.",
+   "gnu": "GNU `search.c:2430-2509,2607-2613` derives all-caps/initials conversion from matched text and current syntax/case tables.",
+   "romacs": "String replacement now applies that inference to assembled replacement text. All-caps conversion uses supported current case tables; initial conversion shares VM2-CASE1 pinned titlecase precedence and current-table fallback. Tested explicit nil mappings suppress inference, and unibyte inputs preserve byte-valued output. Non-nil FIXEDCASE preserves replacement case.",
+   "why": "Buffer replacement remains refused (VM2-RM1), and general custom titlecase conversion remains limited. Supported string and custom-table cases are checked against pinned GNU in `tests/replace_match.rs`.",
    "symbols": [
     "replace-match"
    ],
@@ -5114,7 +5160,7 @@
    "planned": false,
    "mechanism": "Autoload loading: what is still not GNU's",
    "gnu": "`Fautoload_do_load` (`src/eval.c:2494`) loads FILE through `load_with_autoload_queue` (`src/eval.c:2465`) when an autoload is called, funcalled, applied (`src/eval.c:2760,3176,3530`), macroexpanded (`src/eval.c:1326`), reached as a keymap (`get_keymap`, `src/keymap.c:218`), asked for its interactive form (`src/data.c:1196`) or run as a command (`src/keyboard.c:10448`). A failed load is undone by `un_autoload` (`src/eval.c:2447`), which re-reads each redefined symbol's previous definition from its `function-history` property (`add_to_function_history`, `src/data.c:933-967`, which keeps one entry per file); `defalias` also honours `defalias-fset-function` and records `load-history`; the \"failed to define\" error names `(car (car load-history))`, the file as `openp` found it",
-   "romacs": "Since `vm2/autoload`, calls, `funcall`, `apply`, call requests from primitives (`Step::Call`) and the compiler's macro expansion load the file exactly as GNU (macro expansion now also follows symbol aliases to a macro or macro autoload, as `Fmacroexpand` does at `src/eval.c:1290-1305`; before this lane an alias of a macro compiled as a function call), `autoload-do-load` (1 . 3) matches GNU's argument contract, a failing load reverts function cells and `features` and keeps functions that had no previous definition, nested loads undo only their own level, `require` shares the undo, and match data is saved (`crates/romacs-vm/src/autoload.rs`, tests `tests/autoload_load.rs`, GNU transcript `crates/romacs-vm/evidence/autoload-load/gnu-transcript.txt`; primh row `autoload/0497` now matches and is unpinned). Remaining: (1) VM2 has no `function-history`, so the undo record is the old definition captured at `defalias` time; GNU's re-read differs only if Lisp edits that property mid-load or the same file redefines a symbol it defined on an earlier load; (2) keymap, `interactive-form` and command-loop autoloads are not loaded (VM2 `get_keymap` returns None for an autoload); (3) no `load-history`, so the \"Autoloading file %s failed to define function %s\" message names the canonicalized path VM2 loaded; (4) `defalias-fset-function` is not honoured; (5) a signal raised inside the autoloaded file reaches the caller without its data (VM2-LOAD1); (6) VM2 macroexpands when it compiles the whole top-level form, so a failing macro autoload fails that form's compilation instead of signalling where the call is reached (an enclosing `condition-case` in the same form cannot catch it; see VM2-LAZY4)",
+   "romacs": "Since `vm2/autoload`, calls, `funcall`, `apply`, call requests from primitives (`Step::Call`) and the compiler's macro expansion load the file exactly as GNU (macro expansion now also follows symbol aliases to a macro or macro autoload, as `Fmacroexpand` does at `src/eval.c:1290-1305`; before this lane an alias of a macro compiled as a function call), `autoload-do-load` (1 . 3) matches GNU's argument contract, a failing load reverts function cells and `features` and keeps functions that had no previous definition, nested loads undo only their own level, `require` shares the undo, and match data is saved (`crates/romacs-vm/src/autoload.rs`, tests `tests/autoload_load.rs`, GNU transcript `crates/romacs-vm/evidence/autoload-load/gnu-transcript.txt`; primh row `autoload/0497` now matches and is unpinned). Remaining: (1) VM2 has no `function-history`, so the undo record is the old definition captured at `defalias` time; GNU's re-read differs only if Lisp edits that property mid-load or the same file redefines a symbol it defined on an earlier load; (2) keymap, `interactive-form` and command-loop autoloads are not loaded (VM2 `get_keymap` returns None for an autoload); (3) no `load-history`, so the \"Autoloading file %s failed to define function %s\" message names the canonicalized path VM2 loaded; (4) `defalias-fset-function` is not honoured; (5) VM2 macroexpands when it compiles the whole top-level form, so a failing macro autoload fails that form's compilation instead of signalling where the call is reached (an enclosing `condition-case` in the same form cannot catch it; see VM2-LAZY4)",
    "why": "**Package-observable** for autoloaded keymaps and commands invoked through the command loop before their file is loaded, for code inspecting `function-history`/`load-history`, and through symlinked load paths in the error text. Calling or expanding an autoloaded function or macro behaves as in GNU",
    "symbols": [
     "autoload",
@@ -5136,7 +5182,7 @@
    "planned": false,
    "mechanism": "Symbol property lists: the condition projections, `overriding-plist-environment`, VM-internal command specs, image plists",
    "gnu": "GNU stores one plist per symbol object (`u.s.plist`, `src/lisp.h`; marked with the symbol, `src/alloc.c:6673`). `get` first consults `overriding-plist-environment` (`src/fns.c:2653-2663`); `put` is `plist_put` (`src/fns.c:2703-2741`). `symbol-plist` shows every property, including the `error-conditions`/`error-message` that `define-error` puts (live: `((error-conditions (#:c error) error-message \"Made\") \"Made\")`), a condition defined only by `setplist` reports its own message (live: `(caught #:c \"C!: 1\")`), and `(let ((overriding-plist-environment '((foo p 9)))) (get 'foo 'p))` is `9`. Transcripts: `crates/romacs-vm/evidence/plist/gnu-transcript.txt`, `divergence-probe.txt`",
-   "romacs": "VM2 matches GNU for every other key and case in that transcript, on interned and uninterned symbols alike (`crates/romacs-vm/tests/symbol_plists.rs`): identity-owned plists, any `eq` key, replace in place, append at the end, `plistp`/`circular-list`/`symbolp` signals, nil/t/keyword plists, buffer-local tables kept off the plist. It differs in four ways. (a) `error-conditions` and `error-message` live in VM2's condition registry, not on the plist: `symbol-plist` omits them and `setplist` neither installs nor removes them, so a condition defined only through `setplist` is unknown to `signal` (it is still caught by an `error` handler, as undefined conditions are, but reports `peculiar error: 1` instead of `C!: 1`), and `symbol-plist` after `define-error` is nil instead of GNU's `(error-conditions ... error-message ...)`. (b) `overriding-plist-environment` does not exist and `get` never consults it (the probe answers nil, GNU 9). (c) A command compiled from `(interactive ...)` carries the VM-internal property `#:interactive` on its plist (GNU keeps the spec in the function object), so `symbol-plist` shows it (live: `(#:interactive (\"\"))` for `(defun f () (interactive) 1)`, GNU nil) and `setplist` removes it. (d) Properties GNU's own C and preloaded Lisp put on symbols are absent until the code that puts them runs in VM2: in batch GNU, `(symbol-plist nil)` is `(event-symbol-element-mask (nil 0) event-symbol-elements (nil) modifier-cache ((0)))` (keyboard.c) and `(symbol-plist t)` adds `cl--class` (cl-preloaded.el); VM2 answers nil for both (primh pins `symbol-plist/0000`, `0001`, `0024`, `0025`, VALUE)",
+   "romacs": "VM2 matches GNU for every other key and case in that transcript, on interned and uninterned symbols alike (`crates/romacs-vm/tests/symbol_plists.rs`): identity-owned plists, any `eq` key, replace in place, append at the end, `plistp`/`circular-list`/`symbolp` signals, nil/t/keyword plists, buffer-local tables kept off the plist. It differs in four ways. (a) `error-conditions` and `error-message` live in VM2's condition registry, not on the plist: `symbol-plist` omits them and `setplist` neither installs nor removes them, so a condition defined only through `setplist` is unknown to `signal` (it is still caught by an `error` handler, as undefined conditions are, but reports `peculiar error: 1` instead of `C!: 1`), and `symbol-plist` after `define-error` is nil instead of GNU's `(error-conditions ... error-message ...)`. (b) `overriding-plist-environment` has its native nil default and dynamic binding; bulk text-property authorization consults it, but general `get` still ignores it (the probe answers nil, GNU 9). (c) A command compiled from `(interactive ...)` carries the VM-internal property `#:interactive` on its plist (GNU keeps the spec in the function object), so `symbol-plist` shows it (live: `(#:interactive (\"\"))` for `(defun f () (interactive) 1)`, GNU nil) and `setplist` removes it. (d) Properties GNU's own C and preloaded Lisp put on symbols are absent until the code that puts them runs in VM2: in batch GNU, `(symbol-plist nil)` is `(event-symbol-element-mask (nil 0) event-symbol-elements (nil) modifier-cache ((0)))` (keyboard.c) and `(symbol-plist t)` adds `cl--class` (cl-preloaded.el); VM2 answers nil for both (primh pins `symbol-plist/0000`, `0001`, `0024`, `0025`, VALUE)",
    "why": "**Package-observable** for (a) to (c): code that copies or inspects whole plists (`symbol-plist`, `setplist`, `cl-remprop`-style edits) sees the registry properties missing and a stray `#:interactive`; the byte compiler's `overriding-plist-environment` bindings have no effect. Image-published plists are now private at restoration, preserving aliases through `put` (former item (d), retired by `code_image::image_alias_tests`). Before this row VM2 had no `symbol-plist`/`setplist` at all and refused `get`/`put` on uninterned symbols with `(error \"symbol required\")`",
    "symbols": [
     "get",
@@ -5261,7 +5307,7 @@
    "planned": false,
    "mechanism": "Only the built-in (C) variables the bootstrap reaches exist, with C-time values",
    "gnu": "GNU defines 948 variables in C (618 `DEFVAR_LISP`, 196 `DEFVAR_BOOL`, 74 `DEFVAR_INT`, 60 `DEFVAR_PER_BUFFER`); each symbol is `SYMBOL_FORWARDED` to C storage from startup, and a dumped GNU then runs `loadup.el`'s Lisp, which fills several of them (`minibuffer-local-map` gains its bindings, `window-persistent-parameters` gains `(context . writable)`, `load-file-rep-suffixes` gains `\".gz\"` from jka-cmpr-hook.el)",
-   "romacs": "VM2 forwards 14 of them (`crates/romacs-vm/src/forwarded.rs`, each entry citing its DEFVAR and the census or chain need that pulled it in), with GNU's forwarding semantics for `symbol-value`, `set`/`setq`, `let` (including unwinding on a signal), `default-value`, `set-default`, `makunbound` (`Built-in variable may not be unbound`), bool coercion, int `integerp` checks and per-buffer auto-local behaviour; GNU 32.0.50 transcripts in `crates/romacs-vm/evidence/c-variables/`. Values are the C initial values, not the dumped image's: `minibuffer-local-map` is `(keymap)`, `window-persistent-parameters` is `((clone-of . t))`, `load-file-rep-suffixes` is `(\"\")`, so `(get-load-suffixes)` is `(\".so\" \".elc\" \".el\")` where `emacs -Q` gives `(\".so\" \".elc\" \".elc.gz\" \".el\" \".el.gz\")` (pinned rows `get-load-suffixes/0000`, `/0002`). The other 934 are ordinary symbols: void until Lisp sets them, not special unless `defvar`ed, and any value is accepted",
+   "romacs": "VM2 forwards the subset declared in `crates/romacs-vm/src/forwarded.rs`, with each entry citing its DEFVAR and the census or chain need that pulled it in, with GNU's forwarding semantics for `symbol-value`, `set`/`setq`, `let` (including unwinding on a signal), `default-value`, `set-default`, `makunbound` (`Built-in variable may not be unbound`), bool coercion, int `integerp` checks and per-buffer auto-local behaviour; GNU 32.0.50 transcripts in `crates/romacs-vm/evidence/c-variables/`. Values are the C initial values, not the dumped image's: `minibuffer-local-map` is `(keymap)`, `window-persistent-parameters` is `((clone-of . t))`, `load-file-rep-suffixes` is `(\"\")`, so `(get-load-suffixes)` is `(\".so\" \".elc\" \".el\")` where `emacs -Q` gives `(\".so\" \".elc\" \".elc.gz\" \".el\" \".el.gz\")` (pinned rows `get-load-suffixes/0000`, `/0002`). Other GNU built-ins are ordinary symbols: void until Lisp sets them, not special unless `defvar`ed, and any value is accepted",
    "why": "**Package-observable:** reading an undefined built-in signals `void-variable`; a `let` of one binds lexically under `lexical-binding`; VM2 does not look for compressed `.el.gz` files. Grows as the census pulls variables in, never speculatively (R216)",
    "symbols": [
     "symbol-value",
@@ -5289,8 +5335,8 @@
    "planned": false,
    "mechanism": "Buffer-local bindings of non-per-buffer built-ins",
    "gnu": "`make-local-variable` / `make-variable-buffer-local` of a `DEFVAR_LISP`/`BOOL`/`INT` variable turns it into `SYMBOL_LOCALIZED` over the forwarding (`src/data.c:2178-2300`, a `blv` whose `fwd` is the C storage): `(with-temp-buffer (make-local-variable 'undo-limit) (setq undo-limit 5) (list undo-limit (default-value 'undo-limit)))` => `(5 160000)`",
-   "romacs": "VM2 signals `(error \"VM2 cannot make built-in variable buffer-local: undo-limit\")` for both primitives on an object, bool or int built-in. `DEFVAR_PER_BUFFER` variables (`fill-column`) are buffer-local as in GNU",
-   "why": "**Package-observable** for code that makes `undo-limit`, `enable-recursive-minibuffers` or another forwarded global buffer-local; it fails loudly. The localised-forwarded redirect is not modelled yet",
+   "romacs": "VM2 supports localized global Boolean variables through the existing traced local-binding tables and retained native default storage. Current/local writes coerce non-nil values to t; dynamic cleanup, buffer changes and recreated local bindings retain their Boolean values. Localized Boolean defaults and saved defaults accept only nil or t; noncanonical writes, or promotion while a saved default is noncanonical, signal an explicit VM2 error. GNU can retain a raw default until a buffer transition synchronizes its C storage, which VM2 does not model. Object and integer globals still signal `VM2 cannot make built-in variable buffer-local`; `DEFVAR_PER_BUFFER` variables retain their existing behavior. Code images retain the existing refusal of localized state",
+   "why": "**Package-observable** for object/integer localization and noncanonical localized Boolean defaults. Ordinary Boolean localization used by GNU help and JSON formatting is supported",
    "symbols": [
     "make-local-variable",
     "make-variable-buffer-local",
@@ -5340,9 +5386,9 @@
    "section": "Detail",
    "observable": false,
    "planned": false,
-   "mechanism": "`current-load-list` and `after-load-alist` are inert storage",
+   "mechanism": "Load-history merging and after-load execution remain incomplete",
    "gnu": "GNU's C maintains both while it loads: `load` specbinds `current-load-list` to `(FILE)` (`loadhist_initialize`, `src/lread.c:1031-1035`), `build_load_history` (`src/lread.c:2054-2114`) moves it into `load-history` and sets it to `t`, and `load` then calls `do-after-load-evaluation` (`src/lread.c:1539-1540`), which runs the `after-load-alist` entries whose regexp matches the file; `LOADHIST_ATTACH` (`src/lisp.h:4735-4739`) conses onto `current-load-list` from `defvar` (`src/eval.c:913`), `defalias` (`src/data.c:979`), `defvaralias` (`src/eval.c:721`), `provide` and `require` (`src/fns.c:3759`, `src/fns.c:3824`); `provide` funcalls the functions of `(assq FEATURE after-load-alist)` (`src/fns.c:3762-3764`). Harness rows `defvar/036` and `defvar/038`: after `(defvar current-load-list 99)` GNU's `current-load-list` is a new cons, so `(eq current-load-list old)` is nil",
-   "romacs": "VM2 forwards both (VM2-CVAR1) with GNU's C initial value nil (`src/lread.c:5650`, `src/lread.c:5695`) and GNU's variable semantics (special, `makunbound` and `defvaralias` refused, `let`/`set-default` as GNU; varh rows over both, fresh process per case), but no VM2 code reads or writes them: `load` does not bind `current-load-list` or call `do-after-load-evaluation`, nothing conses onto `current-load-list`, `provide` does not run `after-load-alist` entries, and there is no `load-history`. The two rows above are pinned VALUE",
+   "romacs": "Romacs forwards `after-load-alist`, `current-load-list`, `load-history` and `eval-buffer-list` with their native C initial value nil. Variable declarations can attach entries to `current-load-list`, but `load` does not scope that list per file or merge it into `load-history`, and neither `load` nor `provide` runs the after-load callbacks. Backtraces therefore retain genuine function/argument frames without source-file cross-references from load history. `eval-buffer` and `eval-region` remain unsupported, so `eval-buffer-list` stays nil. The two rows above remain pinned VALUE",
    "why": "**Package-observable** for code that relies on `provide` or `load` running forms registered with `eval-after-load` / `with-eval-after-load` for a feature or file not yet loaded, or that inspects `current-load-list` or `load-history`. Maintaining them is load-history work, not part of declaring the variables",
    "symbols": [
     "after-load-alist",
@@ -5362,10 +5408,10 @@
    "section": "Detail",
    "observable": false,
    "planned": false,
-   "mechanism": "A signal escaping a loaded file loses its data",
-   "gnu": "`Fload` evaluates the file's forms with `readevalloop` (`src/lread.c`); a signal leaves `load` (and `require`, `autoload-do-load`) unchanged, so `(condition-case e (load \"f\") (error e))` for a file ending in `(error \"boom\")` is `(error \"boom\")`",
-   "romacs": "VM2's loader turns an escaping signal into its own text error, so the caller's handler sees the condition `error` with no data: `(error)` for `load`, `require` and an autoload alike (pre-existing for `load`; found while proving VM2-AUTOLOAD1, not changed by it; the autoload tests compare only the condition name). An error raised by a VM2 built-in inside the file is re-attributed to the loading call instead: a file holding `(car 1)` gives `(wrong-type-argument stringp \"FILE\")` (GNU `(wrong-type-argument listp 1)`), and one holding `(fset 'a 'b) (fset 'b 'a)` or the same two `defalias`es gives `(error)` (GNU `(cyclic-function-indirection b)`); found by the third vm2/autoload review, so `defalias_refuses_a_cyclic_alias_even_inside_an_autoload` compares only that the autoload signals",
-   "why": "**Package-observable** for handlers that read the data of an error raised while loading, e.g. to report `file-missing` from a nested `require` or a message from the file",
+   "mechanism": "Loader failures outside Lisp runtime execution remain textual",
+   "gnu": "GNU runtime signals escaping `load`, `require` and `autoload-do-load` retain their condition and data",
+   "romacs": "Lisp runtime loading now carries the original condition, data object and selected handler across loader reentry before cleanup. Live GNU comparisons cover ordinary errors, primitive type errors, cyclic aliases, require and autoload signals; returning-handler tests also retain the same error object through GC and unwind. The Rust embedder `load_file` interface still returns textual errors, and source-read/compile failures without a runtime escape use that interface. Compile-time macro-autoload placement remains VM2-LAZY4",
+   "why": "**Package-observable** for source-read/compile failures; ordinary runtime signals retain their payload",
    "symbols": [
     "load",
     "require",
@@ -5489,9 +5535,10 @@
    "planned": false,
    "mechanism": "General formatting and initial locale capability",
    "gnu": "`format-message` has all `format` conversions and text-property/identity behavior; the initial internal quoting flag follows the process locale.",
-   "romacs": "Quote selection, template-only substitution, explicit capability bindings, display-table fallback and byte8 promotion are implemented. Formatting shares the existing `%s`, `%S`, `%d`, `%%` subset; widths/precision, other conversions and text properties are not implemented. Initial capability is the VM's UTF-8 default (`t`), not host non-UTF-8 locale detection, and the capability binding is not boolean-normalized.",
-   "why": "Existing formatter/locale substrate limits; the 64-case pinned corpus covers the supported quote behavior, not all formatting.",
+   "romacs": "Quote selection, template-only substitution, explicit capability bindings, display-table fallback and byte8 promotion are implemented. The shared formatter supports field numbers, flags, width and precision for `%s`, `%S`, `%c`, `%d`, `%i`, `%b`, `%B`, `%o`, `%x`, `%X`, `%e`, `%f`, `%g` and `%%`, including bignum integers and float rounding. Width, precision and field-number components are capped at 2^20. Text-property propagation and GNU string-identity behavior remain unsupported. Initial capability is the VM UTF-8 default (`t`), without host non-UTF-8 locale detection, and the capability binding is not boolean-normalized.",
+   "why": "`tests/format_numeric.rs` compares the formatting domain with pinned GNU; the separate 64-case quoting corpus does not establish text-property, identity or host-locale parity.",
    "symbols": [
+    "format",
     "format-message",
     "text-quoting-style"
    ],
@@ -5566,6 +5613,41 @@
     "make-interpreted-closure",
     "cl-type-of",
     "purify-flag"
+   ],
+   "symbols_derived": false
+  },
+  {
+   "id": "VM2-ERT-BATCH1",
+   "source": "DIVERGENCES.md",
+   "section": "GNU ERT batch execution",
+   "observable": false,
+   "planned": false,
+   "mechanism": "Explicit batch adapter and compiled backtrace metadata",
+   "gnu": "ERT isolates each test with a temporary buffer and a window excursion; GNU backtraces can describe interpreter/source frames and lexical locals.",
+   "romacs": "The named `romacs-batch` adapter retains the temporary buffer, assertions, error handling, cleanup, expectedness and GNU batch runner, and replaces the precautionary window excursion. Condition objects use `prin1` plus a newline instead of editor indentation; their data and expectedness are unchanged. Automatic window-layout restoration and GUI fixtures are unsupported. Backtraces report real compiled calls, original evaluated argument snapshots and dynamic locals; lexical/source locals, pre-argument named-autoload frames and debugger mutation are unavailable. GNU apply optimizations can produce different frame/argument shapes. Ordinary closures print opaquely through an owned `cl-print-object` method.",
+   "why": "Keep the batch regime explicit and preserve private closure representation.",
+   "symbols": [
+    "ert--run-test-internal",
+    "mapbacktrace",
+    "backtrace--locals",
+    "cl-print-object"
+   ],
+   "symbols_derived": false
+  },
+  {
+   "id": "VM2-PROPERTY-EDIT1",
+   "source": "DIVERGENCES.md",
+   "section": "GNU ERT batch execution",
+   "observable": false,
+   "planned": false,
+   "mechanism": "Bulk text-property edits and forward boundary queries",
+   "gnu": "GNU supports arbitrary property keys, modification callbacks, byte buffers and raw interval traversal with `next-property-change` LIMIT t.",
+   "romacs": "Bulk edits support interned symbol keys, mutable strings and annotated text buffers, with atomic validation, read-only checks and a changed-result flag. Callback-bearing mutations, other key types, immutable image-string writes and unibyte-buffer edits refuse explicitly. The two forward queries support strings and annotated text buffers; unibyte-buffer queries and raw interval LIMIT t refuse explicitly. Effective property queries retain the existing general property-resolution limits.",
+   "why": "Reuse the native property runs and overlay precedence for the ERT printer's actual calls.",
+   "symbols": [
+    "add-text-properties",
+    "next-property-change",
+    "next-single-char-property-change"
    ],
    "symbols_derived": false
   },

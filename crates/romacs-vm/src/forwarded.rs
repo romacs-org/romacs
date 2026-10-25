@@ -106,6 +106,8 @@ pub(crate) static C_VARIABLES: &[CVariable] = &[
     CVariable { name: "noninteractive", gnu: "emacs.c:3534", kind: Kind::Bool(false) },
     CVariable { name: "auto-window-vscroll", gnu: "window.c:9296", kind: Kind::Bool(true) },
     CVariable { name: "inhibit-point-motion-hooks", gnu: "textprop.c:2412", kind: Kind::Lisp(Init::True) },
+    CVariable { name: "inhibit-modification-hooks", gnu: "insdel.c:2575", kind: Kind::Bool(false) },
+    CVariable { name: "overriding-plist-environment", gnu: "fns.c:6809", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "selective-display", gnu: "buffer.c:5475", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
     CVariable { name: "inhibit-field-text-motion", gnu: "editfns.c:4830", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "buffer-invisibility-spec", gnu: "buffer.c:5849", kind: Kind::PerBuffer { default: Init::True, predicate: None } },
@@ -162,6 +164,10 @@ pub(crate) static C_VARIABLES: &[CVariable] = &[
     // does neither (DIVERGENCES.md VM2-LOADHIST1).
     CVariable { name: "after-load-alist", gnu: "lread.c:5637", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "current-load-list", gnu: "lread.c:5693", kind: Kind::Lisp(Init::Nil) },
+    // Backtrace collection/printing reads these native defaults. Source-history
+    // merging remains VM2-LOADHIST1; eval-buffer/eval-region are unsupported.
+    CVariable { name: "load-history", gnu: "lread.c:5652", kind: Kind::Lisp(Init::Nil) },
+    CVariable { name: "eval-buffer-list", gnu: "lread.c:5771", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "enable-recursive-minibuffers", gnu: "minibuf.c:2603", kind: Kind::Bool(false) },
     // read-from-minibuffer / read-string (prims/minibuf.rs, lane vm2/minibuf):
     // the C variables read_minibuf and its command loop read. All nil/false
@@ -176,6 +182,7 @@ pub(crate) static C_VARIABLES: &[CVariable] = &[
     CVariable { name: "history-add-new-input", gnu: "minibuf.c:2589", kind: Kind::Lisp(Init::True) },
     CVariable { name: "minibuffer-setup-hook", gnu: "minibuf.c:2564", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "debug-on-error", gnu: "eval.c:4485", kind: Kind::Lisp(Init::Nil) },
+    CVariable { name: "debugger-stack-frame-as-list", gnu: "eval.c:4529", kind: Kind::Bool(false) },
     CVariable { name: "signal-hook-function", gnu: "eval.c:4487", kind: Kind::Lisp(Init::Nil) },
     // Variable harness (R216 task 2): a DEFVAR_INT that subr.el reads.
     CVariable { name: "undo-limit", gnu: "undo.c:437", kind: Kind::Int(160_000) },
@@ -388,6 +395,21 @@ impl Vm {
             }
         }
     }
+    pub(super) fn localized_boolean(&self, slot: usize) -> Option<Fwd> {
+        match self.variable_redirects.get(slot).copied().flatten() {
+            Some(VariableRedirect::LocalizedForwarded(fwd @ Fwd::Bool(_))) => Some(fwd),
+            _ => None,
+        }
+    }
+    pub(super) fn native_forwarding(&mut self, slot: usize) -> Option<Fwd> {
+        self.localized_boolean(slot).or_else(|| self.forwarding(slot))
+    }
+    pub(super) fn check_boolean_default(&self, slot: usize, value: Value) -> Result<()> {
+        if self.localized_boolean(slot).is_some() && value != Value::NIL && value != Value::TRUE {
+            return Err(format!("VM2 localized Boolean default requires nil or t: {}", self.symbol_names[slot]));
+        }
+        Ok(())
+    }
     fn materialize(&mut self, init: Init) -> Value {
         match init {
             Init::Nil => Value::NIL,
@@ -554,7 +576,8 @@ impl Vm {
         self.per_buffer_mut(buffer).expect("live buffer").set(i, value);
         Ok(())
     }
-    /// GNU `do_symval_forwarding`: the value the current buffer sees.
+    /// Native storage, including the default of a localized Boolean.
+    /// Effective reads go through `variable_value` and its local table.
     pub(super) fn forwarded_value(&mut self, fwd: Fwd) -> Result<Value> {
         Ok(match fwd {
             Fwd::Obj(i) => self.forwarded_object(i),
@@ -642,6 +665,7 @@ impl Vm {
     /// GNU `set_default_internal`, SYMBOL_FORWARDED arm (data.c:2085-2124):
     /// a per-buffer default is stored WITHOUT the predicate.
     pub(super) fn set_forwarded_default(&mut self, slot: usize, fwd: Fwd, value: Value, flag: SetFlag) -> std::result::Result<(), Fault> {
+        self.check_boolean_default(slot, value).map_err(Fault::Error)?;
         match fwd {
             Fwd::Buffer(i) => {
                 self.forwarded.defaults[i as usize] = value;
@@ -658,14 +682,15 @@ impl Vm {
         let old = self.forwarded_value(fwd).map_err(Fault::Error)?;
         let buffer = self.current_buffer_object()?;
         let owner = self.slots[self.buffer_slot].value;
-        // SPECPDL_LET_DEFAULT for a per-buffer variable with no local value
-        // here; SPECPDL_LET_LOCAL if it has one; SPECPDL_LET otherwise.
-        let let_default = matches!(fwd, Fwd::Buffer(i) if !self.per_buffer_local_p(buffer, i));
+        let localized = self.localized_boolean(slot).is_some();
+        let let_default = localized || matches!(fwd, Fwd::Buffer(i) if !self.per_buffer_local_p(buffer, i));
+        let value = if localized { if value == Value::NIL { Value::NIL } else { Value::TRUE } } else { value };
         if let_default {
             self.set_forwarded_default(slot, fwd, value, SetFlag::Bind)?;
         } else {
             self.set_forwarded(slot, fwd, value, SetFlag::Bind)?;
         }
+        self.backtrace.bind(self.dynamic.len(), Value::reference(slot + 1, 7));
         self.dynamic.push((slot, old, owner, let_default));
         Ok(())
     }
@@ -694,6 +719,10 @@ impl Vm {
     /// GNU `make-local-variable` on a forwarded variable (data.c:2245).
     pub(super) fn make_forwarded_local(&mut self, slot: usize, fwd: Fwd) -> Result<()> {
         match fwd {
+            Fwd::Bool(_) => {
+                self.promote_boolean_local(slot, true)?;
+                self.make_local_variable(slot)
+            }
             Fwd::Buffer(i) => {
                 let buffer = self.buffer_index()?;
                 if !self.per_buffer_local_p(buffer, i) {

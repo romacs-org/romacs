@@ -80,18 +80,20 @@ fn byte_code(code: u32, unibyte: bool) -> u32 {
     }
 }
 
-fn byte_result(code: u32, original: u32, down: bool) -> u8 {
-    if code >= crate::lstring::BYTE8_OFFSET + 128 {
-        return (code - crate::lstring::BYTE8_OFFSET) as u8;
-    }
-    if code < 128 {
-        return code as u8;
-    }
-    // Non-ASCII Unicode is not a raw octet. Never truncate it into binary data.
-    if original < 128 {
-        simple(original, down) as u8
-    } else {
-        original as u8
+impl Leaf<'_> {
+    pub(crate) fn byte_case_result(code: u32, original: u32, down: bool) -> u8 {
+        if code >= crate::lstring::BYTE8_OFFSET + 128 {
+            return (code - crate::lstring::BYTE8_OFFSET) as u8;
+        }
+        if code < 128 {
+            return code as u8;
+        }
+        // Non-ASCII Unicode is not a raw octet. Never truncate it into binary data.
+        if original < 128 {
+            simple(original, down) as u8
+        } else {
+            original as u8
+        }
     }
 }
 
@@ -127,7 +129,7 @@ impl Leaf<'_> {
                 .case_override(table, lookup)?
                 .unwrap_or_else(|| simple(lookup, down));
             let mapped = if unibyte {
-                byte_result(mapped, code, down) as u32
+                Self::byte_case_result(mapped, code, down) as u32
             } else {
                 mapped
             };
@@ -167,7 +169,7 @@ impl Leaf<'_> {
                 } else {
                     // A byte string cannot silently become Unicode or truncate
                     // an unrepresentable override. Fall back to its byte default.
-                    bytes.push(byte_result(c, code, down));
+                    bytes.push(Self::byte_case_result(c, code, down));
                 }
             }
         }

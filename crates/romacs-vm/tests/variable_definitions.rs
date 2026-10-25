@@ -34,6 +34,15 @@ fn defcustom_records_unevaluated_standard_and_keyword_metadata() {
 }
 
 #[test]
+fn defcustom_locality_preserves_defaults_and_permanent_locals() {
+    let mut vm = Vm::new();
+    let source = "(setq locality-count 0) (defcustom locality-normal nil \"normal\" :local nil) (defcustom locality-auto 'initial \"auto\" :local t) (defcustom locality-permanent 'initial \"permanent\" :local (progn (setq locality-count (1+ locality-count)) 'permanent)) (defcustom locality-permanent-only nil \"permanent only\" :local 'permanent-only) (list locality-count (local-variable-if-set-p 'locality-normal) (local-variable-if-set-p 'locality-auto) (get 'locality-auto 'permanent-local) (local-variable-if-set-p 'locality-permanent) (get 'locality-permanent 'permanent-local) (local-variable-if-set-p 'locality-permanent-only) (get 'locality-permanent-only 'permanent-local))";
+    assert_eq!(answer(&mut vm, source), "(1 nil t nil t t nil t)");
+    let source = "(let ((old (current-buffer)) (new (get-buffer-create \"locality-fixture\"))) (unwind-protect (progn (set-buffer new) (setq locality-auto 'changed locality-permanent 'changed) (let ((before (list locality-auto locality-permanent (default-value 'locality-auto) (default-value 'locality-permanent)))) (kill-all-local-variables) (list before locality-auto locality-permanent (progn (set-buffer old) (list locality-auto locality-permanent))))) (set-buffer old) (kill-buffer new)))";
+    assert_eq!(answer(&mut vm, source), "((changed changed initial initial) initial changed (initial initial))");
+}
+
+#[test]
 fn defvar_keymap_parses_key_descriptions_and_preserves_existing_value() {
     let mut vm = Vm::new();
     assert_eq!(answer(&mut vm, "(defvar-keymap s123-map :doc \"map\" \"C-c a\" 's123-command \"<f5>\" 's123-other) (defvar-keymap s123-map \"b\" (error \"must not run\")) (list (keymapp s123-map) (lookup-key s123-map (kbd \"C-c a\")) (lookup-key s123-map (kbd \"<f5>\")) (lookup-key s123-map (kbd \"b\")) (get 's123-map 'variable-documentation))"), "(t s123-command s123-other nil \"map\")");

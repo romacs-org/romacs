@@ -127,15 +127,15 @@ mod tests {
         }
         let state = vm.eval_source("(list (buffer-string) (point))").unwrap();
         assert_eq!(state.display().unwrap(), "(\"xaΔλ\" 5)");
-        // simple.el now defines M-x. Its completion backend is still absent;
-        // preserve the exact diagnostic and prove editing continues afterward.
         let command = vm.eval_source("(not (null (interactive-form 'execute-extended-command)))").unwrap();
         assert_eq!(command.display().unwrap(), "t");
+        let backend = vm.eval_source("(functionp completing-read-function)").unwrap();
+        assert_eq!(backend.display().unwrap(), "t");
         let outcome = presentation.command(&mut vm, &mut commands, CommandEvent::Character((1 << 27) | 'x' as i64)).unwrap().unwrap();
         assert_eq!(outcome.command.as_deref(), Some("execute-extended-command"));
-        let signal = outcome.signal.expect("M-x reports its missing completion backend");
+        let signal = outcome.signal.expect("M-x reports its unsupported minibuffer state");
         assert_eq!(signal.condition, "void-variable");
-        assert_eq!(signal.data, "(completing-read-function)");
+        assert_eq!(signal.data, "(minibuffer-completing-file-name)");
         let shown = text(&mut vm).unwrap();
         assert_eq!(shown, signal_message(&mut vm, &signal).unwrap());
         presentation.command(&mut vm, &mut commands, CommandEvent::Character('!' as i64)).unwrap();

@@ -1,4 +1,4 @@
-//! `round` and `ceiling`, GNU floatfns.c `rounding_driver` (floatfns.c:404),
+//! `round`, `ceiling` and `truncate`, GNU `rounding_driver` (floatfns.c:404),
 //! measured on the window journey: GNU's own `split-window` rounds a new
 //! window's pixel size to a character multiple with `round`
 //! (window.el:5846) and `window--min-size-1` uses `ceiling`.
@@ -8,8 +8,8 @@
 //! mpz division, so `(round 1.5 0.5)` and `(ceiling 0.1 0.01)` see the exact
 //! binary values, never a rounded float quotient. VM2 does the same with each
 //! double as an odd integer times a power of two and a u128 long division.
-//! VM2 has no bignums: an integral result outside the fixnum range signals
-//! `overflow-error` where GNU returns a bignum (DIVERGENCES.md VM2-ROUND1).
+//! This rounding path accepts fixnums/floats and signals `overflow-error`
+//! for results outside the fixnum range (DIVERGENCES.md VM2-ROUND1).
 use super::*;
 use std::result::Result;
 
@@ -39,6 +39,7 @@ fn integer(cx: &mut Leaf<'_>, n: i128) -> Out {
 enum Mode {
     Ceiling,
     Round,
+    Truncate,
 }
 
 /// GNU `ceiling2` / `round2` (floatfns.c:448, :466) on an exact quotient
@@ -47,6 +48,7 @@ enum Mode {
 /// with |D| - |R|.
 fn adjust(mode: Mode, q: u128, r_zero: bool, neg: bool, r_vs_rest: std::cmp::Ordering) -> (u128, bool) {
     let bump = match mode {
+        Mode::Truncate => false,
         // n / d + ((n % d != 0) & same signs): only a positive quotient moves.
         Mode::Ceiling => !r_zero && !neg,
         // abs_r1 < abs_r + (q & 1): strictly past half, or a tie on odd q.
@@ -128,7 +130,11 @@ fn driver(cx: &mut Leaf<'_>, arg: Value, divisor: Value, mode: Mode) -> Out {
                 // emacs_rint is rint (ties to even); ceiling is ceil. Then
                 // double_to_integer: a non-finite value is overflow-error.
                 finite(cx, x)?;
-                let y = if mode == Mode::Round { x.round_ties_even() } else { x.ceil() };
+                let y = match mode {
+                    Mode::Round => x.round_ties_even(),
+                    Mode::Ceiling => x.ceil(),
+                    Mode::Truncate => x.trunc(),
+                };
                 if y.abs() >= 2f64.powi(63) {
                     return Err(signal(cx, "overflow-error"));
                 }
@@ -148,6 +154,7 @@ fn driver(cx: &mut Leaf<'_>, arg: Value, divisor: Value, mode: Mode) -> Out {
             let (n, d) = (i128::from(n), i128::from(d));
             let (q, r) = (n / d, n % d);
             let q = match mode {
+                Mode::Truncate => q,
                 Mode::Ceiling => q + i128::from(r != 0 && (n < 0) == (d < 0)),
                 Mode::Round => {
                     let (abs_r, abs_r1) = (r.abs(), d.abs() - r.abs());
@@ -187,4 +194,9 @@ fn ceiling(cx, arg: Value; optional divisor: Value) {
 defsubr! { name = "round", gnu = "floatfns.c:542", effect = Pure,
 fn round(cx, arg: Value; optional divisor: Value) {
     driver(cx, arg, divisor, Mode::Round)
+}}
+
+defsubr! { name = "truncate", gnu = "floatfns.c:559", effect = Pure,
+fn truncate(cx, arg: Value; optional divisor: Value) {
+    driver(cx, arg, divisor, Mode::Truncate)
 }}

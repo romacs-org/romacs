@@ -4,6 +4,26 @@ use crate::char_table::CharTable;
 use regex::{SyntaxClass, SyntaxLookup};
 use std::collections::BTreeMap;
 
+pub(crate) fn parse_syntax_descriptor(description: &crate::lstring::OwnedStr) -> std::result::Result<Option<(i64, Option<u32>)>, String> {
+    let first = description.bytes.first().copied().unwrap_or(0);
+    let class = SyntaxClass::from_syntax_spec_byte(first)
+        .ok_or_else(|| format!("Invalid syntax description letter: {}", char::from(first)))?;
+    if class == SyntaxClass::InheritStd { return Ok(None); }
+    let mut chars = description.chars();
+    chars.next();
+    let matching = chars.next();
+    let mut code = class.code();
+    if matching != Some(0) {
+        for c in chars.take_while(|&c| c != 0) {
+            if let Some(bit) = match c {
+                49..=52 => Some(c - 49 + 16), 112 => Some(20),
+                98 => Some(21), 110 => Some(22), 99 => Some(23), _ => None,
+            } { code |= 1 << bit; }
+        }
+    }
+    Ok(Some((code, matching.filter(|&c| c != 32 && c != 0))))
+}
+
 // Reuse the maintained GNU-exported word/symbol membership ranges. The
 // accompanying case mappings are unused here; no second Unicode data copy.
 #[allow(dead_code)]
@@ -275,7 +295,21 @@ impl Vm {
             table
         })
     }
-    fn regexp_syntax_entry(&mut self, code: i64, matching: Value) -> Value {
+    pub(crate) fn regexp_syntax_entry(&mut self, code: i64, matching: Value) -> Value {
+        if matching == Value::NIL && (0..16).contains(&code) {
+            let slot = self.slot("#:vm2-syntax-code-objects");
+            if self.slots[slot].value == Value::UNBOUND {
+                self.slots[slot].value = self.allocate_object(Object::Vector(vec![Value::NIL; 16]));
+            }
+            let root = self.slots[slot].value;
+            let index = root.index(0).unwrap() - 1;
+            if let Object::Vector(values) = &self.objects[index] {
+                if values[code as usize] != Value::NIL { return values[code as usize]; }
+            }
+            let entry = self.list_value(&[Value::integer(code).unwrap()]);
+            if let Object::Vector(values) = &mut self.objects[index] { values[code as usize] = entry; }
+            return entry;
+        }
         let value = Value::reference(self.conses.len(), 3);
         self.conses.push((Value::integer(code).unwrap(), matching));
         value
@@ -460,13 +494,8 @@ impl Vm {
                     let c = self.regexp_int(args[0])?;
                     (c, c)
                 };
-                let description = self.regexp_input(args[1])?;
-                let class = description
-                    .bytes
-                    .first()
-                    .copied()
-                    .and_then(SyntaxClass::from_syntax_spec_byte)
-                    .ok_or_else(|| Fault::Text("error", "Invalid syntax description".into()))?;
+                let description = self.str_view(args[1]).ok_or(Fault::Wrong("stringp", args[1]))?.to_owned();
+                let parsed = parse_syntax_descriptor(&description).map_err(|message| Fault::Text("error", message))?;
                 let table = if args[2] == Value::NIL {
                     self.regexp_current_syntax()?
                 } else {
@@ -476,32 +505,9 @@ impl Vm {
                 if from < 0 || to > 0x3fffff || from > to {
                     return Err(Fault::Signal("args-out-of-range", vec![args[0]]));
                 }
-                let entry = if class == SyntaxClass::InheritStd {
-                    Value::NIL
-                } else {
-                    let mut chars = self.str_view(args[1]).expect("validated string").chars();
-                    chars.next();
-                    let matching = chars.next().filter(|&c| c != 32);
-                    let mut code = class.code();
-                    for c in chars {
-                        if let Some(bit) = match c {
-                            49..=52 => Some(c - 49 + 16),
-                            112 => Some(20),
-                            98 => Some(21),
-                            110 => Some(22),
-                            99 => Some(23),
-                            _ => None,
-                        } {
-                            code |= 1 << bit;
-                        }
-                    }
-                    self.regexp_syntax_entry(
-                        code,
-                        matching
-                            .map(|c| Value::integer(c as i64).unwrap())
-                            .unwrap_or(Value::NIL),
-                    )
-                };
+                let entry = parsed.map_or(Value::NIL, |(code, matching)| {
+                    self.regexp_syntax_entry(code, matching.map_or(Value::NIL, |c| Value::integer(i64::from(c)).unwrap()))
+                });
                 let Object::CharTable(table) = &mut self.objects[table.index(0)? - 1] else {
                     unreachable!()
                 };

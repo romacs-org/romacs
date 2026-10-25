@@ -12,6 +12,16 @@ fn native_defface_needs_no_gnu_custom_files() {
 }
 
 #[test]
+fn native_defface_registers_separate_global_and_frame_attributes() {
+    let mut vm = Vm::new();
+    vm.set_collection_floor(1);
+    answer(&mut vm, "(defface native-query-face '((t (:foreground \"red\" :weight bold :inherit (parent-a parent-b)))) \"Queryable face\")");
+    assert_eq!(answer(&mut vm, "(list (internal-get-lisp-face-attribute 'native-query-face :foreground) (internal-get-lisp-face-attribute 'native-query-face :weight t) (internal-get-lisp-face-attribute 'native-query-face :inherit t) (eq (internal-lisp-face-p 'native-query-face) (internal-lisp-face-p 'native-query-face (selected-frame))))"), "(\"red\" bold (parent-a parent-b) nil)");
+    answer(&mut vm, "(aset (internal-lisp-face-p 'native-query-face (selected-frame)) 5 'light) (garbage-collect)");
+    assert_eq!(answer(&mut vm, "(list (internal-get-lisp-face-attribute 'native-query-face :weight) (internal-get-lisp-face-attribute 'native-query-face :weight t))"), "(light bold)");
+}
+
+#[test]
 fn native_defgroup_records_metadata_only() {
     let mut vm = Vm::new();
     assert_eq!(answer(&mut vm, "(defgroup native-face-group nil \"Group\" :prefix \"nf-\" :group 'parent)"), "native-face-group");

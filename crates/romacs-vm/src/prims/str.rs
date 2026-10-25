@@ -342,6 +342,9 @@ defsubr! { name = "sxhash", gnu = "fns.c:4166", effect = Pure,
 fn sxhash(cx, value: Value) { Ok(cx.sxhash(value)) }}
 defsubr! { name = "sxhash-equal", gnu = "fns.c:4166", effect = Pure,
 fn sxhash_equal(cx, value: Value) { Ok(cx.sxhash(value)) }}
+
+defsubr! { name = "sxhash-eq", gnu = "fns.c:5617", effect = Reads,
+fn sxhash_eq(cx, value: Value) { cx.sxhash_eq(value) }}
 defsubr! { name = "fillarray", gnu = "fns.c:3308", effect = MutatesArgs,
 fn fillarray(cx, array: Value, item: Value) {
     if cx.kind(array) == Kind::Vector {

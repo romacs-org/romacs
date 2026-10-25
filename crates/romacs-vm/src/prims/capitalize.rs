@@ -9,7 +9,7 @@ fn mapping(code: u32) -> Option<&'static (u32, u32, &'static [u32], &'static [u3
     CASES.binary_search_by_key(&code, |row| row.0).ok().map(|i| &CASES[i])
 }
 
-fn capitalized(cx: &mut Leaf<'_>, object: Value) -> Out {
+pub(crate) fn capitalized(cx: &mut Leaf<'_>, object: Value, initials: bool) -> Out {
     if let Some(n) = object.integer_value().filter(|n| *n >= 0) {
         // casefiddle.c narrows XFIXNAT to int before checking the range.
         let ch = n as i32;
@@ -20,7 +20,9 @@ fn capitalized(cx: &mut Leaf<'_>, object: Value) -> Out {
         let code = if !multibyte && (128..256).contains(&code) {
             code + BYTE8_OFFSET
         } else { code };
-        let cased = mapping(code).map_or(code, |row| row.1);
+        let cased = if let Some(row) = mapping(code) { row.1 }
+            else if initials { cx.case_mapping_character(code, false)? }
+            else { code };
         if cased == code { return Ok(object); }
         let cased = if !multibyte && cased >= BYTE8_OFFSET { cased - BYTE8_OFFSET } else { cased };
         return Ok(Value::integer(i64::from(cased | flags)).unwrap());
@@ -38,11 +40,12 @@ fn capitalized(cx: &mut Leaf<'_>, object: Value) -> Out {
     let mut inword = false;
     for (i, &code) in chars.iter().enumerate() {
         let row = mapping(code);
-        let fallback = [code];
-        let mut out = if inword { row.map_or(&fallback[..], |r| r.3) }
+        let fallback = [if initials && !inword && row.is_none() { cx.case_mapping_character(code, false)? } else { code }];
+        let mut out = if inword && initials { &fallback[..] }
+                      else if inword { row.map_or(&fallback[..], |r| r.3) }
                       else { row.map_or(&fallback[..], |r| r.2) };
         let sigma = [0x3c2];
-        if inword && code == 0x3a3 && !words.get(i + 1).copied().unwrap_or(false) {
+        if !initials && inword && code == 0x3a3 && !words.get(i + 1).copied().unwrap_or(false) {
             out = &sigma;
         }
         for &c in out {
@@ -51,7 +54,7 @@ fn capitalized(cx: &mut Leaf<'_>, object: Value) -> Out {
                 let n = char_string(c, &mut encoded);
                 bytes.extend_from_slice(&encoded[..n]);
             } else {
-                bytes.push(if c >= BYTE8_OFFSET { (c - BYTE8_OFFSET) as u8 } else { c as u8 });
+                bytes.push(Leaf::byte_case_result(c, if code >= BYTE8_OFFSET { code - BYTE8_OFFSET } else { code }, false));
             }
         }
         inword = words[i];
@@ -64,5 +67,10 @@ fn capitalized(cx: &mut Leaf<'_>, object: Value) -> Out {
 
 defsubr! { name = "capitalize", gnu = "casefiddle.c:400", effect = Reads,
 fn capitalize(cx, object: Value) {
-    capitalized(cx, object)
+    capitalized(cx, object, false)
+}}
+
+defsubr! { name = "upcase-initials", gnu = "casefiddle.c:418", effect = Reads,
+fn upcase_initials(cx, object: Value) {
+    capitalized(cx, object, true)
 }}

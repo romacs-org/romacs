@@ -1,6 +1,14 @@
 //! Dense keymap constructor and its character-table type boundary.
 use super::*;
 
+defsubr! { name = "romacs--keymap-at-point", gnu = "intervals.c:2176", effect = Reads,
+fn keymap_at_point(cx, property: Value) { cx.keymap_at_point(property) }}
+
+defsubr! { name = "current-local-map", gnu = "keymap.c:1910", effect = Reads,
+fn current_local_map(cx) {
+    cx.current_local_map()
+}}
+
 defsubr! { name = "make-keymap", gnu = "keymap.c:93", effect = Global,
 fn make_keymap(cx; optional prompt: Value) {
     Ok(cx.dense_keymap(prompt))

@@ -201,8 +201,8 @@ pub struct Coverage {
 pub struct Described {
     pub name: String,
     pub implementation: Implementation,
-    /// `subr-arity` from core. VM2 declares no arity table; its handlers check
-    /// argument counts themselves, so a VM2-only name has `None` here.
+    /// `subr-arity` from core. This frontend does not yet collect VM2's
+    /// primitive bounds, so a VM2-only name has `None` here.
     pub arity: Option<Arity>,
     /// `Some(primary)` when this symbol is an alias of another subr.
     pub alias_of: Option<String>,
@@ -672,7 +672,7 @@ impl Index {
             caveats.push("VM2 handler spans are the first match arm on the variant: a heuristic, which may be an arity table rather than the body".into());
         }
         if subr.is_none() {
-            caveats.push("VM2 declares no arity table; its handlers check argument counts themselves, so no arity is reported".into());
+            caveats.push("This frontend does not collect VM2 primitive bounds, so no arity is reported".into());
         }
         let lisp_definition = self.lisp_definition(name);
         if let Some((at, form)) = &lisp_definition {

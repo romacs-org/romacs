@@ -1,4 +1,4 @@
-//! GNU coding.c registry only. No conversion, detection, or CCL execution.
+//! GNU coding.c registry and native UTF-8/raw-text string conversion.
 use super::*;
 
 const ROOT: &str = "#:vm2-coding-system-registry";
@@ -27,6 +27,269 @@ const CATEGORIES: [&str; 21] = [
 ];
 fn num(n: i64) -> Value {
     Value::integer(n).unwrap()
+}
+
+impl Leaf<'_> {
+    pub(crate) fn coding_convert_string(&mut self, string: Value, coding: Value, nocopy: Value, buffer: Value, encode: bool) -> super::super::Out {
+        let source = self.string_view(string)?;
+        self.coding_symbol(coding)?;
+        let last = self.intern("last-coding-system-used");
+        let name = if coding == Value::NIL {
+            let name = self.intern("no-conversion");
+            self.variable_set(last, name)?;
+            if buffer == Value::NIL {
+                return if nocopy != Value::NIL { Ok(string) } else { self.propertized_copy(string, &[]) };
+            }
+            name
+        } else { coding };
+        let spec = self.coding_required(name)?;
+        if buffer != Value::NIL && buffer != Value::TRUE {
+            if !matches!(self.kind(buffer), Kind::Buffer | Kind::ByteBuffer) { return Err(Fault::Wrong("bufferp", buffer)); }
+            if self.buffer_state(buffer).is_none_or(|state| !state.live) { return Err(Fault::Error("Selecting deleted buffer".into())); }
+        }
+        let attrs = self.vector_get(spec, num(0))?;
+        let eol = self.vector_get(spec, num(2))?;
+        let inhibit = self.intern("inhibit-eol-conversion");
+        let inhibit = self.variable_value(inhibit)?.unwrap_or(Value::NIL) != Value::NIL;
+        let unix = self.intern("unix");
+        let fast = source.bytes().is_ascii() && self.vector_get(attrs, num(5))? != Value::NIL
+            && (eol == unix || inhibit || !source.bytes().contains(&if encode { b'\n' } else { b'\r' }));
+        if fast && (buffer == Value::NIL || buffer == Value::TRUE) {
+            self.variable_set(last, name)?;
+            return if nocopy != Value::NIL { Ok(string) } else { Ok(self.make_string(source.bytes().to_vec(), !encode)) };
+        }
+        let kind = self.vector_get(attrs, num(3))?;
+        let utf8 = kind == self.intern("utf-8");
+        if !utf8 && kind != self.intern("raw-text") {
+            return Err(Fault::Error("string conversion for this coding type is not implemented (supported: UTF-8 and raw-text)".into()));
+        }
+        for index in [6, 7, 9, 10] {
+            if self.vector_get(attrs, num(index))? != Value::NIL {
+                return Err(Fault::Error("string coding translation tables and conversion hooks are not implemented".into()));
+            }
+        }
+        let bom = if utf8 { self.vector_get(attrs, num(24))? } else { Value::NIL };
+        if self.pair(bom).is_some() { return Err(Fault::Error("string coding BOM-pair detection is not implemented".into())); }
+        let tokens = if encode && utf8 && !source.is_multibyte() {
+            coding_encode_unibyte(source.bytes())
+        } else { source.chars().map(|code| {
+            if !source.is_multibyte() { CodingToken::Byte(code as u8) }
+            else if code >= crate::lstring::BYTE8_OFFSET + 128 { CodingToken::Byte((code - crate::lstring::BYTE8_OFFSET) as u8) }
+            else if code < 128 { CodingToken::Byte(code as u8) }
+            else { CodingToken::Character(code) }
+        }).collect::<Vec<_>>() };
+        let detected = if !encode && !inhibit && self.kind(eol) == Kind::Vector { coding_eol(&tokens) } else { None };
+        let mode = if inhibit { 0 } else if let Some(mode) = detected { mode }
+            else if eol == self.intern("dos") { 1 } else if eol == self.intern("mac") { 2 } else { 0 };
+        let precise = if let Some(mode) = detected { self.vector_get(eol, num(mode as i64))? } else { name };
+        let (bytes, multibyte) = if encode {
+            let mut bytes = Vec::new();
+            if utf8 && bom != Value::NIL { bytes.extend_from_slice(&[239, 187, 191]); }
+            for token in tokens { match token {
+                CodingToken::Byte(byte) => bytes.push(byte),
+                CodingToken::Character(code) => coding_emit(code, &mut bytes),
+            }}
+            (coding_encode_eol(bytes, mode), false)
+        } else {
+            let tokens = if utf8 {
+                coding_decode_utf8(&tokens, bom != Value::NIL, !inhibit && eol == self.intern("dos"))
+                    .into_iter().map(|code| if code < 128 { CodingToken::Byte(code as u8) } else { CodingToken::Character(code) }).collect()
+            } else { tokens };
+            let tokens = coding_decode_eol(tokens, mode);
+            let for_unibyte = !utf8 && self.vector_get(attrs, num(12))? != Value::NIL;
+            let codes = tokens.into_iter().map(|token| match token {
+                    CodingToken::Character(code) if for_unibyte => 0u32.wrapping_sub(code) & 255,
+                    CodingToken::Character(code) => code,
+                    CodingToken::Byte(byte) if for_unibyte || byte < 128 => u32::from(byte),
+                    CodingToken::Byte(byte) => crate::lstring::BYTE8_OFFSET + u32::from(byte),
+                });
+            let mut bytes = Vec::new();
+            for code in codes { if for_unibyte { bytes.push(code as u8); } else { coding_emit(code, &mut bytes); } }
+            (bytes, !for_unibyte)
+        };
+        if buffer != Value::NIL && buffer != Value::TRUE {
+            return Err(Fault::Error("string coding output to buffers is not implemented".into()));
+        }
+        self.variable_set(last, precise)?;
+        Ok(self.make_string(bytes, multibyte))
+    }
+}
+
+#[derive(Clone, Copy)]
+enum CodingToken { Byte(u8), Character(u32) }
+
+fn coding_emit(code: u32, bytes: &mut Vec<u8>) {
+    let mut encoded = [0; 5];
+    let width = crate::lstring::char_string(code, &mut encoded);
+    bytes.extend_from_slice(&encoded[..width]);
+}
+
+fn coding_eol(tokens: &[CodingToken]) -> Option<usize> {
+    let mut cr = false;
+    let mut crlf = false;
+    for (at, token) in tokens.iter().enumerate() {
+        match token {
+            CodingToken::Byte(10) if at == 0 || !matches!(tokens[at - 1], CodingToken::Byte(13)) => return Some(0),
+            CodingToken::Byte(10) => crlf = true,
+            CodingToken::Byte(13) => cr = true,
+            _ => {}
+        }
+    }
+    if crlf { Some(1) } else if cr { Some(2) } else { None }
+}
+
+fn coding_encode_eol(bytes: Vec<u8>, mode: usize) -> Vec<u8> {
+    let mut result = Vec::with_capacity(bytes.len());
+    for byte in bytes {
+        if byte == b'\n' && mode != 0 { result.push(b'\r'); }
+        if byte != b'\n' || mode != 2 { result.push(byte); }
+    }
+    result
+}
+
+fn coding_decode_eol(tokens: Vec<CodingToken>, mode: usize) -> Vec<CodingToken> {
+    let mut result = Vec::with_capacity(tokens.len());
+    let mut at = 0;
+    while at < tokens.len() {
+        if matches!(tokens[at], CodingToken::Byte(13)) {
+            if mode == 2 { result.push(CodingToken::Byte(10)); at += 1; continue; }
+            if mode == 1 && tokens.get(at + 1).is_some_and(|t| matches!(t, CodingToken::Byte(10))) {
+                result.push(CodingToken::Byte(10)); at += 2; continue;
+            }
+        }
+        result.push(tokens[at]);
+        at += 1;
+    }
+    result
+}
+
+// GNU consume_chars validates internal byte8 forms even in unibyte input.
+fn coding_encode_unibyte(mut bytes: &[u8]) -> Vec<CodingToken> {
+    let mut tokens = Vec::new();
+    while !bytes.is_empty() {
+        let (code, width) = crate::lstring::decode_char(bytes).unwrap_or((u32::from(bytes[0]), 1));
+        tokens.push(if code >= crate::lstring::BYTE8_OFFSET + 128 {
+            CodingToken::Byte((code - crate::lstring::BYTE8_OFFSET) as u8)
+        } else if width == 1 { CodingToken::Byte(code as u8) }
+        else { CodingToken::Character(code) });
+        bytes = &bytes[width..];
+    }
+    tokens
+}
+
+fn coding_decode_utf8(tokens: &[CodingToken], bom: bool, dos: bool) -> Vec<u32> {
+    let mut chars = Vec::<i32>::new();
+    let mut at = if bom && matches!(tokens.get(..3), Some([CodingToken::Byte(239), CodingToken::Byte(187), CodingToken::Byte(191)])) { 3 } else { 0 };
+    let mut after_cr = None;
+    loop {
+        // GNU saves src_base after the CR lookahead, including on retry/EOF.
+        let base = at;
+        let Some(token) = after_cr.take().or_else(|| {
+            let token = tokens.get(at).copied()?;
+            at += 1;
+            Some(token)
+        }) else { break; };
+        let byte = match token {
+            CodingToken::Character(code) => { chars.push(code as i32); continue; }
+            CodingToken::Byte(byte) => byte,
+        };
+        if byte < 128 {
+            if dos && byte == b'\r' {
+                let Some(token) = tokens.get(at).copied() else {
+                    coding_flush_utf8(&tokens[base..], &mut chars);
+                    break;
+                };
+                at += 1;
+                // ONE_MORE_BYTE represents ordinary multibyte chars negatively;
+                // byte_after_cr only reuses its nonnegative byte values.
+                if matches!(token, CodingToken::Byte(_)) { after_cr = Some(token); }
+            }
+            chars.push(i32::from(byte));
+            continue;
+        }
+        let mut bytes = [0; 5];
+        bytes[0] = byte;
+        let width = if byte & 0xe0 == 0xc0 { 2 } else if byte & 0xf0 == 0xe0 { 3 }
+            else if byte & 0xf8 == 0xf0 { 4 } else { 5 };
+        let mut invalid = false;
+        for byte in &mut bytes[1..width] {
+            let Some(token) = tokens.get(at).copied() else {
+                coding_flush_utf8(&tokens[base..], &mut chars);
+                return coding_charbuf(&chars);
+            };
+            at += 1;
+            if let CodingToken::Byte(next) = token && next & 0xc0 == 0x80 { *byte = next; }
+            else { invalid = true; break; }
+        }
+        if !invalid && let Some(code) = coding_external_utf8(&bytes[..width]) {
+            chars.push(code as i32);
+        } else {
+            at = base;
+            if let Some(token) = tokens.get(at) {
+                chars.push(match *token {
+                    CodingToken::Byte(byte) if byte < 128 => i32::from(byte),
+                    CodingToken::Byte(byte) => crate::lstring::BYTE8_OFFSET as i32 + i32::from(byte),
+                    CodingToken::Character(code) => crate::lstring::BYTE8_OFFSET as i32 - code as i32,
+                });
+                at += 1;
+            }
+        }
+    }
+    coding_charbuf(&chars)
+}
+
+// External UTF-8 admits five-byte forms of byte8 character codes; the
+// canonical internal string decoder correctly requires their two-byte forms.
+fn coding_external_utf8(bytes: &[u8]) -> Option<u32> {
+    let (minimum, mask) = match bytes {
+        [0xc0..=0xdf, _] => (0x80, 0x1f),
+        [0xe0..=0xef, _, _] => (0x800, 0x0f),
+        [0xf0..=0xf7, _, _, _] => (0x10000, 0x07),
+        [0xf8..=0xfb, _, _, _, _] => (0x200000, 0x03),
+        _ => return None,
+    };
+    let mut code = u32::from(bytes[0] & mask);
+    for &byte in &bytes[1..] {
+        if byte & 0xc0 != 0x80 { return None; }
+        code = (code << 6) | u32::from(byte & 0x3f);
+    }
+    (code >= minimum && code <= crate::lstring::MAX_CHAR && !(0xd800..=0xdfff).contains(&code)).then_some(code)
+}
+
+#[cfg(test)]
+#[test]
+fn external_utf8_byte8_forms_preserve_internal_canonical_validation() {
+    for code in crate::lstring::MAX_5_BYTE_CHAR + 1..=crate::lstring::MAX_CHAR {
+        let bytes = [0xf8, (0x80 | ((code >> 18) & 0x3f)) as u8, (0x80 | ((code >> 12) & 0x3f)) as u8,
+            (0x80 | ((code >> 6) & 0x3f)) as u8, (0x80 | (code & 0x3f)) as u8];
+        assert_eq!(coding_external_utf8(&bytes), Some(code));
+        assert_eq!(crate::lstring::decode_char(&bytes), None);
+    }
+}
+
+fn coding_flush_utf8(tokens: &[CodingToken], chars: &mut Vec<i32>) {
+    for &token in tokens {
+        match token {
+            CodingToken::Byte(byte) if byte < 128 => chars.push(i32::from(byte)),
+            CodingToken::Byte(byte) => chars.push(crate::lstring::BYTE8_OFFSET as i32 + i32::from(byte)),
+            CodingToken::Character(code) => {
+                let mut bytes = Vec::new();
+                coding_emit(code, &mut bytes);
+                chars.extend(bytes.into_iter().map(|byte| crate::lstring::BYTE8_OFFSET as i32 + i32::from(byte)));
+            }
+        }
+    }
+}
+
+fn coding_charbuf(chars: &[i32]) -> Vec<u32> {
+    let mut result = Vec::new();
+    let mut at = 0;
+    while let Some(&code) = chars.get(at) {
+        if code >= 0 { result.push(code as u32); at += 1; }
+        // GNU produce_chars treats negative charbuf entries as annotation spans.
+        else { at += (-code) as usize; }
+    }
+    result
 }
 
 impl Leaf<'_> {

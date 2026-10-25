@@ -108,6 +108,274 @@ impl Stamp {
             .map(|n| (n / self.hz) as i64).ok_or_else(time_overflow)
     }
 }
+#[derive(PartialEq, Eq)]
+enum FrequencyIdentity {
+    Lisp(Value),
+    FloatPower(u64),
+}
+
+struct ExactStamp {
+    ticks: num_bigint::BigInt,
+    hz: num_bigint::BigInt,
+    identity: FrequencyIdentity,
+}
+
+fn exact_integer(cx: &Leaf<'_>, value: Value) -> std::result::Result<num_bigint::BigInt, Fault> {
+    cx.bigint_value(value).ok_or_else(invalid_time)
+}
+
+fn exact_stamp(cx: &Leaf<'_>, value: Value) -> std::result::Result<ExactStamp, Fault> {
+    use num_bigint::BigInt;
+    let immediate = |ticks, hz: i64| ExactStamp {
+        ticks,
+        hz: BigInt::from(hz),
+        identity: FrequencyIdentity::Lisp(Value::integer(hz).unwrap()),
+    };
+    if value == Value::NIL {
+        let nanos = match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+            Ok(d) => BigInt::from(d.as_nanos()),
+            Err(e) => -BigInt::from(e.duration().as_nanos()),
+        };
+        return Ok(immediate(nanos, 1_000_000_000));
+    }
+    if let Some((high, low)) = cx.pair(value) {
+        if let Some((low, tail)) = cx.pair(low) {
+            let seconds = exact_integer(cx, high)? * 65536 + exact_integer(cx, low)?;
+            let (us, ps, hz) = if let Some((us, tail)) = cx.pair(tail) {
+                if let Some((ps, _)) = cx.pair(tail) {
+                    (us, ps, 1_000_000_000_000)
+                } else {
+                    (us, Value::integer(0).unwrap(), 1_000_000)
+                }
+            } else if tail == Value::NIL {
+                (Value::integer(0).unwrap(), Value::integer(0).unwrap(), 1)
+            } else {
+                (tail, Value::integer(0).unwrap(), 1_000_000)
+            };
+            let us = us.integer_value().ok_or_else(invalid_time)?;
+            let ps = ps.integer_value().ok_or_else(invalid_time)?;
+            let sub = if hz == 1_000_000_000_000 {
+                BigInt::from(us) * 1_000_000 + ps
+            } else {
+                BigInt::from(us)
+            };
+            return Ok(immediate(seconds * hz + sub, hz));
+        }
+        let hz = exact_integer(cx, low)?;
+        if hz <= BigInt::from(0) {
+            return Err(invalid_time());
+        }
+        return Ok(ExactStamp {
+            ticks: exact_integer(cx, high)?,
+            hz,
+            identity: FrequencyIdentity::Lisp(low),
+        });
+    }
+    if let Some(ticks) = cx.bigint_value(value) {
+        return Ok(immediate(ticks, 1));
+    }
+    if let Ok(n) = cx.float_value(value) {
+        if n.is_nan() {
+            return Err(invalid_time());
+        }
+        if !n.is_finite() {
+            return Err(time_overflow());
+        }
+        let (ticks, hz) = float_ticks(n);
+        let identity = i64::try_from(&hz)
+            .ok()
+            .and_then(|n| Value::integer(n).ok())
+            .map(FrequencyIdentity::Lisp)
+            .unwrap_or_else(|| FrequencyIdentity::FloatPower(hz.bits() - 1));
+        return Ok(ExactStamp {
+            ticks,
+            hz,
+            identity,
+        });
+    }
+    Err(invalid_time())
+}
+
+fn floor_ratio(n: num_bigint::BigInt, d: &num_bigint::BigInt) -> num_bigint::BigInt {
+    let q = &n / d;
+    if n % d < num_bigint::BigInt::from(0) {
+        q - 1
+    } else {
+        q
+    }
+}
+
+fn exact_list(cx: &mut Leaf<'_>, time: &ExactStamp) -> Value {
+    use num_bigint::BigInt;
+    let trillion = BigInt::from(1_000_000_000_000i64);
+    let ps = floor_ratio(&time.ticks * &trillion, &time.hz);
+    let seconds = floor_ratio(ps.clone(), &trillion);
+    let subseconds = ps - &seconds * &trillion;
+    let high = floor_ratio(seconds.clone(), &BigInt::from(65536));
+    let low = seconds - &high * 65536;
+    let us = &subseconds / 1_000_000;
+    let ps = subseconds % 1_000_000;
+    let mut result = Value::NIL;
+    for n in [ps, us, low, high] {
+        let value = cx.bigint(n);
+        result = cx.cons(value, result);
+    }
+    result
+}
+
+fn list_time_output(cx: &mut Leaf<'_>) -> std::result::Result<bool, Fault> {
+    let symbol = cx.intern("current-time-list");
+    Ok(cx.variable_value(symbol)?.unwrap_or(Value::NIL) != Value::NIL)
+}
+
+fn exact_pair(cx: &mut Leaf<'_>, time: ExactStamp) -> Value {
+    let ticks = cx.bigint(time.ticks);
+    let hz = cx.bigint(time.hz);
+    cx.cons(ticks, hz)
+}
+
+fn invalid_frequency(cx: &mut Leaf<'_>, value: Value) -> Fault {
+    let message = cx.string("Invalid time frequency");
+    let data = cx.cons(value, Value::NIL);
+    let data = cx.cons(message, data);
+    Fault::Signal(cx.intern("error"), data)
+}
+
+defsubr! { name = "time-convert", gnu = "timefns.c:1778", effect = Global,
+fn time_convert(cx, time: Value; optional form: Value) {
+    use num_bigint::BigInt;
+    let stamp = exact_stamp(cx, time)?;
+    let form = if form == Value::NIL {
+        if list_time_output(cx)? { cx.intern("list") } else { Value::TRUE }
+    } else { form };
+    if form == cx.intern("list") {
+        return Ok(exact_list(cx, &stamp));
+    }
+    if form == cx.intern("integer") {
+        if cx.bigint_value(time).is_some() { return Ok(time); }
+        return Ok(cx.bigint(floor_ratio(stamp.ticks, &stamp.hz)));
+    }
+    if let Some((_, tail)) = cx.pair(time) {
+        if (form == Value::TRUE && cx.pair(tail).is_none()) || form == tail {
+            return Ok(time);
+        }
+    }
+    if form == Value::TRUE { return Ok(exact_pair(cx, stamp)); }
+    let hz = cx.bigint_value(form).filter(|n| *n > BigInt::from(0))
+        .ok_or_else(|| invalid_frequency(cx, form))?;
+    let ticks = cx.bigint(floor_ratio(stamp.ticks * &hz, &stamp.hz));
+    Ok(cx.cons(ticks, form))
+}}
+
+fn time_gcd(mut a: num_bigint::BigInt, mut b: num_bigint::BigInt) -> num_bigint::BigInt {
+    if a < num_bigint::BigInt::from(0) {
+        a = -a;
+    }
+    while b != num_bigint::BigInt::from(0) {
+        let remainder = a % &b;
+        a = b;
+        b = remainder;
+    }
+    a
+}
+
+fn time_arithmetic(cx: &mut Leaf<'_>, a: Value, b: Value, subtract: bool) -> Out {
+    use num_bigint::BigInt;
+    let a_stamp = exact_stamp(cx, a)?;
+    let b_stamp = exact_stamp(cx, b)?;
+    let (ticks, hz) = if a_stamp.identity == b_stamp.identity {
+        let ticks = if subtract {
+            a_stamp.ticks - b_stamp.ticks
+        } else {
+            a_stamp.ticks + b_stamp.ticks
+        };
+        (ticks, a_stamp.hz)
+    } else {
+        let gcd = time_gcd(a_stamp.hz.clone(), b_stamp.hz.clone());
+        let a_factor = &a_stamp.hz / &gcd;
+        let b_factor = &b_stamp.hz / gcd;
+        let a_ticks = a_stamp.ticks * b_factor;
+        let b_ticks = b_stamp.ticks * &a_factor;
+        let ticks = if subtract {
+            a_ticks - b_ticks
+        } else {
+            a_ticks + b_ticks
+        };
+        let hz = a_factor * &b_stamp.hz;
+        let minimum = a_stamp.hz.min(b_stamp.hz);
+        let gcd = time_gcd(ticks.clone(), hz.clone());
+        let mut ticks = ticks / &gcd;
+        let mut hz = hz / gcd;
+        if hz < minimum {
+            let scale = (&minimum + &hz - 1) / &hz;
+            ticks *= &scale;
+            hz *= scale;
+        }
+        (ticks, hz)
+    };
+    if hz == BigInt::from(1) {
+        return Ok(cx.bigint(ticks));
+    }
+    let pair_input = |v| cx.pair(v).is_some_and(|(_, tail)| cx.pair(tail).is_none());
+    let needs_pair = pair_input(a)
+        || pair_input(b)
+        || BigInt::from(1_000_000_000_000i64) % &hz != BigInt::from(0);
+    let result = ExactStamp {
+        ticks,
+        hz,
+        identity: FrequencyIdentity::Lisp(Value::NIL),
+    };
+    if !needs_pair && list_time_output(cx)? {
+        Ok(exact_list(cx, &result))
+    } else {
+        Ok(exact_pair(cx, result))
+    }
+}
+
+defsubr! { name = "time-add", gnu = "timefns.c:1220", effect = Global,
+fn time_add(cx, a: Value, b: Value) { time_arithmetic(cx, a, b, false) }}
+
+defsubr! { name = "time-subtract", gnu = "timefns.c:1229", effect = Global,
+fn time_subtract(cx, a: Value, b: Value) {
+    if a == b {
+        let zero = ExactStamp { ticks: 0.into(), hz: 1_000_000_000.into(),
+            identity: FrequencyIdentity::Lisp(Value::NIL) };
+        return Ok(if list_time_output(cx)? { exact_list(cx, &zero) } else { exact_pair(cx, zero) });
+    }
+    time_arithmetic(cx, a, b, true)
+}}
+
+fn time_compare(
+    cx: &Leaf<'_>,
+    a: Value,
+    b: Value,
+) -> std::result::Result<std::cmp::Ordering, Fault> {
+    if a == b {
+        return Ok(std::cmp::Ordering::Equal);
+    }
+    let (x, y) = match (cx.pair(a), cx.pair(b)) {
+        (Some((x, tail_a)), Some((y, tail_b))) if tail_a == tail_b => (x, y),
+        _ => (a, b),
+    };
+    if let (Some(x), Some(y)) = (x.integer_value(), y.integer_value()) {
+        return Ok(x.cmp(&y));
+    }
+    let a = exact_stamp(cx, a)?;
+    let b = exact_stamp(cx, b)?;
+    Ok((a.ticks * b.hz).cmp(&(b.ticks * a.hz)))
+}
+
+defsubr! { name = "time-less-p", gnu = "timefns.c:1287", effect = Global,
+fn time_less_p(cx, a: Value, b: Value) {
+    Ok(if time_compare(cx, a, b)?.is_lt() { Value::TRUE } else { Value::NIL })
+}}
+
+defsubr! { name = "time-equal-p", gnu = "timefns.c:1296", effect = Reads,
+fn time_equal_p(cx, a: Value, b: Value) {
+    if (a == Value::NIL) != (b == Value::NIL) { return Ok(Value::NIL); }
+    Ok(if time_compare(cx, a, b)?.is_eq() { Value::TRUE } else { Value::NIL })
+}}
+
 #[derive(Clone)]
 struct Zone { offset: i64, name: String, dst: bool }
 fn zone_fault(cx: &mut Leaf<'_>, v: Value) -> Fault {

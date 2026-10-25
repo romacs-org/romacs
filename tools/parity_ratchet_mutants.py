@@ -308,13 +308,22 @@ def run_gate_tests(root):
     return p.returncode, p.stdout + p.stderr
 
 
+def gnu_gate_target(data):
+    import parity_ratchet as pr
+    files = sorted(data['gnu_suite']['files'])
+    for index in range(1, pr.GATE_SHARDS + 1):
+        for file in pr.shard(files, f'{index}/{pr.GATE_SHARDS}'):
+            if len(data['gnu_suite']['passing'].get(file, [])) >= 2:
+                return file, f'parity_ratchet_gnu_suite_shard_{index}_of_{pr.GATE_SHARDS}'
+    raise ValueError('GNU gate mutant needs a member with at least two recorded passes')
+
+
 def gate_mutants(args) -> int:
     """Mutate THIS worktree's ratchet file / checker (never lisp/), run the gate's
     own Rust test, require it to fail at its assertion with the expected text."""
     ratchet_file, checker = ROOT / 'parity-ratchet.json', ROOT / 'tools' / 'parity_ratchet.py'
     data = json.loads(ratchet_file.read_text())
-    files = sorted(data['gnu_suite']['files'])
-    shard1 = [f for f in files[0::4] if len(data['gnu_suite']['passing'].get(f, [])) >= 2][0]
+    member, gnu_test = gnu_gate_target(data)
 
     def edit_floor(fn):
         d = json.loads(ratchet_file.read_text())
@@ -326,18 +335,18 @@ def gate_mutants(args) -> int:
         return json.dumps(d, indent=1, sort_keys=True) + '\n'
 
     def phantom(d):
-        d['gnu_suite']['passing'][shard1] = sorted(d['gnu_suite']['passing'][shard1] + ['parity-mutant-phantom'])
+        d['gnu_suite']['passing'][member] = sorted(d['gnu_suite']['passing'][member] + ['parity-mutant-phantom'])
 
     def drop_one(d):
-        d['gnu_suite']['passing'][shard1] = d['gnu_suite']['passing'][shard1][1:]
+        d['gnu_suite']['passing'][member] = d['gnu_suite']['passing'][member][1:]
 
     def drop_cold(d):
         d['census']['cold']['loaded'] = d['census']['cold']['loaded'][1:]
     table = [
         ('gate-gnu-shard-loses-a-pass', ratchet_file, edit_floor(phantom), 'romacs-gnu-tests',
-         'parity_ratchet_gnu_suite_shard_1_of_4', ['is not PASS (exit Some(1))', 'parity-mutant-phantom']),
+         gnu_test, ['is not PASS (exit Some(1))', 'parity-mutant-phantom']),
         ('gate-gnu-shard-gains-a-pass', ratchet_file, edit_floor(drop_one), 'romacs-gnu-tests',
-         'parity_ratchet_gnu_suite_shard_1_of_4', ['is not PASS (exit Some(3))', 'FAIL-WITH-INSTRUCTION']),
+         gnu_test, ['is not PASS (exit Some(3))', 'FAIL-WITH-INSTRUCTION']),
         ('gate-census-cold-gains-a-file', ratchet_file, edit_floor(drop_cold), 'romacs-vm',
          'parity_ratchet_census_cold', ['is not PASS (exit Some(3))', 'HIGHER census-cold']),
         ('gate-checker-test-skipped', ROOT / 'tools' / 'parity_ratchet_test.py',
@@ -346,7 +355,7 @@ def gate_mutants(args) -> int:
          'romacs-gnu-tests', 'parity_ratchet_checker_contract', ['a checker test was skipped']),
         ('gate-pass-that-measured-nothing', checker,
          checker.read_text().replace('reported {reported} seconds', 'reported 0 seconds'), 'romacs-gnu-tests',
-         'parity_ratchet_gnu_suite_shard_1_of_4', ['printed PASS but measured nothing']),
+         gnu_test, ['printed PASS but measured nothing']),
     ]
     results = []
     for name, path, mutated, pkg, test, want in table:

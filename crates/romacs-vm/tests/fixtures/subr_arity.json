@@ -1,0 +1,1056 @@
+{
+  "gnu_revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "cases": [
+    {
+      "name": "+",
+      "source": "(subr-arity (symbol-function '+))",
+      "expected": "(0 . many)"
+    },
+    {
+      "name": "/",
+      "source": "(subr-arity (symbol-function '/))",
+      "expected": "(1 . many)"
+    },
+    {
+      "name": "abs",
+      "source": "(subr-arity (symbol-function 'abs))",
+      "expected": "(1 . 1)"
+    },
+    {
+      "name": "-",
+      "source": "(subr-arity (symbol-function '-))",
+      "expected": "(0 . many)"
+    },
+    {
+      "name": "*",
+      "source": "(subr-arity (symbol-function '*))",
+      "expected": "(0 . many)"
+    },
+    {
+      "name": "<",
+      "source": "(subr-arity (symbol-function '<))",
+      "expected": "(1 . many)"
+    },
+    {
+      "name": "=",
+      "source": "(subr-arity (symbol-function '=))",
+      "expected": "(1 . many)"
+    },
+    {
+      "name": "1+",
+      "source": "(subr-arity (symbol-function '1+))",
+      "expected": "(1 . 1)"
+    },
+    {
+      "name": "1-",
+      "source": "(subr-arity (symbol-function '1-))",
+      "expected": "(1 . 1)"
+    },
+    {
+      "name": "cons",
+      "source": "(subr-arity (symbol-function 'cons))",
+      "expected": "(2 . 2)"
+    },
+    {
+      "name": "car",
+      "source": "(subr-arity (symbol-function 'car))",
+      "expected": "(1 . 1)"
+    },
+    {
+      "name": "cdr",
+      "source": "(subr-arity (symbol-function 'cdr))",
+      "expected": "(1 . 1)"
+    },
+    {
+      "name": "length",
+      "source": "(subr-arity (symbol-function 'length))",
+      "expected": "(1 . 1)"
+    },
+    {
+      "name": "nreverse",
+      "source": "(subr-arity (symbol-function 'nreverse))",
+      "expected": "(1 . 1)"
+    },
+    {
+      "name": "throw",
+      "source": "(subr-arity (symbol-function 'throw))",
+      "expected": "(2 . 2)"
+    },
+    {
+      "name": "vector",
+      "source": "(subr-arity (symbol-function 'vector))",
+      "expected": "(0 . many)"
+    },
+    {
+      "name": "aref",
+      "source": "(subr-arity (symbol-function 'aref))",
+      "expected": "(2 . 2)"
+    },
+    {
+      "name": "aset",
+      "source": "(subr-arity (symbol-function 'aset))",
+      "expected": "(3 . 3)"
+    },
+    {
+      "name": "copy-sequence",
+      "source": "(subr-arity (symbol-function 'copy-sequence))",
+      "expected": "(1 . 1)"
+    },
+    {
+      "name": "assq",
+      "source": "(subr-arity (symbol-function 'assq))",
+      "expected": "(2 . 2)"
+    },
+    {
+      "name": "setcar",
+      "source": "(subr-arity (symbol-function 'setcar))",
+      "expected": "(2 . 2)"
+    },
+    {
+      "name": "setcdr",
+      "source": "(subr-arity (symbol-function 'setcdr))",
+      "expected": "(2 . 2)"
+    },
+    {
+      "name": "%",
+      "source": "(subr-arity (symbol-function '%))",
+      "expected": "(2 . 2)"
+    },
+    {
+      "name": "current-buffer",
+      "source": "(subr-arity (symbol-function 'current-buffer))",
+      "expected": "(0 . 0)"
+    },
+    {
+      "name": "set-buffer",
+      "source": "(subr-arity (symbol-function 'set-buffer))",
+      "expected": "(1 . 1)"
+    },
+    {
+      "name": "insert",
+      "source": "(subr-arity (symbol-function 'insert))",
+      "expected": "(0 . many)"
+    },
+    {
+      "name": "point",
+      "source": "(subr-arity (symbol-function 'point))",
+      "expected": "(0 . 0)"
+    },
+    {
+      "name": "point-min",
+      "source": "(subr-arity (symbol-function 'point-min))",
+      "expected": "(0 . 0)"
+    },
+    {
+      "name": "point-max",
+      "source": "(subr-arity (symbol-function 'point-max))",
+      "expected": "(0 . 0)"
+    },
+    {
+      "name": "goto-char",
+      "source": "(subr-arity (symbol-function 'goto-char))",
+      "expected": "(1 . 1)"
+    },
+    {
+      "name": "char-after",
+      "source": "(subr-arity (symbol-function 'char-after))",
+      "expected": "(0 . 1)"
+    },
+    {
+      "name": "delete-region",
+      "source": "(subr-arity (symbol-function 'delete-region))",
+      "expected": "(2 . 2)"
+    },
+    {
+      "name": "self-insert-command",
+      "source": "(subr-arity (symbol-function 'self-insert-command))",
+      "expected": "(1 . 2)"
+    },
+    {
+      "name": "forward-char",
+      "source": "(subr-arity (symbol-function 'forward-char))",
+      "expected": "(0 . 1)"
+    },
+    {
+      "name": "backward-char",
+      "source": "(subr-arity (symbol-function 'backward-char))",
+      "expected": "(0 . 1)"
+    },
+    {
+      "name": "beginning-of-line",
+      "source": "(subr-arity (symbol-function 'beginning-of-line))",
+      "expected": "(0 . 1)"
+    },
+    {
+      "name": "end-of-line",
+      "source": "(subr-arity (symbol-function 'end-of-line))",
+      "expected": "(0 . 1)"
+    },
+    {
+      "name": "delete-char",
+      "source": "(subr-arity (symbol-function 'delete-char))",
+      "expected": "(1 . 2)"
+    },
+    {
+      "name": "this-command-keys",
+      "source": "(subr-arity (symbol-function 'this-command-keys))",
+      "expected": "(0 . 0)"
+    },
+    {
+      "name": "buffer-substring-no-properties",
+      "source": "(subr-arity (symbol-function 'buffer-substring-no-properties))",
+      "expected": "(2 . 2)"
+    },
+    {
+      "name": "narrow-to-region",
+      "source": "(subr-arity (symbol-function 'narrow-to-region))",
+      "expected": "(2 . 2)"
+    },
+    {
+      "name": "widen",
+      "source": "(subr-arity (symbol-function 'widen))",
+      "expected": "(0 . 0)"
+    },
+    {
+      "name": "position-bytes",
+      "source": "(subr-arity (symbol-function 'position-bytes))",
+      "expected": "(1 . 1)"
+    },
+    {
+      "name": "byte-to-position",
+      "source": "(subr-arity (symbol-function 'byte-to-position))",
+      "expected": "(1 . 1)"
+    },
+    {
+      "name": "put-text-property",
+      "source": "(subr-arity (symbol-function 'put-text-property))",
+      "expected": "(4 . 5)"
+    },
+    {
+      "name": "get-text-property",
+      "source": "(subr-arity (symbol-function 'get-text-property))",
+      "expected": "(2 . 3)"
+    },
+    {
+      "name": "set-buffer-multibyte",
+      "source": "(subr-arity (symbol-function 'set-buffer-multibyte))",
+      "expected": "(1 . 1)"
+    },
+    {
+      "name": "buffer-string",
+      "source": "(subr-arity (symbol-function 'buffer-string))",
+      "expected": "(0 . 0)"
+    },
+    {
+      "name": "unibyte-string",
+      "source": "(subr-arity (symbol-function 'unibyte-string))",
+      "expected": "(0 . many)"
+    },
+    {
+      "name": "string-as-unibyte",
+      "source": "(subr-arity (symbol-function 'string-as-unibyte))",
+      "expected": "(1 . 1)"
+    },
+    {
+      "name": "string-as-multibyte",
+      "source": "(subr-arity (symbol-function 'string-as-multibyte))",
+      "expected": "(1 . 1)"
+    },
+    {
+      "name": "string-to-unibyte",
+      "source": "(subr-arity (symbol-function 'string-to-unibyte))",
+      "expected": "(1 . 1)"
+    },
+    {
+      "name": "multibyte-string-p",
+      "source": "(subr-arity (symbol-function 'multibyte-string-p))",
+      "expected": "(1 . 1)"
+    },
+    {
+      "name": "format",
+      "source": "(subr-arity (symbol-function 'format))",
+      "expected": "(1 . many)"
+    },
+    {
+      "name": "load",
+      "source": "(subr-arity (symbol-function 'load))",
+      "expected": "(1 . 5)"
+    },
+    {
+      "name": "require",
+      "source": "(subr-arity (symbol-function 'require))",
+      "expected": "(1 . 3)"
+    },
+    {
+      "name": "eval",
+      "source": "(subr-arity (symbol-function 'eval))",
+      "expected": "(1 . 2)"
+    },
+    {
+      "name": "provide",
+      "source": "(subr-arity (symbol-function 'provide))",
+      "expected": "(1 . 2)"
+    },
+    {
+      "name": "featurep",
+      "source": "(subr-arity (symbol-function 'featurep))",
+      "expected": "(1 . 2)"
+    },
+    {
+      "name": "message",
+      "source": "(subr-arity (symbol-function 'message))",
+      "expected": "(1 . many)"
+    },
+    {
+      "name": "list",
+      "source": "(subr-arity (symbol-function 'list))",
+      "expected": "(0 . many)"
+    },
+    {
+      "name": "member",
+      "source": "(subr-arity (symbol-function 'member))",
+      "expected": "(2 . 2)"
+    },
+    {
+      "name": "nth",
+      "source": "(subr-arity (symbol-function 'nth))",
+      "expected": "(2 . 2)"
+    },
+    {
+      "name": "stringp",
+      "source": "(subr-arity (symbol-function 'stringp))",
+      "expected": "(1 . 1)"
+    },
+    {
+      "name": "null",
+      "source": "(subr-arity (symbol-function 'null))",
+      "expected": "(1 . 1)"
+    },
+    {
+      "name": "nconc",
+      "source": "(subr-arity (symbol-function 'nconc))",
+      "expected": "(0 . many)"
+    },
+    {
+      "name": "expand-file-name",
+      "source": "(subr-arity (symbol-function 'expand-file-name))",
+      "expected": "(1 . 2)"
+    },
+    {
+      "name": "file-directory-p",
+      "source": "(subr-arity (symbol-function 'file-directory-p))",
+      "expected": "(1 . 1)"
+    },
+    {
+      "name": "max",
+      "source": "(subr-arity (symbol-function 'max))",
+      "expected": "(1 . many)"
+    },
+    {
+      "name": "boundp",
+      "source": "(subr-arity (symbol-function 'boundp))",
+      "expected": "(1 . 1)"
+    },
+    {
+      "name": "defalias",
+      "source": "(subr-arity (symbol-function 'defalias))",
+      "expected": "(2 . 3)"
+    },
+    {
+      "name": "get",
+      "source": "(subr-arity (symbol-function 'get))",
+      "expected": "(2 . 2)"
+    },
+    {
+      "name": "put",
+      "source": "(subr-arity (symbol-function 'put))",
+      "expected": "(3 . 3)"
+    },
+    {
+      "name": "bare-symbol",
+      "source": "(subr-arity (symbol-function 'bare-symbol))",
+      "expected": "(1 . 1)"
+    },
+    {
+      "name": "eq",
+      "source": "(subr-arity (symbol-function 'eq))",
+      "expected": "(2 . 2)"
+    },
+    {
+      "name": "memq",
+      "source": "(subr-arity (symbol-function 'memq))",
+      "expected": "(2 . 2)"
+    },
+    {
+      "name": "text-properties-at",
+      "source": "(subr-arity (symbol-function 'text-properties-at))",
+      "expected": "(1 . 2)"
+    },
+    {
+      "name": "get-char-property",
+      "source": "(subr-arity (symbol-function 'get-char-property))",
+      "expected": "(2 . 3)"
+    },
+    {
+      "name": "buffer-substring",
+      "source": "(subr-arity (symbol-function 'buffer-substring))",
+      "expected": "(2 . 2)"
+    },
+    {
+      "name": "insert-and-inherit",
+      "source": "(subr-arity (symbol-function 'insert-and-inherit))",
+      "expected": "(0 . many)"
+    },
+    {
+      "name": "make-marker",
+      "source": "(subr-arity (symbol-function 'make-marker))",
+      "expected": "(0 . 0)"
+    },
+    {
+      "name": "set-marker",
+      "source": "(subr-arity (symbol-function 'set-marker))",
+      "expected": "(2 . 3)"
+    },
+    {
+      "name": "marker-position",
+      "source": "(subr-arity (symbol-function 'marker-position))",
+      "expected": "(1 . 1)"
+    },
+    {
+      "name": "marker-buffer",
+      "source": "(subr-arity (symbol-function 'marker-buffer))",
+      "expected": "(1 . 1)"
+    },
+    {
+      "name": "marker-insertion-type",
+      "source": "(subr-arity (symbol-function 'marker-insertion-type))",
+      "expected": "(1 . 1)"
+    },
+    {
+      "name": "set-marker-insertion-type",
+      "source": "(subr-arity (symbol-function 'set-marker-insertion-type))",
+      "expected": "(2 . 2)"
+    },
+    {
+      "name": "insert-before-markers",
+      "source": "(subr-arity (symbol-function 'insert-before-markers))",
+      "expected": "(0 . many)"
+    },
+    {
+      "name": "make-overlay",
+      "source": "(subr-arity (symbol-function 'make-overlay))",
+      "expected": "(2 . 5)"
+    },
+    {
+      "name": "move-overlay",
+      "source": "(subr-arity (symbol-function 'move-overlay))",
+      "expected": "(3 . 4)"
+    },
+    {
+      "name": "delete-overlay",
+      "source": "(subr-arity (symbol-function 'delete-overlay))",
+      "expected": "(1 . 1)"
+    },
+    {
+      "name": "overlay-start",
+      "source": "(subr-arity (symbol-function 'overlay-start))",
+      "expected": "(1 . 1)"
+    },
+    {
+      "name": "overlay-end",
+      "source": "(subr-arity (symbol-function 'overlay-end))",
+      "expected": "(1 . 1)"
+    },
+    {
+      "name": "overlay-get",
+      "source": "(subr-arity (symbol-function 'overlay-get))",
+      "expected": "(2 . 2)"
+    },
+    {
+      "name": "overlay-put",
+      "source": "(subr-arity (symbol-function 'overlay-put))",
+      "expected": "(3 . 3)"
+    },
+    {
+      "name": "overlays-in",
+      "source": "(subr-arity (symbol-function 'overlays-in))",
+      "expected": "(2 . 2)"
+    },
+    {
+      "name": "next-overlay-change",
+      "source": "(subr-arity (symbol-function 'next-overlay-change))",
+      "expected": "(1 . 1)"
+    },
+    {
+      "name": "consp",
+      "source": "(subr-arity (symbol-function 'consp))",
+      "expected": "(1 . 1)"
+    },
+    {
+      "name": "car-safe",
+      "source": "(subr-arity (symbol-function 'car-safe))",
+      "expected": "(1 . 1)"
+    },
+    {
+      "name": "symbolp",
+      "source": "(subr-arity (symbol-function 'symbolp))",
+      "expected": "(1 . 1)"
+    },
+    {
+      "name": "error-message-string",
+      "source": "(subr-arity (symbol-function 'error-message-string))",
+      "expected": "(1 . 1)"
+    },
+    {
+      "name": "make-hash-table",
+      "source": "(subr-arity (symbol-function 'make-hash-table))",
+      "expected": "(0 . many)"
+    },
+    {
+      "name": "gethash",
+      "source": "(subr-arity (symbol-function 'gethash))",
+      "expected": "(2 . 3)"
+    },
+    {
+      "name": "puthash",
+      "source": "(subr-arity (symbol-function 'puthash))",
+      "expected": "(3 . 3)"
+    },
+    {
+      "name": "remhash",
+      "source": "(subr-arity (symbol-function 'remhash))",
+      "expected": "(2 . 2)"
+    },
+    {
+      "name": "clrhash",
+      "source": "(subr-arity (symbol-function 'clrhash))",
+      "expected": "(1 . 1)"
+    },
+    {
+      "name": "maphash",
+      "source": "(subr-arity (symbol-function 'maphash))",
+      "expected": "(2 . 2)"
+    },
+    {
+      "name": "hash-table-count",
+      "source": "(subr-arity (symbol-function 'hash-table-count))",
+      "expected": "(1 . 1)"
+    },
+    {
+      "name": "hash-table-p",
+      "source": "(subr-arity (symbol-function 'hash-table-p))",
+      "expected": "(1 . 1)"
+    },
+    {
+      "name": "hash-table-test",
+      "source": "(subr-arity (symbol-function 'hash-table-test))",
+      "expected": "(1 . 1)"
+    },
+    {
+      "name": "hash-table-size",
+      "source": "(subr-arity (symbol-function 'hash-table-size))",
+      "expected": "(1 . 1)"
+    },
+    {
+      "name": "hash-table-weakness",
+      "source": "(subr-arity (symbol-function 'hash-table-weakness))",
+      "expected": "(1 . 1)"
+    },
+    {
+      "name": "hash-table-rehash-size",
+      "source": "(subr-arity (symbol-function 'hash-table-rehash-size))",
+      "expected": "(1 . 1)"
+    },
+    {
+      "name": "hash-table-rehash-threshold",
+      "source": "(subr-arity (symbol-function 'hash-table-rehash-threshold))",
+      "expected": "(1 . 1)"
+    },
+    {
+      "name": "copy-hash-table",
+      "source": "(subr-arity (symbol-function 'copy-hash-table))",
+      "expected": "(1 . 1)"
+    },
+    {
+      "name": "define-hash-table-test",
+      "source": "(subr-arity (symbol-function 'define-hash-table-test))",
+      "expected": "(3 . 3)"
+    },
+    {
+      "name": "integerp",
+      "source": "(subr-arity (symbol-function 'integerp))",
+      "expected": "(1 . 1)"
+    },
+    {
+      "name": "looking-at",
+      "source": "(subr-arity (symbol-function 'looking-at))",
+      "expected": "(1 . 2)"
+    },
+    {
+      "name": "string-match",
+      "source": "(subr-arity (symbol-function 'string-match))",
+      "expected": "(2 . 4)"
+    },
+    {
+      "name": "match-beginning",
+      "source": "(subr-arity (symbol-function 'match-beginning))",
+      "expected": "(1 . 1)"
+    },
+    {
+      "name": "match-end",
+      "source": "(subr-arity (symbol-function 'match-end))",
+      "expected": "(1 . 1)"
+    },
+    {
+      "name": "match-data",
+      "source": "(subr-arity (symbol-function 'match-data))",
+      "expected": "(0 . 3)"
+    },
+    {
+      "name": "re-search-forward",
+      "source": "(subr-arity (symbol-function 're-search-forward))",
+      "expected": "(1 . 4)"
+    },
+    {
+      "name": "re-search-backward",
+      "source": "(subr-arity (symbol-function 're-search-backward))",
+      "expected": "(1 . 4)"
+    },
+    {
+      "name": "syntax-table",
+      "source": "(subr-arity (symbol-function 'syntax-table))",
+      "expected": "(0 . 0)"
+    },
+    {
+      "name": "standard-syntax-table",
+      "source": "(subr-arity (symbol-function 'standard-syntax-table))",
+      "expected": "(0 . 0)"
+    },
+    {
+      "name": "copy-syntax-table",
+      "source": "(subr-arity (symbol-function 'copy-syntax-table))",
+      "expected": "(0 . 1)"
+    },
+    {
+      "name": "set-syntax-table",
+      "source": "(subr-arity (symbol-function 'set-syntax-table))",
+      "expected": "(1 . 1)"
+    },
+    {
+      "name": "modify-syntax-entry",
+      "source": "(subr-arity (symbol-function 'modify-syntax-entry))",
+      "expected": "(2 . 3)"
+    },
+    {
+      "name": "selected-window",
+      "source": "(subr-arity (symbol-function 'selected-window))",
+      "expected": "(0 . 0)"
+    },
+    {
+      "name": "selected-frame",
+      "source": "(subr-arity (symbol-function 'selected-frame))",
+      "expected": "(0 . 0)"
+    },
+    {
+      "name": "window-buffer",
+      "source": "(subr-arity (symbol-function 'window-buffer))",
+      "expected": "(0 . 1)"
+    },
+    {
+      "name": "set-window-buffer",
+      "source": "(subr-arity (symbol-function 'set-window-buffer))",
+      "expected": "(2 . 3)"
+    },
+    {
+      "name": "window-start",
+      "source": "(subr-arity (symbol-function 'window-start))",
+      "expected": "(0 . 1)"
+    },
+    {
+      "name": "window-point",
+      "source": "(subr-arity (symbol-function 'window-point))",
+      "expected": "(0 . 1)"
+    },
+    {
+      "name": "fset",
+      "source": "(subr-arity (symbol-function 'fset))",
+      "expected": "(2 . 2)"
+    },
+    {
+      "name": "window-vscroll",
+      "source": "(subr-arity (symbol-function 'window-vscroll))",
+      "expected": "(0 . 2)"
+    },
+    {
+      "name": "delete-window-internal",
+      "source": "(subr-arity (symbol-function 'delete-window-internal))",
+      "expected": "(1 . 1)"
+    },
+    {
+      "name": "frame-selected-window",
+      "source": "(subr-arity (symbol-function 'frame-selected-window))",
+      "expected": "(0 . 1)"
+    },
+    {
+      "name": "minibuffer-window",
+      "source": "(subr-arity (symbol-function 'minibuffer-window))",
+      "expected": "(0 . 1)"
+    },
+    {
+      "name": "select-window",
+      "source": "(subr-arity (symbol-function 'select-window))",
+      "expected": "(1 . 2)"
+    },
+    {
+      "name": "set-window-margins",
+      "source": "(subr-arity (symbol-function 'set-window-margins))",
+      "expected": "(2 . 3)"
+    },
+    {
+      "name": "set-window-parameter",
+      "source": "(subr-arity (symbol-function 'set-window-parameter))",
+      "expected": "(3 . 3)"
+    },
+    {
+      "name": "set-window-point",
+      "source": "(subr-arity (symbol-function 'set-window-point))",
+      "expected": "(2 . 2)"
+    },
+    {
+      "name": "set-window-start",
+      "source": "(subr-arity (symbol-function 'set-window-start))",
+      "expected": "(2 . 3)"
+    },
+    {
+      "name": "window-end",
+      "source": "(subr-arity (symbol-function 'window-end))",
+      "expected": "(0 . 2)"
+    },
+    {
+      "name": "window-total-height",
+      "source": "(subr-arity (symbol-function 'window-total-height))",
+      "expected": "(0 . 2)"
+    },
+    {
+      "name": "split-window-internal",
+      "source": "(subr-arity (symbol-function 'split-window-internal))",
+      "expected": "(4 . 5)"
+    },
+    {
+      "name": "window-resize-apply",
+      "source": "(subr-arity (symbol-function 'window-resize-apply))",
+      "expected": "(0 . 2)"
+    },
+    {
+      "name": "set-window-new-pixel",
+      "source": "(subr-arity (symbol-function 'set-window-new-pixel))",
+      "expected": "(2 . 3)"
+    },
+    {
+      "name": "window-new-pixel",
+      "source": "(subr-arity (symbol-function 'window-new-pixel))",
+      "expected": "(0 . 1)"
+    },
+    {
+      "name": "window-parent",
+      "source": "(subr-arity (symbol-function 'window-parent))",
+      "expected": "(0 . 1)"
+    },
+    {
+      "name": "window-next-sibling",
+      "source": "(subr-arity (symbol-function 'window-next-sibling))",
+      "expected": "(0 . 1)"
+    },
+    {
+      "name": "window-prev-sibling",
+      "source": "(subr-arity (symbol-function 'window-prev-sibling))",
+      "expected": "(0 . 1)"
+    },
+    {
+      "name": "frame-root-window",
+      "source": "(subr-arity (symbol-function 'frame-root-window))",
+      "expected": "(0 . 1)"
+    },
+    {
+      "name": "windowp",
+      "source": "(subr-arity (symbol-function 'windowp))",
+      "expected": "(1 . 1)"
+    },
+    {
+      "name": "window-live-p",
+      "source": "(subr-arity (symbol-function 'window-live-p))",
+      "expected": "(1 . 1)"
+    },
+    {
+      "name": "window-parameter",
+      "source": "(subr-arity (symbol-function 'window-parameter))",
+      "expected": "(2 . 2)"
+    },
+    {
+      "name": "window-parameters",
+      "source": "(subr-arity (symbol-function 'window-parameters))",
+      "expected": "(0 . 1)"
+    },
+    {
+      "name": "window-margins",
+      "source": "(subr-arity (symbol-function 'window-margins))",
+      "expected": "(0 . 1)"
+    },
+    {
+      "name": "window-pixel-width",
+      "source": "(subr-arity (symbol-function 'window-pixel-width))",
+      "expected": "(0 . 1)"
+    },
+    {
+      "name": "window-pixel-height",
+      "source": "(subr-arity (symbol-function 'window-pixel-height))",
+      "expected": "(0 . 1)"
+    },
+    {
+      "name": "window-total-width",
+      "source": "(subr-arity (symbol-function 'window-total-width))",
+      "expected": "(0 . 2)"
+    },
+    {
+      "name": "define-key",
+      "source": "(subr-arity (symbol-function 'define-key))",
+      "expected": "(3 . 4)"
+    },
+    {
+      "name": "make-sparse-keymap",
+      "source": "(subr-arity (symbol-function 'make-sparse-keymap))",
+      "expected": "(0 . 1)"
+    },
+    {
+      "name": "keymapp",
+      "source": "(subr-arity (symbol-function 'keymapp))",
+      "expected": "(1 . 1)"
+    },
+    {
+      "name": "key-binding",
+      "source": "(subr-arity (symbol-function 'key-binding))",
+      "expected": "(1 . 4)"
+    },
+    {
+      "name": "lookup-key",
+      "source": "(subr-arity (symbol-function 'lookup-key))",
+      "expected": "(2 . 3)"
+    },
+    {
+      "name": "current-global-map",
+      "source": "(subr-arity (symbol-function 'current-global-map))",
+      "expected": "(0 . 0)"
+    },
+    {
+      "name": "use-local-map",
+      "source": "(subr-arity (symbol-function 'use-local-map))",
+      "expected": "(1 . 1)"
+    },
+    {
+      "name": "symbol-value",
+      "source": "(subr-arity (symbol-function 'symbol-value))",
+      "expected": "(1 . 1)"
+    },
+    {
+      "name": "special-variable-p",
+      "source": "(subr-arity (symbol-function 'special-variable-p))",
+      "expected": "(1 . 1)"
+    },
+    {
+      "name": "make-variable-buffer-local",
+      "source": "(subr-arity (symbol-function 'make-variable-buffer-local))",
+      "expected": "(1 . 1)"
+    },
+    {
+      "name": "equal",
+      "source": "(subr-arity (symbol-function 'equal))",
+      "expected": "(2 . 2)"
+    },
+    {
+      "name": "min",
+      "source": "(subr-arity (symbol-function 'min))",
+      "expected": "(1 . many)"
+    },
+    {
+      "name": "append",
+      "source": "(subr-arity (symbol-function 'append))",
+      "expected": "(0 . many)"
+    },
+    {
+      "name": "prin1-to-string",
+      "source": "(subr-arity (symbol-function 'prin1-to-string))",
+      "expected": "(1 . 3)"
+    },
+    {
+      "name": "get-buffer",
+      "source": "(subr-arity (symbol-function 'get-buffer))",
+      "expected": "(1 . 1)"
+    },
+    {
+      "name": "erase-buffer",
+      "source": "(subr-arity (symbol-function 'erase-buffer))",
+      "expected": "(0 . 0)"
+    },
+    {
+      "name": "forward-line",
+      "source": "(subr-arity (symbol-function 'forward-line))",
+      "expected": "(0 . 1)"
+    },
+    {
+      "name": "force-mode-line-update",
+      "source": "(subr-arity (symbol-function 'force-mode-line-update))",
+      "expected": "(0 . 1)"
+    },
+    {
+      "name": "daemonp",
+      "source": "(subr-arity (symbol-function 'daemonp))",
+      "expected": "(0 . 0)"
+    },
+    {
+      "name": "daemon-initialized",
+      "source": "(subr-arity (symbol-function 'daemon-initialized))",
+      "expected": "(0 . 0)"
+    },
+    {
+      "name": "fboundp",
+      "source": "(subr-arity (symbol-function 'fboundp))",
+      "expected": "(1 . 1)"
+    },
+    {
+      "name": "set",
+      "source": "(subr-arity (symbol-function 'set))",
+      "expected": "(2 . 2)"
+    },
+    {
+      "name": "makunbound",
+      "source": "(subr-arity (symbol-function 'makunbound))",
+      "expected": "(1 . 1)"
+    },
+    {
+      "name": "make-local-variable",
+      "source": "(subr-arity (symbol-function 'make-local-variable))",
+      "expected": "(1 . 1)"
+    },
+    {
+      "name": "autoload-do-load",
+      "source": "(subr-arity (symbol-function 'autoload-do-load))",
+      "expected": "(1 . 3)"
+    },
+    {
+      "name": "macroexpand",
+      "source": "(subr-arity (symbol-function 'macroexpand))",
+      "expected": "(1 . 2)"
+    },
+    {
+      "name": "subr-arity",
+      "source": "(subr-arity (symbol-function 'subr-arity))",
+      "expected": "(1 . 1)"
+    },
+    {
+      "name": "time-convert",
+      "source": "(subr-arity (symbol-function 'time-convert))",
+      "expected": "(1 . 2)"
+    },
+    {
+      "name": "time-add",
+      "source": "(subr-arity (symbol-function 'time-add))",
+      "expected": "(2 . 2)"
+    },
+    {
+      "name": "time-subtract",
+      "source": "(subr-arity (symbol-function 'time-subtract))",
+      "expected": "(2 . 2)"
+    },
+    {
+      "name": "time-less-p",
+      "source": "(subr-arity (symbol-function 'time-less-p))",
+      "expected": "(2 . 2)"
+    },
+    {
+      "name": "time-equal-p",
+      "source": "(subr-arity (symbol-function 'time-equal-p))",
+      "expected": "(2 . 2)"
+    },
+    {
+      "name": "subrp",
+      "source": "(subr-arity (symbol-function 'subrp))",
+      "expected": "(1 . 1)"
+    },
+    {
+      "name": "make-vector",
+      "source": "(subr-arity (symbol-function 'make-vector))",
+      "expected": "(2 . 2)"
+    },
+    {
+      "name": "make-bool-vector",
+      "source": "(subr-arity (symbol-function 'make-bool-vector))",
+      "expected": "(2 . 2)"
+    },
+    {
+      "name": "try-completion",
+      "source": "(subr-arity (symbol-function 'try-completion))",
+      "expected": "(2 . 3)"
+    },
+    {
+      "name": "where-is-internal",
+      "source": "(subr-arity (symbol-function 'where-is-internal))",
+      "expected": "(1 . 5)",
+      "romacs_representation": "lisp"
+    },
+    {
+      "name": "reject-'car",
+      "source": "(let ((x 'car)) (condition-case e (subr-arity x) (wrong-type-argument (list (car e) (car (cdr e)) (eq x (car (cdr (cdr e))))))))",
+      "expected": "(wrong-type-argument subrp t)"
+    },
+    {
+      "name": "reject-'if",
+      "source": "(let ((x 'if)) (condition-case e (subr-arity x) (wrong-type-argument (list (car e) (car (cdr e)) (eq x (car (cdr (cdr e))))))))",
+      "expected": "(wrong-type-argument subrp t)"
+    },
+    {
+      "name": "reject-nil",
+      "source": "(let ((x nil)) (condition-case e (subr-arity x) (wrong-type-argument (list (car e) (car (cdr e)) (eq x (car (cdr (cdr e))))))))",
+      "expected": "(wrong-type-argument subrp t)"
+    },
+    {
+      "name": "reject-t",
+      "source": "(let ((x t)) (condition-case e (subr-arity x) (wrong-type-argument (list (car e) (car (cdr e)) (eq x (car (cdr (cdr e))))))))",
+      "expected": "(wrong-type-argument subrp t)"
+    },
+    {
+      "name": "reject-3",
+      "source": "(let ((x 3)) (condition-case e (subr-arity x) (wrong-type-argument (list (car e) (car (cdr e)) (eq x (car (cdr (cdr e))))))))",
+      "expected": "(wrong-type-argument subrp t)"
+    },
+    {
+      "name": "reject-[1 2]",
+      "source": "(let ((x [1 2])) (condition-case e (subr-arity x) (wrong-type-argument (list (car e) (car (cdr e)) (eq x (car (cdr (cdr e))))))))",
+      "expected": "(wrong-type-argument subrp t)"
+    },
+    {
+      "name": "reject-'(lambda (x) x)",
+      "source": "(let ((x '(lambda (x) x))) (condition-case e (subr-arity x) (wrong-type-argument (list (car e) (car (cdr e)) (eq x (car (cdr (cdr e))))))))",
+      "expected": "(wrong-type-argument subrp t)"
+    },
+    {
+      "name": "reject-(lambda (x) x)",
+      "source": "(let ((x (lambda (x) x))) (condition-case e (subr-arity x) (wrong-type-argument (list (car e) (car (cdr e)) (eq x (car (cdr (cdr e))))))))",
+      "expected": "(wrong-type-argument subrp t)"
+    },
+    {
+      "name": "legacy-alias",
+      "source": "(progn (fset 'subr-arity-test-alias (symbol-function 'car)) (subr-arity (symbol-function 'subr-arity-test-alias)))",
+      "expected": "(1 . 1)"
+    },
+    {
+      "name": "generated-alias",
+      "source": "(progn (fset 'subr-arity-test-alias (symbol-function 'time-convert)) (subr-arity (symbol-function 'subr-arity-test-alias)))",
+      "expected": "(1 . 2)"
+    },
+    {
+      "name": "rebound-function-cell",
+      "source": "(let ((original (symbol-function 'car))) (fset 'car (symbol-function 'time-convert)) (list (subr-arity original) (subr-arity (symbol-function 'car))))",
+      "expected": "((1 . 1) (1 . 2))"
+    }
+  ]
+}

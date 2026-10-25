@@ -312,6 +312,10 @@ impl Vm {
         if let Some(escape) = &mut self.propagated_escape {
             escape.visit_values(&mut |v| pending.push(*v));
         }
+        for handler in &mut self.signal_handlers {
+            handler.visit_values(&mut |v| pending.push(*v));
+        }
+        self.backtrace.visit_values(&mut |v| pending.push(*v));
         let mut local_live = HashSet::new();
         let mut obarray_symbols_live = HashSet::new();
         for (slot, s) in self.slots.iter().enumerate() {
@@ -637,6 +641,10 @@ impl Vm {
         if let Some(escape) = &mut self.propagated_escape {
             escape.visit_values(&mut |v| rewrite(v));
         }
+        for handler in &mut self.signal_handlers {
+            handler.visit_values(&mut |v| rewrite(v));
+        }
+        self.backtrace.visit_values(&mut |v| rewrite(v));
         for (&slot, name) in &mut self.obarray_symbol_names {
             if obarray_symbols_live.contains(&slot) { rewrite(name); }
             else {

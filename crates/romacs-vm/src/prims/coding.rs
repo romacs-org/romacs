@@ -190,3 +190,26 @@ mod tests {
         );
     }
 }
+
+fn convert_string(cx: &mut Leaf<'_>, encode: bool, string: Value, coding: Value, nocopy: Value, buffer: Value) -> Next {
+    cx.string_view(string)?;
+    let saved = vec![if encode { Value::TRUE } else { Value::NIL }, string, coding, nocopy, buffer];
+    if coding != Value::NIL && cx.kind(coding) == Kind::Symbol && cx.coding_spec(coding)? == Value::NIL {
+        return realize(cx, coding, saved, converted_string);
+    }
+    converted_string(cx, Value::NIL, &saved)
+}
+
+fn converted_string(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
+    cx.coding_convert_string(saved[1], saved[2], saved[3], saved[4], saved[0] != Value::NIL).map(Step::Done)
+}
+
+defsubr! { name = "encode-coding-string", gnu = "coding.c:10509", effect = Global,
+fn encode_coding_string(cx, string: Value, coding: Value; optional nocopy: Value, buffer: Value) -> Step {
+    convert_string(cx, true, string, coding, nocopy, buffer)
+}}
+
+defsubr! { name = "decode-coding-string", gnu = "coding.c:10487", effect = Global,
+fn decode_coding_string(cx, string: Value, coding: Value; optional nocopy: Value, buffer: Value) -> Step {
+    convert_string(cx, false, string, coding, nocopy, buffer)
+}}

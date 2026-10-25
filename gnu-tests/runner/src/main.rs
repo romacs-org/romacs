@@ -1,7 +1,8 @@
 //! VM-side adapter for the GNU test runner (`gnu-tests/run.py`).
 //!
 //! One process evaluates ONE GNU test file in ONE fresh VM. Real mode loads
-//! unmodified GNU ERT and the target with ordinary load semantics, then evaluates
+//! pinned GNU ERT and the target with ordinary load semantics, optionally applies
+//! the named Romacs batch adapter, then evaluates
 //! an observer reporter which calls `ert-run-tests-batch`; it never enters the
 //! reduced mini accessor path. Mini mode (the default) uses VM2's Lisp prelude,
 //! the loadup bootstrap chain as far as it reaches, the test harness, then every top-level form of the test file, each
@@ -32,6 +33,9 @@ enum HarnessKind {
 struct Args {
     kind: HarnessKind,
     measurement_regime: bool,
+    ert_bootstrap: bool,
+    ert_batch_adapter: bool,
+    selector: String,
     reporter: Option<PathBuf>,
     load_path: Vec<PathBuf>,
     preload: Vec<PathBuf>,
@@ -49,7 +53,7 @@ fn usage() -> ! {
     eprintln!(
         "usage: romacs-gnu-ert --harness FILE --plan PLAN.json [--load-path DIR]... \
          [--preload FILE]... [--skip-test NAME]... [--probe EXPR]... \
-         [--harness-kind mini|real] [--reporter FILE] [--audit FILE]"
+         [--harness-kind mini|real] [--ert-adapter none|romacs-batch] [--reporter FILE] [--audit FILE]"
     );
     std::process::exit(2)
 }
@@ -60,12 +64,19 @@ fn parse() -> Args {
     let (mut harness, mut plan, mut reporter, mut audit) = (None, None, None, None);
     let mut kind = HarnessKind::Mini;
     let mut measurement_regime = false;
+    let mut ert_bootstrap = false;
+    let mut ert_batch_adapter = false;
+    let mut selector = "t".to_owned();
     while let Some(flag) = it.next() {
         let Some(value) = it.next() else { usage() };
         match flag.as_str() {
             "--load-path" => load_path.push(PathBuf::from(value)),
             "--preload" => preload.push(PathBuf::from(value)),
             "--measurement-regime" if value == "retained-bindings-prefix" => measurement_regime = true,
+            "--bootstrap-regime" if value == "gnu-ert" => ert_bootstrap = true,
+            "--ert-adapter" if value == "romacs-batch" => ert_batch_adapter = true,
+            "--ert-adapter" if value == "none" => ert_batch_adapter = false,
+            "--selector" => selector = value,
             "--harness" => harness = Some(PathBuf::from(value)),
             "--plan" => plan = Some(PathBuf::from(value)),
             "--reporter" => reporter = Some(PathBuf::from(value)),
@@ -85,7 +96,8 @@ fn parse() -> Args {
     let (Some(harness), Some(plan)) = (harness, plan) else {
         usage()
     };
-    if (measurement_regime && kind != HarnessKind::Real)
+    if ((measurement_regime || ert_batch_adapter || selector != "t") && kind != HarnessKind::Real)
+        || (measurement_regime && ert_bootstrap)
         || (kind == HarnessKind::Real && (!skip.is_empty() || !probe.is_empty()))
         || (kind == HarnessKind::Mini && reporter.is_some())
         || (kind == HarnessKind::Real && audit.is_some())
@@ -95,6 +107,9 @@ fn parse() -> Args {
     Args {
         kind,
         measurement_regime,
+        ert_bootstrap,
+        ert_batch_adapter,
+        selector,
         reporter,
         load_path,
         preload,
@@ -239,12 +254,20 @@ fn run_real(vm: &mut Vm, args: &Args, file: &str) -> ! {
     })) {
         Ok(Ok(())) => {}
         Ok(Err(e)) => {
+            let report = vm.load_report();
+            let failed_forms = report["steps"].as_array().map(|steps| steps.iter()
+                .filter(|step| step["status"] != "ok").collect::<Vec<_>>());
             emit(
-                json!({"event": "setup", "ok": false, "phase": "test-load", "file": file, "error": e}),
+                json!({"event": "setup", "ok": false, "phase": "test-load", "file": file, "error": e, "failed_forms": failed_forms}),
             );
             std::process::exit(4);
         }
         Err(_) => panic_exit("test-load", "panic", None),
+    }
+    if let Err((panic, error)) = eval(vm, &format!("(setq ert-scoreboard-selector {})", args.selector)) {
+        if panic { panic_exit("selector", &error, None); }
+        emit(json!({"event": "setup", "ok": false, "phase": "selector", "error": error}));
+        std::process::exit(4);
     }
     let result = if let Some(path) = &args.reporter {
         match catch_unwind(AssertUnwindSafe(|| vm.load_file(path).map(shown))) {
@@ -295,6 +318,10 @@ fn main() {
     let forms = plan["forms"].as_array().cloned().unwrap_or_default();
 
     let mut vm = Vm::new();
+    if let Err((_, error)) = eval(&mut vm, "(setq noninteractive t)") {
+        emit(json!({"event": "setup", "ok": false, "phase": "batch-mode", "error": error}));
+        std::process::exit(3);
+    }
     if let Err(e) = vm.set_load_path(&args.load_path) {
         emit(json!({"event": "setup", "ok": false, "phase": "load-path", "error": e}));
         std::process::exit(3);
@@ -316,13 +343,13 @@ fn main() {
         let failed = result.is_err();
         let retained = result.as_ref().is_err_and(|error| retained_bindings_failure(args.measurement_regime, link, error));
         chain.push(json!({"file": link, "loaded": !failed, "retained_failed_prefix": retained,
-                          "error": result.err().map(|e| e.chars().take(400).collect::<String>())}));
+                          "error": result.err()}));
         if failed && !retained {
             break; // the chain as far as it reaches, exactly as the warm census
         }
     }
-    emit(json!({"event": "chain", "entries": chain, "regime": if args.measurement_regime { "MEASUREMENT REGIME: retained failed bindings prefix" } else { "standard" }}));
-    if args.kind == HarnessKind::Real && chain.iter().any(|entry| entry["loaded"] == false && entry["retained_failed_prefix"] != true) {
+    emit(json!({"event": "chain", "entries": chain, "regime": if args.measurement_regime { "MEASUREMENT REGIME: retained failed bindings prefix" } else if args.ert_bootstrap { "gnu-ert" } else { "standard" }}));
+    if (args.kind == HarnessKind::Real || args.ert_bootstrap) && chain.iter().any(|entry| entry["loaded"] == false && entry["retained_failed_prefix"] != true) {
         std::process::exit(3);
     }
 
@@ -333,6 +360,16 @@ fn main() {
             std::process::exit(4);
         }
         Err(_) => panic_exit("harness", "panic", None),
+    }
+    if args.ert_batch_adapter {
+        match eval(&mut vm, "(require 'romacs-ert-batch)") {
+            Ok(_) => emit(json!({"event": "ert-adapter", "name": "romacs-batch", "automatic_window_isolation": false, "condition_format": "native-prin1"})),
+            Err((true, error)) => panic_exit("ert-adapter", &error, None),
+            Err((false, error)) => {
+                emit(json!({"event": "setup", "ok": false, "phase": "ert-adapter", "error": error}));
+                std::process::exit(4);
+            }
+        }
     }
     if let Some(audit) = &args.audit {
         match catch_unwind(AssertUnwindSafe(|| vm.load_file(audit).map(|_| ()))) {

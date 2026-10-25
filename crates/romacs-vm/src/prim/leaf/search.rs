@@ -1,4 +1,4 @@
-//! GNU search.c:2344 string replacement. No Lisp allocation until assembly ends.
+//! GNU search.c:2344 string replacement.
 use super::*;
 
 impl Leaf<'_> {
@@ -47,11 +47,9 @@ impl Leaf<'_> {
         if start > end || end > source.chars {
             return Err(Fault::Range(Value::integer(start as i64).map_err(Fault::Error)?, Value::integer(end as i64).map_err(Fault::Error)?));
         }
+        let mut case_action = 0;
         if fixedcase == Value::NIL && self.string_view(newtext)?.chars != 0 {
             let matched: Vec<u32> = source.chars().skip(start).take(end - start).collect();
-            if matched.iter().any(|&c| c > 127) {
-                return Err(Fault::Error("replace-match: case-table conversion is not implemented".into()));
-            }
             let defaults: Vec<u8> = matched.iter().map(|&c| {
                 match romacs_regex_engine::standard_syntax_class_for_code(c) {
                     romacs_regex_engine::SyntaxClass::Word => 1,
@@ -63,11 +61,12 @@ impl Leaf<'_> {
             let mut previous_word = self.casing_word_flags(&[u32::from(b'\n')], &[0])?[0];
             let (mut lowercase, mut uppercase, mut multiletter, mut nonuppercase_initial) = (false, false, false, false);
             for (&code, word) in matched.iter().zip(words) {
-                let c = code as u8;
-                if c.is_ascii_lowercase() {
+                let code = if !source.multibyte && code >= 128 { code + crate::lstring::BYTE8_OFFSET } else { code };
+                let upper = self.case_mapping_character(code, true)? != code;
+                if !upper && self.case_mapping_character(code, false)? != code {
                     lowercase = true;
                     if previous_word { multiletter = true; } else { nonuppercase_initial = true; }
-                } else if c.is_ascii_uppercase() {
+                } else if upper {
                     uppercase = true;
                     if previous_word { multiletter = true; }
                 } else if !previous_word {
@@ -75,9 +74,10 @@ impl Leaf<'_> {
                 }
                 previous_word = word;
             }
-            if (!lowercase && multiletter) || (!nonuppercase_initial && (multiletter || uppercase)) {
-                return Err(Fault::Error("replace-match: case-table conversion is not implemented".into()));
-            }
+            case_action = if !lowercase && multiletter { 1 }
+                else if !nonuppercase_initial && multiletter { 2 }
+                else if !nonuppercase_initial && uppercase { 1 }
+                else { 0 };
         }
         let groups = self.vm.regexp.groups.clone();
         let replacement = self.string_view(newtext)?;
@@ -115,12 +115,26 @@ impl Leaf<'_> {
             }
             pieces.push((newtext, last, chars.len()));
         }
-        pieces.push((string, end, source.chars));
-        // Preserve the true encoding flag, including explicitly multibyte ASCII.
         let multibyte = source.multibyte || (replacement.multibyte && (literal || pieces.iter().any(|&(v, a, b)| v == newtext && a < b)));
+        if case_action != 0 {
+            let mut middle_multibyte = false;
+            for &(value, a, b) in &pieces[1..] {
+                middle_multibyte |= a < b && self.string_view(value)?.multibyte;
+            }
+            let middle = self.join_replacement_parts(&pieces[1..], middle_multibyte)?;
+            let middle = if case_action == 1 { self.case_convert(middle, false)? }
+                else { crate::prim::prims::capitalize::capitalized(self, middle, true)? };
+            pieces.truncate(1);
+            pieces.push((middle, 0, self.string_view(middle)?.chars));
+        }
+        pieces.push((string, end, source.chars));
+        self.join_replacement_parts(&pieces, multibyte)
+    }
+
+    fn join_replacement_parts(&mut self, pieces: &[(Value, usize, usize)], multibyte: bool) -> std::result::Result<Value, Fault> {
         let mut output = data::LispString::from_bytes(Vec::new(), multibyte);
         let mut assembled = Vec::new();
-        for (value, a, b) in pieces {
+        for &(value, a, b) in pieces {
             let view = self.string_view(value)?;
             if a > b || b > view.chars {
                 return Err(Fault::Range(Value::integer(a as i64).map_err(Fault::Error)?, Value::integer(b as i64).map_err(Fault::Error)?));

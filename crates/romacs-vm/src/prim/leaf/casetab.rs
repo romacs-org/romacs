@@ -188,11 +188,16 @@ impl Leaf<'_> {
     }
 
     pub(crate) fn completion_upcase(&mut self, code: u32) -> std::result::Result<u32, Fault> {
-        let table = self.current_case_mapping(false)?;
-        if self.char_table_element(table, code as usize)? == Value::NIL && (code < 128 || !self.native_case_mapping(table, 1)) {
+        self.case_mapping_character(code, false)
+    }
+
+    pub(crate) fn case_mapping_character(&mut self, code: u32, down: bool) -> std::result::Result<u32, Fault> {
+        let table = self.current_case_mapping(down)?;
+        let kind = if down { 0 } else { 1 };
+        if self.char_table_element(table, code as usize)? == Value::NIL && (code < 128 || !self.native_case_mapping(table, kind)) {
             return Ok(code);
         }
-        Ok(self.case_convert(Value::integer(i64::from(code)).unwrap(), false)?.integer_value().unwrap() as u32)
+        Ok(self.case_convert(Value::integer(i64::from(code)).unwrap(), down)?.integer_value().unwrap() as u32)
     }
 
     fn case_set(

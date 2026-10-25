@@ -3,6 +3,7 @@ use crate::{coordinates::*, data::Object, *};
 use romacs_regex_engine::{self as regex, EmacsStr, MatchRegisters};
 #[path = "regexp_syntax.rs"]
 mod syntax;
+pub(crate) use syntax::parse_syntax_descriptor;
 
 #[derive(Default)]
 pub(super) struct MatchState {

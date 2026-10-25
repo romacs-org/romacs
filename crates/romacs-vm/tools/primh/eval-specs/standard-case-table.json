@@ -4,7 +4,7 @@
   "effect": "reads",
   "gnu_files": ["casetab.c", "chartab.c"],
   "gnu_def": "casetab.c:72",
-  "rust": "src/prims/casetab.rs:3",
+  "rust": "src/prims/casetab.rs:45",
   "args": [],
   "probes": [
     "(list (fboundp 'standard-case-table) (functionp #'standard-case-table) (eq (funcall #'standard-case-table) (standard-case-table)))",

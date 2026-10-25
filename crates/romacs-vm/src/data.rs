@@ -482,6 +482,9 @@ impl Vm {
             let data = self.list_value(&[self.slots[self.buffer_slot].value]);
             return Some((condition, data));
         }
+        if matches!(p, Primitive::Format | Primitive::Message) && error == "floating-point overflow" {
+            return Some((self.intern("overflow-error"), Value::NIL));
+        }
         if p == Primitive::Featurep && error == "featurep subfeature fault" {
             let fault = self.feature_subfeature_matches(x, y).err()?;
             return Some(self.fault(fault));

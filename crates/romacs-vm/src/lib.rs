@@ -24,6 +24,7 @@ mod oclosure;
 mod host_input;
 mod terminal_host;
 mod process_jobs;
+mod environment;
 pub use command::{CommandEvent, CommandOutcome, CommandSignal};
 pub use host_input::{HostEvent, HostFrame, HostInput};
 pub use terminal_host::{TerminalColor, TerminalHost, TerminalInputState, TerminalSnapshot, TerminalStyle, TerminalStyleRun};
@@ -55,6 +56,7 @@ mod hash;
 mod intervals;
 mod properties;
 pub mod text;
+mod backtrace;
 mod threaded;
 
 mod expand;
@@ -981,6 +983,8 @@ enum VariableRedirect {
     /// GNU `SYMBOL_LOCALIZED`: the slot's own `local` table holds per-buffer
     /// bindings. Set-only: never cleared once published.
     Localized,
+    /// Native Boolean defaults with canonical per-buffer values in `local`.
+    LocalizedForwarded(forwarded::Fwd),
     /// GNU `SYMBOL_VARALIAS` (lisp.h): this variable IS another one. Holds a
     /// stable slot ID, never a moving heap Value, so it needs no tracing.
     Alias(usize),
@@ -1038,6 +1042,8 @@ pub struct Vm {
     /// An escape leaving a reentrant `eval`'s engine, re-raised by the caller's
     /// engine. Traced by the collector while present.
     propagated_escape: Option<threaded::Escape>,
+    signal_handlers: Vec<threaded::SignalHandler>,
+    backtrace: backtrace::Backtrace,
     propagated_escape_hooked: bool,
     propagated_eval_depth: Option<usize>,
     /// Set immediately before executing an `eval` form; consumed by the engine.
@@ -1045,6 +1051,7 @@ pub struct Vm {
     /// The embedder's keyboard while one is attached (host_input.rs).
     host_input: Option<Box<dyn host_input::HostInput>>,
     process_jobs: process_jobs::Jobs,
+    environment_snapshot: Option<Vec<Vec<u8>>>,
     terminal_host: Option<Box<dyn terminal_host::TerminalHost>>,
     terminal_bindings: Vec<terminal_host::TerminalBinding>,
     pending_specials: HashSet<String>,
@@ -1148,10 +1155,13 @@ impl Vm {
             eval_depth: 0,
             dynamic_scope: false,
             propagated_escape: None,
+            signal_handlers: Vec::new(),
+            backtrace: backtrace::Backtrace::default(),
             propagated_escape_hooked: false,
             propagated_eval_depth: None,
             host_input: None,
             process_jobs: process_jobs::Jobs::default(),
+            environment_snapshot: Some(environment::snapshot()),
             terminal_host: None,
             terminal_bindings: Vec::new(),
             propagate_next: false,
@@ -1229,6 +1239,8 @@ impl Vm {
         vm.initialize_loader();
         vm.initialize_autoload();
         vm.declare_fileio_specials();
+        vm.specials.extend(["process-environment".into(), "initial-environment".into()]);
+        vm.declare_special_raw("inhibit-eol-conversion", Value::NIL);
         vm.declare_special_raw("text-quoting-style", Value::NIL);
         vm.declare_special_raw("internal--text-quoting-flag", Value::TRUE);
         vm.declare_special_raw("default-text-properties", Value::NIL);
@@ -1282,6 +1294,8 @@ impl Vm {
         }
         vm.declare_special_raw("print-quoted", Value::TRUE);
         vm.declare_special_raw("standard-output", Value::TRUE);
+        // xdisp.c: GNU ERT uses the native log limit when collecting results.
+        vm.declare_special_raw("message-log-max", Value::integer(1000).unwrap());
         vm.declare_special_raw("meta-prefix-char", Value::integer(27).unwrap());
         let command_error_default = vm.intern("command-error-default-function");
         vm.declare_special_raw("command-error-function", command_error_default);
@@ -1344,6 +1358,7 @@ impl Vm {
         self.initialize_annotation_slot(name, i);
         self.initialize_case_table_slot(name, i);
         self.initialize_face_slot(name, i);
+        self.initialize_environment_slot(name);
         if name == "charset-list" { self.ensure_charsets(); }
         prim::initialize_coding_slot(self, name);
         if name == "obarray" {
@@ -2327,7 +2342,20 @@ impl Vm {
     fn unbind(&mut self, n: usize) {
         for _ in 0..n {
             let (slot, value, owner, let_default) = self.dynamic.pop().expect("compiler balances bindings");
-            if let Some(Some(VariableRedirect::Forwarded(fwd))) = self.variable_redirects.get(slot).copied() {
+            let symbol = self.backtrace.bindings.last().filter(|(at, _)| *at == self.dynamic.len()).map(|(_, symbol)| *symbol);
+            self.backtrace.unbind(self.dynamic.len());
+            if let Some(base) = symbol.and_then(|symbol| symbol.index_if(7)).map(|index| index - 1)
+                && self.localized_boolean(base).is_some() && self.local_binding_slots.contains(&slot)
+            {
+                if self.live_buffer_value(owner) {
+                    let table = self.slots[base].local;
+                    if let Some(local) = self.declaration_hash_get(table, owner).expect("localized Boolean table") {
+                        self.slots[local.index(7).expect("private binding") - 1].value = value;
+                    }
+                }
+                continue;
+            }
+            if let Some(fwd) = self.native_forwarding(slot) {
                 self.unbind_forwarded(fwd, value, owner, let_default);
                 continue;
             }

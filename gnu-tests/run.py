@@ -83,9 +83,14 @@ ORDERED_BOOTSTRAP_CHAIN = [
     'emacs-lisp/debug', 'emacs-lisp/backtrace', 'emacs-lisp/ewoc',
     'emacs-lisp/find-func', 'emacs-lisp/pp', 'emacs-lisp/map', 'help-mode',
 ]
+ERT_SOURCE_BOOTSTRAP = ['rlisp/romacs-gnu-ert-bootstrap.el']
+ERT_REPORT_BOOTSTRAP = ['gnu-lisp/help-fns.el', 'rlisp/romacs-cl-print.el']
 
 
-def real_bootstrap_chain(args):
+def source_bootstrap_chain(args):
+    if getattr(args, 'bootstrap', 'standard') == 'ert':
+        return ERT_SOURCE_BOOTSTRAP + (ERT_REPORT_BOOTSTRAP
+                                     if getattr(args, 'harness', 'real') == 'real' else [])
     return ORDERED_BOOTSTRAP_CHAIN if getattr(args, 'bootstrap', 'standard') == 'ordered' else BOOTSTRAP_CHAIN
 
 
@@ -586,7 +591,8 @@ def build_adapter() -> pathlib.Path:
 
 
 def run_romacs(binary: pathlib.Path, rel: str, plan: dict, scratch: pathlib.Path,
-               test_timeout: float, setup_timeout: float, log, extra_args: tuple = ()) -> dict:
+               test_timeout: float, setup_timeout: float, log, extra_args: tuple = (),
+               bootstrap: str = 'standard') -> dict:
     """Run every test of one file, resuming past a hung or crashing test.
 
     Returns {'events': [...], 'results': {name: result}, 'fatal': str|None}.
@@ -601,8 +607,12 @@ def run_romacs(binary: pathlib.Path, rel: str, plan: dict, scratch: pathlib.Path
             cmd += ['--load-path', d]
         for d in [str((RUN_TESTS / rel).parent)]:
             cmd += ['--load-path', d]
-        for link in BOOTSTRAP_CHAIN:
-            cmd += ['--preload', str(ROOT / 'gnu-lisp' / f'{link}.el')]
+        if bootstrap == 'ert':
+            cmd += ['--bootstrap-regime', 'gnu-ert', '--load-path', str(ROOT / 'rlisp'),
+                    '--preload', str(ROOT / 'rlisp/romacs-gnu-ert-bootstrap.el')]
+        else:
+            for link in BOOTSTRAP_CHAIN:
+                cmd += ['--preload', str(ROOT / 'gnu-lisp' / f'{link}.el')]
         for name in skip:
             cmd += ['--skip-test', name]
         cmd += list(extra_args)  # the runner's own tests only
@@ -955,12 +965,24 @@ def harness_defects(real: dict, mini: dict) -> list[dict]:
     def outcome(row):
         value = (row or {}).get('outcome')
         return 'failed' if value == 'errored' else value
+    def expected(row):
+        row = row or {}
+        if row.get('as_expected') is not None:
+            return row['as_expected']
+        # Mini records only these three supported expected-result types.
+        wanted = row.get('expected')
+        if wanted == 't':
+            return True
+        if wanted in (':passed', ':failed'):
+            return outcome(row) == wanted[1:]
+        return None
     return [{'test': name, 'real': real.get(name), 'mini': mini.get(name),
              'category': 'harness-defect'}
             for name in sorted(real.keys() | mini.keys())
             if outcome(real.get(name)) != outcome(mini.get(name))
-            or real.get(name, {}).get('vacuous_void_function')
-            or mini.get(name, {}).get('vacuous_void_function')]
+            or expected(real.get(name)) != expected(mini.get(name))
+            or real.get(name, {}).get('vacuous_void_function', [])
+            != mini.get(name, {}).get('vacuous_void_function', [])]
 
 
 def scoreboard_rows(rel, reference, results, engine, ledger):
@@ -968,7 +990,9 @@ def scoreboard_rows(rel, reference, results, engine, ledger):
     for name in sorted(reference.keys() | results.keys()):
         result, ref = results.get(name), reference.get(name)
         passed = bool(result and ref and result == ref and result['as_expected']
-                      and result['outcome'] != 'skipped' and not result.get('vacuous_void_function'))
+                      and result['outcome'] != 'skipped')
+        unmatched = list((collections.Counter((result or {}).get('vacuous_void_function', []))
+                          - collections.Counter((ref or {}).get('vacuous_void_function', []))).elements())
         exclusion = ledger.get((rel, name))
         if engine == 'romacs' and exclusion and passed:
             raise Refusal(2, f'{rel}::{name} PASSES but EXCLUSIONS.toml excludes it')
@@ -976,6 +1000,7 @@ def scoreboard_rows(rel, reference, results, engine, ledger):
                      'outcome': result and result['outcome'],
                      'as_expected': result and result['as_expected'], 'gnu': ref,
                      'vacuous_void_function': result and result.get('vacuous_void_function', []),
+                     'unmatched_void_function': unmatched,
                      'excluded_by': exclusion,
                      'verdict': 'passed' if passed else 'failed'})
     for file, name in ledger:
@@ -984,12 +1009,24 @@ def scoreboard_rows(rel, reference, results, engine, ledger):
     return rows
 
 
+def verify_real_lisp(pin):
+    command = [sys.executable, str(ROOT / 'tools' / 'lisp_oracle.py'), 'check',
+               '--root', str(ROOT), '--gnu', str(GNU_MIRROR), '--pin', pin]
+    try:
+        result = subprocess.run(command, capture_output=True, text=True)
+    except OSError as error:
+        raise Refusal(3, f'cannot verify real ERT Lisp tree: {error}') from error
+    if result.returncode:
+        raise Refusal(3, f'real ERT Lisp tree validation failed: {result.stdout}{result.stderr}')
+
+
 def cmd_scoreboard(args) -> int:
     """Real ERT execution; no mini classification or stale baseline can bless it."""
     from ert_report import ReportError, parse_report, run_native
     sys.path.insert(0, str(ROOT / 'scripts'))
     import gnu_oracle
     p = verify_pin()
+    verify_real_lisp(p['gnu_commit'])
     # The oracle's binary identity, not the checkout name, binds GNU evidence.
     oracle_binary = os.environ.get('ROMACS_GNU_ORACLE') or os.environ.get('ROMACS_FORCE_ORACLE_PATH')
     ident = gnu_oracle.require(oracle_binary)
@@ -1006,16 +1043,7 @@ def cmd_scoreboard(args) -> int:
     engine = 'gnu' if args.harness_fidelity else args.engine
     binary = (pathlib.Path(args.bin) if args.bin else build_adapter()) if engine == 'romacs' else None
     ert = ROOT / 'gnu-lisp' / 'emacs-lisp' / 'ert.el'
-    # Never label edited source as the pin, even outside a Git source mirror.
-    try:
-        expected_lisp = subprocess.run(['git', '-C', str(GNU_MIRROR), 'rev-parse',
-                                        f'{PIN_COMMIT}:lisp'],
-                                       check=True, capture_output=True, text=True).stdout.strip()
-    except (OSError, subprocess.CalledProcessError) as error:
-        raise Refusal(3, f'cannot verify pinned Lisp tree: {error}') from error
-    if git_tree_id(ROOT / 'gnu-lisp') != expected_lisp:
-        raise Refusal(3, 'real ERT Lisp tree differs from GNU pin')
-    rows, defects, reports, errors = [], [], {}, {}
+    rows, defects, reports, errors, executions = [], [], {}, {}, {}
     with ScratchTree(), tempfile.TemporaryDirectory(prefix='gts-real-') as tmp:
         scratch = pathlib.Path(tmp)
 
@@ -1024,22 +1052,29 @@ def cmd_scoreboard(args) -> int:
             home.mkdir()
             target = RUN_TESTS / rel
             logs = []
+            failed_engine = 'gnu'
             try:
                 reference = run_native(ident['path'], target, None, ert,
                                        [str(target.parent)], home, args.setup_timeout,
-                                       environment=gnu_env(home))
+                                       environment=gnu_env(home), selector=getattr(args, 'selector', 't'))
                 logs.append(reference['output'])
                 report = reference
                 if engine == 'romacs':
+                    failed_engine = 'romacs'
                     plan = extract(rel, home, ident['path'])
                     cmd = [str(binary), '--harness-kind', 'real', '--harness', str(ert),
-                           '--plan', plan['path']]
-                    for directory in load_path() + [str(target.parent)]:
+                           '--plan', plan['path'], '--selector', getattr(args, 'selector', 't')]
+                    if getattr(args, 'ert_adapter', 'none') != 'none':
+                        cmd += ['--ert-adapter', args.ert_adapter]
+                    for directory in load_path() + [str(ROOT / 'rlisp'), str(target.parent)]:
                         cmd += ['--load-path', directory]
                     if getattr(args, 'bootstrap', 'standard') == 'ordered':
                         cmd += ['--measurement-regime', 'retained-bindings-prefix']
-                    for link in real_bootstrap_chain(args):
-                        cmd += ['--preload', str(ROOT / 'gnu-lisp' / f'{link}.el')]
+                    if getattr(args, 'bootstrap', 'standard') == 'ert':
+                        cmd += ['--bootstrap-regime', 'gnu-ert']
+                    for link in source_bootstrap_chain(args):
+                        path = ROOT / link if getattr(args, 'bootstrap', 'standard') == 'ert' else ROOT / 'gnu-lisp' / f'{link}.el'
+                        cmd += ['--preload', str(path)]
                     proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                           text=True, errors='replace', env=gnu_env(home),
                                           timeout=args.setup_timeout, cwd=target.parent)
@@ -1053,14 +1088,25 @@ def cmd_scoreboard(args) -> int:
                         raise ReportError('incomplete mini harness fidelity execution')
                 return rel, reference, report, mini, None
             except (ReportError, Refusal, OSError, subprocess.TimeoutExpired) as error:
-                logs.append(getattr(error, 'output', '') or '')
-                return rel, None, None, None, str(error)
+                diagnostic = getattr(error, 'output', '') or ''
+                if diagnostic not in logs:
+                    logs.append(diagnostic)
+                evidence = getattr(error, 'evidence', None)
+                if evidence is None and isinstance(error, subprocess.TimeoutExpired):
+                    try:
+                        parse_report((error.output or b'').decode(errors='replace') if isinstance(error.output, bytes) else error.output or '', -1)
+                    except ReportError as incomplete:
+                        evidence = incomplete.evidence
+                return rel, None, dict(evidence or ReportError(str(error)).evidence,
+                                       engine=failed_engine, complete=False), None, str(error)
             finally:
                 (out / 'log' / (rel.replace('/', '__') + '.log')).write_text(
                     '\n'.join(x.decode(errors='replace') if isinstance(x, bytes) else x for x in logs))
 
         with concurrent.futures.ThreadPoolExecutor(args.jobs) as pool:
             for rel, reference, report, mini, error in pool.map(one, files):
+                executions[rel] = dict({key: report[key] for key in ('selected', 'started', 'terminal', 'execution', 'complete') if key in report},
+                                       engine=report.get('engine', engine))
                 if error:
                     errors[rel] = error
                     continue
@@ -1073,19 +1119,25 @@ def cmd_scoreboard(args) -> int:
                     errors[rel] = str(error)
     verify_pin()
     summary = {'harness': 'gnu-ert', 'is_gnu_ert': True, 'engine': engine,
+               'is_unmodified_gnu_ert': getattr(args, 'ert_adapter', 'none') == 'none',
+               'ert_adapter': {'name': getattr(args, 'ert_adapter', 'none'),
+                               'sha256': hashlib.sha256((ROOT / 'rlisp/romacs-ert-batch.el').read_bytes()).hexdigest()
+                               if getattr(args, 'ert_adapter', 'none') == 'romacs-batch' else None,
+                               'condition_format': 'native-prin1' if getattr(args, 'ert_adapter', 'none') == 'romacs-batch' else 'gnu-pp',
+                               'automatic_window_isolation': getattr(args, 'ert_adapter', 'none') == 'none'},
                'pin': p, 'gnu': ident, 'files': len(files), 'completed_files': len(reports),
-               'selector': 't (including expensive and unstable tests)',
+               'selector': getattr(args, 'selector', 't'),
                'bootstrap_regime': ('MEASUREMENT REGIME: retained failed bindings prefix'
                                     if getattr(args, 'bootstrap', 'standard') == 'ordered'
-                                    else 'standard'),
-               'bootstrap_chain': real_bootstrap_chain(args) if engine == 'romacs' else [],
+                                    else 'gnu-ert' if getattr(args, 'bootstrap', 'standard') == 'ert' else 'standard'),
+               'bootstrap_chain': source_bootstrap_chain(args) if engine == 'romacs' else [],
                'load_strategy': 'GNU pinned install; romacs pristine source tree (recursive source load path)',
                'scope': 'test/lisp, GNU Makefile directory pruning; empty files fail closed',
                'romacs_commit': git_or_none('rev-parse', 'HEAD'),
                'adapter_sha256': hashlib.sha256(binary.read_bytes()).hexdigest() if binary else None,
                'excluded_tests': sum(bool(row['excluded_by']) for row in rows),
-               'vacuous_passes': sum(bool(row['vacuous_void_function']) for row in rows),
-               'ert_summaries': reports, 'infrastructure_errors': errors,
+               'vacuous_passes': sum(bool(row['unmatched_void_function']) for row in rows),
+               'ert_summaries': reports, 'execution_reports': executions, 'infrastructure_errors': errors,
                'harness_defects': defects, 'harness_fidelity': args.harness_fidelity,
                'ert_totals': {key: sum(s[key] for s in reports.values())
                               for key in ('passed', 'failed', 'skipped', 'total')}}
@@ -1100,9 +1152,17 @@ def cmd_scoreboard(args) -> int:
 
 
 def cmd_run(args) -> int:
+    if getattr(args, 'ert_adapter', 'none') != 'none' and (
+            args.harness != 'real' or args.engine != 'romacs' or args.harness_fidelity):
+        raise Refusal(2, '--ert-adapter requires --harness real --engine romacs without --harness-fidelity')
     if getattr(args, 'bootstrap', 'standard') == 'ordered' and (
             args.harness != 'real' or args.engine != 'romacs' or args.harness_fidelity):
-        raise Refusal(2, '--bootstrap ordered requires --harness real --engine romacs')
+        raise Refusal(2, f'--bootstrap {args.bootstrap} requires --harness real --engine romacs')
+    if getattr(args, 'bootstrap', 'standard') == 'ert' and (
+            args.engine != 'romacs' or args.harness_fidelity):
+        raise Refusal(2, '--bootstrap ert requires --engine romacs without --harness-fidelity')
+    if getattr(args, 'selector', 't') != 't' and args.harness != 'real':
+        raise Refusal(2, '--selector requires --harness real')
     if args.harness == 'real' or args.harness_fidelity:
         return cmd_scoreboard(args)
     if args.engine != 'romacs':
@@ -1129,7 +1189,8 @@ def cmd_run(args) -> int:
         home = scratch / ('home-' + rel.replace('/', '__'))
         home.mkdir()
         with open(out / 'log' / (rel.replace('/', '__') + '.log'), 'w') as log:
-            result = run_romacs(binary, rel, plans[rel], home, args.test_timeout, args.setup_timeout, log)
+            result = run_romacs(binary, rel, plans[rel], home, args.test_timeout, args.setup_timeout, log,
+                                bootstrap=getattr(args, 'bootstrap', 'standard'))
         try:
             baselines[rel] = refresh_catch_audit(rel, baselines[rel], plans[rel], result, home, args.setup_timeout)
         finally:
@@ -1161,6 +1222,8 @@ def cmd_run(args) -> int:
         'adapter_sha256': hashlib.sha256(binary.read_bytes()).hexdigest(),
         'romacs_commit': git_or_none('rev-parse', 'HEAD'),
         'romacs_tree_dirty': None if git_or_none('rev-parse', 'HEAD') is None else bool(git_or_none('status', '--porcelain')),
+        'bootstrap_regime': 'gnu-ert' if getattr(args, 'bootstrap', 'standard') == 'ert' else 'standard',
+        'bootstrap_chain': source_bootstrap_chain(args),
         'bootstrap_chain_reached': chain,
         'textual_ert_deftest_forms': sum((TESTS / rel).read_text(errors='replace').count('(ert-deftest')
                                          for rel in files if (TESTS / rel).is_file()),
@@ -1202,8 +1265,11 @@ def main(argv=None) -> int:
     r.add_argument('--jobs', type=int, default=4)
     r.add_argument('--out')
     r.add_argument('--harness', choices=('mini', 'real'), default='mini')
-    r.add_argument('--bootstrap', choices=('standard', 'ordered'), default='standard',
-                   help='ordered: MEASUREMENT REGIME retaining failed bindings prefix; real Romacs only')
+    r.add_argument('--bootstrap', choices=('standard', 'ordered', 'ert'), default='standard',
+                   help='ert: strict GNU ERT source dependencies; ordered: retained-prefix measurement only')
+    r.add_argument('--selector', default='t', help='GNU ERT selector as a Lisp expression; real harness only')
+    r.add_argument('--ert-adapter', choices=('none', 'romacs-batch'), default='none',
+                   help='romacs-batch: GNU ERT without precautionary window-layout isolation')
     r.add_argument('--harness-fidelity', action='store_true',
                    help='compare mini under native pinned GNU with genuine ERT; differences are defects')
     r.add_argument('--engine', choices=('romacs', 'gnu'), default='romacs',

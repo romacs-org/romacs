@@ -1,4 +1,27 @@
 use super::*;
+
+#[test]
+fn keymap_query_preserves_the_threaded_register_allocation() {
+    let mut vm = Vm::new();
+    let buffer = vm.allocate_object(Object::Buffer(Box::new(
+        text::Text::new(b"").unwrap().into(),
+    )));
+    vm.slots[vm.buffer_slot].value = buffer;
+    let tag = Value::reference(vm.slot("keymap") + 1, 7);
+    let map = vm.list_value(&[tag]);
+    vm.annotated_mut(buffer).unwrap().local_keymap = map;
+    let property = Value::reference(vm.slot("local-map") + 1, 7);
+    vm.stack.clear();
+    vm.stack.shrink_to_fit();
+    let registers = vm.stack.as_ptr();
+    let capacity = vm.stack.capacity();
+    assert_eq!(vm.keymap_at_point(property).unwrap(), map);
+    // A native leaf call cannot invalidate the interpreter's cached registers.
+    assert_eq!(vm.stack.as_ptr(), registers);
+    assert_eq!(vm.stack.capacity(), capacity);
+    assert!(vm.stack.is_empty());
+}
+
 #[test]
 fn mixed_buffer_anchor_coordinates_across_directory_boundaries() {
     let source = "English Ελληνικά Кириллица\n".repeat(600);

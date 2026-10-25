@@ -4,6 +4,18 @@ use super::*;
 fn sym(s: &str) -> Form { Form::Sym(s.into()) }
 fn quote(f: Form) -> Form { Form::List(vec![sym("quote"), f]) }
 fn call(s: &str, args: Vec<Form>) -> Form { Form::List(std::iter::once(sym(s)).chain(args).collect()) }
+
+fn custom_locality(name: Form, expression: Form) -> Form {
+    let value = Form::Generated(expand::generated_id());
+    let automatic = call("memq", vec![value.clone(), quote(Form::List(vec![sym("t"), sym("permanent")]))]);
+    let permanent = call("memq", vec![value.clone(), quote(Form::List(vec![sym("permanent"), sym("permanent-only")]))]);
+    call("let", vec![
+        Form::List(vec![Form::List(vec![value, expression])]),
+        call("if", vec![automatic, call("make-variable-buffer-local", vec![quote(name.clone())])]),
+        call("if", vec![permanent, call("put", vec![quote(name), quote(sym("permanent-local")), sym("t")])]),
+    ])
+}
+
 impl Vm {
     pub(super) fn variable_definition(&mut self, b: &mut Builder, head: &str, rest: &[Form]) -> Result<usize> {
         if rest.is_empty() { return Err("variable definition requires a symbol".into()); }
@@ -51,6 +63,10 @@ impl Vm {
                     forms.push(call("defvar", rest[..3].to_vec()));
                 }
                 for pair in rest[3..].chunks_exact(2) {
+                    if pair[0].sym()? == ":local" {
+                        forms.push(custom_locality(name.clone(), pair[1].clone()));
+                        continue;
+                    }
                     let key = match pair[0].sym()? {
                         ":type" => "custom-type", ":set" => "custom-set", ":get" => "custom-get",
                         ":group" => "custom-group", ":initialize" => "custom-initialize",

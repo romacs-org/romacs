@@ -36,6 +36,13 @@ fn subrp(cx, object: Value) {
     Ok(if cx.kind(object) == Kind::Subr { Value::TRUE } else { Value::NIL })
 }}
 
+// Rust primitives and register-code closures carry no GNU native-compilation
+// unit. A GNU native-comp object producer would need a distinct representation.
+defsubr! { name = "native-comp-function-p", gnu = "data.c:1067", effect = Pure,
+fn native_comp_function_p(_cx, _object: Value) {
+    Ok(Value::NIL)
+}}
+
 // GNU requires a closure whose CLOSURE_CODE is a string (data.c:536).
 // VM2 closures contain its own register-code representation, not GNU bytecode;
 // neither the GNU #[...] reader nor make-byte-code is implemented. Thus no

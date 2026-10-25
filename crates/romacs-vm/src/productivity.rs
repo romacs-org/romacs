@@ -1,6 +1,9 @@
 //! Synchronous local productivity primitives. Eval-stream is a trusted local
 //! control interface, not a sandbox; subprocesses inherit the caller environment.
 use crate::{Form, Result, Value, Vm};
+#[path = "productivity_format.rs"]
+mod numeric_format;
+use numeric_format::FormatSpec;
 impl Vm {
     /// Whether an owned background command completed since the last drain.
     pub fn background_processes_ready(&self) -> bool { self.process_jobs.has_ready() }
@@ -62,8 +65,9 @@ impl Vm {
         let mut unicode_high = false;
         let message_multibyte = !byte_template || arguments[1..].iter()
             .any(|&value| self.str_view(value).is_some_and(|s| s.is_multibyte()));
-        let mut args = arguments[1..].iter().copied();
-        let mut chars = format.chars();
+        let mut argument = 0usize;
+        let codes = format.chars().collect::<Vec<_>>();
+        let mut chars = codes.iter().copied().peekable();
         while let Some(c) = chars.next() {
             if c != b'%' as u32 {
                 // Only literal template characters are requoted (GNU editfns.c).
@@ -88,48 +92,66 @@ impl Vm {
                 }
                 continue;
             }
-            let spec = chars
-                .next()
-                .and_then(char::from_u32)
-                .ok_or("incomplete format specifier")?;
-            if spec == '%' {
+            let spec = FormatSpec::parse(&mut chars)?;
+            if let Some(index) = spec.argument { argument = index; }
+            if spec.conversion == '%' {
                 out.push(b'%');
                 continue;
             }
-            if !matches!(spec, 's' | 'S' | 'd' | 'c') {
-                return Err("unsupported format specifier (supported: %s %S %d %c %%)".into());
-            }
-            let value = args.next().ok_or("not enough format arguments")?;
-            if spec == 'c' {
+            let value = *arguments.get(argument + 1).ok_or("not enough format arguments")?;
+            argument += 1;
+            let mut raw = false;
+            let piece = if spec.conversion == 'c' {
                 let code = value.integer_value()
-                    .ok_or("Format specifier doesn’t match argument type")?;
+                    .ok_or("Format specifier doesn't match argument type")?;
                 if !(0..=0x3fffff).contains(&code) {
                     return Err("format character out of range".into());
                 }
                 let code = code as u32;
-                unicode_high |= code >= 128;
                 let mut encoded = [0; 5];
                 let width = crate::lstring::char_string(code, &mut encoded);
-                out.extend_from_slice(&encoded[..width]);
-            } else if spec == 'd' {
-                out.extend_from_slice(value.as_integer()?.to_string().as_bytes());
-            } else if spec == 's'
+                spec.character(encoded[..width].to_vec(), code)
+            } else if spec.conversion == 's'
                 && let Some(text) = self.str_view(value)
             {
-                if text.is_multibyte() {
-                    unicode_high |= !text.bytes().is_ascii();
-                } else {
-                    raw_high |= !text.bytes().is_ascii();
-                    if quoting_style.is_some() && !text.bytes().is_ascii() {
-                        raw_ranges.push(out.len()..out.len() + text.bytes().len());
-                    }
-                }
-                out.extend_from_slice(text.bytes());
+                raw = !text.is_multibyte();
+                spec.text(text.bytes().to_vec(), !raw, 8)
+            } else if matches!(spec.conversion, 's' | 'S') {
+                let printed = self.format_print(value, spec.conversion == 'S', 0)?;
+                spec.text(printed, true, 8)
             } else {
-                let printed = self.format_print(value, spec == 'S', 0)?;
-                unicode_high |= !printed.is_ascii();
-                out.extend_from_slice(&printed);
+                let numeric = if matches!(spec.conversion, 'e' | 'f' | 'g') {
+                    if let Some(number) = self.bigint_value(value)
+                        && (i64::try_from(&number).is_ok() || u64::try_from(&number).is_ok()) {
+                        spec.integer_float(&number)
+                    } else {
+                        spec.float(self.number(value).map_err(|_| "Format specifier doesn't match argument type")?)
+                    }
+                } else {
+                    let float = self.bigint_value(value).is_none();
+                    let number = if let Some(number) = self.bigint_value(value) { number }
+                        else {
+                            use num_bigint::ToBigInt;
+                            let number = self.number(value).map_err(|_| "Format specifier doesn't match argument type")?;
+                            if !number.is_finite() && matches!(spec.conversion, 'd' | 'i') {
+                                out.extend_from_slice(spec.float(number).as_bytes());
+                                continue;
+                            }
+                            number.to_bigint().ok_or("floating-point overflow")?
+                        };
+                    if float { spec.truncated_float(&number) } else { spec.integer(&number) }
+                };
+                numeric.into_bytes()
+            };
+            if raw {
+                raw_high |= !piece.is_ascii();
+                if quoting_style.is_some() && !piece.is_ascii() {
+                    raw_ranges.push(out.len()..out.len() + piece.len());
+                }
+            } else {
+                unicode_high |= !piece.is_ascii();
             }
+            out.extend_from_slice(&piece);
         }
         if quoting_style.is_some() && unicode_high && raw_high {
             // GNU promotes each unibyte octet separately, never as UTF-8.

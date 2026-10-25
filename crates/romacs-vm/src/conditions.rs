@@ -134,6 +134,35 @@ impl Vm {
         self.conditions.put(id, property, value);
         value
     }
+    fn unobserved_condition_ancestry(&self, id: SymbolId, property: Value) -> Option<&[SymbolId]> {
+        let entry = self.conditions.entries.get(&id)?;
+        if entry.properties.iter().any(|(key, _)| *key == property) { return None; }
+        entry.builtin.as_ref().map(|(ancestry, _)| ancestry.as_slice())
+    }
+    // Search retains this projection when a returning handler replaces its property.
+    pub(super) fn signal_conditions(&mut self, condition: Value) -> Value {
+        let Some(id) = SymbolId::new(condition) else { return Value::NIL; };
+        let property = self.intern_symbol("error-conditions");
+        if let Some(ancestry) = self.unobserved_condition_ancestry(id, property) {
+            let values: Vec<_> = ancestry.iter().map(|id| id.value()).collect();
+            return self.list_value(&values);
+        }
+        let conditions = self.get_property(id, property);
+        if conditions != Value::NIL { return conditions; }
+        let error = self.intern_symbol("error");
+        self.list_value(&[error])
+    }
+
+    pub(super) fn publish_signal_conditions(&mut self, condition: Value, conditions: Value) {
+        let Some(id) = SymbolId::new(condition) else { return; };
+        let property = self.intern_symbol("error-conditions");
+        if self.unobserved_condition_ancestry(id, property).is_some() {
+            // A callback can observe and mutate the list with `get'. Publish
+            // the search's own list so subsequent matching sees those edits.
+            self.conditions.put(id, property, conditions);
+        }
+    }
+
     pub(super) fn condition_matches(&mut self, condition: Value, choice: Value) -> bool {
         if choice == Value::TRUE {
             return true;

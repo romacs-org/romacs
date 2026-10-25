@@ -151,19 +151,18 @@ fn table_entries_are_unique_and_cite_gnu() {
     }
 }
 
-/// after-load-alist and current-load-list are DEFVAR_LISPs that lread.c's
-/// syms_of_lread sets to Qnil (lread.c:5650, lread.c:5695). The dumped GNU
-/// image has run Lisp that filled both (and `load' rebinds the second), so
+/// These loader DEFVAR_LISPs begin at Qnil in syms_of_lread. The dumped GNU
+/// image has run Lisp that filled its history (and `load' rebinds its list), so
 /// the transcripts cannot show the C-time value; this pins it, and that both
 /// are special and forwarded to object storage.
 #[test]
 fn load_variables_start_as_gnus_c_nil() {
     let mut vm = Vm::new();
     let v = vm
-        .eval_source_raw("(prin1-to-string (condition-case e (list after-load-alist current-load-list (special-variable-p 'after-load-alist) (special-variable-p 'current-load-list)) (error e)))")
+        .eval_source_raw("(prin1-to-string (condition-case e (list after-load-alist current-load-list load-history eval-buffer-list (special-variable-p 'after-load-alist) (special-variable-p 'current-load-list) (special-variable-p 'load-history) (special-variable-p 'eval-buffer-list)) (error e)))")
         .unwrap();
-    assert_eq!(vm.display(v).unwrap(), "\"(nil nil t t)\"");
-    for name in ["after-load-alist", "current-load-list"] {
+    assert_eq!(vm.display(v).unwrap(), "\"(nil nil nil nil t t t t)\"");
+    for name in ["after-load-alist", "current-load-list", "load-history", "eval-buffer-list"] {
         assert!(matches!(fwd(&mut vm, name), Fwd::Obj(_)), "{name} is a DEFVAR_LISP");
     }
 }

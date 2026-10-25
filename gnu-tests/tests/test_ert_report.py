@@ -4,6 +4,7 @@ import json
 import os
 import pathlib
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -13,6 +14,8 @@ import ert_report
 
 
 def event(kind, **fields):
+    if kind == 'result':
+        fields.setdefault('vacuous_void_function', [])
     return 'ERT-SCOREBOARD ' + json.dumps(dict(event=kind, **fields)) + '\n'
 
 
@@ -21,8 +24,9 @@ def report(rows=None):
     skipped = sum(outcome == 'skipped' for _, outcome, _ in rows)
     expected = sum(ok and outcome != 'skipped' for _, outcome, ok in rows)
     unexpected = len(rows) - expected - skipped
-    return (event('registered', names=[name for name, _, _ in rows])
-            + ''.join(event('result', test=name, outcome=outcome, as_expected=ok)
+    return (event('selected', names=[name for name, _, _ in rows])
+            + ''.join(event('started', test=name)
+                      + event('result', test=name, outcome=outcome, as_expected=ok)
                       for name, outcome, ok in rows)
             + f'Ran {len(rows)} tests, {expected} results as expected, {unexpected} unexpected'
               + (f', {skipped} skipped' if skipped else '') + ' (date, 0.001 sec)\n'
@@ -30,6 +34,9 @@ def report(rows=None):
 
 
 class Parser(unittest.TestCase):
+    def test_missing_absence_audit_is_not_empty_evidence(self):
+        self.rejects(report().replace(', "vacuous_void_function": []', ''))
+
     def rejects(self, text, rc=0):
         with self.assertRaises(ValueError, msg=f'{inspect.stack()[1].function}: invalid ERT report accepted') as caught:
             ert_report.parse_report(text, rc)
@@ -40,6 +47,10 @@ class Parser(unittest.TestCase):
         self.assertEqual(value['results'], {'a': {'outcome': 'passed', 'as_expected': True}})
         self.assertEqual(value['summary'], dict(passed=1, failed=0, skipped=0, total=1))
         self.assertEqual(value['registered'], 1)
+        self.assertEqual(value['execution'], dict(selected=1, started=1, terminal=1))
+        self.assertEqual(value['selected'], ['a'])
+        self.assertEqual(value['started'], ['a'])
+        self.assertEqual(value['terminal'], ['a'])
         self.assertIs(value['complete'], True)
 
     def test_expected_failure_and_skip_are_raw_outcomes(self):
@@ -56,6 +67,30 @@ class Parser(unittest.TestCase):
 
     def test_death_even_with_complete_output(self):
         self.rejects(report(), -9)
+
+    def test_partial_execution_evidence_survives_death(self):
+        text = (event('selected', names=['a', 'b'])
+                + event('started', test='a')
+                + event('result', test='a', outcome='passed', as_expected=True)
+                + event('started', test='b'))
+        with self.assertRaises(ert_report.ReportError) as caught:
+            ert_report.parse_report(text, -9)
+        self.assertEqual(caught.exception.evidence['execution'],
+                         dict(selected=2, started=2, terminal=1))
+        self.assertEqual(caught.exception.evidence['terminal'], ['a'])
+        self.assertFalse(caught.exception.evidence['complete'])
+
+    def test_starts_are_required_once_and_in_order(self):
+        start = event('started', test='a')
+        self.rejects(report().replace(start, ''))
+        self.rejects(report().replace(start, start * 2))
+        self.rejects(report().replace(start, event('started', test='b')))
+        self.rejects(start + report())
+        self.rejects(report().replace(event('done'), start + event('done')))
+        second = report([('a', 'passed', True), ('b', 'passed', True)])
+        self.rejects(second.replace(event('started', test='b'), '')
+                     .replace(start, start + event('started', test='b')))
+        self.rejects(second.replace('"names": ["a", "b"]', '"names": ["b", "a"]'))
 
     def test_exit_status_must_match_unexpected_results(self):
         self.rejects(report(), 1)
@@ -105,10 +140,71 @@ class Native(unittest.TestCase):
         binary = os.environ.get('ROMACS_GNU_ORACLE') or os.environ.get('ROMACS_FORCE_ORACLE_PATH')
         self.binary = gnu_oracle.require(binary)['path']
 
-    def run_source(self, source, timeout: float = 15):
+    def run_source(self, source, timeout: float = 15, selector='t'):
         target = self.root / 'fixture.el'
         target.write_text(source)
-        return ert_report.run_native(self.binary, target, None, self.ert, [], self.root, timeout)
+        return ert_report.run_native(self.binary, target, None, self.ert, [], self.root, timeout,
+                                     selector=selector)
+
+    def test_subset_selection_evaluates_predicate_once(self):
+        value = self.run_source('''
+(defvar selection-calls 0)
+(ert-deftest chosen () (should (= selection-calls 2)))
+(ert-deftest excluded () (error "must not execute"))
+''', selector="'(satisfies (lambda (test) (setq selection-calls (1+ selection-calls)) (eq (ert-test-name test) 'chosen)))")
+        self.assertEqual(value['selected'], ['chosen'])
+        self.assertEqual(value['execution'], dict(selected=1, started=1, terminal=1))
+        self.assertEqual(value['summary']['passed'], 1)
+
+    def test_expected_error_and_cleanup_execute(self):
+        value = self.run_source('''
+(ert-deftest a-cleanup ()
+  (let ((buffer (generate-new-buffer "scoreboard-cleanup")))
+    (unwind-protect
+        (should-error (error "expected") :type 'error)
+      (kill-buffer buffer))))
+(ert-deftest b-after-cleanup () (should-not (get-buffer "scoreboard-cleanup")))
+''')
+        self.assertEqual(value['summary'], dict(passed=2, failed=0, skipped=0, total=2))
+        self.assertEqual(value['execution'], dict(selected=2, started=2, terminal=2))
+
+    def test_failed_assertion_cannot_exit_success(self):
+        value = self.run_source('(ert-deftest assertion () (should nil))')
+        self.assertEqual(value['returncode'], 1)
+        self.assertEqual(value['results']['assertion'], dict(outcome='failed', as_expected=False))
+
+    def test_zero_selection_rejected(self):
+        with self.assertRaises(ert_report.ReportError) as caught:
+            self.run_source('(ert-deftest exists () (should t))', selector='"^missing$"')
+        self.assertEqual(caught.exception.evidence['execution'],
+                         dict(selected=0, started=0, terminal=0))
+
+    def test_death_after_all_bodies_cannot_complete(self):
+        with self.assertRaises(ert_report.ReportError) as caught:
+            self.run_source('''
+(ert-deftest passed () (should t))
+(advice-add 'ert-run-tests-batch :after (lambda (&rest _) (kill-emacs 0)))
+''')
+        self.assertEqual(caught.exception.evidence['execution'],
+                         dict(selected=1, started=1, terminal=1))
+        self.assertFalse(caught.exception.evidence['complete'])
+
+    def test_reporter_advice_is_removed_after_success_and_error(self):
+        reporter = pathlib.Path(ert_report.__file__).parent / 'harness/romacs-real-ert-reporter.el'
+        for before in ['', '(advice-add \'ert-run-tests-batch :before (lambda (&rest _) (error "stop")))']:
+            expression = f'''(progn
+(load {json.dumps(str(self.ert))} nil t)
+(ert-deftest fixture () (should t))
+{before}
+(condition-case nil (load {json.dumps(str(reporter))} nil t) (error nil))
+(princ "REPORTER-CLEANUP ")
+(prin1 (list (advice-member-p #'ert-scoreboard--observe 'ert-run-tests)
+             (advice-member-p #'ert-scoreboard--audit-error 'ert--should-error-handle-error))))'''
+            process = subprocess.run([self.binary, '-Q', '--batch', '--eval', expression],
+                                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                     text=True, timeout=15, env=dict(os.environ, HOME=str(self.root)))
+            self.assertEqual(process.returncode, 0, process.stdout)
+            self.assertIn('REPORTER-CLEANUP (nil nil)', process.stdout)
 
     def test_genuine_batch_summary_with_expected_failure_and_skip(self):
         value = self.run_source('''
@@ -132,6 +228,8 @@ class Native(unittest.TestCase):
         with self.assertRaises(ValueError) as caught:
             self.run_source('(ert-deftest hang () (while t (sleep-for 1)))', timeout=5)
         self.assertIn('ERT-SCOREBOARD', caught.exception.output)
+        self.assertEqual(caught.exception.evidence['execution'],
+                         dict(selected=1, started=1, terminal=0))
 
     def test_caught_void_function_is_not_parity(self):
         value = self.run_source('''

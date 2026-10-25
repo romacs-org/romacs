@@ -1,0 +1,177 @@
+[
+  {
+    "name": "sparse_order",
+    "source": "(let ((m (make-sparse-keymap))) (define-key m [97] 'wi-target) (define-key m [122] 'wi-target) (define-key m [112 120] 'wi-target) (where-is-internal 'wi-target (list m)))",
+    "expected": "([122] [97] [112 120])"
+  },
+  {
+    "name": "inheritance_shadow",
+    "source": "(let ((p (make-sparse-keymap)) (m (make-sparse-keymap))) (define-key p [97] 'wi-target) (define-key p [98] 'wi-target) (set-keymap-parent m p) (define-key m [97] 'wi-other) (where-is-internal 'wi-target (list m)))",
+    "expected": "([98])"
+  },
+  {
+    "name": "shared_prefixes",
+    "source": "(let ((p (make-sparse-keymap)) (m (make-sparse-keymap))) (define-key p [97] 'wi-target) (define-key m [120] p) (define-key m [121] p) (where-is-internal 'wi-target (list m)))",
+    "expected": "([121 97] [120 97])"
+  },
+  {
+    "name": "cyclic_prefix",
+    "source": "(let ((m (make-sparse-keymap))) (define-key m [97] 'wi-target) (define-key m [120] m) (where-is-internal 'wi-target (list m)))",
+    "expected": "([97])"
+  },
+  {
+    "name": "global_local_and_list",
+    "source": "(let ((g (make-sparse-keymap)) (m (make-sparse-keymap))) (use-global-map g) (define-key g [112 120] 'wi-target) (define-key g [103] 'wi-target) (define-key m [112] 'wi-other) (define-key m [108] 'wi-target) (list (where-is-internal 'wi-target m) (where-is-internal 'wi-target (list m))))",
+    "expected": "(([108] [103]) ([108]))"
+  },
+  {
+    "name": "menus_and_firstonly",
+    "source": "(let ((m (make-sparse-keymap))) (define-key m [menu-bar sub action] '(menu-item \"Action\" wi-target)) (list (where-is-internal 'wi-target (list m)) (where-is-internal 'wi-target (list m) t) (where-is-internal 'wi-target (list m) 'non-ascii)))",
+    "expected": "(([menu-bar sub action]) nil [menu-bar sub action])"
+  },
+  {
+    "name": "noindirect",
+    "source": "(let ((m (make-sparse-keymap)) (item '(menu-item \"Action\" wi-target))) (define-key m [97] 'wi-target) (define-key m [98] item) (list (where-is-internal 'wi-target (list m)) (where-is-internal 'wi-target (list m) nil t) (where-is-internal item (list m) nil t)))",
+    "expected": "(([98] [97]) ([97]) nil)"
+  },
+  {
+    "name": "old_menu",
+    "source": "(let ((m (make-sparse-keymap))) (define-key m [97] '(\"Old\" . wi-target)) (where-is-internal 'wi-target (list m)))",
+    "expected": "([97])"
+  },
+  {
+    "name": "remapping_flags",
+    "source": "(let ((m (make-sparse-keymap))) (define-key m [remap wi-old] 'wi-new) (define-key m [97] 'wi-old) (define-key m [98] 'wi-new) (list (where-is-internal 'wi-new (list m)) (where-is-internal 'wi-new (list m) nil nil t) (where-is-internal 'wi-old (list m)) (where-is-internal 'wi-old (list m) nil nil t)))",
+    "expected": "(([98] [97]) ([98] [remap wi-old]) ([98] [97]) ([97]))"
+  },
+  {
+    "name": "remapping_is_one_step",
+    "source": "(let ((m (make-sparse-keymap))) (define-key m [remap wi-old] 'wi-mid) (define-key m [remap wi-mid] 'wi-new) (define-key m [97] 'wi-old) (define-key m [98] 'wi-mid) (define-key m [99] 'wi-new) (list (where-is-internal 'wi-old (list m)) (where-is-internal 'wi-mid (list m)) (where-is-internal 'wi-new (list m))))",
+    "expected": "(([98] [97]) ([99] [98] [remap wi-old]) ([99] [98] [remap wi-old]))"
+  },
+  {
+    "name": "meta_prefix",
+    "source": "(let ((m (make-sparse-keymap))) (define-key m [27 97] 'wi-target) (define-key m [120 27 98] 'wi-target) (where-is-internal 'wi-target (list m)))",
+    "expected": "([134217825] [120 134217826])"
+  },
+  {
+    "name": "dense_ranges",
+    "source": "(let ((m (make-keymap))) (set-char-table-range (car (cdr m)) '(97 . 99) 'wi-target) (set-char-table-range (car (cdr m)) '(200 . 203) 'wi-target) (define-key m [300] 'wi-other) (define-key m [955] 'wi-target) (where-is-internal 'wi-target (list m)))",
+    "expected": "([(97 . 99)] [(200 . 203)] [955])"
+  },
+  {
+    "name": "embedded_map",
+    "source": "(let ((m (list 'keymap (list 'keymap (cons 97 'wi-target)) (cons 98 'wi-target)))) (where-is-internal 'wi-target (list m)))",
+    "expected": "([97] [98])"
+  },
+  {
+    "name": "non_key_events",
+    "source": "(let ((m (make-sparse-keymap))) (put 'wi-internal 'non-key-event t) (define-key m [wi-internal] 'wi-target) (define-key m [97] 'wi-target) (where-is-internal 'wi-target (list m)))",
+    "expected": "([97])"
+  },
+  {
+    "name": "preferred_modifiers",
+    "source": "(let ((m (make-sparse-keymap))) (define-key m [97] 'wi-target) (define-key m [8388705] 'wi-target) (define-key m [f1] 'wi-target) (list (let ((where-is-preferred-modifier nil)) (where-is-internal 'wi-target (list m) t)) (let ((where-is-preferred-modifier 'super)) (where-is-internal 'wi-target (list m) t)) (where-is-internal 'wi-target (list m) 'non-ascii)))",
+    "expected": "([97] [8388705] [f1])"
+  },
+  {
+    "name": "advertised_binding",
+    "source": "(let ((m (make-sparse-keymap))) (define-key m [97] 'wi-target) (define-key m [98] 'wi-target) (put 'wi-target :advertised-binding [97]) (list (where-is-internal 'wi-target (list m)) (where-is-internal 'wi-target (list m) t)))",
+    "expected": "(([98] [97]) [97])"
+  },
+  {
+    "name": "active_ignores_overriding",
+    "source": "(let ((g (make-sparse-keymap)) (m (make-sparse-keymap)) (overriding-local-map (make-sparse-keymap))) (use-global-map g) (use-local-map m) (define-key g [97] 'wi-target) (define-key m [98] 'wi-target) (define-key overriding-local-map [99] 'wi-target) (where-is-internal 'wi-target))",
+    "expected": "([98] [97])"
+  },
+  {
+    "name": "active_minor_modes",
+    "source": "(let* ((g (make-sparse-keymap)) (m (make-sparse-keymap)) (p (make-sparse-keymap)) (q (make-sparse-keymap)) (minor-mode-map-alist (list (cons 'wi-mode p))) (minor-mode-overriding-map-alist (list (cons 'wi-mode q)))) (set 'wi-mode t) (use-global-map g) (use-local-map m) (define-key p [97] 'wi-target) (define-key q [98] 'wi-target) (define-key m [99] 'wi-target) (where-is-internal 'wi-target))",
+    "expected": "([98] [99])"
+  },
+  {
+    "name": "absent_prefix_falls_through",
+    "source": "(let ((a (make-sparse-keymap)) (b (make-sparse-keymap))) (define-key a [97] 'wi-other) (define-key b [112 120] 'wi-target) (where-is-internal 'wi-target (list a b)))",
+    "expected": "([112 120])"
+  },
+  {
+    "name": "string_menu_keys",
+    "source": "(let ((m (list 'keymap (cons \"hello\" 'wi-target) (cons \"other\" 'wi-target)))) (where-is-internal 'wi-target (list m)))",
+    "expected": "([\"(any string)\"])"
+  },
+  {
+    "name": "active_text_maps",
+    "source": "(let ((g (make-sparse-keymap)) (m (make-sparse-keymap)) (p (make-sparse-keymap))) (use-global-map g) (use-local-map m) (define-key g [97] 'wi-target) (define-key m [98] 'wi-target) (define-key p [99] 'wi-target) (insert \"x\") (goto-char 1) (put-text-property 1 2 'keymap p) (where-is-internal 'wi-target))",
+    "expected": "([99] [98] [97])"
+  },
+  {
+    "name": "cons_definition",
+    "source": "(let ((m (make-sparse-keymap))) (define-key m [97] '(lambda () (interactive))) (where-is-internal '(lambda () (interactive)) (list m)))",
+    "expected": "([97])"
+  },
+  {
+    "name": "modifier_named_prefix",
+    "source": "(let ((m (make-sparse-keymap))) (define-key m [A 97] 'wi-target) (where-is-internal 'wi-target (list m) t))",
+    "expected": "[A 97]"
+  },
+  {
+    "name": "cyclic_meta_prefix",
+    "source": "(let ((m (make-sparse-keymap)) (p (make-sparse-keymap)) (q (make-sparse-keymap))) (define-key m [27] p) (define-key p [97] 'wi-target) (define-key p [100] q) (define-key q [99] p) (where-is-internal 'wi-target (list m)))",
+    "expected": "([134217825] [134217828 99 97])"
+  },
+  {
+    "name": "sticky_keymap_end",
+    "source": "(let ((g (make-sparse-keymap)) (p (make-sparse-keymap))) (use-global-map g) (define-key p [99] 'wi-target) (insert \"x\") (put-text-property 1 2 'keymap p) (where-is-internal 'wi-target))",
+    "expected": "([99])"
+  },
+  {
+    "name": "sticky_local_map_end",
+    "source": "(let ((g (make-sparse-keymap)) (p (make-sparse-keymap)) (local (make-sparse-keymap))) (use-global-map g) (use-local-map local) (define-key local [97] 'wi-target) (define-key p [99] 'wi-target) (insert \"x\") (put-text-property 1 2 'local-map p) (where-is-internal 'wi-target))",
+    "expected": "([99])"
+  },
+  {
+    "name": "nonsticky_keymap_end",
+    "source": "(let ((g (make-sparse-keymap)) (p (make-sparse-keymap))) (use-global-map g) (define-key p [99] 'wi-target) (insert \"x\") (put-text-property 1 2 'keymap p) (put-text-property 1 2 'rear-nonsticky '(keymap)) (where-is-internal 'wi-target))",
+    "expected": "nil"
+  },
+  {
+    "name": "sticky_keymap_narrowed_end",
+    "source": "(let ((g (make-sparse-keymap)) (p (make-sparse-keymap))) (use-global-map g) (define-key p [99] 'wi-target) (insert \"x\") (put-text-property 1 2 'keymap p) (narrow-to-region 2 2) (where-is-internal 'wi-target))",
+    "expected": "([99])"
+  },
+  {
+    "name": "overlay_rear_advancement",
+    "source": "(let ((g (make-sparse-keymap)) (p (make-sparse-keymap))) (use-global-map g) (define-key p [99] 'wi-target) (insert \"x\") (let ((o (make-overlay 1 2 nil nil t))) (overlay-put o 'keymap p) (where-is-internal 'wi-target)))",
+    "expected": "([99])"
+  },
+  {
+    "name": "overlay_no_rear_advancement",
+    "source": "(let ((g (make-sparse-keymap)) (p (make-sparse-keymap))) (use-global-map g) (define-key p [99] 'wi-target) (insert \"x\") (let ((o (make-overlay 1 2))) (overlay-put o 'keymap p) (where-is-internal 'wi-target)))",
+    "expected": "nil"
+  },
+  {
+    "name": "empty_overlay_front_nil_rear_nil",
+    "source": "(let ((g (make-sparse-keymap)) (p (make-sparse-keymap))) (use-global-map g) (define-key p [99] 'wi-target) (let ((o (make-overlay 1 1 nil nil nil))) (overlay-put o 'keymap p) (where-is-internal 'wi-target)))",
+    "expected": "nil"
+  },
+  {
+    "name": "empty_overlay_front_nil_rear_t",
+    "source": "(let ((g (make-sparse-keymap)) (p (make-sparse-keymap))) (use-global-map g) (define-key p [99] 'wi-target) (let ((o (make-overlay 1 1 nil nil t))) (overlay-put o 'keymap p) (where-is-internal 'wi-target)))",
+    "expected": "([99])"
+  },
+  {
+    "name": "empty_overlay_front_t_rear_nil",
+    "source": "(let ((g (make-sparse-keymap)) (p (make-sparse-keymap))) (use-global-map g) (define-key p [99] 'wi-target) (let ((o (make-overlay 1 1 nil t nil))) (overlay-put o 'keymap p) (where-is-internal 'wi-target)))",
+    "expected": "nil"
+  },
+  {
+    "name": "empty_overlay_front_t_rear_t",
+    "source": "(let ((g (make-sparse-keymap)) (p (make-sparse-keymap))) (use-global-map g) (define-key p [99] 'wi-target) (let ((o (make-overlay 1 1 nil t t))) (overlay-put o 'keymap p) (where-is-internal 'wi-target)))",
+    "expected": "nil"
+  },
+  {
+    "name": "unbound_emulation_alist",
+    "source": "(let ((g (make-sparse-keymap))) (use-global-map g) (setq emulation-mode-map-alists '(wi-undefined)) (where-is-internal 'wi-target))",
+    "expected": "nil"
+  }
+]

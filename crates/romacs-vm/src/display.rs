@@ -284,8 +284,10 @@ impl Vm {
                 .theme
                 .with_defface(&face, &spec)
                 .map_err(|e| e.to_string())?;
+            let definition = next.definition(&face).ok_or("missing declared face")?.clone();
             self.display_state.theme = next;
             self.display_state.version += 1;
+            self.register_declared_face(name, definition)?;
             return Ok(name);
         }
         let frame = matches!(p, SelectedFrame | FramePixelWidth | FramePixelHeight);

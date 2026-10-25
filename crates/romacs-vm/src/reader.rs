@@ -763,6 +763,9 @@ impl Reader<'_, '_> {
                 _ => Err("unsupported # reader syntax".into()),
             },
             63 => {
+                if matches!(self.peek(), Some(9 | 32)) {
+                    return Value::integer(i64::from(self.next()?));
+                }
                 let n = if self.peek() == Some(92) {
                     self.next()?;
                     self.escape()?

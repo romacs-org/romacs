@@ -855,7 +855,8 @@ class Wiring(unittest.TestCase):
 
     def test_a_dropped_shard_is_refused(self):
         problems = self.mutated('gnu-tests/runner/tests/parity_ratchet.rs',
-                                lambda t: t.replace('"gnu-shard:4/4"', '"gnu-shard:3/4"'))
+                                lambda t: t.replace(f'"gnu-shard:{pr.GATE_SHARDS}/{pr.GATE_SHARDS}"',
+                                                    f'"gnu-shard:{pr.GATE_SHARDS - 1}/{pr.GATE_SHARDS}"'))
         self.assertTrue(any('parity_ratchet.rs was edited' in p for p in problems), problems)
 
     def test_a_compiled_out_test_file_is_refused(self):
@@ -1051,6 +1052,8 @@ class NothingMeasured(unittest.TestCase):
         import vacuity_binding
         binary = '/bin/true'
         def measured(command, **kwargs):
+            self.assertEqual(command[command.index('--harness') + 1], 'mini')
+            self.assertEqual(command[command.index('--bootstrap') + 1], 'ert')
             output = pathlib.Path(command[command.index('--out') + 1])
             output.mkdir()
             (output / 'summary.json').write_text('{}')
@@ -1091,6 +1094,24 @@ class Shards(unittest.TestCase):
         parts = [pr.shard(files, f'{k}/{pr.GATE_SHARDS}') for k in range(1, pr.GATE_SHARDS + 1)]
         self.assertEqual(sorted(f for p in parts for f in p), sorted(files))
         self.assertTrue(all(parts))
+        self.assertLessEqual(max(map(len, parts)), 8)
+
+    def test_gate_mutants_select_a_member_of_the_executed_partition(self):
+        import parity_ratchet_mutants as mutants
+        data = json.loads((ROOT / pr.RATCHET_NAME).read_text())
+        member, test = mutants.gnu_gate_target(data)
+        index = int(test.split('_shard_')[1].split('_of_')[0])
+        self.assertIn(member, pr.shard(sorted(data['gnu_suite']['files']),
+                                      f'{index}/{pr.GATE_SHARDS}'))
+        self.assertGreaterEqual(len(data['gnu_suite']['passing'][member]), 2)
+        source = (ROOT / 'gnu-tests/runner/tests/parity_ratchet.rs').read_text()
+        self.assertIn(f'fn {test}()', source)
+
+    def test_gate_mutants_refuse_a_population_without_an_eligible_member(self):
+        import parity_ratchet_mutants as mutants
+        data = {'gnu_suite': {'files': ['only.el'], 'passing': {'only.el': ['one']}}}
+        with self.assertRaisesRegex(ValueError, 'at least two recorded passes'):
+            mutants.gnu_gate_target(data)
 
     def test_the_ratchet_covers_exactly_the_suite(self):
         data = pr.load_ratchet(ROOT)

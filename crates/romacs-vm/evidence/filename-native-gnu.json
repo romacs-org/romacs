@@ -237,14 +237,14 @@
       "id": "real-helper-env",
       "real_helper": true,
       "source": "(let ((process-environment (list \"ROMACS_FILENAME_CASE=prefix//final\"))) (equal (substitute-in-file-name \"before/$ROMACS_FILENAME_CASE\") \"/final\"))",
-      "candidate_error": "(void-function getenv-internal)",
+      "candidate_error": "(void-function called-interactively-p)",
       "expected": "t"
     },
     {
       "id": "real-helper-undefined",
       "real_helper": true,
       "source": "(let ((process-environment nil)) (equal (substitute-in-file-name \"$ROMACS_FILENAME_UNDEFINED\") \"$ROMACS_FILENAME_UNDEFINED\"))",
-      "candidate_error": "(void-function getenv-internal)",
+      "candidate_error": "(void-function called-interactively-p)",
       "expected": "t"
     },
     {

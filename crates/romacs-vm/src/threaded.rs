@@ -6,6 +6,10 @@
 //! and functions keep address-stable buffers; GC forwards their Value operands
 //! only at wait points. No pointer escapes the VM's retained Program lifetime.
 use super::*;
+#[path = "threaded_signal.rs"]
+mod signal_handlers;
+pub(super) use signal_handlers::SignalHandler;
+use signal_handlers::{prepare_signal, release_control};
 #[cfg(test)]
 #[path = "error_signal_tests.rs"]
 mod error_signal_tests;
@@ -94,6 +98,10 @@ mod control_tests {
                 activations: vec![(0, None)],
             },
             frames: vec![],
+            call_marks: vec![None],
+            native_mark: None,
+            apply_function: None,
+            apply_mark: None,
             stack_used: 0,
             depth_base: 0,
             regs: std::ptr::null_mut(),
@@ -149,6 +157,7 @@ mod control_tests {
                 dest: 0,
                 target: 0,
                 dynamic: 0,
+                registry: None,
             });
             e.controls_base = 1;
             // SAFETY: both instructions and the single addressed register are live.
@@ -173,6 +182,7 @@ mod control_tests {
             dest: 0,
             target: 0,
             dynamic: 0,
+            registry: None,
         });
         e.controls_base = 1;
         e.escape = Some(Escape::Normal(Value::TRUE));
@@ -205,6 +215,10 @@ mod control_tests {
                 dynamic: 0,
                 controls_base: 0,
             }],
+            call_marks: vec![None, None],
+            native_mark: None,
+            apply_function: None,
+            apply_mark: None,
             stack_used: 0,
             depth_base: 0,
             regs: std::ptr::null_mut(),
@@ -225,6 +239,7 @@ mod control_tests {
                 dest: 0,
                 target: 0,
                 dynamic: 0,
+                registry: None,
             }],
             controls_base: 4,
             budget: 0,
@@ -241,12 +256,14 @@ mod control_tests {
                 dest: 0,
                 target: 0,
                 dynamic: 0,
+                registry: None,
             },
             Control {
                 kind: ControlKind::Condition(conditions),
                 dest: 0,
                 target: 0,
                 dynamic: 0,
+                registry: None,
             },
             Control {
                 kind: ControlKind::Resume {
@@ -256,6 +273,7 @@ mod control_tests {
                 dest: 0,
                 target: 0,
                 dynamic: 0,
+                registry: None,
             },
         ]);
         e.controls.push(Control {
@@ -266,6 +284,7 @@ mod control_tests {
             dest: 0,
             target: 0,
             dynamic: 0,
+            registry: None,
         });
         let mut roots = vec![];
         e.visit_values(&mut |v| roots.push(*v));
@@ -634,19 +653,21 @@ pub(super) enum Escape {
     Normal(Value),
     Throw(Value, Value),
     Signal(Value, Value),
+    Error { condition: Value, object: Value, conditions: Value, target: Option<usize> },
 }
 impl Escape {
     pub(super) fn visit_values(&mut self, visit: &mut impl FnMut(&mut Value)) {
         match self {
             Self::Normal(v) => visit(v),
-            Self::Throw(a, b) | Self::Signal(a, b) => {
-                visit(a);
-                visit(b);
+            Self::Throw(a, b) | Self::Signal(a, b) => { visit(a); visit(b); }
+            Self::Error { condition, object, conditions, .. } => {
+                visit(condition); visit(object); visit(conditions);
             }
         }
     }
 }
 enum ControlKind {
+    HandlerBind { mark: usize },
     Catch(Value),
     Condition(Value),
     Protect {
@@ -662,13 +683,14 @@ struct Control {
     dest: usize,
     target: usize,
     dynamic: usize,
+    registry: Option<usize>,
 }
 impl Control {
     fn visit_values(&mut self, visit: &mut impl FnMut(&mut Value)) {
         match &mut self.kind {
             ControlKind::Catch(v) | ControlKind::Condition(v) => visit(v),
             ControlKind::Resume { exit, .. } => exit.visit_values(visit),
-            ControlKind::Protect { .. } => {}
+            ControlKind::Protect { .. } | ControlKind::HandlerBind { .. } => {}
         }
     }
 }
@@ -682,6 +704,7 @@ fn checked_unbind(e: &mut Engine<'_>, n: usize) -> Option<Escape> {
             && value.integer_value().is_none()
         {
             e.vm.dynamic.pop();
+            e.vm.backtrace.unbind(e.vm.dynamic.len());
             let predicate = Value::reference(e.vm.slot("integerp") + 1, 7);
             let condition = Value::reference(e.vm.slot("wrong-type-argument") + 1, 7);
             let data = e.vm.list_value(&[predicate, value]);
@@ -784,22 +807,24 @@ fn route_escape(e: &mut Engine<'_>) -> Option<(*mut Value, *const Inst)> {
         }
     };
     let failed_depth = e.failed_eval_depth.take();
-    if !std::mem::take(&mut e.escape_hooked)
-        && let Escape::Signal(condition, data) = &escape
-        && let Some(replacement) = signal_hook(e, *condition, *data, failed_depth)
-    {
-        escape = replacement;
-        original = None;
-    }
+    e.escape = Some(escape);
+    let hooked = std::mem::take(&mut e.escape_hooked);
+    if prepare_signal(e, hooked, failed_depth) { original = None; }
+    escape = e.escape.take().unwrap();
     if let Escape::Throw(tag, value) = escape
-        && !e.propagate
-        && !e.controls.iter()
-            .any(|h| matches!(h.kind, ControlKind::Catch(wanted) if wanted != Value::NIL && wanted == tag))
+        && (!e.propagate || e.depth_base > 1)
+        && !e.vm.signal_handlers.iter()
+            .any(|h| matches!(h, SignalHandler::Catch(wanted) if *wanted != Value::NIL && *wanted == tag))
     {
         let slot = e.vm.slot("no-catch");
         let data = e.vm.list_value(&[tag, value]);
-        escape = Escape::Signal(Value::reference(slot + 1, 7), data);
+        e.escape = Some(Escape::Signal(Value::reference(slot + 1, 7), data));
+        prepare_signal(e, false, None);
+        escape = e.escape.take().unwrap();
     }
+    leave_native(e);
+    e.apply_function = None;
+    if let Some(mark) = e.apply_mark.take() { e.vm.backtrace.leave(mark); }
     loop {
         while e.controls.len() > e.controls_base {
             let control = e.controls.pop().unwrap();
@@ -807,7 +832,9 @@ fn route_escape(e: &mut Engine<'_>) -> Option<(*mut Value, *const Inst)> {
             // a saved integer forwarding can replace the pending escape.
             if let Some(signal) = checked_unbind(e, e.vm.dynamic.len() - control.dynamic) {
                 e.controls.push(control);
-                escape = signal;
+                e.escape = Some(signal);
+                prepare_signal(e, false, None);
+                escape = e.escape.take().unwrap();
                 original = None;
                 continue;
             }
@@ -816,21 +843,13 @@ fn route_escape(e: &mut Engine<'_>) -> Option<(*mut Value, *const Inst)> {
                 (ControlKind::Catch(tag), Escape::Throw(wanted, _)) => {
                     *tag != Value::NIL && tag == wanted
                 }
-                (ControlKind::Condition(conditions), Escape::Signal(condition, _)) => {
-                    let choices = if conditions.tag() == 3 {
-                        e.vm.list_values(*conditions).unwrap_or_default()
-                    } else {
-                        vec![*conditions]
-                    };
-                    choices
-                        .into_iter()
-                        .any(|choice| e.vm.condition_matches(*condition, choice))
+                (ControlKind::Condition(_), Escape::Error { target, .. }) => {
+                    control.registry.is_some() && control.registry == *target
                 }
                 _ => false,
             };
-            if !matches {
-                continue;
-            }
+            release_control(e, &control);
+            if !matches { continue; }
             match control.kind {
                 ControlKind::Protect { end } => {
                     e.controls.push(Control {
@@ -841,6 +860,7 @@ fn route_escape(e: &mut Engine<'_>) -> Option<(*mut Value, *const Inst)> {
                         dest: control.dest,
                         target: end,
                         dynamic: control.dynamic,
+                        registry: None,
                     });
                 }
                 ControlKind::Catch(_) | ControlKind::Condition(_) => {
@@ -851,15 +871,14 @@ fn route_escape(e: &mut Engine<'_>) -> Option<(*mut Value, *const Inst)> {
                                     && matches!(previous.kind, ControlKind::Condition(_))
                             })
                         {
-                            e.controls.pop();
+                            let sibling = e.controls.pop().unwrap();
+                            release_control(e, &sibling);
                         }
                     }
                     let payload = match escape {
                         Escape::Throw(_, value) => value,
-                        Escape::Signal(condition, data) => {
-                            e.vm.conses.push((condition, data));
-                            Value::reference(e.vm.conses.len() - 1, 3)
-                        }
+                        Escape::Error { object, .. } => object,
+                        Escape::Signal(_, _) => unreachable!("signal search normalizes errors"),
                         Escape::Normal(_) => unreachable!(),
                     };
                     // SAFETY: activation-owned compiler/image-validated destination.
@@ -867,7 +886,7 @@ fn route_escape(e: &mut Engine<'_>) -> Option<(*mut Value, *const Inst)> {
                         *e.regs.add(control.dest) = payload;
                     }
                 }
-                ControlKind::Resume { .. } => unreachable!(),
+                ControlKind::Resume { .. } | ControlKind::HandlerBind { .. } => unreachable!(),
             }
             return Some((e.regs, unsafe {
                 e.code[e.function].as_ptr().add(control.target)
@@ -879,17 +898,31 @@ fn route_escape(e: &mut Engine<'_>) -> Option<(*mut Value, *const Inst)> {
             return None;
         }
         if let Some(signal) = checked_unbind(e, e.vm.dynamic.len() - e.dynamic) {
-            escape = signal;
+            e.escape = Some(signal);
+            prepare_signal(e, false, None);
+            escape = e.escape.take().unwrap();
             original = None;
             continue;
         }
         if let Some(frame) = e.frames.pop() {
+            leave_call(e);
             e.rest.leave();
             e.regs = frame.regs;
             e.function = frame.function;
             e.dynamic = frame.dynamic;
             e.controls_base = frame.controls_base;
         } else {
+            if let Escape::Error { condition, object, .. } = &escape {
+                let (_, data) = e.vm.cons_pair(*object).unwrap();
+                let name = e.vm.display(*condition).unwrap_or_default();
+                if name == "excessive-lisp-nesting" {
+                    original = Some(format!("Lisp nesting exceeds `max-lisp-eval-depth': {}", e.vm.display(data).unwrap_or_default()));
+                }
+                if matches!(name.as_str(), "void-function" | "void-variable") {
+                    let values = e.vm.display(data).unwrap_or_default();
+                    original = Some(format!("({name}{})", values.strip_prefix('(').and_then(|s| s.strip_suffix(')')).filter(|s| !s.is_empty()).map(|s| format!(" {s}")).unwrap_or_default()));
+                }
+            }
             if e.propagate {
                 e.error = Some(original.unwrap_or_else(|| "escape propagated to the eval caller".into()));
                 e.vm.propagated_escape = Some(escape);
@@ -897,21 +930,9 @@ fn route_escape(e: &mut Engine<'_>) -> Option<(*mut Value, *const Inst)> {
                 e.vm.propagated_eval_depth = None;
                 return None;
             }
-            if let Escape::Signal(condition, data) = &escape {
-                let name = e.vm.display(*condition).unwrap_or_default();
-                if name == "excessive-lisp-nesting" {
-                    e.error = Some(format!("Lisp nesting exceeds `max-lisp-eval-depth': {}", e.vm.display(*data).unwrap_or_default()));
-                    return None;
-                }
-                if matches!(name.as_str(), "void-function" | "void-variable") {
-                    let values = e.vm.display(*data).unwrap_or_default();
-                    e.error = Some(format!("({name}{})", values.strip_prefix('(').and_then(|s| s.strip_suffix(')')).filter(|s| !s.is_empty()).map(|s| format!(" {s}")).unwrap_or_default()));
-                    return None;
-                }
-            }
             e.error = Some(original.unwrap_or_else(|| match escape {
                 Escape::Throw(_, _) => "no-catch".into(),
-                Escape::Signal(condition, _) => format!("unhandled signal {}",
+                Escape::Signal(condition, _) | Escape::Error { condition, .. } => format!("unhandled signal {}",
                     e.vm.display(condition).unwrap_or_else(|_| "invalid condition".into())),
                 Escape::Normal(_) => unreachable!(),
             }));
@@ -959,6 +980,13 @@ pub(super) struct Engine<'a> {
     rest: RestStack,
     stack_used: usize,
     frames: Vec<Frame>,
+    // Physical continuations can own several real calls (an apply chain).
+    // K machinery itself has no public activation.
+    call_marks: Vec<Option<usize>>,
+    native_mark: Option<usize>,
+    apply_function: Option<Value>,
+    // Until entry, a spreader's calls have no physical callee to unwind them.
+    apply_mark: Option<usize>,
     depth_base: usize,
     regs: *mut Value,
     function: usize,
@@ -989,6 +1017,7 @@ pub(super) struct Engine<'a> {
 impl Engine<'_> {
     fn visit_values(&mut self, visit: &mut impl FnMut(&mut Value)) {
         self.rest.visit_values(visit);
+        if let Some(function) = &mut self.apply_function { visit(function); }
         visit_code(&mut self.code, visit);
         for entry in &mut self.entries {
             visit(&mut entry.target);
@@ -1025,6 +1054,10 @@ pub(super) fn assert_opaque_rest_compaction() {
         },
         stack_used: 0,
         frames: vec![],
+        call_marks: vec![None],
+        native_mark: None,
+        apply_function: None,
+        apply_mark: None,
         depth_base: 0,
         regs: std::ptr::null_mut(),
         function: 0,
@@ -1104,6 +1137,7 @@ impl Vm {
     pub(crate) fn pending_eval_escape(&self) -> Option<(Value, Value)> {
         match self.propagated_escape.as_ref() {
             Some(Escape::Signal(condition, data)) => Some((*condition, *data)),
+            Some(Escape::Error { condition, object, .. }) => self.cons_pair(*object).ok().map(|(_, data)| (*condition, data)),
             _ => None,
         }
     }
@@ -1173,6 +1207,8 @@ fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Va
     vm.stack[..args.len()].copy_from_slice(args);
     let regs = vm.stack.as_mut_ptr();
     let mark = vm.dynamic.len();
+    let handler_mark = vm.signal_handlers.len();
+    let backtrace_mark = vm.backtrace.frames.len();
     let vm_propagate = std::mem::take(&mut vm.propagate_next);
     program.rest.activations.push((0, None));
     let mut engine = Engine {
@@ -1182,6 +1218,10 @@ fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Va
         code: program.code,
         rest: program.rest,
         frames: Vec::with_capacity(512),
+        call_marks: vec![None],
+        native_mark: None,
+        apply_function: None,
+        apply_mark: None,
         regs,
         function,
         dynamic: mark,
@@ -1223,6 +1263,8 @@ fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Va
         break;
     }
     engine.vm.unbind(engine.vm.dynamic.len() - mark);
+    engine.vm.signal_handlers.truncate(handler_mark);
+    engine.vm.backtrace.leave(backtrace_mark);
     // Only entered frames can have written values. Clear that prefix, not all
     // reserved frames; retaining zeroed storage avoids reinitializing it.
     engine.vm.stack[..engine.stack_used].fill(Value::NIL);
@@ -1683,6 +1725,7 @@ unsafe fn ret(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
             return fail(e, "invalid image return through control region");
         }
         if let Some(frame) = e.frames.pop() {
+            leave_call(e);
             e.rest.leave();
             *frame.regs.add(frame.dest) = value;
             e.function = frame.function;
@@ -1777,6 +1820,59 @@ unsafe fn frame_room(e: &mut Engine<'_>, r: *mut Value) -> Option<*mut Value> {
         unsafe { widen_registers(e, r, e.vm.register_width) }
     }
 }
+// Keep metadata allocation and cleanup out of threaded callers so optimized
+// non-LTO builds can tail-dispatch after the operation completes.
+#[inline(never)]
+fn leave_native(e: &mut Engine<'_>) {
+    if let Some(mark) = e.native_mark.take() { e.vm.backtrace.leave(mark); }
+}
+#[inline(never)]
+fn leave_call(e: &mut Engine<'_>) {
+    if let Some(mark) = e.call_marks.pop().flatten() { e.vm.backtrace.leave(mark); }
+}
+#[inline(never)]
+unsafe fn trace_call(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst,
+    target: Value, start: usize, argc: usize) -> usize {
+    unsafe {
+        let function = if std::ptr::eq(pc, &K_CODE[0]) { *r.add(K_F) } else {
+            match (*pc).op {
+                Op::Direct(_, slot, ..) | Op::Prepared(_, _, slot, ..) => Value::reference(slot + 1, 7),
+                Op::Call(_, function, ..) => *r.add(function),
+                _ => target,
+            }
+        };
+        // The spreader carries the final original function through nested
+        // apply calls. Reading the outer call's first argument loses aliases
+        // and can mislabel a real failing callee as apply itself.
+        let function = e.apply_function.take().unwrap_or(function);
+        let resolved = if target == Value::UNBOUND { e.vm.backtrace_resolve(function).unwrap_or(target) } else { target };
+        e.vm.backtrace.enter(function, resolved, std::slice::from_raw_parts(r.add(start), argc), e.vm.dynamic.len())
+    }
+}
+#[inline(never)]
+unsafe fn enter_native(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst,
+    target: Value, start: usize, argc: usize) {
+    let mark = if let Some(mark) = e.native_mark.take() {
+        e.vm.backtrace.resolve_pending(target);
+        mark
+    } else {
+        unsafe { trace_call(e, r, pc, target, start, argc) }
+    };
+    e.native_mark = Some(e.apply_mark.take().unwrap_or(mark));
+}
+#[inline(never)]
+unsafe fn enter_apply(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst, start: usize, argc: usize) {
+    let target = Value::reference(Primitive::Apply as usize, 6);
+    let mark = if let Some(mark) = e.native_mark.take() {
+        e.vm.backtrace.resolve_pending(target);
+        mark
+    } else {
+        unsafe { trace_call(e, r, pc, target, start, argc) }
+    };
+    // A callee's physical activation owns its whole native apply chain. This
+    // keeps genuine apply operations visible until the final callee leaves.
+    e.apply_mark.get_or_insert(mark);
+}
 unsafe fn call(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
     unsafe { invoke(e, r, pc, *r.add((*pc).b), (*pc).c, (*pc).d) }
 }
@@ -1816,7 +1912,7 @@ unsafe fn direct(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
             }
             let new = r.add(e.vm.functions.get_unchecked(e.function).regs.max(1));
             std::ptr::copy(r.add(i.d), new, i.e);
-            return enter_frame(e, r, pc, new, entry.function, None);
+            return enter_frame(e, r, pc, new, entry.function, None, entry.target, i.d, i.e);
         }
         #[cfg(test)]
         if entry.world_version != 0 && entry.world_version != e.vm.world_version {
@@ -1905,11 +2001,12 @@ unsafe fn invoke(
                 }
                 n => std::ptr::copy(r.add(start), new, n),
             }
-            return enter_frame(e, r, pc, new, function, None);
+            return enter_frame(e, r, pc, new, function, None, target, start, argc);
         }
         let closure = &e.vm.closures[target.payload() as usize];
         let f = e.vm.functions.get_unchecked(function);
         if argc < f.required || (!f.rest && argc > f.arity) {
+            enter_native(e, r, pc, target, start, argc);
             return closure_arity_error(e, function, argc);
         }
         let new = r.add(e.vm.functions.get_unchecked(e.function).regs.max(1));
@@ -1950,7 +2047,7 @@ unsafe fn invoke(
         } else {
             None
         };
-        enter_frame(e, r, pc, new, function, rest)
+        enter_frame(e, r, pc, new, function, rest, target, start, argc)
     }
 }
 #[cold]
@@ -2103,6 +2200,7 @@ unsafe fn invoke_full(
         if target == Value::reference(Primitive::Throw as usize, 6)
             || target == Value::reference(Primitive::Signal as usize, 6)
         {
+            enter_native(e, r, pc, target, start, argc);
             if argc != 2 {
                 return fail(e, "wrong primitive arity");
             }
@@ -2140,6 +2238,7 @@ unsafe fn invoke_full(
         // eval.c:2760/3176/3530: an autoload loads its file, then the call is
         // retried from the original function (`goto retry').
         if target.tag() == 3 && e.vm.autoload_object(target) {
+            enter_native(e, r, pc, target, start, argc);
             return match autoload_then(e, r, function, target) {
                 Some(r) => t2_invoke_full(e, r, pc, function, start, argc),
                 None => Value::UNBOUND,
@@ -2166,11 +2265,15 @@ unsafe fn apply(
     argc: usize,
 ) -> Value {
     unsafe {
+        enter_apply(e, r, pc, start, argc);
         let base = r.offset_from(e.vm.stack.as_ptr()) as usize;
         // prepare_apply writes the disjoint scratch window at the allocation end.
         e.stack_used = e.vm.stack.len();
         match e.vm.prepare_apply(base + start, argc) {
-            Ok((target, offset, count)) => invoke_full(e, r, pc, target, offset - base, count),
+            Ok((target, offset, count)) => {
+                e.apply_function = Some(target);
+                invoke_full(e, r, pc, target, offset - base, count)
+            },
             Err(error) => {
                 e.error = Some(error);
                 Value::UNBOUND
@@ -2186,8 +2289,18 @@ unsafe fn enter_frame(
     new: *mut Value,
     function: usize,
     rest: Option<OpaqueRest>,
+    target: Value,
+    start: usize,
+    argc: usize,
 ) -> Value {
     unsafe {
+        let mark = if let Some(mark) = e.native_mark.take() {
+            e.vm.backtrace.resolve_pending(target);
+            mark
+        } else {
+            trace_call(e, r, pc, target, start, argc)
+        };
+        e.call_marks.push(Some(e.apply_mark.take().unwrap_or(mark)));
         let base = rest.map_or(e.rest.values.len(), |rest| rest.start);
         e.rest.activations.push((base, rest));
         // Captures/arguments have already been copied, including on lower failure.
@@ -2305,6 +2418,7 @@ unsafe fn generated_step(
     argc: usize,
 ) -> Continue {
     unsafe {
+        enter_native(e, r, pc, target, start, argc);
         let base = r.offset_from(e.vm.stack.as_ptr()) as usize;
         let reader = matches!(prim::name(target), Some("read" | "read-from-string"));
         let saved_depth = e.vm.eval_depth;
@@ -2355,12 +2469,14 @@ unsafe fn take_step(
     step: std::result::Result<prim::Step, (Value, Value)>,
 ) -> Continue {
     unsafe {
+        let mut handlers = None;
         let (f, args, then, saved) = match step {
             Err((condition, data)) => {
                 e.escape = Some(Escape::Signal(condition, data));
                 return Continue::Stop;
             }
             Ok(prim::Step::Collect) => {
+                leave_native(e);
                 if e.vm.gc_threshold == usize::MAX {
                     // Nested compilation/load owns unforwarded Rust locals.
                     // Match GNU's garbage_collection_inhibited early return.
@@ -2372,10 +2488,20 @@ unsafe fn take_step(
                 return Continue::At(r, pc.add(1));
             }
             Ok(prim::Step::Done(value)) => {
+                leave_native(e);
+                if std::ptr::eq(pc, &K_CODE[1]) && e.controls.len() > e.controls_base
+                    && e.controls.last().is_some_and(|c| matches!(c.kind, ControlKind::HandlerBind { .. })) {
+                    let control = e.controls.pop().unwrap();
+                    release_control(e, &control);
+                }
                 *r.add((*pc).a) = value;
                 return Continue::At(r, pc.add(1));
             }
             Ok(prim::Step::Call { f, args, then, saved }) => (f, args, then, saved),
+            Ok(prim::Step::Handle { body, handlers: bindings }) => {
+                handlers = Some(bindings);
+                (body, Vec::new(), handler_bind_return as prim::Then, Vec::new())
+            }
         };
         let resuming = std::ptr::eq(pc, &K_CODE[1]);
         let (k, depth) = if resuming {
@@ -2426,6 +2552,7 @@ unsafe fn take_step(
             return Continue::Stop;
         }
         if !resuming {
+            e.call_marks.push(e.native_mark.take());
             e.rest.activations.push((e.rest.values.len(), None));
             e.frames.push(Frame {
                 pc: pc.add(1),
@@ -2459,7 +2586,15 @@ unsafe fn take_step(
         std::ptr::copy_nonoverlapping(saved.as_ptr(), k.add(K_SAVED), saved.len());
         std::ptr::copy_nonoverlapping(args.as_ptr(), k.add(K_SAVED + saved.len()), args.len());
         e.stack_used = e.stack_used.max(offset + width);
-        // Every Value of the request now lives in registers: a safe wait point.
+        if let Some(handlers) = handlers {
+            let mark = e.vm.signal_handlers.len();
+            for (conditions, function) in handlers.into_iter().rev() {
+                e.vm.signal_handlers.push(SignalHandler::Bind { conditions, function, group: mark });
+            }
+            e.controls.push(Control { kind: ControlKind::HandlerBind { mark },
+                dest: 0, target: 0, dynamic: e.vm.dynamic.len(), registry: None });
+        }
+        // Every Value of the request now lives in registers or traced handler storage.
         e.budget -= 1;
         if e.budget < 0 {
             Continue::Poll(k, K_CODE.as_ptr())
@@ -2468,6 +2603,10 @@ unsafe fn take_step(
         }
     }
 }
+fn handler_bind_return(_: &mut prim::Leaf<'_>, value: Value, _: &[Value]) -> prim::Next {
+    Ok(prim::Step::Done(value))
+}
+
 /// Run the continuation of the activation at `k` on K_RES and its saved
 /// registers, copied for the duration of a leaf call that cannot collect.
 #[inline(never)]
@@ -2516,6 +2655,7 @@ unsafe fn t2_dispatch(
             return Value::UNBOUND;
         };
         if target.tag() == 3 && e.vm.autoload_object(target) {
+            enter_native(e, r, pc, target, start, argc);
             return match autoload_then(e, r, function, target) {
                 Some(r) => t2_dispatch(e, r, pc, function, start, argc),
                 None => Value::UNBOUND,
@@ -2539,9 +2679,11 @@ unsafe fn t2_dispatch(
         let base = r.offset_from(e.vm.stack.as_ptr()) as usize;
         match p {
             Primitive::Apply => {
+                enter_apply(e, r, pc, start, argc);
                 let Some((target, offset, count)) = t2_prepare_apply(e, base + start, argc) else {
                     return Value::UNBOUND;
                 };
+                e.apply_function = Some(target);
                 t2_dispatch(e, r, pc, target, offset - base, count)
             }
             // These use neither the site caches nor the caller's width.
@@ -2549,10 +2691,12 @@ unsafe fn t2_dispatch(
                 t2_invoke_full(e, r, pc, target, start, argc)
             }
             _ => {
+                enter_native(e, r, pc, target, start, argc);
                 let Some(value) = primitive_value(e, p, base + start, argc, primitive_target(p))
                 else {
                     return Value::UNBOUND;
                 };
+                leave_native(e);
                 *r.add((*pc).a) = value;
                 advance(e, r, pc)
             }
@@ -2659,6 +2803,7 @@ unsafe fn t2_enter_closure(
         let closure = &e.vm.closures[target.payload() as usize];
         let f = &e.vm.functions[function];
         if argc < f.required || (!f.rest && argc > f.arity) {
+            enter_native(e, r, pc, target, start, argc);
             return closure_arity_error(e, function, argc);
         }
         let new = r.add(k_width(r));
@@ -2683,7 +2828,7 @@ unsafe fn t2_enter_closure(
         } else {
             None
         };
-        enter_frame(e, r, pc, new, function, rest)
+        enter_frame(e, r, pc, new, function, rest, target, start, argc)
     }
 }
 // Resolve the ordinary primitive family once per call site. Each cached call
@@ -2834,11 +2979,13 @@ unsafe fn cached_primitive(
     call: PrimitiveCall,
 ) -> Value {
     unsafe {
+        enter_native(e, r, pc, target, start, argc);
         let base = r.offset_from(e.vm.stack.as_ptr()) as usize;
         let p = prim::legacy(target).expect("legacy primitive");
         let Some(value) = primitive_value(e, p, base + start, argc, call) else {
             return Value::UNBOUND;
         };
+        leave_native(e);
         *r.add((*pc).a) = value;
         advance(e, r, pc)
     }
@@ -2853,6 +3000,7 @@ unsafe fn primitive(
     argc: usize,
 ) -> Value {
     unsafe {
+        enter_native(e, r, pc, target, start, argc);
         let base = r.offset_from(e.vm.stack.as_ptr()) as usize;
         let p = prim::legacy(target).expect("legacy primitive");
         if matches!(p, Primitive::Load | Primitive::Require | Primitive::Eval | Primitive::Macroexpand | Primitive::AutoloadDoLoad | Primitive::ReadHostEvent | Primitive::MakeInterpretedClosure) {
@@ -2864,6 +3012,7 @@ unsafe fn primitive(
             .primitive_call(p, base + start, argc, &mut e.error, &mut signal)
         {
             Some(value) => {
+                leave_native(e);
                 *r.add((*pc).a) = value;
                 advance(e, r, pc)
             }
@@ -3003,7 +3152,9 @@ unsafe fn autoload_then(e: &mut Engine<'_>, r: *mut Value, function: Value, fund
         e.vm.propagated_eval_depth = None;
         let saved_depth = e.vm.eval_depth;
         e.vm.eval_depth = e.depth_base + e.frames.len();
+        e.vm.loader.propagate += 1;
         let result = stacker::maybe_grow(512 * 1024, 2 * 1024 * 1024, || e.vm.autoload_do_load(fundef, function, Value::NIL));
+        e.vm.loader.propagate -= 1;
         e.vm.eval_depth = saved_depth;
         e.fatal_image_failure |= e.vm.execution_fatal;
         e.vm.gc_threshold = threshold;
@@ -3071,7 +3222,9 @@ unsafe fn reentrant_load(
         e.vm.propagated_eval_depth = None;
         let saved_depth = e.vm.eval_depth;
         e.vm.eval_depth = e.depth_base + e.frames.len();
+        e.vm.loader.propagate += 1;
         let result = stacker::maybe_grow(512 * 1024, 2 * 1024 * 1024, || e.vm.loader_primitive(p, &args));
+        e.vm.loader.propagate -= 1;
         e.vm.eval_depth = saved_depth;
         e.fatal_image_failure |= e.vm.execution_fatal;
         e.vm.gc_threshold = threshold;
@@ -3092,6 +3245,7 @@ unsafe fn reentrant_load(
         e.regs = r;
         match result {
             Ok(value) => {
+                leave_native(e);
                 *r.add((*pc).a) = value;
                 advance(e, r, pc)
             }
@@ -3479,32 +3633,14 @@ unsafe fn cold_step(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> bool 
                         return Err(error);
                     }
                 }
-                Op::Bind(slot, reg) if e.vm.forwarding(e.vm.indirect_variable(slot)).is_some() => {
-                    // GNU specbind, SYMBOL_FORWARDED (eval.c:3680).
-                    let base = e.vm.indirect_variable(slot);
-                    let fwd = e.vm.forwarding(base).unwrap();
+                Op::Bind(slot, reg) => {
                     let value = *r.add(reg);
-                    if let Err(fault) = e.vm.bind_forwarded(base, fwd, value) {
-                        let error = forwarded_fault_text(fault);
+                    if let Err(error) = e.vm.bind_variable(slot, value) {
                         if let Some((condition, data)) = e.vm.forwarded_condition(&error, value) {
                             e.escape = Some(Escape::Signal(condition, data));
                         }
                         return Err(error);
                     }
-                }
-                Op::Bind(slot, reg) => {
-                    // GNU specbind binds the variable at the end of the alias
-                    // chain (eval.c specbind, SYMBOL_VARALIAS).
-                    let original = e.vm.indirect_variable(slot);
-                    let slot = e.vm.variable_binding_slot(slot, false)?;
-                    let localized = e.vm.local_table(original)?.is_some();
-                    e.vm.dynamic.push((
-                        slot,
-                        e.vm.slots[slot].value,
-                        e.vm.slots[e.vm.buffer_slot].value,
-                        localized,
-                    ));
-                    e.vm.slots[slot].value = *r.add(reg);
                 }
                 Op::Unbind(n) => {
                     if n > e.vm.dynamic.len() - e.dynamic {
@@ -3515,23 +3651,28 @@ unsafe fn cold_step(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> bool 
                         return Ok(());
                     }
                 }
-                Op::Catch(dest, tag, target) => e.controls.push(Control {
-                    kind: ControlKind::Catch(*r.add(tag)),
-                    dest,
-                    target,
-                    dynamic: e.vm.dynamic.len(),
-                }),
-                Op::Condition(dest, conditions, target) => e.controls.push(Control {
-                    kind: ControlKind::Condition(conditions),
-                    dest,
-                    target,
-                    dynamic: e.vm.dynamic.len(),
-                }),
+                Op::Catch(dest, tag, target) => {
+                    let registry = e.vm.signal_handlers.len();
+                    e.vm.signal_handlers.push(SignalHandler::Catch(*r.add(tag)));
+                    e.controls.push(Control {
+                        kind: ControlKind::Catch(*r.add(tag)), dest, target,
+                        dynamic: e.vm.dynamic.len(), registry: Some(registry),
+                    });
+                }
+                Op::Condition(dest, conditions, target) => {
+                    let registry = e.vm.signal_handlers.len();
+                    e.vm.signal_handlers.push(SignalHandler::Condition(conditions));
+                    e.controls.push(Control {
+                        kind: ControlKind::Condition(conditions), dest, target,
+                        dynamic: e.vm.dynamic.len(), registry: Some(registry),
+                    });
+                }
                 Op::Protect(dest, target, end) => e.controls.push(Control {
                     kind: ControlKind::Protect { end },
                     dest,
                     target,
                     dynamic: e.vm.dynamic.len(),
+                    registry: None,
                 }),
                 Op::LeaveProtect(reg) => {
                     if e.controls.len() == e.controls_base
@@ -3579,7 +3720,10 @@ unsafe fn cold_step(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> bool 
                     }) {
                         return Err("invalid image handler region".into());
                     }
-                    e.controls.truncate(keep);
+                    while e.controls.len() > keep {
+                        let control = e.controls.pop().unwrap();
+                        release_control(e, &control);
+                    }
                 }
                 Op::Closure(reg, function, site) => {
                     let captures = e.vm.functions[e.function].sites[site]

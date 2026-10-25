@@ -529,7 +529,7 @@ impl Vm {
         }
         Ok(None)
     }
-    fn annotation_inherited(
+    pub(super) fn annotation_inherited(
         &mut self,
         left: Vec<(String, Value)>,
         right: Vec<(String, Value)>,
@@ -843,7 +843,7 @@ impl Vm {
         }
         out
     }
-    fn annotation_raw(&self, object: Value, at: usize) -> Result<Vec<(String, Value)>> {
+    pub(super) fn annotation_raw(&self, object: Value, at: usize) -> Result<Vec<(String, Value)>> {
         if Self::image_value(object) {
             if at > self.string_value(object)?.chars().count() {
                 return Err("index out of range".into());
@@ -899,7 +899,7 @@ impl Vm {
         }
         Ok(None)
     }
-    fn annotation_resolve(&self, raw: &[(String, Value)], key: Value) -> Result<Value> {
+    pub(super) fn annotation_resolve(&self, raw: &[(String, Value)], key: Value) -> Result<Value> {
         if let Some(v) = self.annotation_base(raw, key)? {
             return Ok(v);
         }

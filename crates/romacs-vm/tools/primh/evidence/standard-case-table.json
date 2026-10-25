@@ -1,10 +1,8 @@
 {
  "protocol": "primh-v1",
  "primitive": "standard-case-table",
- "spec_sha256": "1c2480218a1f0f42e6e49ad9517b787af907eb59c70c433c8ba8e3f499300af9",
+ "spec_sha256": "cddd574f6815fdb36b294617337e6e5e382c63948e7f9ef107b28ec1749f442c",
  "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
- "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
- "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
  "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
  "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
  "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
@@ -94,5 +92,6 @@
    "source": "(prin1-to-string (condition-case e (list 'ok (aref (standard-case-table) 192)) (error (list 'sig e))))",
    "expected": "(ok 224)"
   }
- ]
+ ],
+ "pinned": {}
 }

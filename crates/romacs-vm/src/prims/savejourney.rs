@@ -330,17 +330,3 @@ mod case_tests {
         assert_eq!(classify((1, 2), None, true), None);
     }
 }
-// GNU code_convert_string (coding.c:9583-9590) has an independent nil-coding
-// branch before registry lookup or conversion. Do not pretend the remaining
-// coding engine is implemented: refuse it and buffer destinations explicitly.
-defsubr! { name = "decode-coding-string", gnu = "coding.c:10487", effect = Global,
-fn decode_coding_string(cx, string: Value, coding: Value; optional nocopy: Value, buffer: Value) {
-    cx.string_bytes(string)?;
-    if coding != Value::NIL || buffer != Value::NIL {
-        return Err(Fault::Error("VM2 decode-coding-string supports nil coding and nil destination only".into()));
-    }
-    let variable = cx.intern("last-coding-system-used");
-    let no_conversion = cx.intern("no-conversion");
-    cx.variable_set(variable, no_conversion)?;
-    if nocopy != Value::NIL { Ok(string) } else { cx.propertized_copy(string, &[]) }
-}}

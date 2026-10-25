@@ -218,6 +218,45 @@ class HonestRatchet(unittest.TestCase):
         del bad['gnu_suite']['real_ert']
         self.assertTrue(pr.consistency(bad), 'a schema-2 ratchet without its real-ERT number was accepted')
 
+    def test_adapted_ert_cannot_be_labelled_unmodified(self):
+        data = honest({f'{RX}::rx-and': GENUINE})
+        real = data['gnu_suite']['real_ert']
+        real.update(harness=pr.BATCH_REAL_LABEL, is_unmodified_gnu_ert=False,
+                    ert_adapter=dict(name='romacs-batch', automatic_window_isolation=False))
+        self.assertEqual(pr.consistency(data), [])
+        for forged in [dict(harness=pr.REAL_LABEL), dict(is_unmodified_gnu_ert=True),
+                       dict(ert_adapter=None), dict(ert_adapter='romacs-batch'),
+                       dict(ert_adapter=dict(name='romacs-batch', automatic_window_isolation=True))]:
+            bad = copy.deepcopy(data)
+            bad['gnu_suite']['real_ert'].update(forged)
+            self.assertTrue(pr.consistency(bad), f'adapted ERT evidence mislabelled: {forged}')
+
+    def test_real_measurement_requires_and_reports_the_batch_adapter(self):
+        from unittest.mock import patch
+        import json
+        summary = dict(is_gnu_ert=True, engine='romacs', bootstrap_regime='gnu-ert',
+                       is_unmodified_gnu_ert=False,
+                       ert_adapter=dict(name='romacs-batch', automatic_window_isolation=False))
+
+        def measured(command, **kwargs):
+            self.assertEqual(command[command.index('--ert-adapter') + 1], 'romacs-batch')
+            self.assertEqual(command[command.index('--bootstrap') + 1], 'ert')
+            out = pathlib.Path(command[command.index('--out') + 1])
+            out.mkdir()
+            (out / 'summary.json').write_text(json.dumps(summary))
+            (out / 'results.jsonl').write_text(json.dumps(dict(file=RX, test='rx-and', verdict='passed')))
+            return pr.subprocess.CompletedProcess(command, 0, '', '')
+
+        with patch.dict(pr.os.environ, ROMACS_GNU_ORACLE='/fixture/gnu'), \
+                patch.object(pr.subprocess, 'run', side_effect=measured):
+            result = pr.measure_real_ert(pathlib.Path('.'), {RX: ['rx-and']}, '/fixture/romacs', 1)
+            self.assertEqual(result['harness'], pr.BATCH_REAL_LABEL)
+            self.assertFalse(result['is_unmodified_gnu_ert'])
+            self.assertEqual(result['passed'], 1)
+            summary['is_unmodified_gnu_ert'] = True
+            with self.assertRaises(pr.Refusal):
+                pr.measure_real_ert(pathlib.Path('.'), {RX: ['rx-and']}, '/fixture/romacs', 1)
+
     def test_the_restatement_report_shows_closing_arithmetic_and_every_moved_member(self):
         import restatement_report as rr
         files = files_of([f'{RX}::x'])

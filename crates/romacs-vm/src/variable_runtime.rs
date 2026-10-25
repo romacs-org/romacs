@@ -201,14 +201,14 @@ impl Vm {
             self.variable_redirects[slot] = Some(if localized { VariableRedirect::Localized } else { VariableRedirect::Plain });
         }
     }
-    /// Publish SLOT's local TABLE: GNU makes the variable SYMBOL_LOCALIZED.
-    /// Callers have already refused forwarded variables and resolved aliases.
+    /// Publish SLOT's local TABLE, retaining native Boolean forwarding.
     fn install_local_table(&mut self, slot: usize, table: Value, explicit: bool) {
         self.slots[slot].local = table;
         self.slots[slot].explicit_local = explicit;
         self.variable_redirects.resize(self.variable_redirects.len().max(slot + 1), None);
-        // GNU keeps SYMBOL_FORWARDED and SYMBOL_VARALIAS: never demote them.
-        if !matches!(self.variable_redirects[slot], Some(VariableRedirect::Forwarded(_) | VariableRedirect::Alias(_))) {
+        if let Some(VariableRedirect::Forwarded(fwd @ forwarded::Fwd::Bool(_))) = self.variable_redirects[slot] {
+            self.variable_redirects[slot] = Some(VariableRedirect::LocalizedForwarded(fwd));
+        } else if !matches!(self.variable_redirects[slot], Some(VariableRedirect::Forwarded(_) | VariableRedirect::LocalizedForwarded(_) | VariableRedirect::Alias(_))) {
             self.variable_redirects[slot] = Some(VariableRedirect::Localized);
         }
     }
@@ -223,7 +223,7 @@ impl Vm {
             }
             self.initialize_variable_redirect(&name, slot);
         }
-        let Some(VariableRedirect::Localized) = self.variable_redirects[slot] else { return Ok(None) };
+        if !matches!(self.variable_redirects[slot], Some(VariableRedirect::Localized | VariableRedirect::LocalizedForwarded(_))) { return Ok(None); }
         let table = self.slots[slot].local;
         Ok((table != Value::NIL).then_some(table))
     }
@@ -252,25 +252,58 @@ impl Vm {
         });
         if !create || explicit || shadowed { return Ok(slot); }
         let local = self.allocate_local_binding_slot();
-        self.slots[local].value = self.slots[slot].value;
+        self.slots[local].value = if let Some(fwd) = self.localized_boolean(slot) { self.forwarded_value(fwd)? } else { self.slots[slot].value };
         self.declaration_hash_put(table, buffer, Value::reference(local+1, 7))?;
         Ok(local)
     }
     pub(super) fn variable_value(&mut self, slot: usize) -> Result<Value> {
         let base = self.indirect_variable(slot);
-        if let Some(fwd) = self.forwarding(base) {
-            return self.forwarded_value(fwd);
+        if let Some(fwd) = self.native_forwarding(base) {
+            let local = self.variable_binding_slot(base, false)?;
+            return if local == base { self.forwarded_value(fwd) } else { Ok(self.slots[local].value) };
         }
         let local = self.variable_binding_slot(slot, false)?;
         Ok(self.slots[local].value)
     }
     pub(super) fn set_variable_value(&mut self, slot: usize, value: Value) -> Result<()> {
         let base = self.indirect_variable(slot);
-        if let Some(fwd) = self.forwarding(base) {
-            return self.set_forwarded(base, fwd, value, forwarded::SetFlag::Set).map_err(forwarded::fault_text);
+        if let Some(fwd) = self.native_forwarding(base) {
+            if value == Value::UNBOUND {
+                return self.set_forwarded(base, fwd, value, forwarded::SetFlag::Set).map_err(forwarded::fault_text);
+            }
+            let local = self.variable_binding_slot(base, true)?;
+            if local == base {
+                return self.set_forwarded(base, fwd, value, forwarded::SetFlag::Set).map_err(forwarded::fault_text);
+            }
+            self.slots[local].value = if value == Value::NIL { Value::NIL } else { Value::TRUE };
+            return Ok(());
         }
         let local = self.variable_binding_slot(slot, true)?;
         self.slots[local].value = value;
+        Ok(())
+    }
+    pub(super) fn promote_boolean_local(&mut self, slot: usize, explicit: bool) -> Result<()> {
+        if self.dynamic.iter().any(|(bound, old, _, _)| *bound == slot && *old != Value::NIL && *old != Value::TRUE) {
+            return Err(format!("VM2 localized Boolean default requires nil or t: {}", self.symbol_names[slot]));
+        }
+        if self.local_table(slot)?.is_none() {
+            let table = self.allocate_object(data::Object::HashTable(Box::new(hash::HashTable::new_local_bindings())));
+            self.install_local_table(slot, table, explicit);
+        }
+        Ok(())
+    }
+    pub(super) fn bind_variable(&mut self, slot: usize, value: Value) -> Result<()> {
+        let base = self.indirect_variable(slot);
+        let local = self.variable_binding_slot(base, false)?;
+        if let Some(fwd) = self.native_forwarding(base) && local == base {
+            return self.bind_forwarded(base, fwd, value).map_err(forwarded::fault_text);
+        }
+        let localized = self.local_table(base)?.is_some();
+        if base != self.buffer_slot {
+            self.backtrace.bind(self.dynamic.len(), Value::reference(base + 1, 7));
+        }
+        self.dynamic.push((local, self.slots[local].value, self.slots[self.buffer_slot].value, localized));
+        self.slots[local].value = if self.localized_boolean(base).is_some() { if value == Value::NIL { Value::NIL } else { Value::TRUE } } else { value };
         Ok(())
     }
     pub(super) fn make_local_variable(&mut self, slot: usize) -> Result<()> {
@@ -339,10 +372,12 @@ impl Vm {
                 let property = self.intern("standard-value");
                 Ok(truth(self.symbol_property(symbol, property)? != Value::NIL))
             }
-            // GNU data.c:2208: a per-buffer variable already is; others become
-            // SYMBOL_LOCALIZED over their forwarding (refused, VM2-CVAR1).
             MakeVariableBufferLocal if self.forwarding(slot).is_some() => {
-                match self.forwarding(slot) { Some(forwarded::Fwd::Buffer(_)) => Ok(symbol), _ => Err(forwarded::unlocalizable(&self.symbol_names[slot])) }
+                match self.forwarding(slot) {
+                    Some(forwarded::Fwd::Buffer(_)) => Ok(symbol),
+                    Some(forwarded::Fwd::Bool(_)) => { self.promote_boolean_local(slot, false)?; Ok(symbol) }
+                    _ => Err(forwarded::unlocalizable(&self.symbol_names[slot])),
+                }
             }
             MakeVariableBufferLocal => {
                 self.slots[slot].explicit_local = false;
@@ -361,9 +396,9 @@ impl Vm {
             },
             // A built-in variable is always bound (GNU Fboundp), so `defvar'
             // never replaces its value.
-            DefvarBoundp if self.forwarding(slot).is_some() => Ok(Value::TRUE),
-            DefvarSetDefault if self.forwarding(slot).is_some() => {
-                let fwd = self.forwarding(slot).unwrap();
+            DefvarBoundp if self.native_forwarding(slot).is_some() => Ok(Value::TRUE),
+            DefvarSetDefault if self.native_forwarding(slot).is_some() => {
+                let fwd = self.native_forwarding(slot).unwrap();
                 let value = self.stack[start+1];
                 self.set_forwarded_default(slot, fwd, value, forwarded::SetFlag::Set).map_err(forwarded::fault_text)?;
                 Ok(value)

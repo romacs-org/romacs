@@ -26,8 +26,12 @@ impl Leaf<'_> {
         Ok(marker)
     }
     pub(crate) fn editor_point_marker(&mut self) -> Out {
+        let point = self.point()?;
+        self.editor_position_marker(point)
+    }
+    pub(crate) fn editor_position_marker(&mut self, position: i64) -> Out {
         let buffer = self.current_buffer()?;
-        let point = Value::integer(self.point()?).map_err(Fault::Error)?;
+        let point = Value::integer(position).map_err(Fault::Error)?;
         let marker = self.vm.allocate_object(Object::Marker(Box::new(Marker {
             buffer: Value::NIL, anchor: None, bias: Bias::Left,
         })));

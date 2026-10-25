@@ -6,7 +6,11 @@ impl Leaf<'_> {
         let mut values = Vec::with_capacity(arguments.len() + 1);
         values.push(template);
         values.extend_from_slice(arguments);
-        self.vm.format_values(&values, Some(style)).map_err(Fault::Error)
+        self.vm.format_values(&values, Some(style)).map_err(|error| {
+            if error == "floating-point overflow" {
+                Fault::Signal(self.intern("overflow-error"), Value::NIL)
+            } else { Fault::Error(error) }
+        })
     }
 
     pub(crate) fn text_quoting_style(&mut self) -> std::result::Result<&'static str, Fault> {
@@ -51,8 +55,131 @@ impl Leaf<'_> {
         Ok(style)
     }
 
-    pub(crate) fn print_text(&mut self, object: Value, quoted: bool, overrides: Value) -> std::result::Result<Value, Fault> {
-        let text = self.vm.print_render(object, quoted, overrides, false).map_err(Fault::Error)?;
+    pub(crate) fn print_text(&mut self, object: Value, quoted: bool, mut overrides: Value, stream: Value) -> std::result::Result<Value, Fault> {
+        let buffer = self.print_buffer(stream)?;
+        if let Some(buffer) = buffer {
+            if self.kind(buffer) == Kind::ByteBuffer {
+                let mut settings = if overrides == Value::TRUE { vec![overrides] }
+                    else { self.vm.list_values(overrides).map_err(Fault::Error)? };
+                let key = self.intern("escape-multibyte");
+                settings.push(self.cons(key, Value::TRUE));
+                overrides = self.vm.list_value(&settings);
+            }
+        }
+        let current = if buffer.is_some() { Some(self.current_buffer()?) } else { None };
+        if let Some(buffer) = buffer { self.vm.slots[self.vm.buffer_slot].value = buffer; }
+        let text = self.vm.print_render(object, quoted, overrides,
+            buffer.is_some_and(|buffer| self.kind(buffer) == Kind::Buffer));
+        if let Some(current) = current { self.vm.slots[self.vm.buffer_slot].value = current; }
+        let text = text.map_err(Fault::Error)?;
         Ok(self.string(&text))
+    }
+
+    fn print_buffer(&self, stream: Value) -> std::result::Result<Option<Value>, Fault> {
+        let buffer = match self.vm.object_if(stream) {
+            Some(data::Object::Marker(marker)) => {
+                if marker.buffer == Value::NIL {
+                    return Err(Fault::Error("Marker does not point anywhere".into()));
+                }
+                marker.buffer
+            }
+            Some(data::Object::Buffer(_) | data::Object::ByteBuffer(_)) => stream,
+            _ => return Ok(None),
+        };
+        self.vm.require_live_buffer(buffer).map_err(Fault::Error)?;
+        Ok(Some(buffer))
+    }
+
+    pub(crate) fn princ_text(&mut self, object: Value, stream: Value) -> std::result::Result<Value, Fault> {
+        if !matches!(self.kind(object), Kind::String | Kind::Bytes) {
+            return self.print_text(object, false, Value::NIL, stream);
+        }
+        if self.print_buffer(stream)?.is_some_and(|buffer| self.kind(buffer) == Kind::Buffer) {
+            let view = self.string_view(object)?;
+            if !view.is_multibyte() {
+                use std::fmt::Write;
+                let mut text = String::new();
+                for &byte in view.bytes() {
+                    if byte >= 128 { write!(text, "\\{byte:03o}").unwrap(); }
+                    else { text.push(char::from(byte)); }
+                }
+                return Ok(self.string(&text));
+            }
+        }
+        Ok(object)
+    }
+
+    pub(crate) fn print_into_buffer(&mut self, text: Value, stream: Value) -> std::result::Result<(), Fault> {
+        let buffer = self.print_buffer(stream)?.unwrap();
+        let current = self.current_buffer()?;
+        let marker = self.kind(stream) == Kind::Marker;
+        let point = if marker { Some(self.print_marker_point(stream, buffer)?) } else { None };
+        self.vm.slots[self.vm.buffer_slot].value = buffer;
+        let result = self.insert_printed_text(text);
+        let result = result.and_then(|()| {
+            if let Some((old, at)) = point {
+                let end = self.point()?;
+                self.vm.set_marker_object(stream, Value::integer(end).unwrap(), buffer).map_err(Fault::Error)?;
+                let data::Object::Buffer(target) = &mut self.vm.objects[buffer.index(0).unwrap() - 1] else { unreachable!() };
+                target.point = if old >= at { crate::coordinates::ByteOffset(old.0 + target.point.0 - at.0) } else { old };
+            }
+            Ok(())
+        });
+        self.vm.slots[self.vm.buffer_slot].value = current;
+        result
+    }
+
+    fn print_marker_point(&mut self, stream: Value, buffer: Value) -> std::result::Result<(crate::coordinates::ByteOffset, crate::coordinates::ByteOffset), Fault> {
+        let position = self.vm.marker_position_value(stream).map_err(Fault::Error)?.as_integer().map_err(Fault::Error)?;
+        let data::Object::Buffer(target) = &mut self.vm.objects[buffer.index(0).unwrap() - 1] else {
+            return Err(Fault::Error("printing to unibyte buffer markers is not supported".into()));
+        };
+        let at = target.byte_of_char(crate::coordinates::CharOffset(position as usize - 1)).map_err(Fault::Error)?;
+        let accessible = target.accessible();
+        if at < accessible.start || at > accessible.end {
+            return Err(Fault::Error("Marker is outside the accessible part of the buffer".into()));
+        }
+        let old = target.point;
+        target.point = at;
+        Ok((old, at))
+    }
+
+    fn insert_printed_text(&mut self, text: Value) -> std::result::Result<(), Fault> {
+        let view = self.string_view(text)?;
+        if view.bytes().is_empty() { return Ok(()); }
+        let inhibit = self.intern("inhibit-read-only");
+        let inhibit = self.variable_value(inhibit)?.unwrap_or(Value::NIL);
+        let read_only = self.intern("buffer-read-only");
+        if inhibit == Value::NIL && self.variable_value(read_only)?.is_some_and(|v| v != Value::NIL)
+            && self.fileio_property_at_point("inhibit-read-only")? == Value::NIL {
+            let condition = self.intern("buffer-read-only");
+            let buffer = self.current_buffer()?;
+            return Err(Fault::Signal(condition, self.cons(buffer, Value::NIL)));
+        }
+        self.fileio_check_insertion(inhibit)?;
+        let hooks = self.intern("inhibit-modification-hooks");
+        if self.variable_value(hooks)?.unwrap_or(Value::NIL) == Value::NIL {
+            for name in ["before-change-functions", "after-change-functions", "first-change-hook"] {
+                let name = self.intern(name);
+                if self.variable_value(name)?.is_some_and(|value| value != Value::NIL) {
+                    return Err(Fault::Error("printing to buffers with change hooks is not supported".into()));
+                }
+            }
+            if self.fileio_has_insertion_hooks()? {
+                return Err(Fault::Error("printing to buffers with change hooks is not supported".into()));
+            }
+        }
+        let multibyte = self.casing_multibyte()?;
+        let bytes = if !multibyte && view.is_multibyte() {
+            view.chars().map(|code| u8::try_from(code).map_err(|_| Fault::NotUnicode(text))).collect::<std::result::Result<Vec<_>, _>>()?
+        } else { view.bytes().to_vec() };
+        let index = self.vm.buffer_index().map_err(Fault::Error)?;
+        match &mut self.vm.objects[index] {
+            data::Object::Buffer(target) => target.replace(target.point..target.point, &bytes),
+            data::Object::ByteBuffer(target) => target.replace(target.point..target.point, &bytes),
+            _ => unreachable!(),
+        }.map_err(Fault::Error)?;
+        self.vm.display_state.version += 1;
+        Ok(())
     }
 }

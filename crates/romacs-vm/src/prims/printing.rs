@@ -4,14 +4,14 @@ use std::io::Write;
 
 defsubr! { name = "prin1", gnu = "print.c:738", effect = Global,
 fn prin1(cx, object: Value; optional stream: Value, overrides: Value) -> Step {
-    let text = cx.print_text(object, true, overrides)?;
+    let stream = destination(cx, stream)?; let text = cx.print_text(object, true, overrides, stream)?;
     output(cx, object, text, stream)
 }}
 
 defsubr! { name = "princ", gnu = "print.c:844", effect = Global,
 fn princ(cx, object: Value; optional stream: Value) -> Step {
-    let text = if matches!(cx.kind(object), leaf::Kind::String | leaf::Kind::Bytes) { object }
-        else { cx.print_text(object, false, Value::NIL)? };
+    let stream = destination(cx, stream)?;
+    let text = cx.princ_text(object, stream)?;
     output(cx, object, text, stream)
 }}
 
@@ -24,7 +24,7 @@ fn terpri(cx; optional stream: Value, ensure: Value) -> Step {
 
 defsubr! { name = "print", gnu = "print.c:882", effect = Global,
 fn print(cx, object: Value; optional stream: Value) -> Step {
-    let text = cx.print_text(object, true, Value::NIL)?;
+    let stream = destination(cx, stream)?; let text = cx.print_text(object, true, Value::NIL, stream)?;
     let text = cx.string(&format!("\n{}\n", cx.string_text(text)?));
     output(cx, object, text, stream)
 }}
@@ -66,7 +66,8 @@ fn output(cx: &mut Leaf<'_>, result: Value, text: Value, stream: Value) -> Next 
         return Ok(Step::Done(result));
     }
     if matches!(cx.kind(stream), leaf::Kind::Buffer | leaf::Kind::ByteBuffer | leaf::Kind::Marker) {
-        return Err(Fault::Error("printing to buffers and markers is not supported".into()));
+        cx.print_into_buffer(text, stream)?;
+        return Ok(Step::Done(result));
     }
     next_char(cx, vec![result, text, stream, Value::integer(0).unwrap()])
 }

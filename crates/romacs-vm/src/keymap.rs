@@ -319,7 +319,7 @@ impl Vm {
                     c &= !meta;
                 }
                 event = Value::integer(c)?;
-            } else if event.tag() != 7 && event != Value::TRUE {
+            } else if event.tag() != 7 && event != Value::TRUE && self.str_view(event).is_none() {
                 return Err("integer or symbol event required".into());
             }
             events.push(KeyEvent { value: event, input_index });

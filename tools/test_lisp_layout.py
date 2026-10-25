@@ -59,7 +59,17 @@ class LispLayoutTests(unittest.TestCase):
             with self.subTest(file=file.relative_to(ROOT)):
                 self.assertIn('SPDX-License-Identifier: GPL-3.0-or-later', source)
                 self.assertIn(';;; Commentary:', source)
-                self.assertNotRegex(source, r'(?im)^;+.*Copyright.*(?:Free Software Foundation|FSF)')
+                copyright_pattern = r'(?im)^;+.*Copyright.*(?:Free Software Foundation|FSF).*'
+                if file == ROOT / 'rlisp/romacs-ert-batch.el':
+                    # This adapter derives a GNU function and must retain its notice.
+                    upstream = (ROOT / 'gnu-lisp/emacs-lisp/ert.el').read_text()
+                    notices = re.findall(copyright_pattern, upstream)
+                    self.assertTrue(notices, 'GNU_ERT_COPYRIGHT_MISSING')
+                    for notice in notices:
+                        self.assertIn(notice, source)
+                    self.assertIn('Adapted from GNU ert.el', source)
+                else:
+                    self.assertNotRegex(source, copyright_pattern)
                 self.assertNotIn('This file is part of GNU Emacs.', source)
 
 

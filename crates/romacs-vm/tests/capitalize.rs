@@ -14,6 +14,8 @@ fn capitalize_native_contract() {
         (r#"(with-temp-buffer (set-syntax-table (copy-syntax-table)) (modify-syntax-entry 45 "w") (capitalize "a-B_C"))"#, r#""A-b_C""#),
         (r#"(let ((case-symbols-as-words t)) (capitalize "foo_BAR"))"#, r#""Foo_bar""#),
         ("(list (condition-case e (capitalize -1) (error e)) (condition-case e (capitalize nil) (error e)))", "((wrong-type-argument char-or-string-p -1) (wrong-type-argument char-or-string-p nil))"),
+        ("(let ((u (char-table-extra-slot (current-case-table) 0))) (aset u ?1 256) (list (append (upcase-initials (unibyte-string ?1)) nil) (aref (upcase-initials (string-to-multibyte \"1\")) 0)))", "((49) 256)"),
+        ("(let ((u (char-table-extra-slot (current-case-table) 0))) (aset u 4194281 4194249) (append (upcase-initials (unibyte-string 233)) nil))", "(201)"),
         (r#"(let* ((s (propertize (unibyte-string 97 66) 'face 'bold)) (r (capitalize s))) (list (eq s r) (append s nil) (append r nil) (get-text-property 0 'face r) (multibyte-string-p r)))"#, "(nil (97 66) (65 98) bold nil)"),
     ] {
         let actual = vm.eval_source(source).and_then(|v| v.display());

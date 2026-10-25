@@ -94,6 +94,8 @@ pub(crate) enum Step {
     Collect,
     /// Return this value from the primitive.
     Done(Value),
+    /// Establish non-unwinding signal handlers for the dynamic extent of BODY.
+    Handle { body: Value, handlers: Vec<(Value, Value)> },
     /// Call `f` with `args` as an ordinary Lisp call, then run `then` with its
     /// value and `saved`. The engine copies `f`, `args` and `saved` into the
     /// continuation activation's registers before any wait point.
@@ -275,6 +277,10 @@ mod leaf {
             let buffer = self.vm.create_named_buffer(&name, false).map_err(|error| {
                 match self.vm.propagated_escape.take() {
                     Some(crate::threaded::Escape::Signal(condition, data)) => Fault::Signal(condition, data),
+                    Some(crate::threaded::Escape::Error { condition, object, .. }) => {
+                        let (_, data) = self.vm.cons_pair(object).expect("normalized signal object");
+                        Fault::Signal(condition, data)
+                    }
                     escape => {
                         self.vm.propagated_escape = escape;
                         Fault::Error(error)
@@ -446,6 +452,35 @@ mod leaf {
         }
         pub fn sxhash(&self, value: Value) -> Value {
             Value::integer((self.vm.public_sxhash(value) & ((1u64 << 60)-1)) as i64).unwrap()
+        }
+        pub fn string_to_syntax(&mut self, string: Value) -> super::Out {
+            let description = self.string_view(string)?;
+            Ok(match crate::regexp::parse_syntax_descriptor(&description).map_err(Fault::Error)? {
+                None => Value::NIL,
+                Some((code, matching)) => self.vm.regexp_syntax_entry(code,
+                    matching.map_or(Value::NIL, |c| Value::integer(i64::from(c)).unwrap())),
+            })
+        }
+        pub fn sxhash_eq(&mut self, value: Value) -> super::Out {
+            const MASK: u64 = (1 << 60) - 1;
+            if !matches!(value.tag(), 0 | 3 | 4 | 5) || value == Value::NIL {
+                return Ok(Value::integer((value.0 & MASK) as i64).unwrap());
+            }
+            let slot = self.vm.slot("#:vm2-sxhash-eq");
+            if self.vm.slots[slot].value == Value::UNBOUND {
+                let table = hash::HashTable::new_local_bindings();
+                self.vm.slots[slot].value = self.vm.allocate_object(data::Object::HashTable(Box::new(table)));
+            }
+            let table = self.vm.slots[slot].value;
+            if let Some(hash) = self.vm.declaration_hash_get(table, value).map_err(Fault::Error)? {
+                return Ok(hash);
+            }
+            let counter = self.vm.slot("#:vm2-next-eq-hash");
+            let hash = self.vm.slots[counter].value.integer_value().unwrap_or(0);
+            let value_hash = Value::integer(hash).map_err(Fault::Error)?;
+            self.vm.slots[counter].value = Value::integer(((hash as u64 + 1) & MASK) as i64).unwrap();
+            self.vm.declaration_hash_put(table, value, value_hash).map_err(Fault::Error)?;
+            Ok(value_hash)
         }
         pub fn fill_string(&mut self, value: Value, code: u32) -> std::result::Result<Value, Fault> {
             if Vm::image_value(value) { return Err(Fault::Error("immutable image string".into())); }
@@ -729,6 +764,7 @@ mod leaf {
             if v == Value::NIL || v == Value::TRUE { return Ok(false); }
             let slot = self.symbol_slot(v)?;
             let Some(binding) = self.vm.default_toplevel_binding(slot) else { return Ok(false) };
+            self.vm.check_boolean_default(slot, value).map_err(Fault::Error)?;
             self.vm.dynamic[binding].1 = value;
             Ok(true)
         }
@@ -746,7 +782,7 @@ mod leaf {
             }
             let base = self.vm.indirect_variable(self.symbol_slot(v)?);
             // GNU default_value, SYMBOL_FORWARDED arm (data.c:1983).
-            if let Some(fwd) = self.vm.forwarding(base) {
+            if let Some(fwd) = self.vm.native_forwarding(base) {
                 return self.vm.forwarded_default(fwd).map_err(Fault::Error);
             }
             let value = self.vm.slots[base].value;
@@ -774,7 +810,7 @@ mod leaf {
                 return Err(Fault::SettingConstant(v));
             }
             // GNU set_default_internal, SYMBOL_FORWARDED arm (data.c:2085).
-            if let Some(fwd) = self.vm.forwarding(slot) {
+            if let Some(fwd) = self.vm.native_forwarding(slot) {
                 self.vm.set_forwarded_default(slot, fwd, value, crate::forwarded::SetFlag::Set)?;
                 return Ok(value);
             }
@@ -925,7 +961,16 @@ mod leaf {
                 let marker = if noset == Value::NIL { Value::TRUE } else { self.intern("noset") };
                 self.vm.put_symbol_property_checked(symbol, autoload, marker).map_err(put_fault)?;
             }
-            let key = self.intern("custom-loads");
+            self.custom_list_metadata(symbol, load, "custom-loads")
+        }
+        pub fn custom_list_metadata(&mut self, symbol: Value, load: Value, property: &str) -> super::Out {
+            self.symbol_slot(symbol)?;
+            let put_fault = |fault| match fault {
+                annotations::PlistFault::Symbol(v) => Fault::Wrong("symbolp", v),
+                annotations::PlistFault::Plistp(v) => Fault::Wrong("plistp", v),
+                annotations::PlistFault::Circular(v) => Fault::Circular(v),
+            };
+            let key = self.intern(property);
             let loads = self.vm.symbol_property(symbol, key).map_err(Fault::Error)?;
             let mut tail = loads;
             let mut seen = std::collections::HashSet::new();
@@ -1124,6 +1169,16 @@ mod leaf {
             let slot = self.vm.names["#:vm2-global-keymap"];
             self.vm.slots[slot].value = map;
             Ok(Value::NIL)
+        }
+        pub fn current_local_map(&mut self) -> std::result::Result<Value, Fault> {
+            let index = self.vm.buffer_index().map_err(Fault::Error)?;
+            match &self.vm.objects[index] {
+                crate::data::Object::Buffer(buffer) => Ok(buffer.local_keymap),
+                _ => Err(Fault::Error("current-local-map in unibyte buffers is not implemented".into())),
+            }
+        }
+        pub fn keymap_at_point(&mut self, property: Value) -> super::Out {
+            self.vm.keymap_at_point(property).map_err(Fault::Error)
         }
         pub fn obarray_lookup(&self, name: &str) -> Option<Value> {
             match name {
@@ -1372,6 +1427,8 @@ mod leaf {
     mod face;
     mod value_order;
     mod completion;
+    mod backtrace;
+    mod text_properties;
 }
 pub(crate) use leaf::{Leaf, Kind};
 
@@ -1515,6 +1572,16 @@ pub(crate) fn descriptor(index: usize) -> Option<Descriptor> {
 pub(crate) fn legacy(v: Value) -> Option<Primitive> {
     descriptor(v.index_if(6)?)?.legacy()
 }
+#[path = "prim/legacy_arity.rs"]
+mod legacy_arity;
+
+pub(crate) fn arity(value: Value) -> Option<(usize, Option<usize>)> {
+    Some(match descriptor(value.index_if(6)?)? {
+        Descriptor::Legacy(_, primitive) => legacy_arity::arity(primitive),
+        Descriptor::Generated(desc) => (desc.min, desc.max),
+    })
+}
+
 pub(crate) fn name(v: Value) -> Option<&'static str> {
     Some(descriptor(v.index_if(6)?)?.name())
 }
@@ -1798,7 +1865,7 @@ mod tests {
             Body::Leaf(f) => f(&mut cx, args),
             Body::Call(f) => match f(&mut cx, args)? {
                 Step::Done(v) => Ok(v),
-                Step::Call { .. } | Step::Collect => panic!("expected immediate test result"),
+                Step::Call { .. } | Step::Handle { .. } | Step::Collect => panic!("expected immediate test result"),
             },
         }
     }

@@ -130,6 +130,24 @@ fn real_mode_preserves_reporter_failure_status() {
 }
 
 #[test]
+fn strict_prerequisite_failure_stops_both_harnesses() {
+    let f = Fixture::new();
+    let preload = f.put("broken-prerequisite.el", "(if noninteractive nil (error \"BATCH-MODE-MISSING\"))\n(error \"PREREQUISITE-STOP\")");
+    let harness = f.put("unreachable-harness.el", "(error \"HARNESS-MUST-NOT-LOAD\")");
+    let plan = f.put("empty-plan.json", &json!({"file":"unreachable", "forms":[]}).to_string());
+    for kind in ["mini", "real"] {
+        let output = Command::new(env!("CARGO_BIN_EXE_romacs-gnu-ert"))
+            .args(["--harness-kind", kind, "--bootstrap-regime", "gnu-ert", "--harness"])
+            .arg(&harness).arg("--plan").arg(&plan).arg("--preload").arg(&preload)
+            .output().unwrap();
+        assert_eq!(output.status.code(), Some(3), "{}", stdout(&output));
+        assert!(stdout(&output).contains("PREREQUISITE-STOP"));
+        assert!(!stdout(&output).contains("HARNESS-MUST-NOT-LOAD"));
+        assert!(!events(&output).iter().any(|row| row["event"] == "harness"));
+    }
+}
+
+#[test]
 fn ordinary_load_defers_registration_body_until_execution() {
     let f = Fixture::new();
     let harness = include_str!("../../harness/romacs-mini-ert.el");

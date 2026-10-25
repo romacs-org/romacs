@@ -43,6 +43,8 @@ impl Leaf<'_> {
         } else if let Some(table) = self.vm.local_table(slot).map_err(Fault::Error)? {
             if let Some(local) = self.vm.declaration_hash_get(table, buffer).map_err(Fault::Error)? {
                 self.vm.slots[local.index(7).unwrap() - 1].value
+            } else if let Some(fwd) = self.vm.localized_boolean(slot) {
+                self.vm.forwarded_default(fwd).map_err(Fault::Error)?
             } else { self.vm.slots[slot].value }
         } else { self.vm.slots[slot].value };
         if value == Value::UNBOUND {

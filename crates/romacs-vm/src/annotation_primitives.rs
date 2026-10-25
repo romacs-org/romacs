@@ -10,6 +10,68 @@ use crate::{
     *,
 };
 impl Vm {
+    pub(crate) fn keymap_at_point(&mut self, property: Value) -> Result<Value> {
+        let index = self.buffer_index()?;
+        let buffer = self.slots[self.buffer_slot].value;
+        let (at, left, right, same, local, overlays) = match &self.objects[index] {
+            Object::Buffer(text) => {
+                let at = text.point;
+                let raw = |at| text.properties.properties_at(at).into_iter().map(|(k, v)| (k.to_owned(), v)).collect();
+                (at.0,
+                 if at.0 > 0 { raw(ByteOffset(at.0 - 1)) } else { vec![] },
+                 if at.0 < text.len_bytes() { raw(at) } else { vec![] },
+                 at.0 > 0 && at.0 < text.len_bytes() && text.properties.same_run_state(ByteOffset(at.0 - 1), at), text.local_keymap,
+                 text.intervals.query_with_end(at.0 as u32, at.0 as u32, true,
+                     at.0 == text.len_bytes(), &text.anchors).0)
+            }
+            Object::ByteBuffer(_) => return Err("keymap lookup in unibyte buffers is not implemented".into()),
+            _ => unreachable!(),
+        };
+        let mut value = self.ordered_overlay_property(overlays, property)?;
+        if value == Value::NIL {
+            value = self.annotation_resolve(&right, property)?;
+        }
+        if value == Value::NIL {
+            value = self.insertion_overlay_property(buffer, at, property)?;
+        }
+        if value == Value::NIL {
+            let inherited = self.annotation_inherited(left, right, same)?;
+            value = self.annotation_resolve(&inherited, property)?;
+        }
+        Ok(self.resolve_keymap(value).unwrap_or_else(|| {
+            if self.names.get("local-map").is_some_and(|&slot| property == Value::reference(slot + 1, 7)) { local } else { Value::NIL }
+        }))
+    }
+
+    fn insertion_overlay_property(&self, buffer: Value, at: usize, property: Value) -> Result<Value> {
+        let Object::Buffer(text) = self.object(buffer)? else { return Ok(Value::NIL); };
+        let mut candidates = text.intervals.query_with_end(at.saturating_sub(1) as u32,
+            (at + 1).min(text.len_bytes()) as u32, false, true, &text.anchors).0;
+        candidates.retain(|&overlay| {
+            let object = self.overlay(overlay).unwrap();
+            let (start, end) = self.overlay_range(overlay).unwrap().unwrap();
+            start as usize <= at && at <= end as usize
+                && !(start as usize == at && object.front == Bias::Right)
+                && !(end as usize == at && object.rear != Bias::Right)
+        });
+        self.ordered_overlay_property(candidates, property)
+    }
+
+    fn ordered_overlay_property(&self, mut overlays: Vec<Value>, property: Value) -> Result<Value> {
+        overlays.sort_by_key(|&overlay| self.overlay_order_key(overlay));
+        for overlay in overlays.into_iter().rev() {
+            let value = self.overlay_property(overlay, property)?;
+            if value != Value::NIL { return Ok(value); }
+        }
+        Ok(Value::NIL)
+    }
+
+    fn overlay_order_key(&self, overlay: Value) -> (i64, u32, std::cmp::Reverse<u32>, usize) {
+        let priority = self.overlay_property_named(overlay, "priority").unwrap().integer_value().unwrap_or(0);
+        let (start, end) = self.overlay_range(overlay).unwrap().unwrap();
+        (priority, start, std::cmp::Reverse(end), overlay.index(0).unwrap())
+    }
+
     /// Visit covering overlays without allocating a result list or Lisp conses.
     /// Positions and emitted ranges are zero-based UTF-8 byte boundaries.
     /// Identities must be rooted/re-written across collection like other Values.
@@ -318,6 +380,44 @@ impl Vm {
             .find(|(k, _)| *k == key)
             .map_or(Value::NIL, |(_, v)| *v))
     }
+    pub(crate) fn get_char_property_values(
+        &mut self,
+        position: Value,
+        property: Value,
+        object: Value,
+    ) -> Result<Value> {
+        let object = if object == Value::NIL {
+            self.buffer_index()?;
+            self.slots[self.buffer_slot].value
+        } else {
+            object
+        };
+        let at = if matches!(self.object_if(object), Some(Object::Buffer(_))) {
+            let byte = self.buffer_position(object, position, false)?;
+            let buffer = self.annotated(object)?;
+            let found = buffer
+                .intervals
+                .query_with_end(
+                    byte,
+                    byte,
+                    true,
+                    byte == buffer.anchors.extent(),
+                    &buffer.anchors,
+                )
+                .0;
+            let at = buffer.char_of_byte(ByteOffset(byte as usize))?.0 + 1;
+            let value = self.ordered_overlay_property(found, property)?;
+            if value != Value::NIL {
+                return Ok(value);
+            }
+            at
+        } else {
+            usize::try_from(position.as_integer()?).map_err(|_| "index out of range")?
+        };
+        let raw = self.annotation_raw(object, at)?;
+        self.annotation_resolve(&raw, property)
+    }
+
     pub(super) fn annotation_primitive(
         &mut self,
         p: Primitive,
@@ -325,21 +425,13 @@ impl Vm {
         n: usize,
     ) -> Result<Value> {
         use Primitive::*;
+        if p == GetCharProperty {
+            if !(2..=3).contains(&n) { return Err("wrong primitive arity".into()); }
+            let object = if n == 3 { self.stack[start + 2] } else { Value::NIL };
+            return self.get_char_property_values(self.stack[start], self.stack[start + 1], object);
+        }
         if (p as usize) < MakeMarker as usize {
-            let buffer_query = if p == GetCharProperty && (2..=3).contains(&n) {
-                let object = if n == 3 && self.stack[start + 2] != Value::NIL {
-                    self.stack[start + 2]
-                } else {
-                    self.buffer_index()?;
-                    self.slots[self.buffer_slot].value
-                };
-                matches!(self.object(object), Ok(Object::Buffer(_)))
-            } else {
-                false
-            };
-            if !buffer_query {
-                return self.text_annotation_primitive(p, start, n);
-            }
+            return self.text_annotation_primitive(p, start, n);
         }
         let mut fixed = [Value::NIL; 5];
         let variable = if p == InsertBeforeMarkers && n > 5 {
@@ -367,7 +459,6 @@ impl Vm {
             OverlayPut => n == 3,
             MakeOverlay => (2..=5).contains(&n),
             RemoveOverlays => n <= 4,
-            GetCharProperty => (2..=3).contains(&n),
             InsertBeforeMarkers => true,
             _ => false,
         };
@@ -541,12 +632,8 @@ impl Vm {
                 }
                 Ok(args[2])
             }
-            OverlaysAt | OverlaysIn | NextOverlayChange | RemoveOverlays | GetCharProperty => {
-                let buffer = if p == GetCharProperty && n == 3 && args[2] != Value::NIL {
-                    args[2]
-                } else {
-                    self.current_annotation_buffer()?
-                };
+            OverlaysAt | OverlaysIn | NextOverlayChange | RemoveOverlays => {
+                let buffer = self.current_annotation_buffer()?;
                 let (a, b) = if p == RemoveOverlays {
                     let t = self.annotated(buffer)?;
                     (
@@ -579,7 +666,7 @@ impl Vm {
                 } else {
                     0
                 };
-                let mut found = if p == NextOverlayChange {
+                let found = if p == NextOverlayChange {
                     Vec::new()
                 } else {
                     target
@@ -587,7 +674,7 @@ impl Vm {
                         .query_with_end(
                             a,
                             b,
-                            p == OverlaysAt || p == GetCharProperty,
+                            p == OverlaysAt,
                             b == target.anchors.extent(),
                             &target.anchors,
                         )
@@ -658,34 +745,249 @@ impl Vm {
                         }
                         Ok(Value::NIL)
                     }
-                    GetCharProperty => {
-                        found.sort_by_key(|&o| {
-                            let priority = self
-                                .overlay(o)
-                                .unwrap()
-                                .properties
-                                .iter()
-                                .find_map(|(k, v)| {
-                                    let slot = k.index(7).ok()?.checked_sub(1)?;
-                                    (self.names.get("priority") == Some(&slot))
-                                        .then(|| v.as_integer().unwrap_or(0))
-                                })
-                                .unwrap_or(0);
-                            let (s, e) = self.overlay_range(o).unwrap().unwrap();
-                            (priority, s, std::cmp::Reverse(e), o.index(0).unwrap())
-                        });
-                        for o in found.into_iter().rev() {
-                            let v = self.overlay_property(o, args[1])?;
-                            if v != Value::NIL {
-                                return Ok(v);
-                            }
-                        }
-                        self.text_annotation_primitive(p, start, n)
-                    }
                     _ => Ok(self.list_value(&found)),
                 }
             }
             _ => Err("annotation primitive required".into()),
         }
+    }
+}
+
+impl Vm {
+    pub(crate) fn next_property_change_values(
+        &mut self,
+        position: Value,
+        object: Value,
+        limit: Value,
+    ) -> crate::prim::Out {
+        use crate::prim::Fault;
+        if limit == Value::TRUE {
+            return Err(Fault::Error(
+                "raw text-property interval boundaries (LIMIT t) are not implemented".into(),
+            ));
+        }
+        let limit = if limit == Value::NIL {
+            None
+        } else {
+            Some(self.text_property_position(limit)?)
+        };
+        let object = self.property_query_object(object)?;
+        let (_, bytes, _) = self.property_query_cursor(object, position, false)?;
+        let next = self.property_next_text_boundary(object, bytes.start, bytes.end);
+        let next = self.property_query_scalar(object, next)?;
+        let end = self.property_query_scalar(object, bytes.end)?;
+        if next < end && limit.is_none_or(|limit| next < limit) {
+            return Value::integer(next).map_err(Fault::Error);
+        }
+        limit.map_or(Ok(Value::NIL), |n| Value::integer(n).map_err(Fault::Error))
+    }
+
+    pub(crate) fn next_single_char_property_change_values(
+        &mut self,
+        position: Value,
+        property: Value,
+        object: Value,
+        limit: Value,
+    ) -> crate::prim::Out {
+        use crate::prim::Fault;
+        let object = self.property_query_object(object)?;
+        let string = self.str_view(object).is_some();
+        if !string
+            && !matches!(
+                self.object_if(object),
+                Some(Object::Buffer(_) | Object::ByteBuffer(_))
+            )
+        {
+            return Err(Fault::Wrong("bufferp", object));
+        }
+        if string {
+            return self.property_single_change(position, property, object, limit, true);
+        }
+        self.require_live_buffer(object).map_err(Fault::Error)?;
+        let current = self.slots[self.buffer_slot].value;
+        self.slots[self.buffer_slot].value = object;
+        let result = self.property_single_change(position, property, object, limit, false);
+        self.slots[self.buffer_slot].value = current;
+        result
+    }
+
+    fn property_single_change(
+        &mut self,
+        position: Value,
+        property: Value,
+        object: Value,
+        limit: Value,
+        string: bool,
+    ) -> crate::prim::Out {
+        use crate::prim::Fault;
+        let mut bound = if string && limit != Value::NIL {
+            Some(self.text_property_position(limit)?)
+        } else {
+            None
+        };
+        let (position, bytes, end) = self.property_query_cursor(object, position, true)?;
+        let initial = self
+            .get_char_property_values(
+                Value::integer(position).map_err(Fault::Error)?,
+                property,
+                object,
+            )
+            .map_err(Fault::Error)?;
+        if !string && limit != Value::NIL {
+            bound = Some(self.text_property_position(limit)?);
+        }
+        let bound = if string {
+            bound.unwrap_or(end)
+        } else {
+            bound.unwrap_or(end).min(end)
+        };
+        if bound <= position {
+            return Value::integer(bound).map_err(Fault::Error);
+        }
+        let mut at = bytes.start;
+        while at < bytes.end {
+            let mut next = self.property_next_text_boundary(object, at, bytes.end);
+            if !string {
+                next = next.min(
+                    self.next_overlay_change_byte(object, at)
+                        .map_err(Fault::Error)?,
+                );
+            }
+            let scalar = self.property_query_scalar(object, next)?;
+            if next >= bytes.end || scalar >= bound {
+                break;
+            }
+            let value = self
+                .get_char_property_values(
+                    Value::integer(scalar).map_err(Fault::Error)?,
+                    property,
+                    object,
+                )
+                .map_err(Fault::Error)?;
+            if value != initial {
+                return Value::integer(scalar).map_err(Fault::Error);
+            }
+            at = next;
+        }
+        Value::integer(bound).map_err(Fault::Error)
+    }
+
+    fn property_query_object(
+        &mut self,
+        object: Value,
+    ) -> std::result::Result<Value, crate::prim::Fault> {
+        if object != Value::NIL {
+            return Ok(object);
+        }
+        self.buffer_index().map_err(crate::prim::Fault::Error)?;
+        Ok(self.slots[self.buffer_slot].value)
+    }
+
+    fn property_query_cursor(
+        &self,
+        object: Value,
+        position: Value,
+        single: bool,
+    ) -> std::result::Result<(i64, std::ops::Range<ByteOffset>, i64), crate::prim::Fault> {
+        use crate::prim::Fault;
+        let string = self.str_view(object);
+        if string.is_none()
+            && !matches!(
+                self.object_if(object),
+                Some(Object::Buffer(_) | Object::ByteBuffer(_))
+            )
+        {
+            return Err(Fault::Wrong("buffer-or-string-p", object));
+        }
+        let number = self.text_property_position(position)?;
+        let error = || {
+            if single && string.is_none() {
+                Fault::Range1(Value::integer(number).expect("fix_position yields a fixnum"))
+            } else {
+                Fault::Range(position, position)
+            }
+        };
+        if let Some(string) = string {
+            if number < 0 || number as u64 > string.len() as u64 {
+                return Err(error());
+            }
+            let byte = match self.object_if(object) {
+                Some(Object::String(s) | Object::RawString(s)) => {
+                    s.byte_offset(CharOffset(number as usize)).unwrap()
+                }
+                Some(Object::Bytes(_)) => number as usize,
+                _ => string
+                    .chars()
+                    .take(number as usize)
+                    .map(|code| crate::lstring::char_string(code, &mut [0; 5]))
+                    .sum(),
+            };
+            return Ok((
+                number,
+                ByteOffset(byte)..ByteOffset(string.bytes().len()),
+                string.len() as i64,
+            ));
+        }
+        match self.object_if(object).unwrap() {
+            Object::Buffer(buffer) => {
+                let range = buffer.accessible();
+                let min = buffer.char_of_byte(range.start).map_err(Fault::Error)?.0 as i64 + 1;
+                let max = buffer.char_of_byte(range.end).map_err(Fault::Error)?.0 as i64 + 1;
+                if number < min || number > max {
+                    return Err(error());
+                }
+                let byte = buffer
+                    .byte_of_char(CharOffset(number as usize - 1))
+                    .map_err(Fault::Error)?;
+                Ok((number, byte..range.end, max))
+            }
+            Object::ByteBuffer(_) => Err(Fault::Error(
+                "property-change queries in unibyte buffers are not implemented".into(),
+            )),
+            _ => unreachable!(),
+        }
+    }
+
+    fn property_next_text_boundary(
+        &self,
+        object: Value,
+        at: ByteOffset,
+        end: ByteOffset,
+    ) -> ByteOffset {
+        match self.object_if(object) {
+            Some(Object::String(s) | Object::RawString(s)) => s.properties.next_change(at, end),
+            Some(Object::Buffer(buffer)) => buffer.properties.next_change(at, end),
+            _ => end,
+        }
+    }
+
+    fn property_query_scalar(
+        &self,
+        object: Value,
+        byte: ByteOffset,
+    ) -> std::result::Result<i64, crate::prim::Fault> {
+        use crate::prim::Fault;
+        if let Some(string) = self.str_view(object) {
+            if !string.is_multibyte() {
+                return Ok(byte.0 as i64);
+            }
+            let mut prefix = string
+                .bytes()
+                .get(..byte.0)
+                .ok_or_else(|| Fault::Error("invalid property boundary".into()))?;
+            let mut count = 0;
+            while !prefix.is_empty() {
+                let (_, width) = crate::lstring::decode_char(prefix).ok_or_else(|| {
+                    Fault::Error("property boundary is not a character boundary".into())
+                })?;
+                prefix = &prefix[width..];
+                count += 1;
+            }
+            return Ok(count);
+        }
+        let Object::Buffer(buffer) = self.object(object).map_err(Fault::Error)? else {
+            unreachable!()
+        };
+        Ok(buffer.char_of_byte(byte).map_err(Fault::Error)?.0 as i64 + 1)
     }
 }

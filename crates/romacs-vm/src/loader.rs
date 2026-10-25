@@ -4,6 +4,7 @@ use super::*;
 use std::path::{Path, PathBuf};
 #[derive(Default)]
 pub(super) struct Loader {
+    pub(super) propagate: usize,
     active: Vec<PathBuf>,
     steps: Vec<serde_json::Value>,
     completed_files: usize,
@@ -269,7 +270,10 @@ impl Vm {
                 self.compile_request(form).map(|(function, _)| function)
             };
             self.seed_file_specials = false;
-            compiled.and_then(|function| self.execute_raw(function))
+            compiled.and_then(|function| {
+                self.propagate_next |= self.loader.propagate != 0;
+                self.execute_raw(function)
+            })
         };
         if result.is_ok()
             && let Form::List(items) = form
@@ -306,7 +310,9 @@ impl Vm {
         self.slots[progress_slot].value = Value::TRUE;
         // Root both old scoped values across nested executor collections.
         let mark = self.dynamic.len();
+        self.backtrace.bind(self.dynamic.len(), Value::reference(file_slot + 1, 7));
         self.dynamic.push((file_slot, old_file, self.slots[self.buffer_slot].value, false));
+        self.backtrace.bind(self.dynamic.len(), Value::reference(progress_slot + 1, 7));
         self.dynamic.push((progress_slot, old_progress, self.slots[self.buffer_slot].value, false));
         self.loader.active.push(path.clone());
         // GNU readevalloop (src/lread.c:2183-2188) decides ONCE per load:

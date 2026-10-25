@@ -86,7 +86,7 @@ GNU_PIN = '45b0f7699df36b3849edc3bdef37d4cb9e75b9ea'
 GNU_SOURCE = pathlib.Path(os.environ.get('CENSUS_GNU_SOURCE', str(_PortablePath(_portable_os.environ.get('ROMACS_GNU_SOURCE', _PortablePath(_portable_os.environ.get('GNU_ORACLE_ROOT', _PortablePath(_portable_os.environ.get('XDG_CACHE_HOME', _PortablePath.home() / '.cache')) / 'gnu-emacs-pin')) / 'src')) / '')))
 CHARACTERISED = ('src/fns-tests.el', 'src/data-tests.el', 'lisp/subr-tests.el')
 CENSUS_MODES = ('warm', 'cold')
-GATE_SHARDS = 4
+GATE_SHARDS = 71
 PREFIX = 'parity-ratchet:'
 EXIT_PASS, EXIT_LOWER, EXIT_INVALID, EXIT_HIGHER, EXIT_NOT_MEASURED = 0, 1, 2, 3, 4
 RECORD_COMMAND = 'python3 tools/parity_ratchet.py record'
@@ -148,7 +148,8 @@ def measure_gnu(root: pathlib.Path, files: list[str], binary: str, jobs: int) ->
         out = pathlib.Path(tmp) / 'out'
         started = time.monotonic()
         for attempt in (1, 2):
-            p = subprocess.run([sys.executable, str(root / 'gnu-tests' / 'run.py'), 'run', '--bin', binary,
+            p = subprocess.run([sys.executable, str(root / 'gnu-tests' / 'run.py'), 'run',
+                                '--harness', 'mini', '--bootstrap', 'ert', '--bin', binary,
                                 '--jobs', str(jobs), '--out', str(out), *files],
                                cwd=root, capture_output=True, text=True)
             # Killed by a signal from outside (seen in the gate: exit -9 with no
@@ -185,7 +186,8 @@ def measure_gnu(root: pathlib.Path, files: list[str], binary: str, jobs: int) ->
     verdicts = {(r['file'], r['test']): f"{r['verdict']}" + (f" ({r['missing']})" if r.get('missing') else '')
                 + (f" -- {r['reason'][:200]}" if r.get('reason') else '') for r in rows}
     per_file_tests = collections.Counter(r['file'] for r in rows)
-    return {'kind': 'gnu', 'files': sorted(files), 'gnu_tests': len(rows), 'romacs_reported': reported,
+    return {'kind': 'gnu', 'harness': 'romacs-mini-ert', 'bootstrap_regime': 'gnu-ert',
+            'files': sorted(files), 'gnu_tests': len(rows), 'romacs_reported': reported,
             'tests_per_file': dict(sorted(per_file_tests.items())), 'members': members,
             'classes': classes, 'facts_reported': all('file_loaded_clean' in r for r in rows),
             'verdicts': {f'{f}::{t}': v for (f, t), v in verdicts.items()}, 'binary_sha256': digest,
@@ -195,10 +197,10 @@ def measure_gnu(root: pathlib.Path, files: list[str], binary: str, jobs: int) ->
 def measure_real_ert(root: pathlib.Path, members: dict[str, list[str]], binary: str, jobs: int) -> dict:
     """How many reduced-harness passes also pass under GNU's real ert.el.
 
-    Runs `run.py run --harness real` (unmodified ert.el, the pinned oracle
-    as reference) on every file holding a reduced-harness pass. A file whose
+    Runs GNU ert.el with the explicit Romacs batch adapter and the pinned oracle
+    as reference on every file holding a reduced-harness pass. A file whose
     real-ERT run aborts passes nothing; that is the measurement, not a
-    refusal. No summary at all is a refusal. Labelled REAL_LABEL, always.
+    refusal. No summary at all is a refusal. Adapted execution is labelled explicitly.
     """
     files = sorted(f for f, v in members.items() if v)
     of = sum(len(members[f]) for f in files)
@@ -208,6 +210,8 @@ def measure_real_ert(root: pathlib.Path, members: dict[str, list[str]], binary: 
     with tempfile.TemporaryDirectory(prefix='parity-real-ert-') as tmp:
         out = pathlib.Path(tmp) / 'out'
         p = subprocess.run([sys.executable, str(root / 'gnu-tests' / 'run.py'), 'run', '--harness', 'real',
+                            '--bootstrap', 'ert',
+                            '--ert-adapter', 'romacs-batch',
                             '--bin', binary, '--jobs', str(jobs), '--out', str(out), *files],
                            cwd=root, capture_output=True, text=True)
         if p.returncode not in (0, 1, 4) or not (out / 'summary.json').is_file():
@@ -215,12 +219,18 @@ def measure_real_ert(root: pathlib.Path, members: dict[str, list[str]], binary: 
                           + (p.stderr or p.stdout)[-2000:])
         summary = json.loads((out / 'summary.json').read_text())
         rows = [json.loads(line) for line in (out / 'results.jsonl').read_text().splitlines() if line.strip()]
-    if summary.get('is_gnu_ert') is not True or summary.get('engine') != 'romacs':
+    adapter = summary.get('ert_adapter') or {}
+    if (summary.get('is_gnu_ert') is not True or summary.get('engine') != 'romacs'
+            or summary.get('bootstrap_regime') != 'gnu-ert'
+            or summary.get('is_unmodified_gnu_ert') is not False
+            or not isinstance(adapter, dict) or adapter.get('name') != 'romacs-batch'
+            or adapter.get('automatic_window_isolation') is not False):
         raise Refusal(EXIT_NOT_MEASURED, 'the real-ERT run was not GNU ert.el on romacs')
     real = {(r['file'], r['test']) for r in rows if r.get('verdict') == 'passed'}
     passing = {f: sorted(n for n in members[f] if (f, n) in real) for f in files}
     passing = {f: v for f, v in passing.items() if v}
-    return {'harness': REAL_LABEL, 'is_gnu_ert': True, 'passed': sum(len(v) for v in passing.values()), 'of': of,
+    return {'harness': BATCH_REAL_LABEL, 'is_gnu_ert': True, 'passed': sum(len(v) for v in passing.values()), 'of': of,
+            'ert_adapter': adapter, 'is_unmodified_gnu_ert': False,
             'passing': passing, 'files': len(files), 'files_aborted': len(summary.get('infrastructure_errors') or {}),
             'oracle_sha256': (summary.get('gnu') or {}).get('sha256'), 'adapter_sha256': summary.get('adapter_sha256')}
 
@@ -383,6 +393,7 @@ MEMBER_CLASSES = ('GENUINE', 'UNPROBEABLE') + BUDGET_CLASSES
 EVIDENCE_NAME = 'MEMBER-EVIDENCE.json'
 REDUCED_LABEL = 'romacs-mini-ert: REDUCED in-house harness, NOT GNU ert.el'
 REAL_LABEL = 'gnu-ert: GNU ert.el, unmodified, pinned GNU oracle'
+BATCH_REAL_LABEL = 'gnu-ert: GNU ert.el with Romacs batch adapter, pinned GNU oracle'
 
 
 def load_evidence(root: pathlib.Path) -> dict:
@@ -587,8 +598,17 @@ def honest_consistency(g: dict) -> list[str]:
     if not isinstance(r, dict):
         out.append('schema 2 needs gnu_suite.real_ert: the real-ERT number is recorded apart, always')
     else:
-        if r.get('harness') != REAL_LABEL or r.get('is_gnu_ert') is not True:
-            out.append(f'gnu_suite.real_ert must be labelled {REAL_LABEL!r} with is_gnu_ert true')
+        if r.get('harness') not in (REAL_LABEL, BATCH_REAL_LABEL) or r.get('is_gnu_ert') is not True:
+            out.append('gnu_suite.real_ert must identify its GNU ERT regime with is_gnu_ert true')
+        adapter = r.get('ert_adapter') or {}
+        if r.get('harness') == BATCH_REAL_LABEL:
+            if (r.get('is_unmodified_gnu_ert') is not False or not isinstance(adapter, dict)
+                    or adapter.get('name') != 'romacs-batch'
+                    or adapter.get('automatic_window_isolation') is not False):
+                out.append('gnu_suite.real_ert batch label requires the explicit Romacs batch adapter')
+        elif (not isinstance(adapter, dict) or r.get('is_unmodified_gnu_ert') is False
+              or adapter.get('name', 'none') != 'none'):
+            out.append('gnu_suite.real_ert adapted execution cannot be labelled unmodified')
         passed = r.get('passed')
         if not isinstance(passed, int) or passed < 0 or r.get('of') != g.get('passed') or passed > (r.get('of') or 0):
             out.append(f'gnu_suite.real_ert.passed {passed!r} must count members of the {g.get("passed")} '
@@ -784,6 +804,8 @@ def report(unit_label: str, data: dict, m: dict, *, accept_gains: bool = False) 
         print(f'{PREFIX} gains retained in run output; recorded floors are unchanged')
     word = {EXIT_PASS: 'PASS', EXIT_LOWER: 'FAIL', EXIT_HIGHER: 'FAIL-WITH-INSTRUCTION'}[status]
     honest = ''
+    if m['kind'] == 'gnu' and m.get('bootstrap_regime'):
+        print(f'{PREFIX} harness {m["harness"]} bootstrap {m["bootstrap_regime"]}')
     if m['kind'] == 'gnu' and m.get('classes') is not None:
         b_floor = sum(len(fl.get(u, [])) for u in units if u.startswith('budget:'))
         b_now = sum(len(units[u]) for u in units if u.startswith('budget:'))
@@ -1293,7 +1315,7 @@ def cmd_record(args) -> int:
     if not gnu.get('facts_reported'):
         raise Refusal(EXIT_NOT_MEASURED, 'run.py reported no file-load facts; no member can be counted without them')
     real_ert = measure_real_ert(root, gnu['members'], gnu_ert, args.jobs)
-    print(f"{PREFIX} real-ERT ({REAL_LABEL}): {real_ert['passed']}/{real_ert['of']} reduced-harness passes "
+    print(f"{PREFIX} real-ERT ({real_ert['harness']}): {real_ert['passed']}/{real_ert['of']} reduced-harness passes "
           f"also pass under GNU ert.el ({real_ert['files_aborted']} of {real_ert['files']} files aborted)", flush=True)
     if any(hashlib.sha256(pathlib.Path(b).read_bytes()).hexdigest() != h for b, h in frozen_sha.items()):
         raise Refusal(EXIT_NOT_MEASURED, 'a frozen binary changed during recording')
@@ -1371,7 +1393,7 @@ GATE_TESTS = {
     'gnu-tests/runner/tests/candidate_ratchet.rs':
         '446697cc777e43bbaf3899b9dddb6e350a54776c8edae25c696daf0cdd7caba6',
     'gnu-tests/runner/tests/parity_ratchet.rs':
-        'd9f4d0502178b1d1c21eca18949c2b6ba10c98494b481adba4fe37996fcdf005',
+        'b69c150adc1f71bed8385df15d0b48e87a2abdef96b920f3c6c4a468827c76ab',
     'crates/romacs-vm/tests/parity_ratchet.rs':
         '43ced4188fdb6b2929503d0b29b0c519bdc6e57ae470327e1e12240822144366',
 }

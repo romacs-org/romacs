@@ -28,11 +28,11 @@ fn replace_match_nochange_uses_matched_text_and_syntax() {
         assert_eq!(vm.eval_source(source).unwrap().display().unwrap(), expected, "{source}");
     }
     vm.eval_source("(set-syntax-table (standard-syntax-table))").unwrap();
-    for text in ["ABC", "Abc", "X"] {
+    for (text, expected) in [("ABC", "\"MIXED\""), ("Abc", "\"Mixed\""), ("X", "\"MIXED\"")] {
         let source = format!("(progn (string-match {text:?} {text:?}) (condition-case e (replace-match \"mixed\" nil t {text:?}) (error e)))");
-        assert_eq!(vm.eval_source(&source).unwrap().display().unwrap(), "(error \"replace-match: case-table conversion is not implemented\")");
+        assert_eq!(vm.eval_source(&source).unwrap().display().unwrap(), expected);
     }
     vm.eval_source("(set-syntax-table (copy-syntax-table)) (modify-syntax-entry 10 \"w\")").unwrap();
     let source = "(progn (string-match \"a\" \"a\") (condition-case e (replace-match \"x\" nil t \"a\") (error e)))";
-    assert_eq!(vm.eval_source(source).unwrap().display().unwrap(), "(error \"replace-match: case-table conversion is not implemented\")");
+    assert_eq!(vm.eval_source(source).unwrap().display().unwrap(), "\"X\"");
 }

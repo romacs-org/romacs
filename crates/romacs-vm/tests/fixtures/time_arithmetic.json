@@ -1,0 +1,870 @@
+{
+  "gnu_revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "cases": [
+    {
+      "name": "integer-0-t",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert 0 t) (error e)))",
+      "expected": "(0 . 1)"
+    },
+    {
+      "name": "integer-0-'integer",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert 0 'integer) (error e)))",
+      "expected": "0"
+    },
+    {
+      "name": "integer-0-'list",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert 0 'list) (error e)))",
+      "expected": "(0 0 0 0)"
+    },
+    {
+      "name": "integer-0-nil",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert 0 nil) (error e)))",
+      "expected": "(0 . 1)"
+    },
+    {
+      "name": "integer-0-1000",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert 0 1000) (error e)))",
+      "expected": "(0 . 1000)"
+    },
+    {
+      "name": "integer-1-t",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert 1 t) (error e)))",
+      "expected": "(1 . 1)"
+    },
+    {
+      "name": "integer-1-'integer",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert 1 'integer) (error e)))",
+      "expected": "1"
+    },
+    {
+      "name": "integer-1-'list",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert 1 'list) (error e)))",
+      "expected": "(0 1 0 0)"
+    },
+    {
+      "name": "integer-1-nil",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert 1 nil) (error e)))",
+      "expected": "(1 . 1)"
+    },
+    {
+      "name": "integer-1-1000",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert 1 1000) (error e)))",
+      "expected": "(1000 . 1000)"
+    },
+    {
+      "name": "integer--1-t",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert -1 t) (error e)))",
+      "expected": "(-1 . 1)"
+    },
+    {
+      "name": "integer--1-'integer",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert -1 'integer) (error e)))",
+      "expected": "-1"
+    },
+    {
+      "name": "integer--1-'list",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert -1 'list) (error e)))",
+      "expected": "(-1 65535 0 0)"
+    },
+    {
+      "name": "integer--1-nil",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert -1 nil) (error e)))",
+      "expected": "(-1 . 1)"
+    },
+    {
+      "name": "integer--1-1000",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert -1 1000) (error e)))",
+      "expected": "(-1000 . 1000)"
+    },
+    {
+      "name": "integer-65536-t",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert 65536 t) (error e)))",
+      "expected": "(65536 . 1)"
+    },
+    {
+      "name": "integer-65536-'integer",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert 65536 'integer) (error e)))",
+      "expected": "65536"
+    },
+    {
+      "name": "integer-65536-'list",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert 65536 'list) (error e)))",
+      "expected": "(1 0 0 0)"
+    },
+    {
+      "name": "integer-65536-nil",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert 65536 nil) (error e)))",
+      "expected": "(65536 . 1)"
+    },
+    {
+      "name": "integer-65536-1000",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert 65536 1000) (error e)))",
+      "expected": "(65536000 . 1000)"
+    },
+    {
+      "name": "integer--65537-t",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert -65537 t) (error e)))",
+      "expected": "(-65537 . 1)"
+    },
+    {
+      "name": "integer--65537-'integer",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert -65537 'integer) (error e)))",
+      "expected": "-65537"
+    },
+    {
+      "name": "integer--65537-'list",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert -65537 'list) (error e)))",
+      "expected": "(-2 65535 0 0)"
+    },
+    {
+      "name": "integer--65537-nil",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert -65537 nil) (error e)))",
+      "expected": "(-65537 . 1)"
+    },
+    {
+      "name": "integer--65537-1000",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert -65537 1000) (error e)))",
+      "expected": "(-65537000 . 1000)"
+    },
+    {
+      "name": "convert-'(7 . 3)-t",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert '(7 . 3) t) (error e)))",
+      "expected": "(7 . 3)"
+    },
+    {
+      "name": "convert-'(7 . 3)-'integer",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert '(7 . 3) 'integer) (error e)))",
+      "expected": "2"
+    },
+    {
+      "name": "convert-'(7 . 3)-'list",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert '(7 . 3) 'list) (error e)))",
+      "expected": "(0 2 333333 333333)"
+    },
+    {
+      "name": "convert-'(7 . 3)-1000",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert '(7 . 3) 1000) (error e)))",
+      "expected": "(2333 . 1000)"
+    },
+    {
+      "name": "convert-'(-1 . 3)-t",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert '(-1 . 3) t) (error e)))",
+      "expected": "(-1 . 3)"
+    },
+    {
+      "name": "convert-'(-1 . 3)-'integer",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert '(-1 . 3) 'integer) (error e)))",
+      "expected": "-1"
+    },
+    {
+      "name": "convert-'(-1 . 3)-'list",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert '(-1 . 3) 'list) (error e)))",
+      "expected": "(-1 65535 666666 666666)"
+    },
+    {
+      "name": "convert-'(-1 . 3)-1000",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert '(-1 . 3) 1000) (error e)))",
+      "expected": "(-334 . 1000)"
+    },
+    {
+      "name": "convert-'(1 2)-t",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert '(1 2) t) (error e)))",
+      "expected": "(65538 . 1)"
+    },
+    {
+      "name": "convert-'(1 2)-'integer",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert '(1 2) 'integer) (error e)))",
+      "expected": "65538"
+    },
+    {
+      "name": "convert-'(1 2)-'list",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert '(1 2) 'list) (error e)))",
+      "expected": "(1 2 0 0)"
+    },
+    {
+      "name": "convert-'(1 2)-1000",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert '(1 2) 1000) (error e)))",
+      "expected": "(65538000 . 1000)"
+    },
+    {
+      "name": "convert-'(1 2 . 3)-t",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert '(1 2 . 3) t) (error e)))",
+      "expected": "(65538000003 . 1000000)"
+    },
+    {
+      "name": "convert-'(1 2 . 3)-'integer",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert '(1 2 . 3) 'integer) (error e)))",
+      "expected": "65538"
+    },
+    {
+      "name": "convert-'(1 2 . 3)-'list",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert '(1 2 . 3) 'list) (error e)))",
+      "expected": "(1 2 3 0)"
+    },
+    {
+      "name": "convert-'(1 2 . 3)-1000",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert '(1 2 . 3) 1000) (error e)))",
+      "expected": "(65538000 . 1000)"
+    },
+    {
+      "name": "convert-'(1 2 3)-t",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert '(1 2 3) t) (error e)))",
+      "expected": "(65538000003 . 1000000)"
+    },
+    {
+      "name": "convert-'(1 2 3)-'integer",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert '(1 2 3) 'integer) (error e)))",
+      "expected": "65538"
+    },
+    {
+      "name": "convert-'(1 2 3)-'list",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert '(1 2 3) 'list) (error e)))",
+      "expected": "(1 2 3 0)"
+    },
+    {
+      "name": "convert-'(1 2 3)-1000",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert '(1 2 3) 1000) (error e)))",
+      "expected": "(65538000 . 1000)"
+    },
+    {
+      "name": "convert-'(-1 65535 -1 -1)-t",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert '(-1 65535 -1 -1) t) (error e)))",
+      "expected": "(-1000001000001 . 1000000000000)"
+    },
+    {
+      "name": "convert-'(-1 65535 -1 -1)-'integer",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert '(-1 65535 -1 -1) 'integer) (error e)))",
+      "expected": "-2"
+    },
+    {
+      "name": "convert-'(-1 65535 -1 -1)-'list",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert '(-1 65535 -1 -1) 'list) (error e)))",
+      "expected": "(-1 65534 999998 999999)"
+    },
+    {
+      "name": "convert-'(-1 65535 -1 -1)-1000",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert '(-1 65535 -1 -1) 1000) (error e)))",
+      "expected": "(-1001 . 1000)"
+    },
+    {
+      "name": "convert-'(0 0 1000001 -1 ignored)-t",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert '(0 0 1000001 -1 ignored) t) (error e)))",
+      "expected": "(1000000999999 . 1000000000000)"
+    },
+    {
+      "name": "convert-'(0 0 1000001 -1 ignored)-'integer",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert '(0 0 1000001 -1 ignored) 'integer) (error e)))",
+      "expected": "1"
+    },
+    {
+      "name": "convert-'(0 0 1000001 -1 ignored)-'list",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert '(0 0 1000001 -1 ignored) 'list) (error e)))",
+      "expected": "(0 1 0 999999)"
+    },
+    {
+      "name": "convert-'(0 0 1000001 -1 ignored)-1000",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert '(0 0 1000001 -1 ignored) 1000) (error e)))",
+      "expected": "(1000 . 1000)"
+    },
+    {
+      "name": "convert-'(0 0 0 . ignored)-t",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert '(0 0 0 . ignored) t) (error e)))",
+      "expected": "(0 . 1000000)"
+    },
+    {
+      "name": "convert-'(0 0 0 . ignored)-'integer",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert '(0 0 0 . ignored) 'integer) (error e)))",
+      "expected": "0"
+    },
+    {
+      "name": "convert-'(0 0 0 . ignored)-'list",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert '(0 0 0 . ignored) 'list) (error e)))",
+      "expected": "(0 0 0 0)"
+    },
+    {
+      "name": "convert-'(0 0 0 . ignored)-1000",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert '(0 0 0 . ignored) 1000) (error e)))",
+      "expected": "(0 . 1000)"
+    },
+    {
+      "name": "convert-3.5-t",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert 3.5 t) (error e)))",
+      "expected": "(7881299347898368 . 2251799813685248)"
+    },
+    {
+      "name": "convert-3.5-'integer",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert 3.5 'integer) (error e)))",
+      "expected": "3"
+    },
+    {
+      "name": "convert-3.5-'list",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert 3.5 'list) (error e)))",
+      "expected": "(0 3 500000 0)"
+    },
+    {
+      "name": "convert-3.5-1000",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert 3.5 1000) (error e)))",
+      "expected": "(3500 . 1000)"
+    },
+    {
+      "name": "convert--0.1-t",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert -0.1 t) (error e)))",
+      "expected": "(-7205759403792794 . 72057594037927936)"
+    },
+    {
+      "name": "convert--0.1-'integer",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert -0.1 'integer) (error e)))",
+      "expected": "-1"
+    },
+    {
+      "name": "convert--0.1-'list",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert -0.1 'list) (error e)))",
+      "expected": "(-1 65535 899999 999999)"
+    },
+    {
+      "name": "convert--0.1-1000",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert -0.1 1000) (error e)))",
+      "expected": "(-101 . 1000)"
+    },
+    {
+      "name": "convert--1.0e-300-t",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert -1.0e-300 t) (error e)))",
+      "expected": "(-6032057205060441 . 6032057205060440848842124543157735677050252251748505781796615064961622344493727293370973578138265743708225425014400837164813540499979063179105919597766951022193355091707896034850684039059079180396788349106095584290087446076413771468940477241550670753145517602931224392424029547429993824129889235158145614364972941312)"
+    },
+    {
+      "name": "convert--1.0e-300-'integer",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert -1.0e-300 'integer) (error e)))",
+      "expected": "-1"
+    },
+    {
+      "name": "convert--1.0e-300-'list",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert -1.0e-300 'list) (error e)))",
+      "expected": "(-1 65535 999999 999999)"
+    },
+    {
+      "name": "convert--1.0e-300-1000",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert -1.0e-300 1000) (error e)))",
+      "expected": "(-1 . 1000)"
+    },
+    {
+      "name": "convert-5.0e-324-t",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert 5.0e-324 t) (error e)))",
+      "expected": "(1 . 202402253307310618352495346718917307049556649764142118356901358027430339567995346891960383701437124495187077864316811911389808737385793476867013399940738509921517424276566361364466907742093216341239767678472745068562007483424692698618103355649159556340810056512358769552333414615230502532186327508646006263307707741093494784)"
+    },
+    {
+      "name": "convert-5.0e-324-'integer",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert 5.0e-324 'integer) (error e)))",
+      "expected": "0"
+    },
+    {
+      "name": "convert-5.0e-324-'list",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert 5.0e-324 'list) (error e)))",
+      "expected": "(0 0 0 0)"
+    },
+    {
+      "name": "convert-5.0e-324-1000",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert 5.0e-324 1000) (error e)))",
+      "expected": "(0 . 1000)"
+    },
+    {
+      "name": "convert-1.0e100-t",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert 1.0e100 t) (error e)))",
+      "expected": "(10000000000000000159028911097599180468360808563945281389781327557747838772170381060813469985856815104 . 1)"
+    },
+    {
+      "name": "convert-1.0e100-'integer",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert 1.0e100 'integer) (error e)))",
+      "expected": "10000000000000000159028911097599180468360808563945281389781327557747838772170381060813469985856815104"
+    },
+    {
+      "name": "convert-1.0e100-'list",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert 1.0e100 'list) (error e)))",
+      "expected": "(152587890625000002426588609277331244939587533019184591518880120204892559389806839917197723172864 0 0 0)"
+    },
+    {
+      "name": "convert-1.0e100-1000",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert 1.0e100 1000) (error e)))",
+      "expected": "(10000000000000000159028911097599180468360808563945281389781327557747838772170381060813469985856815104000 . 1000)"
+    },
+    {
+      "name": "convert--0.0-t",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert -0.0 t) (error e)))",
+      "expected": "(0 . 1)"
+    },
+    {
+      "name": "convert--0.0-'integer",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert -0.0 'integer) (error e)))",
+      "expected": "0"
+    },
+    {
+      "name": "convert--0.0-'list",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert -0.0 'list) (error e)))",
+      "expected": "(0 0 0 0)"
+    },
+    {
+      "name": "convert--0.0-1000",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert -0.0 1000) (error e)))",
+      "expected": "(0 . 1000)"
+    },
+    {
+      "name": "time-add-1-2",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-add 1 2) (error e)))",
+      "expected": "3"
+    },
+    {
+      "name": "time-subtract-1-2",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-subtract 1 2) (error e)))",
+      "expected": "-1"
+    },
+    {
+      "name": "time-less-p-1-2",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-less-p 1 2) (error e)))",
+      "expected": "t"
+    },
+    {
+      "name": "time-equal-p-1-2",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-equal-p 1 2) (error e)))",
+      "expected": "nil"
+    },
+    {
+      "name": "time-add-'(6 . 4)-'(4 . 4)",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-add '(6 . 4) '(4 . 4)) (error e)))",
+      "expected": "(10 . 4)"
+    },
+    {
+      "name": "time-subtract-'(6 . 4)-'(4 . 4)",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-subtract '(6 . 4) '(4 . 4)) (error e)))",
+      "expected": "(2 . 4)"
+    },
+    {
+      "name": "time-less-p-'(6 . 4)-'(4 . 4)",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-less-p '(6 . 4) '(4 . 4)) (error e)))",
+      "expected": "nil"
+    },
+    {
+      "name": "time-equal-p-'(6 . 4)-'(4 . 4)",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-equal-p '(6 . 4) '(4 . 4)) (error e)))",
+      "expected": "nil"
+    },
+    {
+      "name": "time-add-'(1 . 2)-'(1 . 3)",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-add '(1 . 2) '(1 . 3)) (error e)))",
+      "expected": "(5 . 6)"
+    },
+    {
+      "name": "time-subtract-'(1 . 2)-'(1 . 3)",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-subtract '(1 . 2) '(1 . 3)) (error e)))",
+      "expected": "(1 . 6)"
+    },
+    {
+      "name": "time-less-p-'(1 . 2)-'(1 . 3)",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-less-p '(1 . 2) '(1 . 3)) (error e)))",
+      "expected": "nil"
+    },
+    {
+      "name": "time-equal-p-'(1 . 2)-'(1 . 3)",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-equal-p '(1 . 2) '(1 . 3)) (error e)))",
+      "expected": "nil"
+    },
+    {
+      "name": "time-add-'(3 . 6)-'(6 . 12)",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-add '(3 . 6) '(6 . 12)) (error e)))",
+      "expected": "(6 . 6)"
+    },
+    {
+      "name": "time-subtract-'(3 . 6)-'(6 . 12)",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-subtract '(3 . 6) '(6 . 12)) (error e)))",
+      "expected": "(0 . 6)"
+    },
+    {
+      "name": "time-less-p-'(3 . 6)-'(6 . 12)",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-less-p '(3 . 6) '(6 . 12)) (error e)))",
+      "expected": "nil"
+    },
+    {
+      "name": "time-equal-p-'(3 . 6)-'(6 . 12)",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-equal-p '(3 . 6) '(6 . 12)) (error e)))",
+      "expected": "t"
+    },
+    {
+      "name": "time-add-'(5 . 6)-'(1 . 3)",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-add '(5 . 6) '(1 . 3)) (error e)))",
+      "expected": "(7 . 6)"
+    },
+    {
+      "name": "time-subtract-'(5 . 6)-'(1 . 3)",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-subtract '(5 . 6) '(1 . 3)) (error e)))",
+      "expected": "(2 . 4)"
+    },
+    {
+      "name": "time-less-p-'(5 . 6)-'(1 . 3)",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-less-p '(5 . 6) '(1 . 3)) (error e)))",
+      "expected": "nil"
+    },
+    {
+      "name": "time-equal-p-'(5 . 6)-'(1 . 3)",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-equal-p '(5 . 6) '(1 . 3)) (error e)))",
+      "expected": "nil"
+    },
+    {
+      "name": "time-add-'(-1 . 3)-'(1 . 6)",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-add '(-1 . 3) '(1 . 6)) (error e)))",
+      "expected": "(-1 . 6)"
+    },
+    {
+      "name": "time-subtract-'(-1 . 3)-'(1 . 6)",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-subtract '(-1 . 3) '(1 . 6)) (error e)))",
+      "expected": "(-2 . 4)"
+    },
+    {
+      "name": "time-less-p-'(-1 . 3)-'(1 . 6)",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-less-p '(-1 . 3) '(1 . 6)) (error e)))",
+      "expected": "t"
+    },
+    {
+      "name": "time-equal-p-'(-1 . 3)-'(1 . 6)",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-equal-p '(-1 . 3) '(1 . 6)) (error e)))",
+      "expected": "nil"
+    },
+    {
+      "name": "time-add-'(0 0 0 1)-'(0 0 0 2)",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-add '(0 0 0 1) '(0 0 0 2)) (error e)))",
+      "expected": "(3 . 1000000000000)"
+    },
+    {
+      "name": "time-subtract-'(0 0 0 1)-'(0 0 0 2)",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-subtract '(0 0 0 1) '(0 0 0 2)) (error e)))",
+      "expected": "(-1 . 1000000000000)"
+    },
+    {
+      "name": "time-less-p-'(0 0 0 1)-'(0 0 0 2)",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-less-p '(0 0 0 1) '(0 0 0 2)) (error e)))",
+      "expected": "t"
+    },
+    {
+      "name": "time-equal-p-'(0 0 0 1)-'(0 0 0 2)",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-equal-p '(0 0 0 1) '(0 0 0 2)) (error e)))",
+      "expected": "nil"
+    },
+    {
+      "name": "time-add-3.5-1.25",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-add 3.5 1.25) (error e)))",
+      "expected": "(10696049115004928 . 2251799813685248)"
+    },
+    {
+      "name": "time-subtract-3.5-1.25",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-subtract 3.5 1.25) (error e)))",
+      "expected": "(5066549580791808 . 2251799813685248)"
+    },
+    {
+      "name": "time-less-p-3.5-1.25",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-less-p 3.5 1.25) (error e)))",
+      "expected": "nil"
+    },
+    {
+      "name": "time-equal-p-3.5-1.25",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-equal-p 3.5 1.25) (error e)))",
+      "expected": "nil"
+    },
+    {
+      "name": "time-add-0.1-0.2",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-add 0.1 0.2) (error e)))",
+      "expected": "(10808639105689191 . 36028797018963968)"
+    },
+    {
+      "name": "time-subtract-0.1-0.2",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-subtract 0.1 0.2) (error e)))",
+      "expected": "(-3602879701896397 . 36028797018963968)"
+    },
+    {
+      "name": "time-less-p-0.1-0.2",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-less-p 0.1 0.2) (error e)))",
+      "expected": "t"
+    },
+    {
+      "name": "time-equal-p-0.1-0.2",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-equal-p 0.1 0.2) (error e)))",
+      "expected": "nil"
+    },
+    {
+      "name": "time-add--1.0e-300-0",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-add -1.0e-300 0) (error e)))",
+      "expected": "(-6032057205060441 . 6032057205060440848842124543157735677050252251748505781796615064961622344493727293370973578138265743708225425014400837164813540499979063179105919597766951022193355091707896034850684039059079180396788349106095584290087446076413771468940477241550670753145517602931224392424029547429993824129889235158145614364972941312)"
+    },
+    {
+      "name": "time-subtract--1.0e-300-0",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-subtract -1.0e-300 0) (error e)))",
+      "expected": "(-6032057205060441 . 6032057205060440848842124543157735677050252251748505781796615064961622344493727293370973578138265743708225425014400837164813540499979063179105919597766951022193355091707896034850684039059079180396788349106095584290087446076413771468940477241550670753145517602931224392424029547429993824129889235158145614364972941312)"
+    },
+    {
+      "name": "time-less-p--1.0e-300-0",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-less-p -1.0e-300 0) (error e)))",
+      "expected": "t"
+    },
+    {
+      "name": "time-equal-p--1.0e-300-0",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-equal-p -1.0e-300 0) (error e)))",
+      "expected": "nil"
+    },
+    {
+      "name": "time-add-1.0e100-1",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-add 1.0e100 1) (error e)))",
+      "expected": "10000000000000000159028911097599180468360808563945281389781327557747838772170381060813469985856815105"
+    },
+    {
+      "name": "time-subtract-1.0e100-1",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-subtract 1.0e100 1) (error e)))",
+      "expected": "10000000000000000159028911097599180468360808563945281389781327557747838772170381060813469985856815103"
+    },
+    {
+      "name": "time-less-p-1.0e100-1",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-less-p 1.0e100 1) (error e)))",
+      "expected": "nil"
+    },
+    {
+      "name": "time-equal-p-1.0e100-1",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-equal-p 1.0e100 1) (error e)))",
+      "expected": "nil"
+    },
+    {
+      "name": "(time-convert '(1 . 0) t)",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert '(1 . 0) t) (error e)))",
+      "expected": "(error \"Invalid time specification\")"
+    },
+    {
+      "name": "(time-convert '(1 . -1) t)",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert '(1 . -1) t) (error e)))",
+      "expected": "(error \"Invalid time specification\")"
+    },
+    {
+      "name": "(time-convert '(1 . 1.0) t)",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert '(1 . 1.0) t) (error e)))",
+      "expected": "(error \"Invalid time specification\")"
+    },
+    {
+      "name": "(time-convert '(1 . nil) t)",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert '(1 . nil) t) (error e)))",
+      "expected": "(error \"Invalid time specification\")"
+    },
+    {
+      "name": "(time-convert '(1) t)",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert '(1) t) (error e)))",
+      "expected": "(error \"Invalid time specification\")"
+    },
+    {
+      "name": "(time-convert '(x 0) t)",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert '(x 0) t) (error e)))",
+      "expected": "(error \"Invalid time specification\")"
+    },
+    {
+      "name": "(time-convert '(0 0 x) t)",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert '(0 0 x) t) (error e)))",
+      "expected": "(error \"Invalid time specification\")"
+    },
+    {
+      "name": "(time-convert '(0 0 0 x) t)",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert '(0 0 0 x) t) (error e)))",
+      "expected": "(error \"Invalid time specification\")"
+    },
+    {
+      "name": "(time-convert '(0 0 0 . x) t)",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert '(0 0 0 . x) t) (error e)))",
+      "expected": "(0 . 1000000)"
+    },
+    {
+      "name": "(time-convert 0 0)",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert 0 0) (error e)))",
+      "expected": "(error \"Invalid time frequency\" 0)"
+    },
+    {
+      "name": "(time-convert 0 -1)",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert 0 -1) (error e)))",
+      "expected": "(error \"Invalid time frequency\" -1)"
+    },
+    {
+      "name": "(time-convert 0 1.0)",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert 0 1.0) (error e)))",
+      "expected": "(error \"Invalid time frequency\" 1.0)"
+    },
+    {
+      "name": "(time-convert 0 'float)",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert 0 'float) (error e)))",
+      "expected": "(error \"Invalid time frequency\" float)"
+    },
+    {
+      "name": "(time-convert 1.0e+INF t)",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert 1.0e+INF t) (error e)))",
+      "expected": "(error \"Specified time is not representable\")"
+    },
+    {
+      "name": "(time-convert 0.0e+NaN t)",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert 0.0e+NaN t) (error e)))",
+      "expected": "(error \"Invalid time specification\")"
+    },
+    {
+      "name": "(time-add 'x 'x)",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-add 'x 'x) (error e)))",
+      "expected": "(error \"Invalid time specification\")"
+    },
+    {
+      "name": "(time-subtract 'x 'x)",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-subtract 'x 'x) (error e)))",
+      "expected": "(0 . 1000000000)"
+    },
+    {
+      "name": "(time-less-p 'x 'x)",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-less-p 'x 'x) (error e)))",
+      "expected": "nil"
+    },
+    {
+      "name": "(time-equal-p 'x 'x)",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-equal-p 'x 'x) (error e)))",
+      "expected": "t"
+    },
+    {
+      "name": "(time-equal-p nil 'x)",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-equal-p nil 'x) (error e)))",
+      "expected": "nil"
+    },
+    {
+      "name": "(time-equal-p 'x nil)",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-equal-p 'x nil) (error e)))",
+      "expected": "nil"
+    },
+    {
+      "name": "(time-equal-p nil nil)",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-equal-p nil nil) (error e)))",
+      "expected": "t"
+    },
+    {
+      "name": "(time-less-p nil nil)",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-less-p nil nil) (error e)))",
+      "expected": "nil"
+    },
+    {
+      "name": "(time-subtract nil nil)",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-subtract nil nil) (error e)))",
+      "expected": "(0 . 1000000000)"
+    },
+    {
+      "name": "(time-less-p '(1 . x) '(2 . x))",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-less-p '(1 . x) '(2 . x)) (error e)))",
+      "expected": "t"
+    },
+    {
+      "name": "(time-equal-p '(1 . x) '(1 . x))",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-equal-p '(1 . x) '(1 . x)) (error e)))",
+      "expected": "t"
+    },
+    {
+      "name": "(let ((tail '(2))) (time-less-p (cons 1 tail) (cons 2 tail)))",
+      "source": "(let ((current-time-list nil)) (condition-case e (let ((tail '(2))) (time-less-p (cons 1 tail) (cons 2 tail))) (error e)))",
+      "expected": "t"
+    },
+    {
+      "name": "(let ((x '(7 . 3))) (eq x (time-convert x t)))",
+      "source": "(let ((current-time-list nil)) (condition-case e (let ((x '(7 . 3))) (eq x (time-convert x t))) (error e)))",
+      "expected": "t"
+    },
+    {
+      "name": "(let ((x '(7 . 3))) (eq x (time-convert x 3)))",
+      "source": "(let ((current-time-list nil)) (condition-case e (let ((x '(7 . 3))) (eq x (time-convert x 3))) (error e)))",
+      "expected": "t"
+    },
+    {
+      "name": "big-(time-convert (* 1000000000 (* 1000000000 1000000000)) t)",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert (* 1000000000 (* 1000000000 1000000000)) t) (error e)))",
+      "expected": "(1000000000000000000000000000 . 1)"
+    },
+    {
+      "name": "big-(time-convert (* 1000000000 (* 1000000000 1000000000)) 'list)",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert (* 1000000000 (* 1000000000 1000000000)) 'list) (error e)))",
+      "expected": "(15258789062500000000000 0 0 0)"
+    },
+    {
+      "name": "big-(time-convert (cons (- (* 1000000000 (* 1000000000 1000000000))) 3) 'list)",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert (cons (- (* 1000000000 (* 1000000000 1000000000))) 3) 'list) (error e)))",
+      "expected": "(-5086263020833333333334 43690 666666 666666)"
+    },
+    {
+      "name": "big-(time-convert -1 (* 1000000000 (* 1000000000 1000000000)))",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert -1 (* 1000000000 (* 1000000000 1000000000))) (error e)))",
+      "expected": "(-1000000000000000000000000000 . 1000000000000000000000000000)"
+    },
+    {
+      "name": "big-(time-add (* 1000000000 (* 1000000000 1000000000)) (* 1000000000 (* 1000000000 1000000000)))",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-add (* 1000000000 (* 1000000000 1000000000)) (* 1000000000 (* 1000000000 1000000000))) (error e)))",
+      "expected": "2000000000000000000000000000"
+    },
+    {
+      "name": "big-(time-less-p (* 1000000000 (* 1000000000 1000000000)) (+ (* 1000000000 (* 1000000000 1000000000)) 1))",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-less-p (* 1000000000 (* 1000000000 1000000000)) (+ (* 1000000000 (* 1000000000 1000000000)) 1)) (error e)))",
+      "expected": "t"
+    },
+    {
+      "name": "big-(time-equal-p (cons (* 1000000000 (* 1000000000 1000000000)) 3) (cons (* (* 1000000000 (* 1000000000 1000000000)) 2) 6))",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-equal-p (cons (* 1000000000 (* 1000000000 1000000000)) 3) (cons (* (* 1000000000 (* 1000000000 1000000000)) 2) 6)) (error e)))",
+      "expected": "t"
+    },
+    {
+      "name": "big-(time-convert (list 0 0 (* 1000000000 (* 1000000000 1000000000))) t)",
+      "source": "(let ((current-time-list nil)) (condition-case e (time-convert (list 0 0 (* 1000000000 (* 1000000000 1000000000))) t) (error e)))",
+      "expected": "(error \"Invalid time specification\")"
+    },
+    {
+      "name": "big-(let ((hz (* 1000000000 (* 1000000000 1000000000)))) (time-add (cons hz hz) (cons hz hz)))",
+      "source": "(let ((current-time-list nil)) (condition-case e (let ((hz (* 1000000000 (* 1000000000 1000000000)))) (time-add (cons hz hz) (cons hz hz))) (error e)))",
+      "expected": "(2000000000000000000000000000 . 1000000000000000000000000000)"
+    },
+    {
+      "name": "big-(let ((hz (* 1000000000 (* 1000000000 1000000000)))) (time-add (cons hz hz) (cons (* hz 1) (* hz 1))))",
+      "source": "(let ((current-time-list nil)) (condition-case e (let ((hz (* 1000000000 (* 1000000000 1000000000)))) (time-add (cons hz hz) (cons (* hz 1) (* hz 1)))) (error e)))",
+      "expected": "(2000000000000000000000000000 . 1000000000000000000000000000)"
+    },
+    {
+      "name": "big-(let* ((hz (* 1000000000 (* 1000000000 1000000000))) (x (cons 1 hz))) (eq x (time-convert x hz)))",
+      "source": "(let ((current-time-list nil)) (condition-case e (let* ((hz (* 1000000000 (* 1000000000 1000000000))) (x (cons 1 hz))) (eq x (time-convert x hz))) (error e)))",
+      "expected": "t"
+    },
+    {
+      "name": "big-(let* ((hz (* 1000000000 (* 1000000000 1000000000))) (x (cons 1 hz))) (eq x (time-convert x (* hz 1))))",
+      "source": "(let ((current-time-list nil)) (condition-case e (let* ((hz (* 1000000000 (* 1000000000 1000000000))) (x (cons 1 hz))) (eq x (time-convert x (* hz 1)))) (error e)))",
+      "expected": "nil"
+    },
+    {
+      "name": "list-output-(time-convert '(7 . 3))",
+      "source": "(let ((current-time-list t)) (condition-case e (time-convert '(7 . 3)) (error e)))",
+      "expected": "(0 2 333333 333333)"
+    },
+    {
+      "name": "list-output-(time-add '(0 0 0 1) '(0 0 0 2))",
+      "source": "(let ((current-time-list t)) (condition-case e (time-add '(0 0 0 1) '(0 0 0 2)) (error e)))",
+      "expected": "(0 0 0 3)"
+    },
+    {
+      "name": "list-output-(time-subtract nil nil)",
+      "source": "(let ((current-time-list t)) (condition-case e (time-subtract nil nil) (error e)))",
+      "expected": "(0 0 0 0)"
+    },
+    {
+      "name": "list-output-(time-subtract 0 0)",
+      "source": "(let ((current-time-list t)) (condition-case e (time-subtract 0 0) (error e)))",
+      "expected": "(0 0 0 0)"
+    },
+    {
+      "name": "list-output-(time-add 3.5 1.25)",
+      "source": "(let ((current-time-list t)) (condition-case e (time-add 3.5 1.25) (error e)))",
+      "expected": "(10696049115004928 . 2251799813685248)"
+    },
+    {
+      "name": "list-output-(time-add '(1 . 2) '(0 0 500000))",
+      "source": "(let ((current-time-list t)) (condition-case e (time-add '(1 . 2) '(0 0 500000)) (error e)))",
+      "expected": "(2 . 2)"
+    },
+    {
+      "name": "list-output-(time-add '(0 0 500000) 0)",
+      "source": "(let ((current-time-list t)) (condition-case e (time-add '(0 0 500000) 0) (error e)))",
+      "expected": "(0 0 500000 0)"
+    }
+  ]
+}

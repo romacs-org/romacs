@@ -1,7 +1,7 @@
 //! The parity ratchet, GNU-suite half: every GNU test file's passing deftests
-//! are floors recorded in parity-ratchet.json (tools/parity_ratchet.py). Four
-//! shards so each stays far under the gate's per-test timeout and a red names
-//! the files it covers. The adapter is the one Cargo just built.
+//! are floors recorded in parity-ratchet.json (tools/parity_ratchet.py). Each
+//! shard fits in one batch of eight files under the gate's per-test timeout.
+//! The adapter is the one Cargo just built.
 //!
 //! A shard is green only when the checker says PASS for exactly that unit AND
 //! reports that romacs ran tests: an exit 0 with nothing measured is red.
@@ -75,23 +75,358 @@ fn require_evidence(unit: &str, line: &str, stdout: &str) {
 const GNU_ERT: &str = env!("CARGO_BIN_EXE_romacs-gnu-ert");
 
 #[test]
-fn parity_ratchet_gnu_suite_shard_1_of_4() {
-    ratchet("gnu-shard:1/4", "--gnu-ert", GNU_ERT);
+fn parity_ratchet_gnu_suite_shard_1_of_71() {
+    ratchet("gnu-shard:1/71", "--gnu-ert", GNU_ERT);
 }
 
 #[test]
-fn parity_ratchet_gnu_suite_shard_2_of_4() {
-    ratchet("gnu-shard:2/4", "--gnu-ert", GNU_ERT);
+fn parity_ratchet_gnu_suite_shard_2_of_71() {
+    ratchet("gnu-shard:2/71", "--gnu-ert", GNU_ERT);
 }
 
 #[test]
-fn parity_ratchet_gnu_suite_shard_3_of_4() {
-    ratchet("gnu-shard:3/4", "--gnu-ert", GNU_ERT);
+fn parity_ratchet_gnu_suite_shard_3_of_71() {
+    ratchet("gnu-shard:3/71", "--gnu-ert", GNU_ERT);
 }
 
 #[test]
-fn parity_ratchet_gnu_suite_shard_4_of_4() {
-    ratchet("gnu-shard:4/4", "--gnu-ert", GNU_ERT);
+fn parity_ratchet_gnu_suite_shard_4_of_71() {
+    ratchet("gnu-shard:4/71", "--gnu-ert", GNU_ERT);
+}
+
+#[test]
+fn parity_ratchet_gnu_suite_shard_5_of_71() {
+    ratchet("gnu-shard:5/71", "--gnu-ert", GNU_ERT);
+}
+
+#[test]
+fn parity_ratchet_gnu_suite_shard_6_of_71() {
+    ratchet("gnu-shard:6/71", "--gnu-ert", GNU_ERT);
+}
+
+#[test]
+fn parity_ratchet_gnu_suite_shard_7_of_71() {
+    ratchet("gnu-shard:7/71", "--gnu-ert", GNU_ERT);
+}
+
+#[test]
+fn parity_ratchet_gnu_suite_shard_8_of_71() {
+    ratchet("gnu-shard:8/71", "--gnu-ert", GNU_ERT);
+}
+
+#[test]
+fn parity_ratchet_gnu_suite_shard_9_of_71() {
+    ratchet("gnu-shard:9/71", "--gnu-ert", GNU_ERT);
+}
+
+#[test]
+fn parity_ratchet_gnu_suite_shard_10_of_71() {
+    ratchet("gnu-shard:10/71", "--gnu-ert", GNU_ERT);
+}
+
+#[test]
+fn parity_ratchet_gnu_suite_shard_11_of_71() {
+    ratchet("gnu-shard:11/71", "--gnu-ert", GNU_ERT);
+}
+
+#[test]
+fn parity_ratchet_gnu_suite_shard_12_of_71() {
+    ratchet("gnu-shard:12/71", "--gnu-ert", GNU_ERT);
+}
+
+#[test]
+fn parity_ratchet_gnu_suite_shard_13_of_71() {
+    ratchet("gnu-shard:13/71", "--gnu-ert", GNU_ERT);
+}
+
+#[test]
+fn parity_ratchet_gnu_suite_shard_14_of_71() {
+    ratchet("gnu-shard:14/71", "--gnu-ert", GNU_ERT);
+}
+
+#[test]
+fn parity_ratchet_gnu_suite_shard_15_of_71() {
+    ratchet("gnu-shard:15/71", "--gnu-ert", GNU_ERT);
+}
+
+#[test]
+fn parity_ratchet_gnu_suite_shard_16_of_71() {
+    ratchet("gnu-shard:16/71", "--gnu-ert", GNU_ERT);
+}
+
+#[test]
+fn parity_ratchet_gnu_suite_shard_17_of_71() {
+    ratchet("gnu-shard:17/71", "--gnu-ert", GNU_ERT);
+}
+
+#[test]
+fn parity_ratchet_gnu_suite_shard_18_of_71() {
+    ratchet("gnu-shard:18/71", "--gnu-ert", GNU_ERT);
+}
+
+#[test]
+fn parity_ratchet_gnu_suite_shard_19_of_71() {
+    ratchet("gnu-shard:19/71", "--gnu-ert", GNU_ERT);
+}
+
+#[test]
+fn parity_ratchet_gnu_suite_shard_20_of_71() {
+    ratchet("gnu-shard:20/71", "--gnu-ert", GNU_ERT);
+}
+
+#[test]
+fn parity_ratchet_gnu_suite_shard_21_of_71() {
+    ratchet("gnu-shard:21/71", "--gnu-ert", GNU_ERT);
+}
+
+#[test]
+fn parity_ratchet_gnu_suite_shard_22_of_71() {
+    ratchet("gnu-shard:22/71", "--gnu-ert", GNU_ERT);
+}
+
+#[test]
+fn parity_ratchet_gnu_suite_shard_23_of_71() {
+    ratchet("gnu-shard:23/71", "--gnu-ert", GNU_ERT);
+}
+
+#[test]
+fn parity_ratchet_gnu_suite_shard_24_of_71() {
+    ratchet("gnu-shard:24/71", "--gnu-ert", GNU_ERT);
+}
+
+#[test]
+fn parity_ratchet_gnu_suite_shard_25_of_71() {
+    ratchet("gnu-shard:25/71", "--gnu-ert", GNU_ERT);
+}
+
+#[test]
+fn parity_ratchet_gnu_suite_shard_26_of_71() {
+    ratchet("gnu-shard:26/71", "--gnu-ert", GNU_ERT);
+}
+
+#[test]
+fn parity_ratchet_gnu_suite_shard_27_of_71() {
+    ratchet("gnu-shard:27/71", "--gnu-ert", GNU_ERT);
+}
+
+#[test]
+fn parity_ratchet_gnu_suite_shard_28_of_71() {
+    ratchet("gnu-shard:28/71", "--gnu-ert", GNU_ERT);
+}
+
+#[test]
+fn parity_ratchet_gnu_suite_shard_29_of_71() {
+    ratchet("gnu-shard:29/71", "--gnu-ert", GNU_ERT);
+}
+
+#[test]
+fn parity_ratchet_gnu_suite_shard_30_of_71() {
+    ratchet("gnu-shard:30/71", "--gnu-ert", GNU_ERT);
+}
+
+#[test]
+fn parity_ratchet_gnu_suite_shard_31_of_71() {
+    ratchet("gnu-shard:31/71", "--gnu-ert", GNU_ERT);
+}
+
+#[test]
+fn parity_ratchet_gnu_suite_shard_32_of_71() {
+    ratchet("gnu-shard:32/71", "--gnu-ert", GNU_ERT);
+}
+
+#[test]
+fn parity_ratchet_gnu_suite_shard_33_of_71() {
+    ratchet("gnu-shard:33/71", "--gnu-ert", GNU_ERT);
+}
+
+#[test]
+fn parity_ratchet_gnu_suite_shard_34_of_71() {
+    ratchet("gnu-shard:34/71", "--gnu-ert", GNU_ERT);
+}
+
+#[test]
+fn parity_ratchet_gnu_suite_shard_35_of_71() {
+    ratchet("gnu-shard:35/71", "--gnu-ert", GNU_ERT);
+}
+
+#[test]
+fn parity_ratchet_gnu_suite_shard_36_of_71() {
+    ratchet("gnu-shard:36/71", "--gnu-ert", GNU_ERT);
+}
+
+#[test]
+fn parity_ratchet_gnu_suite_shard_37_of_71() {
+    ratchet("gnu-shard:37/71", "--gnu-ert", GNU_ERT);
+}
+
+#[test]
+fn parity_ratchet_gnu_suite_shard_38_of_71() {
+    ratchet("gnu-shard:38/71", "--gnu-ert", GNU_ERT);
+}
+
+#[test]
+fn parity_ratchet_gnu_suite_shard_39_of_71() {
+    ratchet("gnu-shard:39/71", "--gnu-ert", GNU_ERT);
+}
+
+#[test]
+fn parity_ratchet_gnu_suite_shard_40_of_71() {
+    ratchet("gnu-shard:40/71", "--gnu-ert", GNU_ERT);
+}
+
+#[test]
+fn parity_ratchet_gnu_suite_shard_41_of_71() {
+    ratchet("gnu-shard:41/71", "--gnu-ert", GNU_ERT);
+}
+
+#[test]
+fn parity_ratchet_gnu_suite_shard_42_of_71() {
+    ratchet("gnu-shard:42/71", "--gnu-ert", GNU_ERT);
+}
+
+#[test]
+fn parity_ratchet_gnu_suite_shard_43_of_71() {
+    ratchet("gnu-shard:43/71", "--gnu-ert", GNU_ERT);
+}
+
+#[test]
+fn parity_ratchet_gnu_suite_shard_44_of_71() {
+    ratchet("gnu-shard:44/71", "--gnu-ert", GNU_ERT);
+}
+
+#[test]
+fn parity_ratchet_gnu_suite_shard_45_of_71() {
+    ratchet("gnu-shard:45/71", "--gnu-ert", GNU_ERT);
+}
+
+#[test]
+fn parity_ratchet_gnu_suite_shard_46_of_71() {
+    ratchet("gnu-shard:46/71", "--gnu-ert", GNU_ERT);
+}
+
+#[test]
+fn parity_ratchet_gnu_suite_shard_47_of_71() {
+    ratchet("gnu-shard:47/71", "--gnu-ert", GNU_ERT);
+}
+
+#[test]
+fn parity_ratchet_gnu_suite_shard_48_of_71() {
+    ratchet("gnu-shard:48/71", "--gnu-ert", GNU_ERT);
+}
+
+#[test]
+fn parity_ratchet_gnu_suite_shard_49_of_71() {
+    ratchet("gnu-shard:49/71", "--gnu-ert", GNU_ERT);
+}
+
+#[test]
+fn parity_ratchet_gnu_suite_shard_50_of_71() {
+    ratchet("gnu-shard:50/71", "--gnu-ert", GNU_ERT);
+}
+
+#[test]
+fn parity_ratchet_gnu_suite_shard_51_of_71() {
+    ratchet("gnu-shard:51/71", "--gnu-ert", GNU_ERT);
+}
+
+#[test]
+fn parity_ratchet_gnu_suite_shard_52_of_71() {
+    ratchet("gnu-shard:52/71", "--gnu-ert", GNU_ERT);
+}
+
+#[test]
+fn parity_ratchet_gnu_suite_shard_53_of_71() {
+    ratchet("gnu-shard:53/71", "--gnu-ert", GNU_ERT);
+}
+
+#[test]
+fn parity_ratchet_gnu_suite_shard_54_of_71() {
+    ratchet("gnu-shard:54/71", "--gnu-ert", GNU_ERT);
+}
+
+#[test]
+fn parity_ratchet_gnu_suite_shard_55_of_71() {
+    ratchet("gnu-shard:55/71", "--gnu-ert", GNU_ERT);
+}
+
+#[test]
+fn parity_ratchet_gnu_suite_shard_56_of_71() {
+    ratchet("gnu-shard:56/71", "--gnu-ert", GNU_ERT);
+}
+
+#[test]
+fn parity_ratchet_gnu_suite_shard_57_of_71() {
+    ratchet("gnu-shard:57/71", "--gnu-ert", GNU_ERT);
+}
+
+#[test]
+fn parity_ratchet_gnu_suite_shard_58_of_71() {
+    ratchet("gnu-shard:58/71", "--gnu-ert", GNU_ERT);
+}
+
+#[test]
+fn parity_ratchet_gnu_suite_shard_59_of_71() {
+    ratchet("gnu-shard:59/71", "--gnu-ert", GNU_ERT);
+}
+
+#[test]
+fn parity_ratchet_gnu_suite_shard_60_of_71() {
+    ratchet("gnu-shard:60/71", "--gnu-ert", GNU_ERT);
+}
+
+#[test]
+fn parity_ratchet_gnu_suite_shard_61_of_71() {
+    ratchet("gnu-shard:61/71", "--gnu-ert", GNU_ERT);
+}
+
+#[test]
+fn parity_ratchet_gnu_suite_shard_62_of_71() {
+    ratchet("gnu-shard:62/71", "--gnu-ert", GNU_ERT);
+}
+
+#[test]
+fn parity_ratchet_gnu_suite_shard_63_of_71() {
+    ratchet("gnu-shard:63/71", "--gnu-ert", GNU_ERT);
+}
+
+#[test]
+fn parity_ratchet_gnu_suite_shard_64_of_71() {
+    ratchet("gnu-shard:64/71", "--gnu-ert", GNU_ERT);
+}
+
+#[test]
+fn parity_ratchet_gnu_suite_shard_65_of_71() {
+    ratchet("gnu-shard:65/71", "--gnu-ert", GNU_ERT);
+}
+
+#[test]
+fn parity_ratchet_gnu_suite_shard_66_of_71() {
+    ratchet("gnu-shard:66/71", "--gnu-ert", GNU_ERT);
+}
+
+#[test]
+fn parity_ratchet_gnu_suite_shard_67_of_71() {
+    ratchet("gnu-shard:67/71", "--gnu-ert", GNU_ERT);
+}
+
+#[test]
+fn parity_ratchet_gnu_suite_shard_68_of_71() {
+    ratchet("gnu-shard:68/71", "--gnu-ert", GNU_ERT);
+}
+
+#[test]
+fn parity_ratchet_gnu_suite_shard_69_of_71() {
+    ratchet("gnu-shard:69/71", "--gnu-ert", GNU_ERT);
+}
+
+#[test]
+fn parity_ratchet_gnu_suite_shard_70_of_71() {
+    ratchet("gnu-shard:70/71", "--gnu-ert", GNU_ERT);
+}
+
+#[test]
+fn parity_ratchet_gnu_suite_shard_71_of_71() {
+    ratchet("gnu-shard:71/71", "--gnu-ert", GNU_ERT);
 }
 
 /// The checker's own logic (floors, lowering records, zero-run refusals).

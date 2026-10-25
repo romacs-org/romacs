@@ -1,0 +1,485 @@
+use romacs_vm::Vm;
+
+fn compare(name: &str, source: &str) {
+    let binary = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
+    let oracle = format!(
+        "(progn (setq lexical-binding t) (defalias 'bt-compile #'byte-compile) (prin1 {source}))"
+    );
+    let output = std::process::Command::new(binary)
+        .args(["-Q", "--batch", "--eval", &oracle])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{name}: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let expected = String::from_utf8(output.stdout).unwrap();
+    let mut vm = Vm::new();
+    vm.eval_source("(defun bt-compile (function) function)")
+        .unwrap();
+    let actual = vm.eval_source(source).and_then(|v| v.display());
+    assert_eq!(actual.as_deref(), Ok(expected.as_str()), "{name}: {source}");
+}
+
+#[test]
+fn compiled_call_identity_arguments_and_bases_match_gnu() {
+    let cases = [
+        (
+            "entry_args",
+            r#"(progn
+          (fset 'bt-outer (bt-compile (lambda (first &optional second &rest tail)
+            (setq first 99 second 88 tail '(77))
+            (let (seen)
+              (mapbacktrace (lambda (evaluated function arguments flags)
+                (if (memq function '(bt-outer mapbacktrace))
+                    (setq seen (cons (list evaluated function arguments flags) seen)))))
+              (nreverse seen)))))
+          (let ((result (bt-outer 1 2 3 4)))
+            (list (car (car result)) (car (cdr (car result)))
+                  (car (cdr result)))))"#,
+        ),
+        (
+            "alias_base_offset",
+            r#"(progn
+          (fset 'bt-outer (bt-compile (lambda ()
+            (let (seen)
+              (mapbacktrace (lambda (e f a flags)
+                (setq seen (cons f seen)) (if (eq f 'bt-alias) (throw 'bt-done (nreverse seen))))
+                '(1 . bt-outer))))))
+          (fset 'bt-inner (bt-compile (lambda () (catch 'bt-done (bt-outer)))))
+          (defalias 'bt-alias 'bt-inner)
+          (bt-alias))"#,
+        ),
+        (
+            "missing_base",
+            "(let ((called nil)) (list (mapbacktrace (lambda (e f a flags) (setq called t)) 'bt-absent) called))",
+        ),
+        (
+            "callback_arity",
+            "(condition-case e (mapbacktrace (lambda (e f a flags) (list e f a flags)) 'mapbacktrace) (error (car e)))",
+        ),
+        (
+            "locals_errors",
+            "(list (condition-case e (backtrace--locals 0) (error (car e))) (condition-case e (backtrace--locals -1) (error (car e))) (condition-case e (backtrace--locals 'wrong) (error (car e))) (condition-case e (backtrace--locals 9999) (error (car e))))",
+        ),
+        (
+            "argument_object_mutation",
+            r#"(progn
+          (fset 'bt-outer (bt-compile (lambda (value)
+            (setcar value 'changed) (setq value 'replaced)
+            (catch 'bt-done
+              (mapbacktrace (lambda (e f a flags) (throw 'bt-done a)) 'bt-outer)))))
+          (bt-outer (list 'original)))"#,
+        ),
+    ];
+    for (name, source) in cases {
+        compare(name, source);
+    }
+}
+
+#[test]
+fn dynamic_locals_are_read_without_rewinding_bindings() {
+    compare(
+        "nested_dynamic",
+        r#"(progn
+      (defvar bt-special 'outside)
+      (fset 'bt-query (bt-compile (lambda ()
+        (list (backtrace--locals 1 'bt-query) (backtrace--locals 2 'bt-query) bt-special))))
+      (fset 'bt-inner (bt-compile (lambda () (let ((bt-special 'inner)) (bt-query)))))
+      (fset 'bt-outer (bt-compile (lambda () (let ((bt-special 'outer)) (bt-inner)))))
+      (bt-outer))"#,
+    );
+    compare(
+        "alias_dynamic",
+        r#"(progn
+      (defvar bt-special 'outside) (defvar bt-alias) (defvaralias 'bt-alias 'bt-special)
+      (fset 'bt-query (bt-compile (lambda () (backtrace--locals 1 'bt-query))))
+      (fset 'bt-outer (bt-compile (lambda () (let ((bt-alias 'inside)) (bt-query)))))
+      (bt-outer))"#,
+    );
+}
+
+#[test]
+fn handler_callback_base_retains_failing_body_and_native_error() {
+    let mut vm = Vm::new();
+    vm.set_collection_floor(1);
+    let source = r#"(let ((debugfun nil) (frames nil))
+      (fset 'bt-failure (lambda (payload) (apply 'apply '(error ("failure")))))
+      (setq debugfun (lambda (condition)
+        (garbage-collect)
+        (mapbacktrace (lambda (e f a flags)
+          (garbage-collect) (setq frames (cons (list f a) frames))) debugfun)))
+      (condition-case e
+        (handler-bind-1 (lambda () (bt-failure 42)) 'error debugfun)
+        (error nil))
+      (setq frames (nreverse frames))
+      (list (eq (car (car frames)) debugfun)
+            (car (cdr (assq 'bt-failure frames)))
+            (car (cdr (assq 'error frames)))))"#;
+    assert_eq!(
+        vm.eval_source(source).unwrap().display().unwrap(),
+        "(t (42) (\"failure\"))"
+    );
+}
+
+#[test]
+fn t2_primitive_origin_and_callback_are_real_frames() {
+    compare(
+        "t2_origin",
+        r#"(progn
+      (fset 'bt-callback (bt-compile (lambda (value)
+        (let (seen)
+          (mapbacktrace (lambda (evaluated function arguments flags)
+            (if (memq function '(bt-callback mapcan))
+                (setq seen (cons (list evaluated function arguments flags) seen)))))
+          (list (nreverse seen))))))
+      (mapcan 'bt-callback '(42)))"#,
+    );
+}
+
+#[test]
+fn eval_and_load_reentry_retain_parent_activations() {
+    compare(
+        "eval_parent",
+        r#"(progn
+      (fset 'bt-child (bt-compile (lambda ()
+        (let (seen)
+          (catch 'bt-frame-end
+            (mapbacktrace (lambda (e f a flags)
+              (if (memq f '(bt-child eval bt-parent)) (setq seen (cons f seen)))
+              (if (eq f 'bt-parent) (throw 'bt-frame-end nil)))) )
+          (nreverse seen)))))
+      (fset 'bt-parent (bt-compile (lambda () (eval '(bt-child)))))
+      (bt-parent))"#,
+    );
+    let path = std::env::temp_dir().join(format!("backtrace-load-{}.el", std::process::id()));
+    std::fs::write(&path, "(setq bt-loaded (bt-child))").unwrap();
+    let source = format!(
+        r#"(progn
+      (defvar bt-loaded nil)
+      (fset 'bt-child (bt-compile (lambda ()
+        (let (seen)
+          (catch 'bt-frame-end
+            (mapbacktrace (lambda (e f a flags)
+              (if (memq f '(bt-child load bt-parent)) (setq seen (cons f seen)))
+              (if (eq f 'bt-parent) (throw 'bt-frame-end nil)))) )
+          (nreverse seen)))))
+      (fset 'bt-parent (bt-compile (lambda () (load {:?} nil t t) bt-loaded)))
+      (bt-parent))"#,
+        path.to_str().unwrap()
+    );
+    compare("load_parent", &source);
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn buffer_local_dynamic_values_use_each_bindings_storage() {
+    compare(
+        "distinct_buffer_bindings",
+        r#"(progn
+      (fset 'bt-query (bt-compile (lambda ()
+        (list (backtrace--locals 1 'bt-query) (backtrace--locals 2 'bt-query) fill-column))))
+      (fset 'bt-inner (bt-compile (lambda () (let ((fill-column 82)) (bt-query)))))
+      (fset 'bt-outer (bt-compile (lambda ()
+        (let ((fill-column 81)) (set-buffer " *bt-buffer-two*") (bt-inner)))))
+      (let ((one (get-buffer-create " *bt-buffer-one*"))
+            (two (get-buffer-create " *bt-buffer-two*")))
+        (unwind-protect
+          (progn (set-buffer two) (make-local-variable 'fill-column) (setq fill-column 72)
+                 (set-buffer one) (make-local-variable 'fill-column) (setq fill-column 71)
+                 (bt-outer))
+          (kill-buffer one) (kill-buffer two))))"#,
+    );
+    compare(
+        "ordinary_buffer_local",
+        r#"(progn
+      (defvar bt-special 'outside)
+      (fset 'bt-query (bt-compile (lambda ()
+        (list (backtrace--locals 1 'bt-query) (backtrace--locals 2 'bt-query) bt-special))))
+      (fset 'bt-inner (bt-compile (lambda () (let ((bt-special 'inner)) (bt-query)))))
+      (fset 'bt-outer (bt-compile (lambda () (let ((bt-special 'outer)) (bt-inner)))))
+      (with-temp-buffer (make-local-variable 'bt-special) (setq bt-special 'local) (bt-outer)))"#,
+    );
+    compare(
+        "forwarded_global",
+        r#"(progn
+      (fset 'bt-query (bt-compile (lambda ()
+        (list (backtrace--locals 1 'bt-query) (backtrace--locals 2 'bt-query) max-lisp-eval-depth))))
+      (fset 'bt-inner (bt-compile (lambda () (let ((max-lisp-eval-depth 900002)) (bt-query)))))
+      (fset 'bt-outer (bt-compile (lambda () (let ((max-lisp-eval-depth 900001)) (bt-inner)))))
+      (bt-outer))"#,
+    );
+}
+
+#[test]
+fn collection_roots_original_arguments_and_nested_iteration() {
+    let mut vm = Vm::new();
+    vm.set_collection_floor(1);
+    let source = r#"(progn
+      (fset 'bt-hold (lambda (argument)
+        (setq argument nil)
+        (garbage-collect)
+        (let ((seen nil) (nested nil))
+          (mapbacktrace (lambda (e f a flags)
+            (garbage-collect)
+            (if (eq f 'bt-hold)
+              (progn
+                (setq seen a)
+                (mapbacktrace (lambda (e2 f2 a2 flags2)
+                  (garbage-collect)
+                  (if (eq f2 'bt-hold) (setq nested a2))) 'bt-hold)))) 'bt-hold)
+          (list seen nested))))
+      (bt-hold (list 42)))"#;
+    assert_eq!(
+        vm.eval_source(source).unwrap().display().unwrap(),
+        "(((42)) ((42)))"
+    );
+    assert!(vm.heap_stats().collections > 0);
+    assert!(vm.heap_stats().reclaimed > 0);
+}
+
+#[test]
+fn callback_throws_and_errors_remove_all_escaped_activations() {
+    compare(
+        "nonlocal_cleanup",
+        r#"(progn
+      (fset 'bt-throw (bt-compile (lambda ()
+        (mapbacktrace (lambda (e f a flags) (throw 'bt-done 'thrown))))))
+      (fset 'bt-error (bt-compile (lambda ()
+        (mapbacktrace (lambda (e f a flags) (error "callback"))))))
+      (fset 'bt-run (bt-compile (lambda ()
+        (let ((first (catch 'bt-done (bt-throw)))
+              (second (condition-case e (bt-error) (error (car e))))
+              (leaked nil))
+          (mapbacktrace (lambda (e f a flags) (setq leaked t)) 'bt-throw)
+          (mapbacktrace (lambda (e f a flags) (setq leaked t)) 'bt-error)
+          (list first second leaked)))))
+      (bt-run))"#,
+    );
+}
+
+#[test]
+fn review_regressions_match_pinned_compiled_gnu() {
+    compare(
+        "compiled_apply_nested",
+        r#"(progn (fset 'bt-hold (bt-compile (lambda (x) (let ((out nil)) (mapbacktrace (lambda (e f a flags) (if (memq f '(bt-hold bt-run)) (setq out (cons (list f a) out))))) (nreverse out))))) (fset 'bt-run (bt-compile (lambda () (apply 'apply '(bt-hold (42)))))) (bt-run))"#,
+    );
+    compare(
+        "compiled_apply_primitive",
+        r#"(progn (fset 'bt-run (bt-compile (lambda () (let ((out nil)) (condition-case e (handler-bind-1 (lambda () (apply 'apply '(error ("failure")))) 'error (lambda (e) (mapbacktrace (lambda (e f a flags) (if (memq f '(error bt-run)) (setq out (cons (list f a) out))))))) (error (nreverse out))))))) (bt-run))"#,
+    );
+    compare(
+        "nil_cons_base",
+        r#"(let ((seen nil)) (mapbacktrace (lambda (e f a flags) (setq seen t)) '(0)) seen)"#,
+    );
+    compare(
+        "kill_local",
+        r#"(progn (fset 'bt-query (bt-compile (lambda () (backtrace--locals 1 'bt-query)))) (fset 'bt-hold (bt-compile (lambda () (let ((fill-column 82)) (kill-local-variable 'fill-column) (bt-query))))) (with-temp-buffer (make-local-variable 'fill-column) (bt-hold)))"#,
+    );
+    compare(
+        "kill_buffer_local",
+        r#"(progn (fset 'bt-query (bt-compile (lambda () (backtrace--locals 1 'bt-query)))) (fset 'bt-hold (bt-compile (lambda () (let ((fill-column 82)) (kill-buffer (current-buffer)) (bt-query))))) (with-temp-buffer (make-local-variable 'fill-column) (bt-hold)))"#,
+    );
+    compare(
+        "kill_ordinary_local",
+        r#"(progn (defvar bt-local 'default) (fset 'bt-query (bt-compile (lambda () (backtrace--locals 1 'bt-query)))) (fset 'bt-hold (bt-compile (lambda () (let ((bt-local 82)) (kill-local-variable 'bt-local) (bt-query))))) (with-temp-buffer (make-local-variable 'bt-local) (bt-hold)))"#,
+    );
+    compare(
+        "killed_ordinary_owner",
+        r#"(progn
+      (defvar bt-local 'default)
+      (fset 'bt-query (bt-compile (lambda () (backtrace--locals 1 'bt-query))))
+      (fset 'bt-hold (bt-compile (lambda () (let ((bt-local 82)) (kill-buffer (current-buffer)) (bt-query)))))
+      (with-temp-buffer (make-local-variable 'bt-local) (bt-hold)))"#,
+    );
+    for base in ["nil", "'(0)", "'(1)", "'(-1)"] {
+        compare(
+            base,
+            &format!(
+                "(let ((seen nil)) (mapbacktrace (lambda (e f a flags) (setq seen t)) {base}) seen)"
+            ),
+        );
+        compare(
+            base,
+            &format!(
+                "(progn (fset 'bt-run (bt-compile (lambda () (condition-case e (backtrace--locals 1 {base}) (error (car e)))))) (bt-run))"
+            ),
+        );
+    }
+}
+
+#[test]
+fn dynamic_apply_preserves_real_operation_and_final_callee_identity() {
+    compare(
+        "dynamic_apply",
+        r#"(progn
+      (fset 'bt-hold (bt-compile (lambda (x)
+        (let ((out nil))
+          (mapbacktrace (lambda (e f a flags)
+            (if (memq f '(bt-hold apply bt-run)) (setq out (cons f out)))))
+          (nreverse out)))))
+      (fset 'bt-run (bt-compile (lambda (f args) (apply f args))))
+      (bt-run 'bt-hold '(42)))"#,
+    );
+    let mut vm = Vm::new();
+    // GNU can compile constant apply away. Romacs retains the operations it
+    // executes and snapshots their original evaluated arguments.
+    let source = r#"(progn
+      (fset 'bt-hold (lambda (x)
+        (let ((out nil))
+          (mapbacktrace (lambda (e f a flags)
+            (if (memq f '(bt-hold apply bt-run)) (setq out (cons (list f a) out)))))
+          (nreverse out))))
+      (fset 'bt-run (lambda () (apply 'apply '(bt-hold (42)))))
+      (bt-run))"#;
+    assert_eq!(
+        vm.eval_source(source).unwrap().display().unwrap(),
+        "((bt-hold (42)) (apply (bt-hold (42))) (apply (apply (bt-hold (42)))) (bt-run nil))"
+    );
+    compare(
+        "nested_apply_base",
+        r#"(progn
+      (fset 'bt-hold (bt-compile (lambda (x)
+        (catch 'bt-done
+          (mapbacktrace (lambda (e f a flags) (throw 'bt-done (list f a))) 'bt-hold)))))
+      (apply 'apply '(bt-hold (42))))"#,
+    );
+}
+
+#[test]
+fn apply_chains_from_t2_and_nonlocal_exits_release_their_frames() {
+    compare(
+        "t2_apply_chain",
+        r#"(progn
+      (fset 'bt-hold (bt-compile (lambda (x)
+        (let ((out nil))
+          (mapbacktrace (lambda (e f a flags)
+            (if (memq f '(bt-hold apply mapcan)) (setq out (cons f out)))))
+          (list (nreverse out))))))
+      (fset 'bt-spread (bt-compile (lambda (call) (apply (car call) (car (cdr call))))))
+      (mapcan 'bt-spread '((bt-hold (42)))))"#,
+    );
+    compare(
+        "apply_chain_cleanup",
+        r#"(progn
+      (fset 'bt-escape (bt-compile (lambda () (error "stop"))))
+      (fset 'bt-run (bt-compile (lambda ()
+        (let ((caught (condition-case e (apply 'apply '(bt-escape nil)) (error (car e))))
+              (leaked nil))
+          (mapbacktrace (lambda (e f a flags) (setq leaked t)) 'bt-escape)
+          (mapbacktrace (lambda (e f a flags) (setq leaked t)) 'apply)
+          (list caught leaked)))))
+      (bt-run))"#,
+    );
+}
+
+#[test]
+fn refused_closure_calls_retain_attempted_frame_until_escape_cleanup() {
+    for (name, parameters, call) in [
+        ("ordinary_arity", "argument", "(bt-arity)"),
+        ("t2_arity", "", "(assoc 2 '((1 . value)) 'bt-arity)"),
+    ] {
+        let source = format!(
+            r#"(progn
+          (defvar bt-entered nil) (defvar bt-body-local 'outside)
+          (defvar bt-out nil) (defvar bt-base nil) (defvar bt-locals 'unset)
+          (defvar bt-condition nil) (defvar bt-count nil)
+          (fset 'bt-arity (bt-compile (lambda ({parameters})
+            (let ((bt-body-local 'unentered)) (setq bt-entered t)))))
+          (fset 'bt-debug (bt-compile (lambda (condition)
+            (garbage-collect)
+            (setq bt-locals (backtrace--locals 1 'bt-debug))
+            (mapbacktrace (lambda (e f a flags)
+              (if (memq f '(bt-arity bt-run)) (setq bt-out (cons (list f a) bt-out)))))
+            (setq bt-base (catch 'bt-frame
+              (mapbacktrace (lambda (e f a flags) (throw 'bt-frame (list f a))) 'bt-arity))))))
+          (fset 'bt-run (bt-compile (lambda ()
+            (condition-case e
+              (handler-bind-1 (lambda () {call}) 'error 'bt-debug)
+              (error (setq bt-condition (car e) bt-count (car (cdr (cdr e))))))
+            (let ((leaked nil))
+              (mapbacktrace (lambda (e f a flags) (setq leaked t)) 'bt-arity)
+              (list bt-condition bt-count (nreverse bt-out) bt-base bt-locals bt-entered leaked)))))
+          (bt-run))"#
+        );
+        compare(name, &source);
+    }
+}
+
+fn compare_autoload_attempt(case: usize, failing: bool) {
+    let callback = case == 2;
+    let path = std::env::temp_dir().join(format!(
+        "backtrace-autoload-{case}-{failing}-{}.el",
+        std::process::id()
+    ));
+    let body = if failing {
+        "(unwind-protect (signal 'arith-error '(autoload-error)) (setq bt-cleaned t))".to_owned()
+    } else {
+        let result = if callback { "(list x)" } else { "x" };
+        format!("(bt-snapshot) (defun bt-auto (x) (setq bt-entered t) (bt-snapshot) {result})")
+    };
+    std::fs::write(&path, body).unwrap();
+    let call = match case {
+        0 => "(funcall 'bt-auto 7)",
+        1 => "(apply 'bt-auto '(7))",
+        2 => "(mapcan 'bt-auto '(7))",
+        _ => "(bt-auto 7)",
+    };
+    // Named calls load at ResolveHead before their arguments are evaluated.
+    // Verify their error/cleanup behavior without inventing an evaluated frame.
+    let report = if case == 3 {
+        "(list result bt-count bt-cleaned-at-handler bt-cleaned bt-entered leaked)"
+    } else {
+        "(list result (nreverse bt-before) (nreverse bt-after) bt-count bt-cleaned-at-handler bt-cleaned bt-entered leaked)"
+    };
+    let source = format!(
+        r#"(progn
+      (defvar bt-before nil) (defvar bt-after nil) (defvar bt-entered nil)
+      (defvar bt-cleaned nil) (defvar bt-cleaned-at-handler 'unset)
+      (defvar bt-count 0) (defvar bt-seen nil)
+      (fset 'bt-snapshot (bt-compile (lambda ()
+        (mapbacktrace (lambda (e f a flags)
+          (if (memq f '(bt-auto bt-run))
+            (if bt-entered (setq bt-after (cons (list f a) bt-after))
+              (setq bt-before (cons (list f a) bt-before))))) 'bt-auto))))
+      (autoload 'bt-auto {:?} nil nil)
+      (fset 'bt-run (bt-compile (lambda ()
+        (let ((result
+          (condition-case e
+            (handler-bind-1 (lambda () {call}) 'error
+              (lambda (condition)
+                (setq bt-count (1+ bt-count) bt-cleaned-at-handler bt-cleaned)
+                (if (null bt-seen) (setq bt-seen condition))
+                (garbage-collect) (bt-snapshot)))
+            (error (list (car e) (cdr e) (eq e bt-seen))))))
+          (let ((leaked nil))
+            (mapbacktrace (lambda (e f a flags) (setq leaked t)) 'bt-auto)
+            {report})))))
+      (bt-run))"#,
+        path.to_str().unwrap()
+    );
+    compare(
+        if failing {
+            "autoload_failure"
+        } else {
+            "autoload_success"
+        },
+        &source,
+    );
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn autoload_success_exposes_one_pending_activation_before_definition() {
+    for case in 0..3 {
+        compare_autoload_attempt(case, false);
+    }
+}
+
+#[test]
+fn autoload_error_preserves_one_original_escape_and_cleanup() {
+    for case in 0..4 {
+        compare_autoload_attempt(case, true);
+    }
+}

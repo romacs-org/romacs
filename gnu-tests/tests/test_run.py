@@ -515,8 +515,8 @@ class Pin(unittest.TestCase):
 
     def test_ordered_bootstrap_is_explicit_and_separate(self):
         from types import SimpleNamespace
-        self.assertIs(run.real_bootstrap_chain(SimpleNamespace()), run.BOOTSTRAP_CHAIN)
-        ordered = run.real_bootstrap_chain(SimpleNamespace(bootstrap='ordered'))
+        self.assertIs(run.source_bootstrap_chain(SimpleNamespace()), run.BOOTSTRAP_CHAIN)
+        ordered = run.source_bootstrap_chain(SimpleNamespace(bootstrap='ordered'))
         self.assertIn('bindings', ordered, 'MEASUREMENT REGIME: bindings prefix missing')
         self.assertLess(ordered.index('bindings'), ordered.index('emacs-lisp/easy-mmode'),
                         'MEASUREMENT REGIME: bindings macro must precede easy-mmode compilation')
