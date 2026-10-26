@@ -1340,6 +1340,10 @@ mod leaf {
         pub fn char_table_element(&self, table: Value, index: usize) -> super::Out {
             self.vm.char_table_get(table, index).map_err(Fault::Error)
         }
+        /// TABLE's own value at INDEX or its default, ignoring the parent.
+        pub fn char_table_own_element(&self, table: Value, index: usize) -> super::Out {
+            self.vm.char_table_own(table, index).map_err(Fault::Error)
+        }
         pub fn make_char_table(&mut self, purpose: Value, init: Value) -> super::Out {
             let mut plist = self.symbol_plist(purpose)?;
             let property = self.intern("char-table-extra-slots");

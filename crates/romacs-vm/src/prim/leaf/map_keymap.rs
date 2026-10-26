@@ -9,6 +9,52 @@ impl Leaf<'_> {
     pub(crate) fn is_uniprop(&self, table: Value) -> bool {
         self.unicode_property_table(table).is_some()
     }
+    /// chartab.c Foptimize_char_table: collapse every sub-table whose slots
+    /// are all values equal (or `eq' when EQ) to the first, children first,
+    /// then reset the ASCII cache.
+    pub(crate) fn optimize_char_table(&mut self, table: Value, eq: bool) -> std::result::Result<(), Fault> {
+        let root = self.map_table_root(table);
+        let slots = root.lock().unwrap().slots.clone();
+        for (i, slot) in slots.into_iter().enumerate() {
+            if let char_table::CharTableSlot::Node(child) = slot {
+                let optimized = self.optimize_node(&child, eq)?;
+                root.lock().unwrap().slots[i] = optimized;
+            }
+        }
+        self.uniprop_reset_ascii(table);
+        Ok(())
+    }
+    /// optimize_sub_char_table: NODE's slot in its parent after optimizing.
+    fn optimize_node(&self, node: &char_table::CharTableNodeHandle, eq: bool) -> std::result::Result<char_table::CharTableSlot, Fault> {
+        let mut slots = node.lock().unwrap().slots.clone();
+        for slot in &mut slots {
+            if let char_table::CharTableSlot::Node(child) = slot {
+                *slot = self.optimize_node(&child.clone(), eq)?;
+            }
+        }
+        node.lock().unwrap().slots = slots.clone();
+        let same = |a: Value, b: Value| -> std::result::Result<bool, Fault> {
+            if eq { return Ok(a == b); }
+            self.equal(a, b).map_err(|e| match e {
+                crate::hash::HashFault::Wrong(p, v) => Fault::Wrong(p, v),
+                crate::hash::HashFault::Error("circular-list", Some(v)) => Fault::Circular(v),
+                crate::hash::HashFault::Error(m, _) => Fault::Error(m.into()),
+                _ => Fault::Error("equal failed".into()),
+            })
+        };
+        let char_table::CharTableSlot::Value(first) = slots[0] else {
+            return Ok(char_table::CharTableSlot::Node(node.clone()));
+        };
+        for slot in &slots[1..] {
+            let char_table::CharTableSlot::Value(this) = *slot else {
+                return Ok(char_table::CharTableSlot::Node(node.clone()));
+            };
+            if !same(this, first)? {
+                return Ok(char_table::CharTableSlot::Node(node.clone()));
+            }
+        }
+        Ok(char_table::CharTableSlot::Value(first))
+    }
     /// set_char_table_ascii (table, char_table_ascii (table)).
     pub(crate) fn uniprop_reset_ascii(&mut self, table: Value) {
         let index = table.index_if(0).unwrap() - 1;

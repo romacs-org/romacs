@@ -31,6 +31,38 @@ fn set_char_table_range(cx, table: Value, range: Value, value: Value) {
     cx.set_char_table_range(table, range, value)
 }}
 
+// A cons RANGE gives FROM's own value or the default, not the parent's
+// (char_table_ref_and_range); a character goes through CHAR_TABLE_REF.
+defsubr! { name = "char-table-range", gnu = "chartab.c:578", effect = Reads,
+fn char_table_range(cx, table: Value, range: Value) {
+    if cx.kind(table) != crate::prim::leaf::Kind::CharTable { return Err(Fault::Wrong("char-table-p", table)); }
+    let character = |v: Value| v.integer_value().filter(|&n| (0..=crate::lstring::MAX_CHAR as i64).contains(&n))
+        .map(|n| n as usize).ok_or(Fault::Wrong("characterp", v));
+    if range == Value::NIL { return Ok(cx.map_table_default(table)); }
+    if range.integer_value().is_some() {
+        let c = character(range).map_err(|_| Fault::Error("Invalid RANGE argument to \u{2018}char-table-range\u{2019}".into()))?;
+        return cx.char_table_element(table, c);
+    }
+    let Some((from, to)) = cx.pair(range) else {
+        return Err(Fault::Error("Invalid RANGE argument to \u{2018}char-table-range\u{2019}".into()));
+    };
+    let from = character(from)?;
+    character(to)?;
+    cx.char_table_own_element(table, from)
+}}
+
+
+// Only GNU's two built-in tests run natively; any other TEST would need a
+// Lisp call per comparison (DIVERGENCES.md VM2-CHARTAB-OPTIMIZE1).
+defsubr! { name = "optimize-char-table", gnu = "chartab.c:676", effect = MutatesArgs,
+fn optimize_char_table(cx, table: Value; optional test: Value) {
+    if cx.kind(table) != crate::prim::leaf::Kind::CharTable { return Err(Fault::Wrong("char-table-p", table)); }
+    let eq = if test == Value::NIL || test == cx.intern("equal") { false }
+        else if test == cx.intern("eq") { true }
+        else { return Err(Fault::Error("VM2 optimize-char-table supports only the equal and eq tests".into())); };
+    cx.optimize_char_table(table, eq)?;
+    Ok(Value::NIL)
+}}
 
 // Unicode property (uniprop) tables, GNU chartab.c's lower half.
 

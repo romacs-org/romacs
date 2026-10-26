@@ -355,3 +355,57 @@ fn unicode_property_tables_match_gnu() {
     let cases: Vec<String> = cases.iter().map(|c| format!("(let ((tb {UNIPROP})) {c})")).collect();
     compare(&cases.iter().map(String::as_str).collect::<Vec<_>>());
 }
+
+#[test]
+fn char_table_range_and_optimize_match_gnu() {
+    compare(&[
+        "(list (condition-case e (char-table-range (make-char-table 'x) 5000000) (error e)) (condition-case e (char-table-range (make-char-table 'x) 'a) (error e)) (condition-case e (char-table-range (make-char-table 'x) '(a . 1)) (error e)) (condition-case e (char-table-range (make-char-table 'x) '(1 . a)) (error e)))",
+        "(let ((p (make-char-table 'x)) (c (make-char-table 'x))) (set-char-table-parent c p) (aset p ?a 'pa) (list (char-table-range c ?a) (char-table-range c '(?a . ?b)) (progn (set-char-table-range c nil 'cd) (list (char-table-range c ?a) (char-table-range c '(?a . ?b)) (char-table-range c nil)))))",
+        "(let ((tb (make-char-table 'x))) (set-char-table-range tb '(#x100 . #x17f) 'a) (aset tb #x105 'a) (list (prin1-to-string tb) (progn (optimize-char-table tb) (prin1-to-string tb)) (aref tb #x105)))",
+        "(let ((tb (make-char-table 'x))) (dotimes (i 128) (aset tb i (list 1))) (optimize-char-table tb 'eq) (let ((a (prin1-to-string tb))) (optimize-char-table tb 'equal) (list a (prin1-to-string tb))))",
+        "(condition-case e (optimize-char-table 'x) (error e))",
+    ]);
+}
+
+// GNU's C initial values (character.c, xdisp.c, composite.c, coding.c);
+// GNU -Q shows them only after characters.el has changed them.
+#[test]
+fn c_char_tables_start_as_gnus_c_values() {
+    let mut vm = Vm::new();
+    let source = "(list (char-table-subtype auto-fill-chars) (aref auto-fill-chars 32) (aref auto-fill-chars 10) (aref auto-fill-chars ?a) (aref char-width-table ?a) (aref char-width-table #x80) (aref char-width-table #x9f) (aref char-width-table #x3fff80) (aref printable-chars 31) (aref printable-chars ?a) (aref printable-chars 127) (aref printable-chars 160) (aref printable-chars #x3fff80) (char-table-subtype char-script-table) (char-table-extra-slot char-script-table 0) (char-table-extra-slot glyphless-char-display 0) (char-table-range composition-function-table ?a) (length translation-table-vector) (get 'translation-table 'char-table-extra-slots) unicode-category-table script-representative-chars current-iso639-language (clear-composition-cache))";
+    assert_eq!(vm.eval_source(source).unwrap().display().unwrap(),
+        "(auto-fill-chars t t nil 1 4 4 4 nil t nil t nil char-script-table nil empty-box nil 16 2 nil nil nil nil)");
+}
+
+#[test]
+fn unicode_scalar_character_names_match_gnu() {
+    compare(&[
+        "(list ?\\N{U+41} \"a\\N{U+1F600}b\" (read \"?\\\\N{U+0041}\") (read \"?\\\\N{U+10FFFF}\"))",
+        "(list (condition-case e (read \"?\\\\N{U+D800}\") (error (car e))) (condition-case e (read \"?\\\\N{U+110000}\") (error (car e))) (condition-case e (read \"?\\\\N{}\") (error (car e))) (condition-case e (read \"?\\\\N{U++41}\") (error (car e))) (condition-case e (read \"?\\\\NU+41\") (error (car e))))",
+    ]);
+}
+
+// utf-8-emacs source holds characters above U+10FFFF (here #x1A01CA, as in
+// language/ethiopic.el) and decodes an invalid byte to a raw-byte character.
+#[test]
+fn utf_8_emacs_sources_load_gnu_characters() {
+    let dir = std::env::temp_dir().join(format!("romacs-utf8-emacs-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("rt-utf8-emacs.el");
+    let mut bytes = b";; -*- coding: utf-8-emacs; lexical-binding: t -*-\n(setq rt-big ?".to_vec();
+    bytes.extend_from_slice(&[0xf6, 0xa0, 0x87, 0x8a]);
+    bytes.extend_from_slice(b" rt-text \"a");
+    // A lone continuation byte, GNU's internal 2-byte raw-byte form and a
+    // surrogate encoding all decode to raw bytes, as coding.c does.
+    bytes.extend_from_slice(&[0xf6, 0xa0, 0x87, 0x8a, 0x80, 0xc0, 0x80, 0xed, 0xa0, 0x80]);
+    bytes.extend_from_slice(b"\")\n");
+    std::fs::write(&file, bytes).unwrap();
+    let dos = dir.join("rt-utf8-emacs-dos.el");
+    let mut bytes = b";; -*- coding: utf-8-emacs-dos; lexical-binding: t -*-\r\n(setq rt-dos \"a\r\nb".to_vec();
+    bytes.extend_from_slice(&[0xf6, 0xa0, 0x87, 0x8a]);
+    bytes.extend_from_slice(b"\")\r\n");
+    std::fs::write(&dos, bytes).unwrap();
+    let expression = format!("(progn (load {:?} nil t t) (load {:?} nil t t) (list rt-big (append rt-text nil) (multibyte-string-p rt-text) (append rt-dos nil)))", file.to_str().unwrap(), dos.to_str().unwrap());
+    compare(&[&expression]);
+    std::fs::remove_dir_all(&dir).unwrap();
+}

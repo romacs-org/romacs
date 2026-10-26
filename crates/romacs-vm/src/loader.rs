@@ -338,12 +338,12 @@ impl Vm {
             let mut ordinal = 0;
             let mut result = Value::NIL;
             loop {
-                let read = self.read_source_span(&source[at..]);
+                let read = self.read_internal_span(&source[at..]);
                 let Some((value, begin, used)) = read.map_err(|e| {
                     format!(
                         "{}: line {} form {}: reader: {e}",
                         path.display(),
-                        source[..at].bytes().filter(|b| *b == b'\n').count() + 1,
+                        source[..at].iter().filter(|b| **b == b'\n').count() + 1,
                         ordinal + 1
                     )
                 })?
@@ -351,11 +351,14 @@ impl Vm {
                     break;
                 };
                 ordinal += 1;
-                let form_source = &source[at + begin..at + used];
+                // A form holding characters outside Unicode has no exact
+                // &str text: it is reported lossily and not compile-cached.
+                let exact = std::str::from_utf8(&source[at + begin..at + used]).ok();
+                let form_source = String::from_utf8_lossy(&source[at + begin..at + used]);
                 let form = self.source_form(value, 0)?;
                 let step = self.loader.steps.len();
-                self.loader.steps.push(serde_json::json!({"file":path,"ordinal":ordinal,"byte":at+begin,"line":source[..at+begin].bytes().filter(|b|*b==b'\n').count()+1,"source":form_source,"status":"entered"}));
-                let evaluated = self.eval_load_toplevel(&form, Some(form_source), lazy, 0);
+                self.loader.steps.push(serde_json::json!({"file":path,"ordinal":ordinal,"byte":at+begin,"line":source[..at+begin].iter().filter(|b|**b==b'\n').count()+1,"source":form_source,"status":"entered"}));
+                let evaluated = self.eval_load_toplevel(&form, exact, lazy, 0);
                 match evaluated {
                     Ok(v) => {
                         result = v;
@@ -368,7 +371,7 @@ impl Vm {
                         return Err(format!(
                             "{}: line {} form {}: {}: {e}",
                             path.display(),
-                            source[..at + begin].bytes().filter(|b| *b == b'\n').count() + 1,
+                            source[..at + begin].iter().filter(|b| **b == b'\n').count() + 1,
                             ordinal,
                             form_source.trim().chars().take(180).collect::<String>()
                         ));
@@ -389,7 +392,8 @@ impl Vm {
         result
     }
 }
-fn decode_source(bytes: &[u8]) -> Result<String> {
+/// Source text as GNU internal multibyte bytes.
+fn decode_source(bytes: &[u8]) -> Result<Vec<u8>> {
     let bytes = bytes.strip_prefix(&[0xef, 0xbb, 0xbf]).unwrap_or(bytes);
     let header = String::from_utf8_lossy(
         bytes
@@ -415,18 +419,48 @@ fn decode_source(bytes: &[u8]) -> Result<String> {
         .or_else(|| name.strip_suffix("-mac"))
         .unwrap_or(name);
     let mut source = match base {
-        "utf-8" | "utf-8-emacs" => {
-            String::from_utf8(bytes.to_vec()).map_err(|_| "source is not valid UTF-8")?
+        "utf-8" => {
+            String::from_utf8(bytes.to_vec()).map_err(|_| "source is not valid UTF-8")?.into_bytes()
         }
-        "latin-1" | "iso-latin-1" | "iso-8859-1" => bytes.iter().map(|b| char::from(*b)).collect(),
-        "us-ascii" if bytes.is_ascii() => String::from_utf8(bytes.to_vec()).unwrap(),
+        "utf-8-emacs" => utf_8_emacs(bytes),
+        "latin-1" | "iso-latin-1" | "iso-8859-1" => bytes.iter().map(|b| char::from(*b)).collect::<String>().into_bytes(),
+        "us-ascii" if bytes.is_ascii() => bytes.to_vec(),
         _ => return Err(format!("unsupported source coding system: {name}")),
     };
+    // CR and LF are single bytes in every internal character sequence.
     if name.ends_with("-dos") {
-        source = source.replace("\r\n", "\n");
+        let mut out = Vec::with_capacity(source.len());
+        for (i, &b) in source.iter().enumerate() {
+            if !(b == b'\r' && source.get(i + 1) == Some(&b'\n')) { out.push(b); }
+        }
+        source = out;
     }
     if name.ends_with("-mac") {
-        source = source.replace('\r', "\n");
+        for b in &mut source { if *b == b'\r' { *b = b'\n'; } }
     }
     Ok(source)
+}
+
+/// GNU's utf-8-emacs decoder: its own internal encoding, every byte that
+/// starts no valid character becoming a raw-byte character. As in coding.c,
+/// the internal 2-byte raw-byte forms (C0/C1 leads) and surrogate codes are
+/// not characters in a file.
+fn utf_8_emacs(bytes: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut at = 0;
+    while at < bytes.len() {
+        let decoded = crate::lstring::decode_char(&bytes[at..])
+            .filter(|_| bytes[at] < 0x80 || bytes[at] > 0xc1)
+            .filter(|&(code, _)| !(0xd800..=0xdfff).contains(&code));
+        match decoded {
+            Some((_, width)) => { out.extend_from_slice(&bytes[at..at + width]); at += width; }
+            None => {
+                let mut raw = [0; 5];
+                let n = crate::lstring::char_string(crate::lstring::BYTE8_OFFSET + u32::from(bytes[at]), &mut raw);
+                out.extend_from_slice(&raw[..n]);
+                at += 1;
+            }
+        }
+    }
+    out
 }

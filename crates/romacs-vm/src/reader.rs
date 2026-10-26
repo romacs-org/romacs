@@ -25,8 +25,10 @@ impl CharacterCode for u32 {
 }
 
 enum Input<'a> {
+    /// GNU internal multibyte text: UTF-8 plus the 4- and 5-byte forms of
+    /// characters above U+10FFFF and the 2-byte raw-byte forms.
     Host {
-        text: &'a str,
+        text: &'a [u8],
         byte: usize,
     },
     String {
@@ -45,6 +47,11 @@ enum Input<'a> {
         root: usize,
     },
 }
+/// Bytes CODE occupies in GNU internal text.
+fn host_width(code: u32) -> usize {
+    crate::lstring::char_string(code, &mut [0; 5])
+}
+
 struct Reader<'a, 'v> {
     input: Input<'a>,
     at: usize,
@@ -61,11 +68,12 @@ impl Reader<'_, '_> {
     fn get(&mut self) -> Result<Option<u32>> {
         match &mut self.input {
             Input::Host { text, byte } => {
-                let c = text[*byte..].chars().next();
-                if let Some(c) = c {
-                    *byte += c.len_utf8();
+                if *byte >= text.len() {
+                    return Ok(None);
                 }
-                Ok(c.map(u32::from))
+                let (c, width) = crate::lstring::decode_char(&text[*byte..]).ok_or("invalid source character")?;
+                *byte += width;
+                Ok(Some(c))
             }
             Input::String {
                 root,
@@ -120,11 +128,7 @@ impl Reader<'_, '_> {
     }
     fn unget(&mut self, c: u32) -> Result<()> {
         match &mut self.input {
-            Input::Host { byte, .. } => {
-                *byte -= char::from_u32(c)
-                    .ok_or("invalid host character")?
-                    .len_utf8()
-            }
+            Input::Host { byte, .. } => *byte -= host_width(c),
             Input::String {
                 root,
                 character,
@@ -184,7 +188,7 @@ impl Reader<'_, '_> {
         };
         self.lookahead = None;
         self.at += match self.input {
-            Input::Host { .. } => char::from_u32(c).unwrap().len_utf8(),
+            Input::Host { .. } => host_width(c),
             _ => 1,
         };
         Ok(c)
@@ -685,12 +689,46 @@ impl Reader<'_, '_> {
                 }
                 n as i64
             }
+            78 => self.character_name()?,
             // Unsupported modifier syntax must not silently become a different character.
-            67 | 77 | 83 | 72 | 65 | 94 | 78 => {
+            67 | 77 | 83 | 72 | 65 | 94 => {
                 return Err("unsupported character modifier/name escape".into());
             }
             _ => c as i64,
         })
+    }
+    /// lread.c read_char_escape's `\N{NAME}', NAME read as GNU does
+    /// (whitespace runs fold to one space, no non-ASCII). `U+XXXX' is
+    /// decoded here; a Unicode name needs Lisp `char-from-name', which the
+    /// reader cannot call, and is refused.
+    fn character_name(&mut self) -> Result<i64> {
+        if self.next()? != 123 {
+            return Err("Expected opening brace after \\N".into());
+        }
+        let mut name = String::new();
+        loop {
+            let c = self.next()?;
+            if c == 125 { break; }
+            if c >= 0x80 {
+                return Err(format!("Invalid character U+{c:04X} in character name"));
+            }
+            let c = char::from_u32(c).unwrap();
+            if c.is_ascii_whitespace() {
+                if name.ends_with(' ') { continue; }
+                name.push(' ');
+            } else {
+                name.push(c);
+            }
+            if name.len() >= 200 { return Err("Character name too long".into()); }
+        }
+        if name.is_empty() { return Err("Empty character name".into()); }
+        let Some(hex) = name.strip_prefix("U+") else {
+            return Err(format!("VM2 reader: \\N{{{name}}} needs char-from-name"));
+        };
+        u32::from_str_radix(hex, 16).ok()
+            .filter(|&code| !hex.starts_with('+') && code <= 0x10ffff && !(0xd800..=0xdfff).contains(&code))
+            .map(i64::from)
+            .ok_or_else(|| format!("\\N{{{name}}}"))
     }
     fn form(&mut self, depth: usize) -> Result<Value> {
         #[cfg(test)]
@@ -993,7 +1031,13 @@ impl Vm {
         &mut self,
         source: &str,
     ) -> Result<Option<(Value, usize, usize)>> {
-        self.read_source_signal(source).map_err(|(text, _)| text)
+        self.read_internal_span(source.as_bytes())
+    }
+    pub(super) fn read_internal_span(
+        &mut self,
+        source: &[u8],
+    ) -> Result<Option<(Value, usize, usize)>> {
+        self.read_internal_signal(source).map_err(|(text, _)| text)
     }
     /// `read_source_span`, also returning GNU's exact `(CONDITION . DATA)`
     /// when the reader knows it. Both values are unrooted: use them before
@@ -1002,11 +1046,14 @@ impl Vm {
         &mut self,
         source: &str,
     ) -> std::result::Result<Option<(Value, usize, usize)>, (String, Option<(Value, Value)>)> {
-        let input = Input::Host {
-            text: source,
-            byte: 0,
-        };
-        self.read_input(input)
+        self.read_internal_signal(source.as_bytes())
+    }
+    /// `read_source_signal` over GNU internal multibyte text.
+    pub(super) fn read_internal_signal(
+        &mut self,
+        source: &[u8],
+    ) -> std::result::Result<Option<(Value, usize, usize)>, (String, Option<(Value, Value)>)> {
+        self.read_input(Input::Host { text: source, byte: 0 })
     }
     fn read_input(
         &mut self,
@@ -1359,7 +1406,7 @@ mod tests {
         let source = r#"("first" ["second" ("third")] '"fourth" . "tail")"#;
         let mut reader = Reader {
             input: Input::Host {
-                text: source,
+                text: source.as_bytes(),
                 byte: 0,
             },
             at: 0,

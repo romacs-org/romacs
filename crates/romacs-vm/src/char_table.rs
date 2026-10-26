@@ -298,11 +298,18 @@ mod tests {
 
 impl Vm {
     pub(super) fn initialize_case_table_slot(&mut self, name: &str, slot: usize) {
-        if name != "case-table" { return; }
+        // The syms_of_* Fput (PURPOSE, Qchar_table_extra_slots, N) calls
+        // (casetab.c, coding.c, character.c, xdisp.c).
+        let Some(count) = (match name {
+            "case-table" => Some(3),
+            "translation-table" => Some(2),
+            "char-script-table" | "glyphless-char-display" => Some(1),
+            _ => None,
+        }) else { return; };
         // Realize GNU's predefined plist on first symbol access, not Vm::new.
         let property = self.intern("char-table-extra-slots");
         let tail = Value::reference(self.conses.len(), 3);
-        self.conses.push((Value::integer(3).unwrap(), Value::NIL));
+        self.conses.push((Value::integer(count).unwrap(), Value::NIL));
         let plist = Value::reference(self.conses.len(), 3);
         self.conses.push((property, tail));
         self.slots[slot].plist = plist;
@@ -321,18 +328,26 @@ impl Vm {
         matches!(codes.first(), Some(1 | 2)).then_some(codes)
     }
 
+    /// TABLE's own value for INDEX, its default for nil, never its parent's
+    /// (char_table_ref_simple).
+    pub(crate) fn char_table_own(&self, table: Value, index: usize) -> Result<Value> {
+        let data::Object::CharTable(t) = self.object(table)? else { return Err("char-table required".into()); };
+        let mut value = t.get(index)?;
+        // GNU sub_char_table_ref uncompresses the block in place; reading
+        // it without storing keeps this lookup read-only.
+        if self.is_uniprop_table(t) {
+            if let Some(codes) = self.uniprop_compressed(value) {
+                value = uniprop_block(&codes)?[index % 128];
+                if value == Value::NIL { value = t.default; }
+            }
+        }
+        Ok(value)
+    }
+
     pub(crate) fn char_table_get(&self, mut table: Value, index: usize) -> Result<Value> {
         loop {
-            let data::Object::CharTable(t) = self.object(table)? else { return Err("char-table required".into()); };
-            let mut value = t.get(index)?;
-            // GNU sub_char_table_ref uncompresses the block in place; reading
-            // it without storing keeps this lookup read-only.
-            if self.is_uniprop_table(t) {
-                if let Some(codes) = self.uniprop_compressed(value) {
-                    value = uniprop_block(&codes)?[index % 128];
-                    if value == Value::NIL { value = t.default; }
-                }
-            }
+            let value = self.char_table_own(table, index)?;
+            let data::Object::CharTable(t) = self.object(table)? else { unreachable!("checked char-table") };
             if value != Value::NIL || !matches!(self.object_if(t.parent), Some(data::Object::CharTable(_))) { return Ok(value); }
             table = t.parent;
         }

@@ -8,14 +8,14 @@
   "provenance": {
     "generated_by": "romacs-introspect-live",
     "generated_on": "linux-x86_64",
-    "input_hash": "5b57b7e9db1c53bee9a0efa9c82865b553fa6f4c4c54d09673c33f1d674195e9",
+    "input_hash": "75543bcd49d582afa43012c19e6768cb9813fff4c0ccb34b2dfba22239035425",
     "source_only_at_generation": [],
     "vm2_probe_panics": [],
-    "vm2_universe": 3259
+    "vm2_universe": 3294
   },
   "schema": 2,
   "vm2": {
-    "count": 692,
+    "count": 695,
     "entries": [
       "#:vm2-closure-document",
       "#:vm2-closure-metadata",
@@ -121,6 +121,7 @@
       "char-table-extra-slot",
       "char-table-p",
       "char-table-parent",
+      "char-table-range",
       "char-table-subtype",
       "char-to-string",
       "characterp",
@@ -129,6 +130,7 @@
       "charsetp",
       "check-coding-system",
       "cl-type-of",
+      "clear-composition-cache",
       "clear-string",
       "closurep",
       "clrhash",
@@ -449,6 +451,7 @@
       "numberp",
       "obarray-make",
       "obarrayp",
+      "optimize-char-table",
       "overlay-buffer",
       "overlay-end",
       "overlay-get",

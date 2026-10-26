@@ -74,9 +74,12 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     // listed only when that value equals pinned GNU's batch value, so no
     // initialization done later in C (init_*) is misrepresented.
     CVariable { name: "after-delete-frame-functions", gnu: "frame.c:7521", kind: Kind::Lisp(Init::Nil) },
+    CVariable { name: "ambiguous-width-chars", gnu: "character.c:1123", kind: Kind::Lisp(Init::CharTable(&CharTableInit { purpose: None, extras: &[], init: Init::Nil, ranges: &[] })) },
     CVariable { name: "attempt-orderly-shutdown-on-fatal-signal", gnu: "keyboard.c:14401", kind: Kind::Bool(true) },
     CVariable { name: "attempt-stack-overflow-recovery", gnu: "keyboard.c:14392", kind: Kind::Bool(true) },
+    CVariable { name: "auto-composition-emoji-eligible-codepoints", gnu: "composite.c:2305", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "auto-composition-mode", gnu: "composite.c:2239", kind: Kind::Lisp(Init::True) },
+    CVariable { name: "auto-fill-chars", gnu: "character.c:1107", kind: Kind::Lisp(Init::CharTable(&CharTableInit { purpose: Some("auto-fill-chars"), extras: &[], init: Init::Nil, ranges: &[(32, 32, Init::True), (10, 10, Init::True)] })) },
     CVariable { name: "auto-hscroll-mode", gnu: "xdisp.c:39075", kind: Kind::Lisp(Init::True) },
     CVariable { name: "auto-resize-tab-bars", gnu: "xdisp.c:38905", kind: Kind::Lisp(Init::True) },
     CVariable { name: "auto-resize-tool-bars", gnu: "xdisp.c:38918", kind: Kind::Lisp(Init::True) },
@@ -89,12 +92,16 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "bidi-inhibit-bpa", gnu: "xdisp.c:39274", kind: Kind::Bool(false) },
     CVariable { name: "blink-cursor-alist", gnu: "xdisp.c:39063", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "char-code-property-alist", gnu: "chartab.c:1386", kind: Kind::Lisp(Init::Nil) },
+    CVariable { name: "char-script-table", gnu: "character.c:1141", kind: Kind::Lisp(Init::CharTable(&CharTableInit { purpose: Some("char-script-table"), extras: &[Init::Nil], init: Init::Nil, ranges: &[] })) },
+    CVariable { name: "char-width-table", gnu: "character.c:1115", kind: Kind::Lisp(Init::CharTable(&CharTableInit { purpose: None, extras: &[], init: Init::Fixnum(1), ranges: &[(0x80, 0x9f, Init::Fixnum(4)), (0x3fff80, 0x3fffff, Init::Fixnum(4))] })) },
     CVariable { name: "clone-indirect-buffer-hook", gnu: "buffer.c:6027", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "coding-system-require-warning", gnu: "coding.c:12166", kind: Kind::Bool(false) },
     CVariable { name: "combine-after-change-calls", gnu: "insdel.c:2571", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "command-debug-status", gnu: "callint.c:892", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "compose-chars-after-function", gnu: "composite.c:2223", kind: Kind::Lisp(Init::Symbol("compose-chars-after")) },
     CVariable { name: "composition-break-at-point", gnu: "xdisp.c:39499", kind: Kind::Bool(false) },
+    CVariable { name: "composition-function-table", gnu: "composite.c:2270", kind: Kind::Lisp(Init::CharTable(&CharTableInit { purpose: None, extras: &[], init: Init::Nil, ranges: &[] })) },
+    CVariable { name: "current-iso639-language", gnu: "charset.c:2430", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "current-key-remap-sequence", gnu: "keyboard.c:14482", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "cursor-in-echo-area", gnu: "dispnew.c:7538", kind: Kind::Bool(false) },
     CVariable { name: "debug-on-event", gnu: "keyboard.c:14381", kind: Kind::Lisp(Init::Symbol("sigusr2")) },
@@ -146,6 +153,7 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "garbage-collection-messages", gnu: "alloc.c:7495", kind: Kind::Bool(false) },
     CVariable { name: "global-mode-string", gnu: "xdisp.c:38701", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "glyph-table", gnu: "dispnew.c:7549", kind: Kind::Lisp(Init::Nil) },
+    CVariable { name: "glyphless-char-display", gnu: "xdisp.c:39349", kind: Kind::Lisp(Init::CharTable(&CharTableInit { purpose: Some("glyphless-char-display"), extras: &[Init::Symbol("empty-box")], init: Init::Nil, ranges: &[] })) },
     CVariable { name: "help-form", gnu: "keyboard.c:13962", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "highlight-nonselected-windows", gnu: "xdisp.c:38819", kind: Kind::Bool(false) },
     CVariable { name: "hscroll-margin", gnu: "xdisp.c:39085", kind: Kind::Int(5) },
@@ -220,6 +228,7 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "pgtk-lost-selection-functions", gnu: "pgtkselect.c:1919", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "pgtk-use-im-context-on-new-connection", gnu: "pgtkim.c:306", kind: Kind::Lisp(Init::True) },
     CVariable { name: "post-select-region-hook", gnu: "keyboard.c:14469", kind: Kind::Lisp(Init::Nil) },
+    CVariable { name: "printable-chars", gnu: "character.c:1131", kind: Kind::Lisp(Init::CharTable(&CharTableInit { purpose: None, extras: &[], init: Init::Nil, ranges: &[(32, 126, Init::True), (160, 0x3fff7f, Init::True)] })) },
     CVariable { name: "process-coding-system-alist", gnu: "coding.c:12051", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "process-connection-type", gnu: "process.c:8940", kind: Kind::Lisp(Init::True) },
     CVariable { name: "process-error-pause-time", gnu: "process.c:9004", kind: Kind::Int(1) },
@@ -238,6 +247,7 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "ring-bell-function", gnu: "terminal.c:695", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "saved-region-selection", gnu: "keyboard.c:14363", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "scalable-fonts-allowed", gnu: "xfaces.c:7692", kind: Kind::Lisp(Init::Nil) },
+    CVariable { name: "script-representative-chars", gnu: "character.c:1149", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "scroll-bar-adjust-thumb-portion", gnu: "frame.c:7467", kind: Kind::Bool(true) },
     CVariable { name: "scroll-conservatively", gnu: "xdisp.c:38731", kind: Kind::Int(0) },
     CVariable { name: "scroll-margin", gnu: "xdisp.c:38745", kind: Kind::Int(0) },
@@ -248,6 +258,7 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "selection-coding-system", gnu: "w32select.c:1324", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "shared-game-score-directory", gnu: "callproc.c:2134", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "show-trailing-whitespace", gnu: "xdisp.c:38640", kind: Kind::Lisp(Init::Nil) },
+    CVariable { name: "special-mirror-table", gnu: "xdisp.c:39379", kind: Kind::Lisp(Init::CharTable(&CharTableInit { purpose: None, extras: &[], init: Init::Nil, ranges: &[] })) },
     CVariable { name: "symbols-with-pos-enabled", gnu: "data.c:4386", kind: Kind::Bool(false) },
     CVariable { name: "syntax-propertize--done", gnu: "syntax.c:3778", kind: Kind::Int(-1) },
     CVariable { name: "system-key-alist", gnu: "keyboard.c:14170", kind: Kind::Lisp(Init::Nil) },
@@ -268,6 +279,7 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "translate-upper-case-key-bindings", gnu: "keyboard.c:14421", kind: Kind::Bool(true) },
     CVariable { name: "translation-hash-table-vector", gnu: "ccl.c:2382", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "translation-table-for-input", gnu: "coding.c:12221", kind: Kind::Lisp(Init::Nil) },
+    CVariable { name: "translation-table-vector", gnu: "character.c:1100", kind: Kind::Lisp(Init::NilVector(16)) },
     CVariable { name: "treesit-extra-load-path", gnu: "treesit.c:5429", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "treesit-thing-settings", gnu: "treesit.c:5443", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "truncate-partial-width-windows", gnu: "xdisp.c:38768", kind: Kind::Lisp(Init::Fixnum(50)) },
@@ -275,6 +287,7 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "underline-minimum-offset", gnu: "xdisp.c:39302", kind: Kind::Int(1) },
     CVariable { name: "undo-strong-limit", gnu: "undo.c:447", kind: Kind::Int(240000) },
     CVariable { name: "unibyte-display-via-language-environment", gnu: "xdisp.c:39025", kind: Kind::Bool(false) },
+    CVariable { name: "unicode-category-table", gnu: "character.c:1159", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "unread-post-input-method-events", gnu: "keyboard.c:13786", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "use-dialog-box", gnu: "fns.c:6843", kind: Kind::Bool(true) },
     CVariable { name: "use-file-dialog", gnu: "fns.c:6852", kind: Kind::Bool(true) },
@@ -335,6 +348,18 @@ pub(crate) enum Init {
     /// init_editfns: user-login-name, user-real-login-name or user-full-name.
     UserIdentity(&'static str),
     Cons(&'static Init, &'static Init),
+    /// Fmake_char_table (PURPOSE, INIT), then these range writes.
+    CharTable(&'static CharTableInit),
+}
+
+#[derive(Debug)]
+pub(crate) struct CharTableInit {
+    pub purpose: Option<&'static str>,
+    /// The extra slots' values, as many as PURPOSE's char-table-extra-slots
+    /// (realized with the symbol, initialize_case_table_slot).
+    pub extras: &'static [Init],
+    pub init: Init,
+    pub ranges: &'static [(u32, u32, Init)],
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -740,6 +765,20 @@ impl Vm {
                 let car = self.materialize(*car);
                 let cdr = self.materialize(*cdr);
                 self.keymap_cons(car, cdr)
+            }
+            Init::CharTable(spec) => {
+                let purpose = spec.purpose.map_or(Value::NIL, |name| self.intern(name));
+                let init = self.materialize(spec.init);
+                let mut table = crate::char_table::CharTable::new(purpose);
+                table.initialize(spec.extras.len(), init).expect("small char-table");
+                for (slot, &extra) in spec.extras.iter().enumerate() {
+                    table.extras[slot] = self.materialize(extra);
+                }
+                for &(from, to, value) in spec.ranges {
+                    let value = self.materialize(value);
+                    table.set_range(from as usize, to as usize, value).expect("C initial range");
+                }
+                self.allocate_object(data::Object::CharTable(Box::new(table)))
             }
         }
     }

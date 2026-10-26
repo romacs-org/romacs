@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "c159cc0c2e5b42477b73c778dd8c27bdd44247a23d594fb5221bb4456376ba8f",
+  "source_fingerprint": "d0c24f426cd1f4b21d6a308b81b075eef68637ebe72482ad189ca67b43c6a5f7",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 684,
-  "parsed_vm2_only": 684
+  "parsed_total": 687,
+  "parsed_vm2_only": 687
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -574,6 +574,11 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/char_table.rs:19"
   },
+  "char-table-range": {
+   "name": "char-table-range",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/char_table.rs:36"
+  },
   "char-table-subtype": {
    "name": "char-table-subtype",
    "implementation": "vm2",
@@ -613,6 +618,11 @@
    "name": "cl-type-of",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/type_of.rs:9"
+  },
+  "clear-composition-cache": {
+   "name": "clear-composition-cache",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/composite.rs:6"
   },
   "clear-string": {
    "name": "clear-string",
@@ -1448,7 +1458,7 @@
   "get-unicode-property-internal": {
    "name": "get-unicode-property-internal",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/char_table.rs:96"
+   "registered_at": "crates/romacs-vm/src/prims/char_table.rs:128"
   },
   "get-unused-category": {
    "name": "get-unused-category",
@@ -2303,6 +2313,11 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/obarray.rs:4"
   },
+  "optimize-char-table": {
+   "name": "optimize-char-table",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/char_table.rs:57"
+  },
   "overlay-buffer": {
    "name": "overlay-buffer",
    "implementation": "vm2",
@@ -2477,7 +2492,7 @@
   "put-unicode-property-internal": {
    "name": "put-unicode-property-internal",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/char_table.rs:103"
+   "registered_at": "crates/romacs-vm/src/prims/char_table.rs:135"
   },
   "puthash": {
    "name": "puthash",
@@ -3321,7 +3336,7 @@
   "unicode-property-table-internal": {
    "name": "unicode-property-table-internal",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/char_table.rs:71"
+   "registered_at": "crates/romacs-vm/src/prims/char_table.rs:103"
   },
   "unify-charset": {
    "name": "unify-charset",
