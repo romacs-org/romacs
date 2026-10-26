@@ -221,6 +221,15 @@ fn arithmetic_tail_dispatch_has_bounded_native_stack() {
 }
 
 #[test]
+fn funcall_and_apply_tail_dispatch_has_bounded_native_stack() {
+    std::thread::Builder::new().stack_size(256 * 1024).spawn(|| {
+        let mut vm = Vm::new();
+        let value = vm.eval_source("(let ((f #'abs) (g (lambda (&rest xs) (car xs))) (n 0) (i 0)) (while (< i 200000) (setq n (+ (funcall f i) (apply #'+ (list i 1)) (apply g i nil) (length (apply #'concat (list \"a\" \"b\")))) i (1+ i))) n)").unwrap();
+        assert_eq!(value.as_integer().unwrap(), 3 * 199999 + 1 + 2);
+    }).unwrap().join().unwrap();
+}
+
+#[test]
 fn indirect_traversal_calls_use_the_same_semantics() {
     let mut vm = Vm::new();
     let value = vm

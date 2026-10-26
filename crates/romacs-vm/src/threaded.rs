@@ -1975,10 +1975,8 @@ unsafe fn invoke(
     unsafe {
         if target.tag() != 4 {
             let entry = *e.entries.get_unchecked((*pc).site);
-            if entry.target == target
-                && let Some(call) = entry.primitive
-            {
-                return cached_primitive(e, r, pc, target, start, argc, call);
+            if entry.target == target && entry.primitive.is_some() {
+                return cached_primitive(e, r, pc, target, start, argc);
             }
             return resolve_entry(e, r, pc, target, start, argc);
         }
@@ -2163,7 +2161,7 @@ unsafe fn resolve_entry(
                     simple_arity: usize::MAX,
                     primitive: Some(call),
                 };
-                return cached_primitive(e, r, pc, target, start, argc, call);
+                return cached_primitive(e, r, pc, target, start, argc);
             }
         }
         invoke_full(e, r, pc, target, start, argc)
@@ -2180,22 +2178,12 @@ unsafe fn invoke_full(
 ) -> Value {
     unsafe {
         let function = target;
-        let mut target = target;
-        let mut aliases = 0;
-        while target.tag() == 7 && target != Value::UNBOUND {
-            let slot = target.payload() as usize - 1;
-            if e.vm.macros.contains(&slot) && !e.vm.expanding.contains(&slot) {
-                return fail(e, &format!("invalid function: macro {} is not callable", e.vm.symbol_names[slot]));
-            }
-            let Some(entry) = e.vm.slots.get(slot) else {
-                return fail(e, "invalid symbol");
-            };
-            target = entry.function;
-            aliases += 1;
-            if aliases > e.vm.slots.len() {
-                return fail(e, "cyclic function indirection");
-            }
-        }
+        // Out of line: the alias walk's address-taken scratch would stop
+        // every tail dispatch below, so a funcall or apply in a loop grew
+        // the native stack.
+        let Some(target) = t2_resolve(e, target) else {
+            return Value::UNBOUND;
+        };
         if target == Value::reference(Primitive::Apply as usize, 6) {
             return apply(e, r, pc, start, argc);
         }
@@ -2269,18 +2257,12 @@ unsafe fn apply(
     unsafe {
         enter_apply(e, r, pc, start, argc);
         let base = r.offset_from(e.vm.stack.as_ptr()) as usize;
-        // prepare_apply writes the disjoint scratch window at the allocation end.
-        e.stack_used = e.vm.stack.len();
-        match e.vm.prepare_apply(base + start, argc) {
-            Ok((target, offset, count)) => {
-                e.apply_function = Some(target);
-                invoke_full(e, r, pc, target, offset - base, count)
-            },
-            Err(error) => {
-                e.error = Some(error);
-                Value::UNBOUND
-            }
-        }
+        // Out of line: the Result's error drop would stop the tail dispatch.
+        let Some((target, offset, count)) = t2_prepare_apply(e, base + start, argc) else {
+            return Value::UNBOUND;
+        };
+        e.apply_function = Some(target);
+        invoke_full(e, r, pc, target, offset - base, count)
     }
 }
 #[inline(always)]
@@ -2974,6 +2956,9 @@ fn primitive_value(
         }
     }
 }
+/// A primitive through the site's entry cache, which holds its call. Six
+/// register arguments: a seventh on the stack would stop every caller from
+/// tail-calling it, so each funcall or apply of a primitive kept a frame.
 unsafe fn cached_primitive(
     e: &mut Engine<'_>,
     r: *mut Value,
@@ -2981,9 +2966,9 @@ unsafe fn cached_primitive(
     target: Value,
     start: usize,
     argc: usize,
-    call: PrimitiveCall,
 ) -> Value {
     unsafe {
+        let call = e.entries.get_unchecked((*pc).site).primitive.expect("cached primitive call");
         enter_native(e, r, pc, target, start, argc);
         let base = r.offset_from(e.vm.stack.as_ptr()) as usize;
         let p = prim::legacy(target).expect("legacy primitive");
