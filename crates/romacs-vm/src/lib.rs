@@ -27,6 +27,7 @@ mod process_jobs;
 mod environment;
 mod watchers;
 mod user_db;
+mod processors;
 pub use command::{CommandEvent, CommandOutcome, CommandSignal};
 pub use host_input::{HostEvent, HostFrame, HostInput};
 pub use terminal_host::{TerminalColor, TerminalHost, TerminalInputState, TerminalSnapshot, TerminalStyle, TerminalStyleRun};

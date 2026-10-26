@@ -489,6 +489,13 @@ impl Vm {
             let fault = self.feature_subfeature_matches(x, y).err()?;
             return Some(self.fault(fault));
         }
+        // get_keymap (keymap.c): (wrong-type-argument keymapp OBJECT).
+        if matches!(p, Primitive::LookupKey | Primitive::UseLocalMap) && error == "keymap required" {
+            let condition = self.intern("wrong-type-argument");
+            let keymapp = self.intern("keymapp");
+            let data = self.list_value(&[keymapp, x]);
+            return Some((condition, data));
+        }
         // The bulk-verified core primitives re-derive GNU's exact data.
         if let Some((condition, values)) = self.core_condition(p, start, argc, error) {
             let slot = self.slot(condition);

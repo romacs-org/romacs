@@ -519,3 +519,19 @@ fn file_name_absolute_p_matches_gnu() {
         "(list (file-name-absolute-p \"/a\") (file-name-absolute-p \"~\") (file-name-absolute-p \"~/x\") (file-name-absolute-p \"~root/x\") (file-name-absolute-p \"~root\") (file-name-absolute-p \"~rt-no-such-user/x\") (file-name-absolute-p \"a/b\") (file-name-absolute-p \"\") (condition-case e (file-name-absolute-p 'a) (error e)))",
     ]);
 }
+
+#[test]
+fn command_remapping_and_keymap_lists_match_gnu() {
+    compare(&[
+        "(let ((m (make-sparse-keymap)) (n (make-sparse-keymap))) (define-key m [remap kill-line] 'my-kill) (define-key n (kbd \"C-c\") 'foo) (list (command-remapping 'kill-line nil m) (command-remapping 'kill-line nil (list n m)) (command-remapping 'other nil m) (command-remapping \"x\") (command-remapping nil) (command-remapping 'kill-line) (progn (use-local-map m) (command-remapping 'kill-line)) (with-temp-buffer (command-remapping 'kill-line))))",
+        "(let ((n (make-sparse-keymap))) (define-key n (kbd \"C-c\") 'foo) (list (lookup-key (list n) (kbd \"C-c\")) (lookup-key nil \"a\") (lookup-key nil \"ab\") (lookup-key nil \"\") (lookup-key (list n) \"\") (condition-case e (lookup-key 3 \"a\") (error e)) (lookup-key (list n) (kbd \"C-c a\")) (lookup-key n [nil]) (condition-case e (use-local-map 3) (error e)) (with-temp-buffer (use-local-map n) (list (key-binding (kbd \"C-c\") nil t) (key-binding (kbd \"C-c\") nil nil nil)))))",
+    ]);
+}
+
+#[test]
+fn base64_string_coding_matches_gnu() {
+    compare(&[
+        "(list (base64-encode-string \"\") (base64-encode-string \"a\") (base64-encode-string \"ab\") (base64-encode-string \"abc\") (base64-encode-string (make-string 60 ?x)) (base64-encode-string (make-string 60 ?x) t) (condition-case e (base64-encode-string (string 255 0 128)) (error e)) (base64-encode-string (unibyte-string 255 0 128)) (base64-encode-string (string-to-multibyte (unibyte-string 255 0 128))) (condition-case e (base64-encode-string \"\\u00e9\") (error e)) (base64url-encode-string \"\\xff\\xfe\") (base64url-encode-string \"\\xff\\xfe\" t))",
+        "(list (base64-decode-string \"YWJj\") (base64-decode-string \" YW\\nJj \") (base64-decode-string \"YQ==\") (base64-decode-string \"YWI=\") (condition-case e (base64-decode-string \"YQ\") (error e)) (base64-decode-string \"YQ\" t) (condition-case e (base64-decode-string \"Y*Q==\") (error e)) (base64-decode-string \"Y*Q==\" nil t) (base64-decode-string \"__-_\" t) (condition-case e (base64-decode-string \"YQ=x\") (error e)) (base64-decode-string \"YQ= =\") (condition-case e (base64-decode-string 3) (error e)) (multibyte-string-p (base64-decode-string \"w6k=\")) (base64-decode-string \"YWJjZA==YWI=\"))",
+    ]);
+}

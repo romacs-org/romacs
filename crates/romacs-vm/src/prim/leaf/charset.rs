@@ -76,7 +76,7 @@ impl Leaf<'_> {
         let c = ch.integer_value().filter(|&c| (0..=crate::lstring::MAX_CHAR as i64).contains(&c)).ok_or(Fault::Wrong("characterp", ch))?;
         Ok(self.charset_encode(i, c as u32)?.map_or(Value::NIL, |code| Value::integer(code.into()).unwrap()))
     }
-    fn named_charset_id(&mut self, name: &str) -> std::result::Result<usize, Fault> {
+    pub(super) fn named_charset_id(&mut self, name: &str) -> std::result::Result<usize, Fault> {
         let symbol = self.intern(name);
         let i = self.charset_record(symbol)?;
         Ok(self.vm.charsets.records[i].attrs[0].integer_value().unwrap() as usize)

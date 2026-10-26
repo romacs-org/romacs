@@ -47,3 +47,19 @@ fn unicode_character_properties_match_gnu() {
     let actual: String = serde_json::from_str(&printed).unwrap_or(printed);
     assert_eq!(actual, expected);
 }
+
+// coding.c's charset coding type, through mule-conf.el's definitions.
+#[test]
+fn charset_coding_systems_match_gnu() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut vm = bootstrapped(&root);
+    vm.eval_source("(progn (load \"language/european.el\" nil t t) (load \"language/chinese.el\" nil t t))").unwrap();
+    let source = "(prin1-to-string (list (decode-coding-string \"\\341\" 'iso-8859-15) (decode-coding-string \"a\\244\\341\\r\\nb\" 'iso-8859-15-dos) (encode-coding-string \"a\\u00e1\\u20ac\\u0100\" 'iso-8859-15) (encode-coding-string \"\\u00e1\" 'iso-8859-2) (decode-coding-string \"\\x81 a\\xe9\" 'windows-1252) last-coding-system-used (encode-coding-string (string #x3fff81 ?a) 'latin-1) (decode-coding-string \"\\244\\242\" 'chinese-gbk) (encode-coding-string \"\\u4e00\" 'chinese-gbk) (decode-coding-string \"\\201\" 'chinese-gbk) (decode-coding-string \"a\" 'iso-8859-15) (decode-coding-string \"\\xe9\\xe9\" 'cp437)))";
+    let binary = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
+    let output = std::process::Command::new(binary).args(["-Q", "--batch", "--eval", &format!("(princ {source})")]).output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let expected = String::from_utf8(output.stdout).unwrap();
+    let printed = vm.eval_source(source).unwrap().display().unwrap();
+    let actual: String = serde_json::from_str(&printed).unwrap_or(printed);
+    assert_eq!(actual, expected);
+}

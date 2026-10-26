@@ -8,14 +8,14 @@
   "provenance": {
     "generated_by": "romacs-introspect-live",
     "generated_on": "linux-x86_64",
-    "input_hash": "6598a554d5436553f7b3f1dd001a6fa3294768fde94d9c7ff4804991626c8df5",
+    "input_hash": "812c4219ed1fd01b6d51e26e3bbd10ee3936e230758766e7ca7b14c01d2105eb",
     "source_only_at_generation": [],
     "vm2_probe_panics": [],
-    "vm2_universe": 3395
+    "vm2_universe": 3415
   },
   "schema": 2,
   "vm2": {
-    "count": 714,
+    "count": 720,
     "entries": [
       "#:vm2-closure-document",
       "#:vm2-closure-metadata",
@@ -68,6 +68,9 @@
       "backward-prefix-chars",
       "bare-symbol",
       "bare-symbol-p",
+      "base64-decode-string",
+      "base64-encode-string",
+      "base64url-encode-string",
       "beginning-of-line",
       "bignump",
       "bobp",
@@ -144,6 +147,7 @@
       "coding-system-plist",
       "coding-system-priority-list",
       "coding-system-put",
+      "command-remapping",
       "commandp",
       "compare-strings",
       "completing-read",
@@ -361,6 +365,7 @@
       "length<",
       "length=",
       "length>",
+      "libxml-available-p",
       "line-beginning-position",
       "line-end-position",
       "list",
@@ -456,6 +461,7 @@
       "nth",
       "nthcdr",
       "null",
+      "num-processors",
       "number-or-marker-p",
       "number-to-string",
       "numberp",

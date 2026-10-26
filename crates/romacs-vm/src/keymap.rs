@@ -319,7 +319,7 @@ impl Vm {
                     c &= !meta;
                 }
                 event = Value::integer(c)?;
-            } else if event.tag() != 7 && event != Value::TRUE && self.str_view(event).is_none() {
+            } else if event.tag() != 7 && event != Value::NIL && event != Value::TRUE && self.str_view(event).is_none() {
                 return Err("integer or symbol event required".into());
             }
             events.push(KeyEvent { value: event, input_index });
@@ -341,7 +341,15 @@ impl Vm {
         Ok(Value::NIL)
     }
     fn lookup_keymap_key(&mut self, map: Value, events: &[KeyEvent], defaults: bool) -> Result<Value> {
-        let mut map = self.resolve_keymap(map).ok_or("keymap required")?;
+        // lookup_key_1: a cons is searched as it is, so a list of keymaps
+        // acts as their composition; nil is an empty keymap.
+        let is_list = map == Value::NIL || map.tag() == 3;
+        if events.is_empty() && is_list { return Ok(map); }
+        let mut map = match self.resolve_keymap(map) {
+            Some(map) => map,
+            None if is_list => { let keymap = self.intern("keymap"); self.keymap_cons(keymap, map) }
+            None => return Err("keymap required".into()),
+        };
         for (i, event) in events.iter().enumerate() {
             let event = event.value;
             let binding = self.keymap_entry(map, event, true, defaults)?.unwrap_or(Value::NIL);
@@ -416,7 +424,8 @@ impl Vm {
                 Ok(Value::NIL)
             }
             KeyBinding => {
-                if n > 2 && args[2..].iter().any(|v| *v != Value::NIL) { return Err("key-binding position/no-remap not supported".into()); }
+                // VM2 key-binding never remaps, which is NO-REMAP t's lookup.
+                if n > 3 && args[3] != Value::NIL { return Err("key-binding POSITION not supported".into()); }
                 let events = self.key_events(args[0])?;
                 let index = self.buffer_index()?;
                 let Object::Buffer(buffer) = &self.objects[index] else { return Err("Unicode buffer required".into()); };

@@ -64,8 +64,9 @@ impl Leaf<'_> {
         }
         let kind = self.vector_get(attrs, num(3))?;
         let utf8 = kind == self.intern("utf-8");
-        if !utf8 && kind != self.intern("raw-text") {
-            return Err(Fault::Error("string conversion for this coding type is not implemented (supported: UTF-8 and raw-text)".into()));
+        let charset = kind == self.intern("charset");
+        if !utf8 && !charset && kind != self.intern("raw-text") {
+            return Err(Fault::Error("string conversion for this coding type is not implemented (supported: UTF-8, charset and raw-text)".into()));
         }
         for index in [6, 7, 9, 10] {
             if self.vector_get(attrs, num(index))? != Value::NIL {
@@ -86,13 +87,16 @@ impl Leaf<'_> {
         let mode = if inhibit { 0 } else if let Some(mode) = detected { mode }
             else if eol == self.intern("dos") { 1 } else if eol == self.intern("mac") { 2 } else { 0 };
         let precise = if let Some(mode) = detected { self.vector_get(eol, num(mode as i64))? } else { name };
+        let mut runs = Vec::new();
         let (bytes, multibyte) = if encode {
             let mut bytes = Vec::new();
             if utf8 && bom != Value::NIL { bytes.extend_from_slice(&[239, 187, 191]); }
-            for token in tokens { match token {
+            if charset {
+                self.coding_encode_charset(attrs, &tokens, &mut bytes)?;
+            } else { for token in tokens { match token {
                 CodingToken::Byte(byte) => bytes.push(byte),
                 CodingToken::Character(code) => coding_emit(code, &mut bytes),
-            }}
+            }}}
             (coding_encode_eol(bytes, mode), false)
         } else {
             let tokens = if utf8 {
@@ -100,6 +104,11 @@ impl Leaf<'_> {
                     .into_iter().map(|code| if code < 128 { CodingToken::Byte(code as u8) } else { CodingToken::Character(code) }).collect()
             } else { tokens };
             let tokens = coding_decode_eol(tokens, mode);
+            let tokens = if charset {
+                let (tokens, found) = self.coding_decode_charset(attrs, &tokens)?;
+                runs = found;
+                tokens
+            } else { tokens };
             let for_unibyte = !utf8 && self.vector_get(attrs, num(12))? != Value::NIL;
             let codes = tokens.into_iter().map(|token| match token {
                     CodingToken::Character(code) if for_unibyte => 0u32.wrapping_sub(code) & 255,
@@ -115,7 +124,86 @@ impl Leaf<'_> {
             return Err(Fault::Error("string coding output to buffers is not implemented".into()));
         }
         self.variable_set(last, precise)?;
-        Ok(self.make_string(bytes, multibyte))
+        let result = self.make_string(bytes, multibyte);
+        // produce_charset: each run of characters a non-ASCII charset decoded.
+        let key = self.intern("charset");
+        for (from, to, id) in runs {
+            let name = self.vm.charsets.records[self.vm.charsets.ids[id]].attrs[1];
+            let properties = self.coding_list(&[key, name]);
+            self.add_text_properties(num(from as i64), num(to as i64), properties, result)?;
+        }
+        Ok(result)
+    }
+}
+
+impl Leaf<'_> {
+    /// coding.c decode_coding_charset: each byte's charset-valids entry
+    /// names the charsets (smallest dimension first) that may start a code
+    /// there; the first that decodes the code's bytes wins, and a byte none
+    /// decodes stays a raw byte.
+    /// Also returns ADD_CHARSET_DATA's runs: (from, to, charset id) over
+    /// output characters, a run continuing across undecodable bytes.
+    fn coding_decode_charset(&mut self, attrs: Value, tokens: &[CodingToken]) -> std::result::Result<(Vec<CodingToken>, Vec<(usize, usize, usize)>), Fault> {
+        let valids = self.vector_get(attrs, num(16))?;
+        let ascii = self.named_charset_id("ascii")?;
+        let (mut runs, mut last_id, mut last_offset) = (Vec::new(), ascii, 0);
+        let mut out = Vec::with_capacity(tokens.len());
+        let mut at = 0;
+        while at < tokens.len() {
+            let CodingToken::Byte(byte) = tokens[at] else { out.push(tokens[at]); at += 1; continue; };
+            let entry = self.vector_get(valids, num(i64::from(byte)))?;
+            let ids = if entry.integer_value().is_some() { vec![entry] } else { self.coding_items(entry)? };
+            let mut decoded = None;
+            for id in ids {
+                let i = self.vm.charsets.ids[id.integer_value().unwrap() as usize];
+                let dim = self.vm.charsets.records[i].dimension as usize;
+                let Some(code) = tokens.get(at..at + dim).and_then(|bytes| bytes.iter().try_fold(0u32, |code, token| match token {
+                    CodingToken::Byte(b) => Some(code << 8 | u32::from(*b)),
+                    CodingToken::Character(_) => None,
+                })) else { continue };
+                if let Some(c) = self.charset_decode(i, code)? { decoded = Some((c, dim, id.integer_value().unwrap() as usize)); break; }
+            }
+            match decoded {
+                Some((c, dim, id)) => {
+                    if id != ascii && id != last_id {
+                        if last_id != ascii { runs.push((last_offset, out.len(), last_id)); }
+                        (last_id, last_offset) = (id, out.len());
+                    }
+                    out.push(CodingToken::Character(c));
+                    at += dim;
+                }
+                None => { out.push(CodingToken::Byte(byte)); at += 1; }
+            }
+        }
+        if last_id != ascii { runs.push((last_offset, out.len(), last_id)); }
+        Ok((out, runs))
+    }
+    /// coding.c encode_coding_charset: ASCII as itself when the coding
+    /// system is ASCII compatible, raw bytes as themselves, other characters
+    /// by the first charset of the charset list that encodes them, else the
+    /// default character.
+    fn coding_encode_charset(&mut self, attrs: Value, tokens: &[CodingToken], bytes: &mut Vec<u8>) -> std::result::Result<(), Fault> {
+        let ascii_compatible = self.vector_get(attrs, num(5))? != Value::NIL;
+        let list = self.vector_get(attrs, num(4))?;
+        let charsets: Vec<usize> = self.coding_items(list)?.into_iter()
+            .map(|id| self.vm.charsets.ids[id.integer_value().unwrap() as usize]).collect();
+        let default = self.vector_get(attrs, num(11))?.integer_value().unwrap_or(32) as u8;
+        for &token in tokens {
+            let c = match token {
+                CodingToken::Byte(byte) if byte >= 128 || ascii_compatible => { bytes.push(byte); continue; }
+                CodingToken::Byte(byte) => u32::from(byte),
+                CodingToken::Character(c) => c,
+            };
+            let mut encoded = None;
+            for &i in &charsets {
+                if let Some(code) = self.charset_encode(i, c)? { encoded = Some((code, self.vm.charsets.records[i].dimension)); break; }
+            }
+            match encoded {
+                Some((code, dim)) => bytes.extend((0..dim).rev().map(|n| (code >> (8 * n)) as u8)),
+                None => bytes.push(default),
+            }
+        }
+        Ok(())
     }
 }
 

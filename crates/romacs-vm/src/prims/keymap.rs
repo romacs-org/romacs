@@ -81,3 +81,23 @@ fn set_keymap_parent(cx, keymap: Value, parent: Value) {
 
 defsubr! { name = "copy-keymap", gnu = "keymap.c:1018", effect = Global,
 fn copy_keymap(cx, keymap: Value) { cx.copy_keymap(keymap, 0) }}
+
+// Fcommand_remapping: the binding of [remap COMMAND], through key-binding
+// (NO-REMAP t, POSITION) or, given KEYMAPS, lookup-key.
+defsubr! { name = "command-remapping", gnu = "keymap.c:1216", effect = Reads,
+fn command_remapping(cx, command: Value; optional position: Value, keymaps: Value) -> Step {
+    if !(command == Value::NIL || command == Value::TRUE || cx.kind(command) == Kind::Symbol) {
+        return Ok(Step::Done(Value::NIL));
+    }
+    let remap = cx.intern("remap");
+    let key = cx.vector(&[remap, command]);
+    let (f, args) = if keymaps == Value::NIL {
+        (cx.intern("key-binding"), vec![key, Value::NIL, Value::TRUE, position])
+    } else {
+        (cx.intern("lookup-key"), vec![keymaps, key, Value::NIL])
+    };
+    Ok(Step::Call { f, args, then: remapping_found, saved: vec![] })
+}}
+fn remapping_found(_: &mut Leaf<'_>, binding: Value, _: &[Value]) -> Next {
+    Ok(Step::Done(if binding.integer_value().is_some() { Value::NIL } else { binding }))
+}
