@@ -204,10 +204,15 @@ impl Value {
         (self.0 >> 3) - u64::from(self.0 & 7 == 2 && self != Self::TRUE)
     }
     pub fn integer(n: i64) -> Result<Self> {
-        if !(Self::MIN_FIXNUM..=Self::MAX_FIXNUM).contains(&n) {
-            return Err("fixnum overflow (bignums not implemented)".into());
-        }
-        Ok(Self(((n as u64) << 2) | 1))
+        Self::fixnum(n).ok_or_else(|| "fixnum overflow (bignums not implemented)".into())
+    }
+    /// The fixnum N, allocation-free for threaded handlers: a Result's error
+    /// String, or an out-of-line call returning through a stack slot, stops
+    /// LLVM from tail-dispatching to the next handler, so loops would grow
+    /// the native stack.
+    #[inline(always)]
+    pub fn fixnum(n: i64) -> Option<Self> {
+        (Self::MIN_FIXNUM..=Self::MAX_FIXNUM).contains(&n).then_some(Self(((n as u64) << 2) | 1))
     }
     fn integer_value(self) -> Option<i64> {
         (self.tag() == 1).then_some((self.0 as i64) >> 2)

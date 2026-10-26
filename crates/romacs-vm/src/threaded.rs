@@ -3304,7 +3304,7 @@ macro_rules! numeric {
 }
 numeric!(mul, |x: Value, y: Value| ((x.0 as i64) >> 2)
     .checked_mul((y.0 as i64) >> 2)
-    .and_then(|n| Value::integer(n).ok()));
+    .and_then(|n| Value::fixnum(n)));
 numeric!(add, |x: Value, y: Value| (x.0 as i64)
     .checked_add((y.0 - 1) as i64)
     .map(|n| Value(n as u64)));
@@ -3377,7 +3377,7 @@ unsafe fn remainder(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value
         if x.tag() != 1 || y.tag() != 1 || y.0 as i64 >> 2 == 0 {
             return direct(e, r, pc);
         }
-        *r.add(i.a) = Value::integer((x.0 as i64 >> 2) % (y.0 as i64 >> 2)).unwrap();
+        *r.add(i.a) = Value::fixnum((x.0 as i64 >> 2) % (y.0 as i64 >> 2)).unwrap();
         advance(e, r, pc)
     }
 }
@@ -3424,7 +3424,7 @@ unsafe fn search_character(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -
         }
         let value = if let Some(at) = t.find_character(ch, t.point, bound) {
             t.point = coordinates::ByteOffset(at.0 + width);
-            Value::integer((t.char_of_byte(t.point).unwrap().0 + 1) as i64).unwrap()
+            Value::fixnum((t.char_of_byte(t.point).unwrap().0 + 1) as i64).unwrap()
         } else if i.e > 2 && *r.add(i.d + 2) != Value::NIL {
             if *r.add(i.d + 2) != Value::TRUE {
                 t.point = bound;
@@ -3452,8 +3452,8 @@ unsafe fn sequence_read(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> V
         };
         let result = if i.e == 1 {
             match object {
-                data::Object::String(s) | data::Object::RawString(s) => Value::integer(s.len() as i64).ok(),
-                data::Object::Vector(s) | data::Object::Record(s) => Value::integer(s.len() as i64).ok(),
+                data::Object::String(s) | data::Object::RawString(s) => Value::fixnum(s.len() as i64),
+                data::Object::Vector(s) | data::Object::Record(s) => Value::fixnum(s.len() as i64),
                 _ => None,
             }
         } else {
@@ -3465,7 +3465,7 @@ unsafe fn sequence_read(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> V
             match object {
                 data::Object::String(s) | data::Object::RawString(s) => s
                     .char_code(coordinates::CharOffset(at))
-                    .and_then(|c| Value::integer(c as i64).ok()),
+                    .and_then(|c| Value::fixnum(c as i64)),
                 data::Object::Vector(s) | data::Object::Record(s) => s.get(at).copied(),
                 _ => None,
             }
@@ -3506,7 +3506,7 @@ unsafe fn buffer_read(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Val
                     return direct(e, r, pc);
                 };
                 *r.add(i.a) = ch
-                    .map(|n| Value::integer(n as i64).unwrap())
+                    .map(|n| Value::fixnum(n as i64).unwrap())
                     .unwrap_or(Value::NIL);
                 return advance(e, r, pc);
             }
@@ -3548,7 +3548,7 @@ unsafe fn buffer_read(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Val
             Some(t.len_chars() as i64)
         };
         *r.add(i.a) = number
-            .map(|n| Value::integer(n).unwrap())
+            .map(|n| Value::fixnum(n).unwrap())
             .unwrap_or(Value::NIL);
         advance(e, r, pc)
     }
