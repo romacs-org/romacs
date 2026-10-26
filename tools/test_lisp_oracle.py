@@ -154,7 +154,7 @@ class RealPinControls(unittest.TestCase):
     def test_14_git_filters_preserve_original_encoded_crlf(self):
         path = ROOT / self.support
         data = path.read_bytes()
-        self.assertEqual(len(data), 20035)
+        self.assertEqual(len(data), 18616)
         self.assertEqual(data.count(b'\r\n'), 2)
         raw = subprocess.check_output(
             ['git', 'hash-object', '--no-filters', str(path)], cwd=ROOT).strip()

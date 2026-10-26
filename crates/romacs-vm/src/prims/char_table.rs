@@ -63,7 +63,9 @@ fn property_entry(cx: &mut Leaf<'_>, prop: Value) -> Out {
 
 // uniprop_table loads a file-name entry, whose define-char-code-property
 // replaces it. Either way the result is the entry's current cdr, the
-// table or, when the file did not provide one, the file name. VM2's
+// table or, when the file did not provide one, the file name. A table
+// whose decoder C knows gets its ASCII cache re-derived (the printed
+// table carries a separate copy of that block), as GNU does. VM2's
 // `load' ignores coding-system-for-read, so GNU's utf-8-emacs-unix binding
 // around it has nothing to protect.
 defsubr! { name = "unicode-property-table-internal", gnu = "chartab.c:1303", effect = Global,
@@ -71,7 +73,7 @@ fn unicode_property_table_internal(cx, prop: Value) -> Step {
     let entry = property_entry(cx, prop)?;
     let file = cx.pair(entry).map_or(Value::NIL, |(_, table)| table);
     if !matches!(cx.kind(file), crate::prim::leaf::Kind::String | crate::prim::leaf::Kind::Bytes) {
-        return Ok(Step::Done(file));
+        return Ok(Step::Done(prepared(cx, file)?));
     }
     let path = format!("international/{}", cx.string_text(file)?);
     let path = cx.string(&path);
@@ -80,7 +82,15 @@ fn unicode_property_table_internal(cx, prop: Value) -> Step {
 }}
 fn property_loaded(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
     let entry = property_entry(cx, saved[0])?;
-    Ok(Step::Done(cx.pair(entry).map_or(Value::NIL, |(_, table)| table)))
+    let table = cx.pair(entry).map_or(Value::NIL, |(_, table)| table);
+    Ok(Step::Done(prepared(cx, table)?))
+}
+fn prepared(cx: &mut Leaf<'_>, table: Value) -> Out {
+    if cx.kind(table) == crate::prim::leaf::Kind::CharTable && cx.is_uniprop(table)
+        && extra(cx, table, 1).map(|d| d == Value::NIL || d.integer_value() == Some(0))? {
+        cx.uniprop_reset_ascii(table);
+    }
+    Ok(table)
 }
 
 defsubr! { name = "get-unicode-property-internal", gnu = "chartab.c:1326", effect = Reads,

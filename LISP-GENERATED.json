@@ -66,7 +66,7 @@
         "admin/unidata/confusables.txt",
         "admin/unidata/IdnaMappingTable.txt"
       ],
-      "recipe": "unidata-gen-file, unidata-gen-charprop, unidata-gen-scripts, unidata-gen-confusable and unidata-gen-idna-mapping; generated headers sometimes name the generic charprop emitter rather than the public entry point."
+      "recipe": "unidata-gen-file, unidata-gen-charprop, unidata-gen-scripts, unidata-gen-confusable and unidata-gen-idna-mapping; generated headers sometimes name the generic charprop emitter rather than the public entry point. The retained unidata bytes are the output of the pinned GNU build at gnu_commit."
     },
     "blocks": {
       "paths": [
@@ -161,6 +161,22 @@
         "leim/leim-ext.el"
       ],
       "recipe": "update-leim-list-file scans generated leim directory, then appends leim-ext.el through the Makefile sed rule."
+    },
+    "unidata-romacs": {
+      "paths": [
+        "admin/unidata/Makefile.in",
+        "admin/unidata/unidata-gen.el",
+        "admin/unidata/UnicodeData.txt",
+        "admin/unidata/BidiMirroring.txt",
+        "admin/unidata/BidiBrackets.txt",
+        "admin/unidata/SpecialCasing.txt",
+        "admin/unidata/Scripts.txt",
+        "admin/unidata/ScriptExtensions.txt",
+        "admin/unidata/PropertyValueAliases.txt",
+        "admin/unidata/confusables.txt",
+        "admin/unidata/IdnaMappingTable.txt"
+      ],
+      "recipe": "The pinned GNU build's unidata output, with each byte-code literal replaced by the name of the same function in rlisp/romacs-unidata.el by tools/romacs_unidata.py (DIVERGENCES.md VM2-UNIDATA1)."
     }
   },
   "files": [
@@ -306,37 +322,37 @@
     ],
     [
       "gnu-lisp/international/idna-mapping.el",
-      "712a447650c79568bd49a5c604f1a87aa2a56ce472f2764b6b96d1593dba89ad",
+      "852e83845c094bce39f4efb92d8d521658f5d44954097016dd9e7d505b407d97",
       "unidata"
     ],
     [
       "gnu-lisp/international/uni-bidi.el",
-      "84b3f5fa2dd763f3e912119595b1302ed57d70393cb7bd9e7d37ebc5a63fa960",
-      "unidata"
+      "8a8e74d2d88b6a8b46ac384b8e51fbe38ac83c31d094ec4244912dc301aaf0ec",
+      "unidata-romacs"
     ],
     [
       "gnu-lisp/international/uni-brackets.el",
-      "c108502e7634ae897cfb00215e75be3c7d5a5bba861c6ea25e203416f73906f5",
-      "unidata"
+      "845a32633fb824e5ad6b115a81238785a5eb01d2a17ad43c720d0ab5f1a8df23",
+      "unidata-romacs"
     ],
     [
       "gnu-lisp/international/uni-category.el",
-      "f97d3cf0ca8ee3fecac466e5fdfc0129e1d2184c4ad7e034e2893d5f05c59410",
-      "unidata"
+      "03401dd3a4674935598d156ba0aec4df3c98da0a57352586103fc35e8e8c0fe2",
+      "unidata-romacs"
     ],
     [
       "gnu-lisp/international/uni-combining.el",
-      "5aaab6d7a9778b41d17080db2513261b3e3907497d989177048817ae0aa0bc56",
-      "unidata"
+      "189ce90bc796da0386b201a5046b6d1439208fbbaa8d3efe3ebe685139d67ef7",
+      "unidata-romacs"
     ],
     [
       "gnu-lisp/international/uni-comment.el",
-      "2f6bf33b8d4522a913203be6872e8425216e1f8adc4aef25cdd4f501f84811dc",
-      "unidata"
+      "ee68949333cb7a43ccebfad63af4161d8312603bce2a7934167b59665dcc3b2e",
+      "unidata-romacs"
     ],
     [
       "gnu-lisp/international/uni-confusable.el",
-      "5b3858911fd5ccb08e18dfcb3a94f9ac6d86d488a06b9eeba5dbd23b77cb9af5",
+      "8119531a95465082156dcf28f5f6e94757d70a6391e842775c058b8103e729e8",
       "unidata"
     ],
     [
@@ -346,8 +362,8 @@
     ],
     [
       "gnu-lisp/international/uni-decomposition.el",
-      "5f7c822da719f1440c27bf680651b60b6c904244a6c4054409b8d3fad680a480",
-      "unidata"
+      "d23b33d70999288b1adf47735a2a0cbd513d3ed31d264fa3be1b7510aca511d1",
+      "unidata-romacs"
     ],
     [
       "gnu-lisp/international/uni-digit.el",
@@ -356,32 +372,32 @@
     ],
     [
       "gnu-lisp/international/uni-lowercase.el",
-      "54aaf427586a47c38034cec2889a26902d34fb79b7d34cd9a95afa35d08c3dd0",
+      "fbd5ff7011bf2fd5291e8e77ef4a9940e698c6afb94a6a57a90373d72db3ebae",
       "unidata"
     ],
     [
       "gnu-lisp/international/uni-mirrored.el",
-      "1fa915d6c30a37a6ee1d7e0e9457992abdc2937a7b8b8e67c5fae2f69634733a",
+      "bd86e6f6e72f1bf737a1dcc0cc962290bb6332f3feeab914f6010e0c60ae9c11",
       "unidata"
     ],
     [
       "gnu-lisp/international/uni-name.el",
-      "c77534492daed9f001c2ea718b46cef07ed9adc26d86ecc7419f2d103f1ca68e",
-      "unidata"
+      "668c36affea3395c12dc4fe8314d5370e43d4379cd2647f42e6025f894c4bb9d",
+      "unidata-romacs"
     ],
     [
       "gnu-lisp/international/uni-numeric.el",
-      "c64562dc4c41d1ae807a493ec6d57e7c9ef083016d0c40dd2a6e6d6c0c0b36c6",
+      "b30e32231ce9549d6bd2ee75095d0ecb79948eb84a05137a1451567590ad1d8b",
       "unidata"
     ],
     [
       "gnu-lisp/international/uni-old-name.el",
-      "b830a8baa178ca5b7757a21e48ff6500b128bf7bc4ac7f2e1265b41a9e0cc5f8",
-      "unidata"
+      "8dcfdba15d0226338b9f380b0d8621ee27aec38894fe35ea99f7a072b731826e",
+      "unidata-romacs"
     ],
     [
       "gnu-lisp/international/uni-scripts.el",
-      "c1aae3265e541b51be21850af33d9fde41f68d98dc5203a9780c618dfb4be7d8",
+      "c3ff3ec9abc1be5805ccf53456b9ddb7f4985353e3063c4c48ed68ebe34e9f6c",
       "unidata"
     ],
     [
@@ -391,22 +407,22 @@
     ],
     [
       "gnu-lisp/international/uni-special-titlecase.el",
-      "3478f508f92372f2ff00dbf6fb68fa8930691cd6c671f117f40a6c485e88d417",
+      "f1cc53829811e93c2026604ab2712036941769b0cb6430bd81de0dd8e219a7dd",
       "unidata"
     ],
     [
       "gnu-lisp/international/uni-special-uppercase.el",
-      "3724846dfc63bb0582c38bd1f11f4ccfaa77f7b2551b831493d068a2c5221e4c",
+      "427ce20c0fc824fd4c2f5fc7787189c495ce32d007954fb850597fa5daa334e7",
       "unidata"
     ],
     [
       "gnu-lisp/international/uni-titlecase.el",
-      "ff0a757ad9e9129df69a1e5aac123fba80c545a87dd4059ac9e51709338d43dc",
+      "7cc994ec0fc12deba94b152ce5751dc9d8b8281357def70ecdfcd39250138724",
       "unidata"
     ],
     [
       "gnu-lisp/international/uni-uppercase.el",
-      "a28fd2ed245d084c20628b939a147351059cb32d8184ca5d42abff3b97a961a8",
+      "2808c9b08c29c5aff88badf437dbcf8f1854537dc895b4b423f9b72c06ba0f41",
       "unidata"
     ],
     [

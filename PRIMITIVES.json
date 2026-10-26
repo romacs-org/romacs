@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "34dd48e2f1fb813ce47be5a6173d6bcb6dd4b4ae78dddf19e47143f2ab72b3db",
+  "source_fingerprint": "c159cc0c2e5b42477b73c778dd8c27bdd44247a23d594fb5221bb4456376ba8f",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -1448,7 +1448,7 @@
   "get-unicode-property-internal": {
    "name": "get-unicode-property-internal",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/char_table.rs:86"
+   "registered_at": "crates/romacs-vm/src/prims/char_table.rs:96"
   },
   "get-unused-category": {
    "name": "get-unused-category",
@@ -2477,7 +2477,7 @@
   "put-unicode-property-internal": {
    "name": "put-unicode-property-internal",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/char_table.rs:93"
+   "registered_at": "crates/romacs-vm/src/prims/char_table.rs:103"
   },
   "puthash": {
    "name": "puthash",
@@ -3321,7 +3321,7 @@
   "unicode-property-table-internal": {
    "name": "unicode-property-table-internal",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/char_table.rs:69"
+   "registered_at": "crates/romacs-vm/src/prims/char_table.rs:71"
   },
   "unify-charset": {
    "name": "unify-charset",

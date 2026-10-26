@@ -9,6 +9,13 @@ impl Leaf<'_> {
     pub(crate) fn is_uniprop(&self, table: Value) -> bool {
         self.unicode_property_table(table).is_some()
     }
+    /// set_char_table_ascii (table, char_table_ascii (table)).
+    pub(crate) fn uniprop_reset_ascii(&mut self, table: Value) {
+        let index = table.index_if(0).unwrap() - 1;
+        if let data::Object::CharTable(t) = &mut self.vm.objects[index] {
+            t.ascii = char_table::CharTable::ascii_from_root(&t.root);
+        }
+    }
     pub(crate) fn map_table_has_decoder(&self, table: Value) -> bool {
         self.unicode_property_table(table)
             .is_some_and(|table| table.extras[1].integer_value() == Some(0))

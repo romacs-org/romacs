@@ -68,6 +68,11 @@ class LispLayoutTests(unittest.TestCase):
                     for notice in notices:
                         self.assertIn(notice, source)
                     self.assertIn('Adapted from GNU ert.el', source)
+                elif file == ROOT / 'rlisp/romacs-unidata.el':
+                    # Derived from admin/unidata/unidata-gen.el, outside gnu-lisp/.
+                    self.assertIn(';; Copyright (C) 2008-2026 Free Software Foundation, Inc.', source)
+                    self.assertIn('National Institute of Advanced Industrial Science and Technology (AIST)', source)
+                    self.assertIn('Adapted from GNU admin/unidata/unidata-gen.el', source)
                 else:
                     self.assertNotRegex(source, copyright_pattern)
                 self.assertNotIn('This file is part of GNU Emacs.', source)
