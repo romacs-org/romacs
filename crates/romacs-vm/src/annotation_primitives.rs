@@ -418,6 +418,108 @@ impl Vm {
         self.annotation_resolve(&raw, property)
     }
 
+    /// editfns.c Fget_pos_property: the PROPERTY a character inserted at
+    /// POSITION would get, from the highest overlay that would cover it,
+    /// else from the text property it would inherit (textprop.c
+    /// text_property_stickiness).
+    pub(crate) fn get_pos_property_values(
+        &mut self,
+        position: Value,
+        property: Value,
+        object: Value,
+    ) -> std::result::Result<Value, crate::prim::Fault> {
+        use crate::prim::Fault;
+        let pos = self.scalar_position(position).map_err(Fault::Error)?;
+        let object = match self.object_if(object) {
+            _ if object == Value::NIL => self.current_annotation_buffer().map_err(Fault::Error)?,
+            Some(Object::Window(w)) => w.buffer,
+            _ => object,
+        };
+        // Fget_text_property: (args-out-of-range AT AT) outside the text.
+        let raw_at = |vm: &mut Self, at: i64| -> std::result::Result<Vec<(String, Value)>, Fault> {
+            match usize::try_from(at).ok().map(|at| vm.annotation_raw(object, at)) {
+                Some(Ok(raw)) => Ok(raw),
+                Some(Err(e)) if e != "index out of range" => Err(Fault::Error(e)),
+                _ => {
+                    let at = Value::integer(at).map_err(Fault::Error)?;
+                    let condition = vm.intern("args-out-of-range");
+                    let data = vm.list_value(&[at, at]);
+                    Err(Fault::Signal(condition, data))
+                }
+            }
+        };
+        let text_property = |vm: &mut Self, at: i64, key: Value| -> std::result::Result<Value, Fault> {
+            let raw = raw_at(vm, at)?;
+            vm.annotation_resolve(&raw, key).map_err(Fault::Error)
+        };
+        if !matches!(self.object_if(object), Some(Object::Buffer(_))) {
+            return text_property(self, pos, property);
+        }
+        let b = self.annotated(object).map_err(Fault::Error)?;
+        let begv = b.char_of_byte(b.accessible().start).map_err(Fault::Error)?.0 as i64 + 1;
+        let max = b.len_chars() as i64 + 1;
+        let byte = |n: i64| b.byte_of_char(CharOffset((n.clamp(1, max) - 1) as usize)).map(|b| b.0 as u32);
+        let (at, low, high) = (byte(pos), byte(pos - 1), byte(pos + 1));
+        let (at, low, high) = (at.map_err(Fault::Error)?, low.map_err(Fault::Error)?, high.map_err(Fault::Error)?);
+        let mut candidates = Vec::new();
+        // ITREE_FOREACH (posn - 1, posn + 1): every overlay meeting that span.
+        self.visit_overlay_bytes(object, ByteOffset(low as usize)..ByteOffset(high as usize), false, |overlay, _| candidates.push(overlay))
+            .map_err(Fault::Error)?;
+        let mut best: Option<(Value, Value)> = None;
+        for overlay in candidates {
+            let value = self.overlay_property(overlay, property).map_err(Fault::Error)?;
+            let Some((start, end)) = self.overlay_range(overlay).map_err(Fault::Error)? else { continue };
+            let o = self.overlay(overlay).map_err(Fault::Error)?;
+            let covers = start <= at && at <= end
+                && !(start == at && o.front == Bias::Right)
+                && !(end == at && o.rear != Bias::Right);
+            if value == Value::NIL || !covers { continue; }
+            if best.is_none_or(|(winner, _)| self.overlay_order_key(winner) < self.overlay_order_key(overlay)) {
+                best = Some((overlay, value));
+            }
+        }
+        if let Some((_, value)) = best { return Ok(value); }
+        // text_property_stickiness: rear-sticky by default, unless
+        // text-property-default-nonsticky or rear-nonsticky says otherwise;
+        // front-sticky inherits from after; a conflict prefers the side
+        // whose value is non-nil, rear first.
+        let nonsticky = self.slot("text-property-default-nonsticky");
+        let defaults = self.variable_value(nonsticky).map_err(Fault::Error)?;
+        let mut default = Value::NIL;
+        let mut tail = defaults;
+        while let Ok((entry, rest)) = self.cons_pair(tail) {
+            if self.cons_pair(entry).is_ok_and(|(key, _)| key == property) { default = entry; break; }
+            tail = rest;
+        }
+        let ignore_previous = pos <= begv;
+        let member = |vm: &Self, mut list: Value| -> bool {
+            while let Ok((item, rest)) = vm.cons_pair(list) {
+                if item == property { return true; }
+                list = rest;
+            }
+            false
+        };
+        let rear_sticky = !(ignore_previous || self.cons_pair(default).is_ok_and(|(_, tail)| tail != Value::NIL)) && {
+            let key = self.intern("rear-nonsticky");
+            let rear = text_property(self, pos - 1, key)?;
+            !(if self.cons_pair(rear).is_ok() { member(self, rear) } else { rear != Value::NIL })
+        };
+        let key = self.intern("front-sticky");
+        let front = text_property(self, pos, key)?;
+        let front_sticky = front == Value::TRUE || (self.cons_pair(front).is_ok() && member(self, front));
+        let stickiness = match (rear_sticky, front_sticky) {
+            (true, false) => -1,
+            (false, true) => 1,
+            (false, false) => 0,
+            (true, true) => if ignore_previous || text_property(self, pos - 1, property)? == Value::NIL { 1 } else { -1 },
+        };
+        match stickiness {
+            1 => text_property(self, pos, property),
+            -1 if pos > begv => text_property(self, pos - 1, property),
+            _ => Ok(Value::NIL),
+        }
+    }
+
     pub(super) fn annotation_primitive(
         &mut self,
         p: Primitive,

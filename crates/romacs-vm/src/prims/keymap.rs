@@ -101,3 +101,50 @@ fn command_remapping(cx, command: Value; optional position: Value, keymaps: Valu
 fn remapping_found(_: &mut Leaf<'_>, binding: Value, _: &[Value]) -> Next {
     Ok(Step::Done(if binding.integer_value().is_some() { Value::NIL } else { binding }))
 }
+
+// Fkeymap_prompt: the first string in MAP's list, searching embedded
+// keymaps (not parents' autoloads) in order.
+defsubr! { name = "keymap-prompt", gnu = "keymap.c:148", effect = Reads,
+fn keymap_prompt(cx, map: Value) {
+    keymap_prompt_in(cx, map, 0)
+}}
+fn keymap_prompt_in(cx: &mut Leaf<'_>, map: Value, depth: usize) -> Out {
+    let Some(mut map) = cx.keymap(map) else { return Ok(Value::NIL) };
+    for _ in 0..=cx.list_limit() {
+        let Some((item, rest)) = cx.pair(map) else { return Ok(Value::NIL) };
+        if cx.string_view(item).is_ok() { return Ok(item); }
+        if depth < cx.list_limit() && cx.keymap(item).is_some() {
+            let prompt = keymap_prompt_in(cx, item, depth + 1)?;
+            if prompt != Value::NIL { return Ok(prompt); }
+        }
+        map = rest;
+    }
+    Err(Fault::Circular(map))
+}
+
+// Flookup_key. A menu item's `:filter' runs as get_keyelt runs it
+// (menu_item_eval_property: errors give nil), through the Lisp helper
+// `romacs--menu-filter'; each result joins SAVED and the walk restarts, so
+// the filter's (item . result) pairs stay rooted across the call.
+defsubr! { name = "lookup-key", gnu = "keymap.c:1290", effect = Global,
+fn lookup_key(cx, keymap: Value, key: Value; optional accept_default: Value) -> Step {
+    lookup_key_step(cx, &[keymap, key, accept_default])
+}}
+fn lookup_key_step(cx: &mut Leaf<'_>, saved: &[Value]) -> Next {
+    let filters = saved[3..].chunks_exact(2).map(|pair| (pair[0], pair[1])).collect();
+    match cx.lookup_key_walk(saved[0], saved[1], saved[2] != Value::NIL, filters)? {
+        Ok(binding) => Ok(Step::Done(binding)),
+        Err((item, filter, object)) => {
+            let helper = cx.intern("romacs--menu-filter");
+            let (f, args) = if cx.fboundp(helper) { (helper, vec![filter, object]) } else { (filter, vec![object]) };
+            let mut saved = saved.to_vec();
+            saved.push(item);
+            Ok(Step::Call { f, args, then: lookup_key_filtered, saved })
+        }
+    }
+}
+fn lookup_key_filtered(cx: &mut Leaf<'_>, result: Value, saved: &[Value]) -> Next {
+    let mut saved = saved.to_vec();
+    saved.push(result);
+    lookup_key_step(cx, &saved)
+}

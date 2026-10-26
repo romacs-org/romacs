@@ -1206,10 +1206,7 @@ mod leaf {
         }
         /// Fresh symbol slot outside the obarray; never re-enters the VM.
         pub fn make_symbol(&mut self, name: &str) -> Value {
-            let value = self.vm.generated_symbol(expand::generated_id());
-            let slot = value.index_if(7).unwrap() - 1;
-            self.vm.symbol_names[slot] = name.to_owned();
-            value
+            self.vm.uninterned_symbol(name)
         }
         /// GNU `get_keymap (OBJECT, 0, 0)` (keymap.c:178): OBJECT if it is a
         /// keymap, else the keymap at the end of its function chain, else

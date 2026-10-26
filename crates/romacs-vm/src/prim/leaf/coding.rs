@@ -65,16 +65,20 @@ impl Leaf<'_> {
         let kind = self.vector_get(attrs, num(3))?;
         let utf8 = kind == self.intern("utf-8");
         let charset = kind == self.intern("charset");
-        if !utf8 && !charset && kind != self.intern("raw-text") {
-            return Err(Fault::Error("string conversion for this coding type is not implemented (supported: UTF-8, charset and raw-text)".into()));
+        let utf16 = kind == self.intern("utf-16");
+        if !utf8 && !charset && !utf16 && kind != self.intern("raw-text") {
+            return Err(Fault::Error("string conversion for this coding type is not implemented (supported: UTF-8, UTF-16, charset and raw-text)".into()));
         }
         for index in [6, 7, 9, 10] {
             if self.vector_get(attrs, num(index))? != Value::NIL {
                 return Err(Fault::Error("string coding translation tables and conversion hooks are not implemented".into()));
             }
         }
-        let bom = if utf8 { self.vector_get(attrs, num(24))? } else { Value::NIL };
-        if self.pair(bom).is_some() { return Err(Fault::Error("string coding BOM-pair detection is not implemented".into())); }
+        let bom = if utf8 || utf16 { self.vector_get(attrs, num(24))? } else { Value::NIL };
+        // Encoding with a BOM pair only writes the BOM; decoding detects.
+        if self.pair(bom).is_some() && !(utf16 && encode) {
+            return Err(Fault::Error("string coding BOM-pair detection is not implemented".into()));
+        }
         let tokens = if encode && utf8 && !source.is_multibyte() {
             coding_encode_unibyte(source.bytes())
         } else { source.chars().map(|code| {
@@ -83,6 +87,8 @@ impl Leaf<'_> {
             else if code < 128 { CodingToken::Byte(code as u8) }
             else { CodingToken::Character(code) }
         }).collect::<Vec<_>>() };
+        // UTF-16 line ends are characters, found and converted after decoding.
+        let tokens = if utf16 && !encode { self.coding_decode_utf16(attrs, bom, &tokens)? } else { tokens };
         let detected = if !encode && !inhibit && self.kind(eol) == Kind::Vector { coding_eol(&tokens) } else { None };
         let mode = if inhibit { 0 } else if let Some(mode) = detected { mode }
             else if eol == self.intern("dos") { 1 } else if eol == self.intern("mac") { 2 } else { 0 };
@@ -91,6 +97,10 @@ impl Leaf<'_> {
         let (bytes, multibyte) = if encode {
             let mut bytes = Vec::new();
             if utf8 && bom != Value::NIL { bytes.extend_from_slice(&[239, 187, 191]); }
+            if utf16 {
+                self.coding_encode_utf16(attrs, bom, &tokens, mode, &mut bytes)?;
+                return self.coding_string_result(buffer, last, precise, bytes, false, Vec::new());
+            }
             if charset {
                 self.coding_encode_charset(attrs, &tokens, &mut bytes)?;
             } else { for token in tokens { match token {
@@ -120,6 +130,9 @@ impl Leaf<'_> {
             for code in codes { if for_unibyte { bytes.push(code as u8); } else { coding_emit(code, &mut bytes); } }
             (bytes, !for_unibyte)
         };
+        self.coding_string_result(buffer, last, precise, bytes, multibyte, runs)
+    }
+    fn coding_string_result(&mut self, buffer: Value, last: Value, precise: Value, bytes: Vec<u8>, multibyte: bool, runs: Vec<(usize, usize, usize)>) -> super::super::Out {
         if buffer != Value::NIL && buffer != Value::TRUE {
             return Err(Fault::Error("string coding output to buffers is not implemented".into()));
         }
@@ -137,6 +150,76 @@ impl Leaf<'_> {
 }
 
 impl Leaf<'_> {
+    /// coding.c decode_coding_utf_16: 16-bit units in the coding system's
+    /// byte order after an optional BOM; a surrogate pair is one character,
+    /// a broken one yields its two bytes as characters (and, as in GNU, a
+    /// non-surrogate after it leaves the high half pending); an odd final
+    /// byte stays a raw byte and a final pending high surrogate is dropped.
+    fn coding_decode_utf16(&mut self, attrs: Value, bom: Value, tokens: &[CodingToken]) -> std::result::Result<Vec<CodingToken>, Fault> {
+        let big = self.vector_get(attrs, num(25))? == self.intern("big");
+        let unit = |a: u8, b: u8| if big { u32::from(a) << 8 | u32::from(b) } else { u32::from(b) << 8 | u32::from(a) };
+        let char_token = |c: u32| if c < 128 { CodingToken::Byte(c as u8) } else { CodingToken::Character(c) };
+        let mut at = 0;
+        if bom == Value::TRUE {
+            if let [CodingToken::Byte(a), CodingToken::Byte(b), ..] = tokens {
+                if unit(*a, *b) == 0xFEFF { at = 2; }
+            }
+        }
+        let (mut out, mut surrogate) = (Vec::with_capacity(tokens.len() / 2), 0);
+        while at < tokens.len() {
+            let CodingToken::Byte(c1) = tokens[at] else { out.push(tokens[at]); at += 1; continue; };
+            let Some(&second) = tokens.get(at + 1) else { out.push(CodingToken::Byte(c1)); break; };
+            at += 2;
+            let CodingToken::Byte(c2) = second else { out.extend([CodingToken::Byte(c1), second]); continue; };
+            let c = unit(c1, c2);
+            if surrogate != 0 {
+                if (0xDC00..=0xDFFF).contains(&c) {
+                    out.push(CodingToken::Character(0x10000 + (((surrogate - 0xD800) << 10) | (c - 0xDC00))));
+                    surrogate = 0;
+                } else {
+                    let (a, b) = if big { (surrogate >> 8, surrogate & 0xff) } else { (surrogate & 0xff, surrogate >> 8) };
+                    out.extend([char_token(a), char_token(b)]);
+                    if (0xD800..=0xDBFF).contains(&c) { surrogate = c; } else { out.push(char_token(c)); }
+                }
+            } else if (0xD800..=0xDBFF).contains(&c) {
+                surrogate = c;
+            } else {
+                out.push(char_token(c));
+            }
+        }
+        Ok(out)
+    }
+    /// coding.c encode_coding_utf_16: a BOM unless the system has none,
+    /// then each character as one unit or a surrogate pair; raw bytes and
+    /// other non-Unicode characters become the default character. Line ends
+    /// convert as characters.
+    fn coding_encode_utf16(&mut self, attrs: Value, bom: Value, tokens: &[CodingToken], mode: usize, bytes: &mut Vec<u8>) -> std::result::Result<(), Fault> {
+        let big = self.vector_get(attrs, num(25))? == self.intern("big");
+        let default = self.vector_get(attrs, num(11))?.integer_value().unwrap_or(32) as u32;
+        let mut emit = |u: u32| {
+            let pair = [(u >> 8) as u8, u as u8];
+            bytes.extend(if big { pair } else { [pair[1], pair[0]] });
+        };
+        if bom != Value::NIL { emit(0xFEFF); }
+        for &token in tokens {
+            let c = match token {
+                CodingToken::Byte(b) if b < 128 => u32::from(b),
+                CodingToken::Byte(_) => default,
+                CodingToken::Character(c) if c > 0x10FFFF => default,
+                CodingToken::Character(c) => c,
+            };
+            if c == u32::from(b'\n') && mode != 0 {
+                emit(u32::from(b'\r'));
+                if mode == 2 { continue; }
+            }
+            if c < 0x10000 { emit(c); } else {
+                let c = c - 0x10000;
+                emit((c >> 10) + 0xD800);
+                emit((c & 0x3FF) + 0xDC00);
+            }
+        }
+        Ok(())
+    }
     /// coding.c decode_coding_charset: each byte's charset-valids entry
     /// names the charsets (smallest dimension first) that may start a code
     /// there; the first that decodes the code's bytes wins, and a byte none

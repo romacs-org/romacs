@@ -216,3 +216,20 @@ fn set_default_toplevel_value(cx, symbol: Value, value: Value) {
     }
     Ok(Value::NIL)
 }}
+
+// Findirect_variable: the end of OBJECT's variable-alias chain; anything
+// else is itself. defvaralias refuses cycles, so the chain ends.
+defsubr! { name = "indirect-variable", gnu = "data.c:1291", effect = Reads,
+fn indirect_variable(cx, object: Value) {
+    if !(object == Value::NIL || object == Value::TRUE || cx.kind(object) == Kind::Symbol) {
+        return Ok(object);
+    }
+    let mut symbol = object;
+    for _ in 0..=cx.list_limit() {
+        match cx.variable_alias(symbol)? {
+            Some(base) => symbol = base,
+            None => return Ok(symbol),
+        }
+    }
+    Err(Fault::Circular(object))
+}}

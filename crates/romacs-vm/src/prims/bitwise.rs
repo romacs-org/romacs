@@ -60,7 +60,7 @@ defsubr! { name = "lognot", gnu = "data.c:3684", effect = Reads,
 }
 
 /// GNU integer-width's default (bignum.c): results wider than this overflow.
-const INTEGER_WIDTH: u64 = 65536;
+pub(super) const INTEGER_WIDTH: u64 = 65536;
 
 defsubr! { name = "ash", gnu = "data.c:3555", effect = Reads,
     fn ash(cx, value: Value, count: Value) {

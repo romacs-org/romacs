@@ -1,4 +1,4 @@
-//! `round`, `ceiling` and `truncate`, GNU `rounding_driver` (floatfns.c:404),
+//! `floor`, `round`, `ceiling` and `truncate`, GNU `rounding_driver` (floatfns.c:404),
 //! measured on the window journey: GNU's own `split-window` rounds a new
 //! window's pixel size to a character multiple with `round`
 //! (window.el:5846) and `window--min-size-1` uses `ceiling`.
@@ -8,8 +8,8 @@
 //! mpz division, so `(round 1.5 0.5)` and `(ceiling 0.1 0.01)` see the exact
 //! binary values, never a rounded float quotient. VM2 does the same with each
 //! double as an odd integer times a power of two and a u128 long division.
-//! This rounding path accepts fixnums/floats and signals `overflow-error`
-//! for results outside the fixnum range (DIVERGENCES.md VM2-ROUND1).
+//! This rounding path accepts fixnums/floats; a quotient past 2^127 signals
+//! `overflow-error` (DIVERGENCES.md VM2-ROUND1).
 use super::*;
 use std::result::Result;
 
@@ -31,12 +31,14 @@ fn signal(cx: &mut Leaf<'_>, condition: &str) -> Fault {
     Fault::Signal(condition, Value::NIL)
 }
 
+/// make_integer: a fixnum, or a bignum past the fixnum range.
 fn integer(cx: &mut Leaf<'_>, n: i128) -> Out {
-    i64::try_from(n).ok().and_then(|n| Value::integer(n).ok()).ok_or_else(|| signal(cx, "overflow-error"))
+    Ok(cx.bigint(num_bigint::BigInt::from(n)))
 }
 
 #[derive(Clone, Copy, PartialEq)]
 enum Mode {
+    Floor,
     Ceiling,
     Round,
     Truncate,
@@ -49,6 +51,8 @@ enum Mode {
 fn adjust(mode: Mode, q: u128, r_zero: bool, neg: bool, r_vs_rest: std::cmp::Ordering) -> (u128, bool) {
     let bump = match mode {
         Mode::Truncate => false,
+        // floor2: a negative quotient with a remainder moves away from zero.
+        Mode::Floor => !r_zero && neg,
         // n / d + ((n % d != 0) & same signs): only a positive quotient moves.
         Mode::Ceiling => !r_zero && !neg,
         // abs_r1 < abs_r + (q & 1): strictly past half, or a tie on odd q.
@@ -122,6 +126,10 @@ fn finite(cx: &mut Leaf<'_>, x: f64) -> Result<(), Fault> {
 }
 
 fn driver(cx: &mut Leaf<'_>, arg: Value, divisor: Value, mode: Mode) -> Out {
+    // An integer is its own rounding, bignums included.
+    if divisor == Value::NIL && cx.bigint_value(arg).is_some() {
+        return Ok(arg);
+    }
     let n = number(cx, arg)?;
     if divisor == Value::NIL {
         return match n {
@@ -132,13 +140,14 @@ fn driver(cx: &mut Leaf<'_>, arg: Value, divisor: Value, mode: Mode) -> Out {
                 finite(cx, x)?;
                 let y = match mode {
                     Mode::Round => x.round_ties_even(),
+                    Mode::Floor => x.floor(),
                     Mode::Ceiling => x.ceil(),
                     Mode::Truncate => x.trunc(),
                 };
-                if y.abs() >= 2f64.powi(63) {
-                    return Err(signal(cx, "overflow-error"));
-                }
-                integer(cx, y as i128)
+                // An integral double is M * 2^E exactly.
+                let (m, e) = decompose(y);
+                let n = num_bigint::BigInt::from(m);
+                Ok(cx.bigint(if e >= 0 { n << e as u32 } else { n >> (-e) as u32 }))
             }
         };
     }
@@ -155,6 +164,7 @@ fn driver(cx: &mut Leaf<'_>, arg: Value, divisor: Value, mode: Mode) -> Out {
             let (q, r) = (n / d, n % d);
             let q = match mode {
                 Mode::Truncate => q,
+                Mode::Floor => q - i128::from(r != 0 && (n < 0) != (d < 0)),
                 Mode::Ceiling => q + i128::from(r != 0 && (n < 0) == (d < 0)),
                 Mode::Round => {
                     let (abs_r, abs_r1) = (r.abs(), d.abs() - r.abs());
@@ -199,4 +209,9 @@ fn round(cx, arg: Value; optional divisor: Value) {
 defsubr! { name = "truncate", gnu = "floatfns.c:559", effect = Pure,
 fn truncate(cx, arg: Value; optional divisor: Value) {
     driver(cx, arg, divisor, Mode::Truncate)
+}}
+
+defsubr! { name = "floor", gnu = "floatfns.c:530", effect = Pure,
+fn floor(cx, arg: Value; optional divisor: Value) {
+    driver(cx, arg, divisor, Mode::Floor)
 }}

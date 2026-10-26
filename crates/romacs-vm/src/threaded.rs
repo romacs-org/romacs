@@ -920,7 +920,9 @@ fn route_escape(e: &mut Engine<'_>) -> Option<(*mut Value, *const Inst)> {
                 if name == "excessive-lisp-nesting" {
                     original = Some(format!("Lisp nesting exceeds `max-lisp-eval-depth': {}", e.vm.display(data).unwrap_or_default()));
                 }
-                if matches!(name.as_str(), "void-function" | "void-variable") {
+                // GNU's printed error, (CONDITION . DATA): an eval caller's
+                // message names the real signal; void-* always do.
+                if matches!(name.as_str(), "void-function" | "void-variable") || (original.is_none() && e.propagate) {
                     let values = e.vm.display(data).unwrap_or_default();
                     original = Some(format!("({name}{})", values.strip_prefix('(').and_then(|s| s.strip_suffix(')')).filter(|s| !s.is_empty()).map(|s| format!(" {s}")).unwrap_or_default()));
                 }
@@ -2190,25 +2192,34 @@ unsafe fn invoke_full(
             || target == Value::reference(Primitive::Signal as usize, 6)
         {
             enter_native(e, r, pc, target, start, argc);
-            if argc != 2 {
+            let signal = target == Value::reference(Primitive::Signal as usize, 6);
+            if !(argc == 2 || (signal && argc == 1)) {
                 return fail(e, "wrong primitive arity");
             }
-            if target == Value::reference(Primitive::Signal as usize, 6) {
-                let condition = *r.add(start);
+            if signal {
+                // eval.c Fsignal/signal_or_quit: an error object with DATA
+                // omitted re-signals itself; nil with non-list DATA is `error'.
+                let data = if argc == 2 { *r.add(start + 1) } else { Value::NIL };
+                let mut condition = *r.add(start);
+                if condition.tag() == 3 && data == Value::NIL {
+                    let Ok((condition, data)) = e.vm.cons_pair(condition) else { return fail(e, "invalid error object") };
+                    e.escape = Some(Escape::Signal(condition, data));
+                    return Value::UNBOUND;
+                }
+                if condition == Value::NIL && data.tag() != 3 {
+                    condition = e.vm.intern("error");
+                }
+                e.escape = Some(Escape::Signal(condition, data));
                 if condition != Value::NIL
                     && condition != Value::TRUE
                     && (condition.tag() != 7 || condition == Value::UNBOUND)
                 {
+                    e.escape = None;
                     return wrong_type(e, "symbolp", condition);
                 }
+                return Value::UNBOUND;
             }
-            e.escape = Some(
-                if target == Value::reference(Primitive::Throw as usize, 6) {
-                    Escape::Throw(*r.add(start), *r.add(start + 1))
-                } else {
-                    Escape::Signal(*r.add(start), *r.add(start + 1))
-                },
-            );
+            e.escape = Some(Escape::Throw(*r.add(start), *r.add(start + 1)));
             return Value::UNBOUND;
         }
         if target.tag() == 6 {

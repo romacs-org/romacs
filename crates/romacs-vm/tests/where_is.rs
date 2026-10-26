@@ -92,9 +92,13 @@ fn where_is_traced_frames_survive_callback_collection() {
     );
 }
 
+// GNU 32.0.50: a menu item's own definition is found; its :filter is not
+// what where-is-internal reports.
 #[test]
-fn where_is_preserves_lookup_errors() {
+fn where_is_reports_menu_items_with_filters_as_gnu() {
     let mut vm = Vm::new();
     vm.install_lisp_prelude().unwrap();
-    assert!(vm.eval_source("(where-is-internal 'wi-target (list (list 'keymap (cons 97 '(menu-item \"x\" wi-target :filter identity)))) )").is_err(), "unsupported menu filter lookup must not be swallowed");
+    let found = vm.eval_source("(list (where-is-internal 'wi-target (list (list 'keymap (cons 97 '(menu-item \"x\" wi-target :filter identity))))) (where-is-internal 'wi-target (list (list 'keymap (cons 97 '(menu-item \"x\" ignore :filter (lambda (_) 'wi-target)))))))")
+        .and_then(|v| v.display());
+    assert_eq!(found.as_deref(), Ok("(([97]) nil)"));
 }

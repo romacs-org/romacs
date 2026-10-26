@@ -1,6 +1,9 @@
 //! Keymaps use a traced, Lisp-mutable cons graph, with character tables for dense maps.
 //! No Rust side table caches bindings: setcdr/nconc edits remain authoritative.
 use super::*;
+
+/// A walk stopped at a menu filter it has no result for yet.
+pub(crate) const KEYMAP_FILTER_PENDING: &str = "keymap menu filter must be evaluated (VM2 key-binding and define-key do not)";
 use data::Object;
 
 struct KeyEvent { value: Value, input_index: usize }
@@ -56,6 +59,19 @@ impl Vm {
         self.declare_special_raw("meta-prefix-char", Value::integer(27).unwrap());
         self.initialize_command_bindings(global);
     }
+    /// One `lookup-key' walk with FILTERS as the known menu-filter results:
+    /// the binding, or the first filter still to run.
+    pub(crate) fn lookup_key_walk(&mut self, map: Value, key: Value, defaults: bool, filters: Vec<(Value, Value)>)
+        -> Result<std::result::Result<Value, (Value, Value, Value)>> {
+        self.keymap_filters = filters;
+        self.keymap_pending_filter = None;
+        let result = self.key_events(key).and_then(|events| self.lookup_keymap_key(map, &events, defaults));
+        self.keymap_filters.clear();
+        match result {
+            Err(e) if e == KEYMAP_FILTER_PENDING => Ok(Err(self.keymap_pending_filter.take().expect("pending filter"))),
+            other => other.map(Ok),
+        }
+    }
     pub(super) fn resolve_keymap(&self, mut value: Value) -> Option<Value> {
         for _ in 0..=self.slots.len() {
             if let Ok((head, _)) = self.cons_pair(value) {
@@ -66,21 +82,38 @@ impl Vm {
         }
         None
     }
-    fn keymap_definition(&self, mut value: Value) -> Result<Value> {
+    /// keymap.c get_keyelt with AUTOLOAD: a menu item's `:filter' result
+    /// comes from `keymap_filters'; one not computed yet is left pending
+    /// for the caller to run (KEYMAP_FILTER_PENDING).
+    fn keymap_definition(&mut self, mut value: Value) -> Result<Value> {
         for _ in 0..=64 {
             let Ok((head, tail)) = self.cons_pair(value) else { return Ok(value); };
             if self.names.get("menu-item").is_some_and(|&s| head == Value::reference(s + 1, 7)) {
+                let item = value;
                 let Ok((_, definition)) = self.cons_pair(tail) else { return Ok(value); };
+                let object = self.cons_pair(definition).map_or(definition, |p| p.0);
                 let mut properties = definition;
+                let mut filter = None;
                 for _ in 0..=self.list_limit() {
                     let Ok((key, next)) = self.cons_pair(properties) else { break; };
+                    if self.cons_pair(next).is_err() { break; }
                     if self.names.get(":filter").is_some_and(|&s| key == Value::reference(s + 1, 7)) {
-                        return Err("keymap menu filters are not supported".into());
+                        filter = Some(self.cons_pair(next)?.0);
+                        break;
                     }
                     properties = next;
                     if properties == definition { return Err("circular menu item".into()); }
                 }
-                value = self.cons_pair(definition).map_or(definition, |p| p.0);
+                value = match filter {
+                    None => object,
+                    Some(filter) => match self.keymap_filters.iter().find(|(i, _)| *i == item) {
+                        Some(&(_, result)) => result,
+                        None => {
+                            self.keymap_pending_filter = Some((item, filter, object));
+                            return Err(KEYMAP_FILTER_PENDING.into());
+                        }
+                    },
+                };
             } else if self.str_view(head).is_some() {
                 value = tail;
             } else { return Ok(value); }

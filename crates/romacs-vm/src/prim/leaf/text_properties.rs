@@ -39,3 +39,9 @@ impl Leaf<'_> {
         self.vm.remove_text_properties_native(start, end, names, object)
     }
 }
+
+impl Leaf<'_> {
+    pub(crate) fn get_pos_property(&mut self, position: Value, property: Value, object: Value) -> super::super::Out {
+        self.vm.get_pos_property_values(position, property, object)
+    }
+}

@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "8c5562854ce396e7432e6b3bff21205a528a0c70f52ed104adf9485bc47f121e",
+  "input_hash": "41715e6bb1620999815e5c1af88bba54bf34ea9558fe4efb0048da45e2cdf485",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -12,8 +12,8 @@
   "note": "Derived from the prose ledgers. Do not edit; edit those and regenerate."
  },
  "counts": {
-  "rows": 254,
-  "symbols": 496,
+  "rows": 255,
+  "symbols": 512,
   "rows_without_symbols": 15
  },
  "by_symbol": {
@@ -21,7 +21,7 @@
    83
   ],
   "(max-char)": [
-   183
+   184
   ],
   "+": [
    66
@@ -30,7 +30,7 @@
    9
   ],
   "1+": [
-   198
+   199
   ],
   ":20": [
    83
@@ -42,28 +42,28 @@
    66
   ],
   "[:class:]": [
-   253
+   254
   ],
   "abort-minibuffers": [
    61
   ],
   "add-text-properties": [
-   197,
-   243
+   198,
+   244
   ],
   "add-variable-watcher": [
-   214,
-   215
+   215,
+   216
   ],
   "after-change-functions": [
-   161
+   160
   ],
   "after-load-alist": [
-   229
+   230
   ],
   "all-completions": [
-   239,
-   240
+   240,
+   241
   ],
   "append": [
    103
@@ -71,7 +71,7 @@
   "apply": [
    104,
    126,
-   210
+   211
   ],
   "aref": [
    74,
@@ -86,17 +86,17 @@
    89
   ],
   "autoload": [
-   218
+   219
   ],
   "autoload-do-load": [
-   218,
-   230
+   219,
+   231
   ],
   "b->last_window_start": [
-   168
+   169
   ],
   "backtrace--locals": [
-   242
+   243
   ],
   "backward-char": [
    137
@@ -105,26 +105,26 @@
    50
   ],
   "before-change-functions": [
-   161
+   160
   ],
   "beginning-of-line": [
    137
   ],
   "bool-vector": [
    81,
-   195
+   196
   ],
   "bool-vector-p": [
    81
   ],
   "boundp": [
-   225
+   226
   ],
   "buffer-chars-modified-tick": [
    96
   ],
   "buffer-enable-undo": [
-   161
+   160
   ],
   "buffer-file-name": [
    95
@@ -153,11 +153,11 @@
    1
   ],
   "buffer-undo-list": [
-   161
+   160
   ],
   "byte-code-function-p": [
    38,
-   222
+   223
   ],
   "byte-compile": [
    48
@@ -173,19 +173,16 @@
    54
   ],
   "car": [
-   212
+   213
   ],
   "ceiling": [
-   179
+   180
   ],
   "char-category-set": [
-   209
+   210
   ],
   "char-code-property-description": [
    39
-  ],
-  "char-from-name": [
-   159
   ],
   "char-or-string-p": [
    50
@@ -197,10 +194,10 @@
    83
   ],
   "cl-print-object": [
-   242
+   243
   ],
   "cl-type-of": [
-   241
+   242
   ],
   "clear-composition-cache": [
    158
@@ -213,6 +210,12 @@
   ],
   "coding-system-for-write": [
    95
+  ],
+  "color-defined-p": [
+   163
+  ],
+  "color-values": [
+   163
   ],
   "command-error-default-function": [
    140
@@ -227,24 +230,24 @@
    100
   ],
   "compare-strings": [
-   240
+   241
   ],
   "compiled-function-p": [
-   222
+   223
   ],
   "composition-function-table": [
    158
   ],
   "concat": [
    18,
-   184,
    185,
    186,
-   228
+   187,
+   229
   ],
   "condition-case": [
-   223,
-   230
+   224,
+   231
   ],
   "copy-case-table": [
    53
@@ -252,7 +255,7 @@
   "copy-sequence": [
    74,
    101,
-   228
+   229
   ],
   "copy-syntax-table": [
    149
@@ -276,7 +279,7 @@
    3
   ],
   "current-load-list": [
-   229
+   230
   ],
   "current-prefix-arg": [
    70
@@ -306,10 +309,10 @@
    131
   ],
   "daemon-initialized": [
-   166
+   167
   ],
   "daemonp": [
-   166
+   167
   ],
   "debug-on-error": [
    19
@@ -323,18 +326,18 @@
   "defalias": [
    98,
    99,
-   218,
-   220
+   219,
+   221
   ],
   "default-boundp": [
-   224
+   225
   ],
   "default-directory": [
    94
   ],
   "default-value": [
-   224,
-   225
+   225,
+   226
   ],
   "defcustom": [
    131
@@ -346,31 +349,34 @@
    120,
    121,
    145,
-   245,
-   249
+   246,
+   250
   ],
   "define-category": [
-   209
+   210
   ],
   "define-charset-internal": [
    156,
-   206
-  ],
-  "define-coding-system-alias": [
    207
   ],
+  "define-coding-system-alias": [
+   208
+  ],
   "define-error": [
-   219
+   220
   ],
   "define-hash-table-test": [
    127
+  ],
+  "defined-colors": [
+   163
   ],
   "defmacro": [
    104
   ],
   "defun": [
    133,
-   220
+   221
   ],
   "defvar": [
    14,
@@ -379,11 +385,11 @@
    134
   ],
   "defvaralias": [
-   214,
-   217
+   215,
+   218
   ],
   "delete": [
-   228
+   229
   ],
   "delete-backward-char": [
    137
@@ -392,8 +398,8 @@
    137
   ],
   "delete-other-windows-internal": [
-   170,
-   172
+   171,
+   173
   ],
   "ding": [
    138
@@ -404,23 +410,52 @@
   "dired-noselect": [
    0
   ],
+  "display-color-cells": [
+   163
+  ],
   "display-color-p": [
-   121
+   121,
+   163
   ],
   "display-graphic-p": [
-   121
+   121,
+   163
+  ],
+  "display-grayscale-p": [
+   163
+  ],
+  "display-mm-height": [
+   163
+  ],
+  "display-mm-width": [
+   163
+  ],
+  "display-monitor-attributes-list": [
+   163
+  ],
+  "display-pixel-height": [
+   163
+  ],
+  "display-pixel-width": [
+   163
+  ],
+  "display-planes": [
+   163
+  ],
+  "display-visual-class": [
+   163
   ],
   "display-warning": [
-   217
+   218
   ],
   "do-after-load-evaluation": [
-   229
+   230
   ],
   "documentation-property": [
    99
   ],
   "downcase_char_code_emacs_compat": [
-   252
+   253
   ],
   "elt": [
    21,
@@ -432,10 +467,10 @@
    152
   ],
   "emacs_downcase_compat": [
-   252
+   253
   ],
   "enable-recursive-minibuffers": [
-   226
+   227
   ],
   "encode-coding-string": [
    11
@@ -448,11 +483,11 @@
    101
   ],
   "eql": [
-   236
+   237
   ],
   "equal": [
    128,
-   163
+   164
   ],
   "erase-buffer": [
    1
@@ -463,21 +498,21 @@
   "error-message-string": [
    139,
    140,
-   211
+   212
   ],
   "ert--run-test-internal": [
-   242
+   243
   ],
   "esc-map": [
    135
   ],
   "eval": [
-   212,
    213,
-   221
+   214,
+   222
   ],
   "eval-after-load": [
-   229
+   230
   ],
   "eval-buffer": [
    107
@@ -486,7 +521,7 @@
    139
   ],
   "eval-when-compile": [
-   213
+   214
   ],
   "excessive-lisp-nesting": [
    88
@@ -513,34 +548,34 @@
    118,
    119,
    120,
-   245,
    246,
-   249
+   247,
+   250
   ],
   "face-family": [
    116,
-   248
+   249
   ],
   "face-font": [
    115,
-   247
+   248
   ],
   "face-remapping-alist": [
    110,
    119,
    120,
-   251
+   252
   ],
   "fboundp": [
-   165
+   166
   ],
   "featurep": [
    86
   ],
   "features": [
    86,
-   218,
-   231
+   219,
+   232
   ],
   "file-accessible-directory-p": [
    31
@@ -554,13 +589,13 @@
   ],
   "find-file-name-handler": [
    47,
-   238
+   239
   ],
   "find-file-noselect": [
    0
   ],
   "first-change-hook": [
-   161
+   160
   ],
   "float-output-format": [
    155
@@ -570,6 +605,9 @@
   ],
   "floatp": [
    50
+  ],
+  "floor": [
+   180
   ],
   "force-mode-line-update": [
    152
@@ -581,12 +619,12 @@
    92,
    102,
    106,
-   237
+   238
   ],
   "format-message": [
    72,
    102,
-   237
+   238
   ],
   "format-time-string": [
    82
@@ -595,22 +633,22 @@
    137
   ],
   "frame-char-height": [
-   173
-  ],
-  "frame-char-width": [
-   173
-  ],
-  "frame-list": [
    174
   ],
+  "frame-char-width": [
+   174
+  ],
+  "frame-list": [
+   175
+  ],
   "frame-live-p": [
-   173
+   174
   ],
   "frame-parameter": [
-   216
+   217
   ],
   "frame-parameters": [
-   216
+   217
   ],
   "frame-pixel-height": [
    145
@@ -618,12 +656,15 @@
   "frame-pixel-width": [
    145
   ],
+  "frame-set-background-mode": [
+   163
+  ],
   "frame-terminal": [
-   174,
-   178
+   175,
+   179
   ],
   "framep": [
-   174
+   175
   ],
   "fset": [
    98
@@ -633,8 +674,8 @@
    104,
    126,
    133,
-   210,
-   212
+   211,
+   213
   ],
   "funcall-interactively": [
    70
@@ -643,7 +684,7 @@
    99
   ],
   "function-history": [
-   218
+   219
   ],
   "function-key-map": [
    135
@@ -654,17 +695,17 @@
    34
   ],
   "generate-new-buffer": [
-   167
+   168
   ],
   "get": [
    83,
-   219
+   220
   ],
   "get-buffer": [
-   167
+   168
   ],
   "get-buffer-window": [
-   174
+   175
   ],
   "get-char-code-property": [
    39
@@ -674,15 +715,15 @@
   ],
   "get-load-suffixes": [
    73,
-   225,
-   227
+   226,
+   228
   ],
   "get-text-property": [
-   185,
-   186
+   186,
+   187
   ],
   "get-variable-watchers": [
-   215
+   216
   ],
   "global-map": [
    135
@@ -700,7 +741,7 @@
    129
   ],
   "header-line-format": [
-   171
+   172
   ],
   "identity": [
    51
@@ -712,13 +753,13 @@
    98
   ],
   "indirect-variable": [
-   214
+   215
   ],
   "inhibit-file-name-handlers": [
-   238
+   239
   ],
   "inhibit-file-name-operation": [
-   238
+   239
   ],
   "inhibit-mouse-event-check": [
    70
@@ -739,25 +780,25 @@
    70
   ],
   "intern": [
-   187,
-   232,
+   188,
    233,
+   234,
+   235,
+   236
+  ],
+  "intern-soft": [
    234,
    235
   ],
-  "intern-soft": [
-   233,
-   234
-  ],
   "internal-delete-indirect-variable": [
-   214
+   215
   ],
   "internal-interpreter-environment": [
    134
   ],
   "internal-macroexpand-for-load": [
-   220,
-   221
+   221,
+   222
   ],
   "internal-set-alternative-font-family-alist": [
    15,
@@ -770,10 +811,10 @@
    15
   ],
   "internal-show-cursor": [
-   216
+   217
   ],
   "interpreted-function-p": [
-   222
+   223
   ],
   "invalid-function": [
    104
@@ -808,9 +849,9 @@
   "lambda": [
    132,
    133,
-   210,
-   220,
-   223
+   211,
+   221,
+   224
   ],
   "last-coding-system-used": [
    95
@@ -823,7 +864,7 @@
    141
   ],
   "last-nonminibuffer-frame": [
-   174
+   175
   ],
   "length": [
    103
@@ -831,19 +872,19 @@
   "let": [
    132,
    134,
-   225
+   226
   ],
   "lexical-binding": [
    85
   ],
   "libxml-available-p": [
-   162
+   161
   ],
   "libxml-parse-html-region": [
-   162
+   161
   ],
   "libxml-parse-xml-region": [
-   162
+   161
   ],
   "lisp-eval-depth-reserve": [
    88
@@ -851,9 +892,9 @@
   "load": [
    107,
    134,
-   221,
-   230,
-   231
+   222,
+   231,
+   232
   ],
   "load eval-buffer eval-region": [
    26
@@ -862,30 +903,30 @@
    25
   ],
   "load-file-rep-suffixes": [
-   225,
-   227
+   226,
+   228
   ],
   "load-history": [
-   214,
-   218,
-   229
+   215,
+   219,
+   230
   ],
   "load-path": [
    86,
    87
   ],
   "load-suffixes": [
-   225
+   226
   ],
   "local-variable-p": [
    40
   ],
   "locate-file-internal": [
-   238
+   239
   ],
   "locate-library": [
    87,
-   164
+   165
   ],
   "looking-at": [
    149,
@@ -895,11 +936,11 @@
    150
   ],
   "macroexp--pending-eager-loads": [
-   221
+   222
   ],
   "macroexpand": [
-   213,
-   220
+   214,
+   221
   ],
   "major-mode": [
    152
@@ -910,21 +951,21 @@
    55,
    80,
    81,
-   195
+   196
   ],
   "make-char-table": [
    74,
-   195
+   196
   ],
   "make-hash-table": [
    127
   ],
   "make-interpreted-closure": [
-   241
+   242
   ],
   "make-local-variable": [
    151,
-   226
+   227
   ],
   "make-marker": [
    76,
@@ -935,24 +976,24 @@
   ],
   "make-string": [
    101,
-   228
+   229
   ],
   "make-symbol": [
    84,
-   232
+   233
   ],
   "make-variable-buffer-local": [
    151,
-   224,
-   226
+   225,
+   227
   ],
   "make-vector": [
-   195,
    196,
-   198
+   197,
+   199
   ],
   "makunbound": [
-   225
+   226
   ],
   "map-char-table": [
    74
@@ -961,10 +1002,10 @@
    74
   ],
   "mapatoms": [
-   233
+   234
   ],
   "mapbacktrace": [
-   242
+   243
   ],
   "mapc": [
    51,
@@ -1004,7 +1045,7 @@
    88
   ],
   "memory-signal-data": [
-   196
+   197
   ],
   "menu-bar-lines": [
    152
@@ -1026,7 +1067,7 @@
    61
   ],
   "minibuffer-local-map": [
-   225
+   226
   ],
   "minibuffer-prompt-properties": [
    61
@@ -1035,13 +1076,13 @@
    61
   ],
   "minibuffer-selected-window": [
-   175
+   176
   ],
   "mode-line-format": [
    130,
    142,
    144,
-   171
+   172
   ],
   "mode-line-in-non-selected-windows": [
    142
@@ -1050,10 +1091,10 @@
    142
   ],
   "modify-category-entry": [
-   209
+   210
   ],
   "modify-frame-parameters": [
-   216
+   217
   ],
   "modify-syntax-entry": [
    149
@@ -1062,7 +1103,7 @@
    3
   ],
   "multibyte-string-p": [
-   184
+   185
   ],
   "native-comp-function-p": [
    48
@@ -1074,19 +1115,19 @@
    122
   ],
   "next-property-change": [
-   243
+   244
   ],
   "next-single-char-property-change": [
-   243
+   244
   ],
   "normal-top-level-add-to-load-path": [
    87
   ],
   "not-unicode-string": [
-   187,
    188,
    189,
-   190
+   190,
+   191
   ],
   "nreverse": [
    14
@@ -1095,13 +1136,13 @@
    50
   ],
   "obarray-make": [
-   235
+   236
   ],
   "obarrayp": [
-   233
+   234
   ],
   "oclosure-type": [
-   241
+   242
   ],
   "optimize-char-table": [
    157
@@ -1115,7 +1156,7 @@
    124
   ],
   "overriding-plist-environment": [
-   219
+   220
   ],
   "permanent-local": [
    151
@@ -1145,8 +1186,8 @@
    153,
    154,
    155,
-   178,
-   232
+   179,
+   233
   ],
   "prin1-to-string": [
    52,
@@ -1154,15 +1195,15 @@
    106,
    153,
    155,
-   178,
-   194,
-   232
+   179,
+   195,
+   233
   ],
   "princ": [
    153,
    154,
    155,
-   194
+   195
   ],
   "print": [
    153,
@@ -1203,25 +1244,25 @@
    155
   ],
   "propertize": [
-   186,
-   197
+   187,
+   198
   ],
   "provide": [
-   218,
-   229,
-   231
+   219,
+   230,
+   232
   ],
   "purify-flag": [
-   241
+   242
   ],
   "push macroexp-let2 gv-letplace": [
    27
   ],
   "put": [
-   219
+   220
   ],
   "put-text-property": [
-   186
+   187
   ],
   "quit-flag": [
    62
@@ -1241,8 +1282,7 @@
    78,
    79,
    107,
-   159,
-   185
+   186
   ],
   "read-from-minibuffer": [
    61,
@@ -1260,8 +1300,8 @@
    78,
    79,
    107,
-   185,
-   235
+   186,
+   236
   ],
   "read-positioning-symbols": [
    49
@@ -1274,10 +1314,10 @@
    70
   ],
   "recenter": [
-   177
+   178
   ],
   "record": [
-   195
+   196
   ],
   "recordp": [
    29
@@ -1286,49 +1326,52 @@
    138
   ],
   "remove-variable-watcher": [
-   215
+   216
   ],
   "replace-match": [
    42,
    43,
    44,
    45,
-   200,
    201,
    202,
    203,
    204,
-   205
+   205,
+   206
   ],
   "require": [
    86,
-   218,
-   229,
+   219,
    230,
-   231
+   231,
+   232
   ],
   "reset": [
    118,
-   244
+   245
   ],
   "reverse": [
    55,
-   195
+   196
   ],
   "romacs--host-input": [
    62
   ],
   "romacs--oclosure-type": [
-   241
+   242
   ],
   "romacs--read-host-event": [
    62
+  ],
+  "romacs-display": [
+   163
   ],
   "romacs-gui-install-command": [
    97
   ],
   "round": [
-   179
+   180
   ],
   "run-hook-with-args": [
    71
@@ -1343,7 +1386,7 @@
    143
   ],
   "scroll-down-aggressively": [
-   160
+   159
   ],
   "scroll-margin": [
    143
@@ -1352,18 +1395,18 @@
    143
   ],
   "scroll-up-aggressively": [
-   160
+   159
   ],
   "secure-hash": [
-   199
+   200
   ],
   "secure-hash-algorithms": [
-   199
+   200
   ],
   "selected-frame": [
    145,
-   174,
-   178
+   175,
+   179
   ],
   "selected-window": [
    145
@@ -1377,10 +1420,10 @@
   ],
   "set": [
    83,
-   225
+   226
   ],
   "set-buffer-redisplay": [
-   215
+   216
   ],
   "set-case-table": [
    53
@@ -1389,22 +1432,22 @@
    74
   ],
   "set-charset-priority": [
-   206
-  ],
-  "set-coding-system-priority": [
    207
   ],
+  "set-coding-system-priority": [
+   208
+  ],
   "set-default": [
-   225
+   226
   ],
   "set-face-attribute": [
    114,
    115,
    116,
-   246,
    247,
    248,
-   250
+   249,
+   251
   ],
   "set-match-data": [
    68
@@ -1421,17 +1464,17 @@
   ],
   "set-window-buffer": [
    145,
-   168
+   169
   ],
   "set-window-hscroll": [
-   176
+   177
   ],
   "set-window-new-total": [
-   169
+   170
   ],
   "set-window-start": [
    143,
-   180
+   181
   ],
   "set-window-vscroll": [
    130,
@@ -1444,42 +1487,42 @@
    14
   ],
   "setf": [
-   223
+   224
   ],
   "setplist": [
-   219
+   220
   ],
   "setq": [
-   225
+   226
   ],
   "signal": [
-   230
+   231
   ],
   "signal-hook-function": [
    88
   ],
   "skip-chars-backward": [
-   253
+   254
   ],
   "skip-chars-forward": [
-   253
+   254
   ],
   "sort": [
    17
   ],
   "source_string": [
-   188,
-   189
+   189,
+   190
   ],
   "special-event-map": [
    135
   ],
   "special-variable-p": [
    85,
-   225
+   226
   ],
   "split-window-internal": [
-   182
+   183
   ],
   "standard-case-table": [
    37
@@ -1512,7 +1555,7 @@
   "string-to-number": [
    69,
    72,
-   236
+   237
   ],
   "string-trim": [
    102
@@ -1525,11 +1568,11 @@
    105
   ],
   "subst-char-in-region": [
-   161
+   160
   ],
   "substring": [
    101,
-   228
+   229
   ],
   "supports": [
    113
@@ -1542,15 +1585,15 @@
    105
   ],
   "symbol-name": [
-   234
+   235
   ],
   "symbol-plist": [
    14,
-   219
+   220
   ],
   "symbol-value": [
    20,
-   225
+   226
   ],
   "symbol-with-pos-p": [
    49
@@ -1565,29 +1608,29 @@
    3
   ],
   "terminal-list": [
-   174
+   175
   ],
   "terminal-live-p": [
-   174,
-   208
+   175,
+   209
   ],
   "terminal-parameter": [
-   208
+   209
   ],
   "terpri": [
    154
   ],
   "test-completion": [
-   239,
-   240
+   240,
+   241
   ],
   "text-properties-at": [
    78,
-   186,
-   197
+   187,
+   198
   ],
   "text-quoting-style": [
-   237
+   238
   ],
   "theme-face": [
    112
@@ -1605,37 +1648,43 @@
   "transient": [
    108
   ],
+  "treesit-available-p": [
+   162
+  ],
   "truncate": [
-   179
+   180
   ],
   "truncate-lines": [
    152
   ],
   "try-completion": [
-   239,
-   240
+   240,
+   241
+  ],
+  "tty-color-alist": [
+   163
   ],
   "tty-top-frame": [
-   174
+   175
   ],
   "undefined": [
    138
   ],
   "undo-limit": [
-   226
+   227
   ],
   "unibyte-string": [
-   184
+   185
   ],
   "unicode-property-table-internal": [
    39
   ],
   "unify-charset": [
-   206
+   207
   ],
   "unintern": [
-   233,
-   234
+   234,
+   235
   ],
   "unread-command-events": [
    61,
@@ -1651,7 +1700,7 @@
    17
   ],
   "vconcat": [
-   195
+   196
   ],
   "vector": [
    101
@@ -1667,72 +1716,72 @@
    95
   ],
   "window-bottom-divider-width": [
-   171
+   172
   ],
   "window-buffer": [
    145
   ],
   "window-combination-limit": [
-   174
+   175
   ],
   "window-end": [
-   181
+   182
   ],
   "window-header-line-height": [
-   171
+   172
   ],
   "window-hscroll": [
-   176
+   177
   ],
   "window-list": [
-   174
+   175
   ],
   "window-mode-line-height": [
-   171
+   172
   ],
   "window-persistent-parameters": [
-   225
+   226
   ],
   "window-point": [
    145,
-   168
-  ],
-  "window-resize-apply-total": [
    169
   ],
+  "window-resize-apply-total": [
+   170
+  ],
   "window-right-divider-width": [
-   171
+   172
   ],
   "window-scroll-bar-height": [
-   171
+   172
   ],
   "window-scroll-bar-width": [
-   171
+   172
   ],
   "window-start": [
    143,
    145,
-   168,
-   172
+   169,
+   173
   ],
   "window-tab-line-height": [
-   171
+   172
   ],
   "window-total-height": [
-   169
+   170
   ],
   "window-vscroll": [
    130,
    142
   ],
   "with-eval-after-load": [
-   229
+   230
   ],
   "with-output-to-string": [
-   194
+   195
   ],
   "with-temp-buffer": [
-   167
+   168
   ],
   "write-char": [
    154
@@ -1744,7 +1793,7 @@
    105
   ],
   "wrong-type-argument": [
-   211
+   212
   ]
  },
  "rows": [
@@ -2681,7 +2730,7 @@
    "planned": false,
    "mechanism": "`read-from-string` reader substrate",
    "gnu": "GNU `lread.c:2511` reads the complete Emacs syntax. `#s(` (`src/lread.c:3852`) opens a record; at `)` (`:3770-3780`) a first element `hash-table` makes a table through `hash_table_from_plist` (`:3153`: `test`, `weakness`, `purecopy` and `data` by `plist_get`, first pair wins; data must be a proper list of even length, checked before `make-hash-table`), any other first element a record via `record_from_list` (`:3198`); `#s` not followed by `(`, `#s()` and a dot token inside signal `invalid-read-syntax` with the buffered text (`\"#sx\"`, `\"#s\"`, `\".\"`). A `.` is the dot token only when the next character is a control/space character, NO-BREAK SPACE, one of `\"';([#?` `` ` `` `,` or end of input (`:4126-4133`); before anything else, `)` and `]` included, it starts a symbol or number, so `#s(hash-table .)` reads `(#s(hash-table) . 16)` and `(a .)` is a list of `a` and the symbol `.`. A dot token outside a list with an element (list start, vector, record, top level, tail) signals `\".\"` (`:4140`); a closer in the tail position signals the closer (`:3789,3827`). Also `#N=`/`#N#`, the other `#` dispatch syntaxes, and raw unibyte strings (octet 255 remains unibyte)",
-   "romacs": "VM2 calls its actual source reader with character-index bounds and offsets. `#s(hash-table ...)` is read exactly as GNU, including its error conditions and data and its ignored keys (`crates/romacs-vm/src/reader.rs` `Reader::record`, `hash.rs` `hash_table_from_plist`; 108-case live-GNU corpus `crates/romacs-vm/evidence/hash-read-syntax/`, `tests/hash_read_syntax.rs`), so the `hashtable-print-readable` syntax is supported when reached (not a complete-subr load claim). Radix `#b`/`#o`/`#x`/`#Nr` syntax now has arbitrary-precision results and GNU-matched condition data (183 live pinned-GNU witnesses in `evidence/radix-reader/`). Records now have a distinct traced/forwarded heap representation and `#s(TYPE ...)` reads a record with GNU's 4095-total-slot limit (`tests/records.rs`). Remaining differences: (1) completed `#N=`/`#N#` aliases are supported; forward/self references and other unsupported dispatch syntaxes signal rather than fabricate objects; (2) a hash table read from SOURCE that is being compiled or loaded (a literal `#s(hash-table ...)` in code, as in `shortdoc-doc.el`) fails with `source datum required`, because a table has no source spelling for the compiler and its caches; reading one at run time (`read-from-string`, `eval` of the result) works. The dot rule is GNU's for lists, vectors and `#s(` alike (before vm2/hashread lists and vectors used VM2's general delimiter set, so `(a .?x)` and `(a .#s(hash-table))` read a symbol `.?x`/`.#s` and `(a .)`/`.)` were refused); its two remaining differences are VM2-READ2 (NO-BREAK SPACE after a dot) and VM2-READ5 (`\"expected )\"`). Raw and mixed 22-bit string input is now supported; non-Unicode symbol names explicitly signal, and other reader fault payloads remain partial",
+   "romacs": "VM2 calls its actual source reader with character-index bounds and offsets. `#s(hash-table ...)` is read exactly as GNU, including its error conditions and data and its ignored keys (`crates/romacs-vm/src/reader.rs` `Reader::record`, `hash.rs` `hash_table_from_plist`; 108-case live-GNU corpus `crates/romacs-vm/evidence/hash-read-syntax/`, `tests/hash_read_syntax.rs`), so the `hashtable-print-readable` syntax is supported when reached (not a complete-subr load claim). Radix `#b`/`#o`/`#x`/`#Nr` syntax now has arbitrary-precision results and GNU-matched condition data (183 live pinned-GNU witnesses in `evidence/radix-reader/`). Records now have a distinct traced/forwarded heap representation and `#s(TYPE ...)` reads a record with GNU's 4095-total-slot limit (`tests/records.rs`). Remaining differences: (1) completed `#N=`/`#N#` aliases are supported; forward/self references and other unsupported dispatch syntaxes signal rather than fabricate objects; (2) a hash table read from SOURCE that is being compiled or loaded (a literal `#s(hash-table ...)` in code, as in `shortdoc-doc.el`) is a self-evaluating constant, as in GNU. `##`, `#:NAME`, `#_NAME` and `#!` read as GNU reads them. The dot rule is GNU's for lists, vectors and `#s(` alike (before vm2/hashread lists and vectors used VM2's general delimiter set, so `(a .?x)` and `(a .#s(hash-table))` read a symbol `.?x`/`.#s` and `(a .)`/`.)` were refused); its two remaining differences are VM2-READ2 (NO-BREAK SPACE after a dot) and VM2-READ5 (`\"expected )\"`). Raw and mixed 22-bit string input is now supported; non-Unicode symbol names explicitly signal, and other reader fault payloads remain partial",
    "why": "**Package-observable staged reader:** circular and other dispatch round trips and source-literal hash tables still need reader substrate work.",
    "symbols": [
     "read-from-string"
@@ -3381,7 +3430,7 @@
    "planned": false,
    "mechanism": "`key-binding` NO-REMAP and POSITION arguments; `command-remapping`",
    "gnu": "Uses POSITION to choose active maps and command remapping, and non-nil NO-REMAP to bypass remapping (`src/keymap.c:1836-1852`); `command-remapping` looks `[remap COMMAND]` up with `key-binding` (NO-REMAP t) or, given KEYMAPS, `lookup-key` (`src/keymap.c:1216`)",
-   "romacs": "VM2 `key-binding` searches only the buffer's local map and the global map and never applies command remapping, so a nil NO-REMAP returns the unremapped binding; a non-nil POSITION signals `key-binding POSITION not supported`. `command-remapping` with KEYMAPS follows GNU; without them it sees only those two maps",
+   "romacs": "VM2 `key-binding` searches only the buffer's local map and the global map and never applies command remapping, so a nil NO-REMAP returns the unremapped binding; a non-nil POSITION signals `key-binding POSITION not supported`. `command-remapping` with KEYMAPS follows GNU; without them it sees only those two maps. `lookup-key` runs a menu item's `:filter` as GNU's lookup does (rlisp `romacs--menu-filter`); `key-binding` and `define-key` refuse a binding that needs one",
    "why": "**Package-observable:** a `[remap ...]` binding in a minor-mode or overriding map is not found, and `(key-binding [97] nil nil 1)` fails. Code that names its keymaps, as `keymap-lookup` callers usually do, gets GNU's answer",
    "symbols": [
     "key-binding",
@@ -4415,22 +4464,6 @@
    "symbols_derived": false
   },
   {
-   "id": "VM2-READNAME1",
-   "source": "DIVERGENCES.md",
-   "section": "Observable by a package",
-   "observable": true,
-   "planned": false,
-   "mechanism": "`\\N{NAME}` character escapes",
-   "gnu": "`lread.c` decodes `\\N{U+XXXX}` and looks any other NAME up with Lisp `char-from-name`.",
-   "romacs": "`\\N{U+XXXX}` follows GNU, including its errors; a Unicode name signals `invalid-read-syntax` \"VM2 reader: \\N{NAME} needs char-from-name\".",
-   "why": "The reader cannot call Lisp mid-read. GNU's preloaded files avoid names (characters.el says so); `auth-source.el`, `shr.el`, `char-fold.el` and `textsec.el` use them.",
-   "symbols": [
-    "char-from-name",
-    "read"
-   ],
-   "symbols_derived": false
-  },
-  {
    "id": "VM2-CVAR-PRED1",
    "source": "DIVERGENCES.md",
    "section": "Observable by a package",
@@ -4480,6 +4513,52 @@
     "libxml-available-p",
     "libxml-parse-html-region",
     "libxml-parse-xml-region"
+   ],
+   "symbols_derived": false
+  },
+  {
+   "id": "VM2-TREESIT1",
+   "source": "DIVERGENCES.md",
+   "section": "Observable by a package",
+   "observable": true,
+   "planned": false,
+   "mechanism": "`treesit-available-p`",
+   "gnu": "A GNU build with tree-sitter returns t once the library loads and provides the `treesit-*` parser primitives (`treesit.c:5295`).",
+   "romacs": "VM2 has no tree-sitter: `treesit-available-p` returns nil, as a GNU built without HAVE_TREE_SITTER does, and the parser primitives are void.",
+   "why": "`*-ts-mode` major modes are unavailable; packages that check the predicate (treesit.el's own defcustoms, sh-script, org-src) take their regexp font-lock paths.",
+   "symbols": [
+    "treesit-available-p"
+   ],
+   "symbols_derived": false
+  },
+  {
+   "id": "VM2-DISPLAY1",
+   "source": "DIVERGENCES.md",
+   "section": "Observable by a package",
+   "observable": true,
+   "planned": false,
+   "mechanism": "Display queries (`display-graphic-p`, `display-color-cells`, `display-pixel-width`, `display-monitor-attributes-list`, ...), colors (`color-values`, `color-defined-p`, `defined-colors`) and `frame-set-background-mode`",
+   "gnu": "frame.el and faces.el dispatch on the frame type to `x-`, `w32-`, `ns-`, `pgtk-`, `haiku-`, `android-` and `tty-` C primitives; a batch session answers for its initial terminal, approximating colors to 8 tty colors (`tty-colors.el`)",
+   "romacs": "rlisp/romacs-frame.el answers every one of them from one capability record, `romacs-display`. Without a GUI the record is pinned GNU's batch answers (not graphic, 0 color cells, 3 planes, `mono`, `dark`, the 8 standard colors), so package tests see GNU's batch values; colors keep tty-colors.el's names and approximation over the record's palette. No `tty-*` terminal primitives exist; the GUI does not set the record yet, so GUI frames still answer as batch does (VM2-WIN5)",
+   "why": "**Package-observable** in the GUI until it sets the record: graphic-only features stay off. Frame geometry, edges, z-order and mouse-position queries are not yet owned",
+   "symbols": [
+    "display-graphic-p",
+    "display-color-cells",
+    "display-color-p",
+    "display-grayscale-p",
+    "display-planes",
+    "display-visual-class",
+    "display-pixel-width",
+    "display-pixel-height",
+    "display-mm-width",
+    "display-mm-height",
+    "display-monitor-attributes-list",
+    "color-values",
+    "color-defined-p",
+    "defined-colors",
+    "tty-color-alist",
+    "frame-set-background-mode",
+    "romacs-display"
    ],
    "symbols_derived": false
   },
@@ -4762,11 +4841,12 @@
    "section": "Observable by a package",
    "observable": true,
    "planned": false,
-   "mechanism": "`round` / `ceiling` / `truncate` accept fixnum/float operands and return fixnums",
-   "gnu": "GNU `rounding_driver` (`src/floatfns.c:404`) divides exactly and returns a bignum when the integral result exceeds the fixnum range, e.g. `(round 1e300)`",
-   "romacs": "Romacs shares exact quotient rounding for these operations (an odd mantissa times a power of two and u128 long division), but this path accepts only fixnum/float operands and does not promote integral results outside the fixnum range into bignum storage: such results signal `overflow-error`. Bignum operands remain unsupported. Existing pins in `tools/primh/evidence/round.json` and `ceiling.json` retain their recorded result, printer and signal differences. `truncate` has a separate live GNU comparison over its supported numeric domain.",
-   "why": "**Package-observable** for bignum operands and integral results outside the fixnum range",
+   "mechanism": "`floor` / `round` / `ceiling` / `truncate` with a bignum operand under a DIVISOR, or a quotient past 2^127",
+   "gnu": "GNU `rounding_driver` (`src/floatfns.c:404`) divides exactly with mpz arithmetic for any integer or float operands",
+   "romacs": "Romacs shares exact quotient rounding (an odd mantissa times a power of two and u128 long division) and returns bignums for integral results outside the fixnum range, e.g. `(round 1e300)`; an integer, bignums included, rounds to itself. A bignum operand together with a DIVISOR signals `wrong-type-argument numberp`, and an exact quotient past 2^127 signals `overflow-error`. Existing pins in `tools/primh/evidence/round.json` and `ceiling.json` retain their recorded result, printer and signal differences.",
+   "why": "**Package-observable** only for bignum division and astronomically large quotients",
    "symbols": [
+    "floor",
     "round",
     "ceiling",
     "truncate"
@@ -5323,7 +5403,7 @@
    "planned": false,
    "mechanism": "`defvaralias` state VM2 does not model",
    "gnu": "`Fdefvaralias` (`src/eval.c:631-726`) refuses `SYMBOL_FORWARDED` built-in C variables (`Cannot make a built-in variable an alias`), runs variable watchers (`notify_variable_watchers`) and records the alias in `load-history` (`LOADHIST_ATTACH`); the alias is part of the dumped/pdumped image",
-   "romacs": "VM2 forwards only the built-in variables it defines (VM2-CVAR1): aliasing one of those, e.g. `fill-column`, now signals exactly as GNU does; aliasing any other GNU built-in still succeeds (`(defvaralias 'tab-width 'y)` => `y`, GNU signals `Cannot make a built-in variable an alias: tab-width`). `defvaralias` does not notify variable watchers (VM2-WATCH1) and VM2 has no `load-history`, so neither is updated; a code image does not persist aliases (image load rebuilds `variable_redirects` without them). `indirect-variable` and `internal-delete-indirect-variable` are absent (void-function). Every other check and effect is GNU's, in GNU's order, and 910 of 958 harness rows match exactly (48 PRINTER pins, all circular-list rows)",
+   "romacs": "VM2 forwards only the built-in variables it defines (VM2-CVAR1): aliasing one of those, e.g. `fill-column`, now signals exactly as GNU does; aliasing any other GNU built-in still succeeds (`(defvaralias 'tab-width 'y)` => `y`, GNU signals `Cannot make a built-in variable an alias: tab-width`). `defvaralias` does not notify variable watchers (VM2-WATCH1) and VM2 has no `load-history`, so neither is updated; a code image does not persist aliases (image load rebuilds `variable_redirects` without them). `indirect-variable` follows the chain as GNU's does; `internal-delete-indirect-variable` is absent (void-function). Every other check and effect is GNU's, in GNU's order, and 910 of 958 harness rows match exactly (48 PRINTER pins, all circular-list rows)",
    "why": "**Package-observable** only for code that aliases a C built-in VM2 does not define, watches variables, inspects `load-history`, or calls `indirect-variable`; ordinary `define-obsolete-variable-alias` and `defvaralias` of Lisp variables behave as in GNU",
    "symbols": [
     "defvaralias",

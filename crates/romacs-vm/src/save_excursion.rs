@@ -62,3 +62,55 @@ impl Vm {
         Ok(dest)
     }
 }
+
+impl Vm {
+    /// GNU editfns.c save_restriction_save/restore: the accessible bounds
+    /// as a left-biased start and right-biased end marker, plus whether the
+    /// buffer was narrowed at all. Cleanup restores that buffer's
+    /// restriction (or widens it) without changing the current buffer, and
+    /// detaches the markers.
+    pub(super) fn save_restriction(&mut self, b: &mut Builder, body: &[Form]) -> Result<usize> {
+        use Primitive::*;
+        let min = Self::excursion_call(b, PointMin, &[]);
+        let max = Self::excursion_call(b, PointMax, &[]);
+        let size = Self::excursion_call(b, BufferSize, &[]);
+        let z = Self::excursion_call(b, Inc, &[size]);
+        let one = b.reg();
+        b.emit(Op::Const(one, Value::integer(1)?));
+        let at_beg = Self::excursion_call(b, Eq, &[min, one]);
+        let at_end = Self::excursion_call(b, Eq, &[max, z]);
+        let t = b.reg();
+        b.emit(Op::Const(t, Value::TRUE));
+        let start = Self::excursion_call(b, CopyMarker, &[min]);
+        let end = Self::excursion_call(b, CopyMarker, &[max, t]);
+        let dest = b.reg();
+        let protect = b.emit(Op::Protect(dest, 0, 0));
+        let result = self.progn(b, body)?;
+        b.emit(Op::LeaveProtect(result));
+        let cleanup = b.code.len();
+        let buffer = Self::excursion_call(b, MarkerBuffer, &[start]);
+        let dead = b.emit(Op::Unless(buffer, 0));
+        let current = Self::excursion_call(b, CurrentBuffer, &[]);
+        Self::excursion_call(b, SetBuffer, &[buffer]);
+        let narrowed_beg = b.emit(Op::Unless(at_beg, 0));
+        let narrowed_end = b.emit(Op::Unless(at_end, 0));
+        Self::excursion_call(b, Widen, &[]);
+        let restored = b.emit(Op::Jump(0));
+        let narrow = b.code.len();
+        b.code[narrowed_beg] = Op::Unless(at_beg, narrow);
+        b.code[narrowed_end] = Op::Unless(at_end, narrow);
+        let from = Self::excursion_call(b, MarkerPosition, &[start]);
+        let to = Self::excursion_call(b, MarkerPosition, &[end]);
+        Self::excursion_call(b, Narrow, &[from, to]);
+        b.code[restored] = Op::Jump(b.code.len());
+        Self::excursion_call(b, SetBuffer, &[current]);
+        let nil = b.reg();
+        b.emit(Op::Const(nil, Value::NIL));
+        Self::excursion_call(b, SetMarker, &[start, nil]);
+        Self::excursion_call(b, SetMarker, &[end, nil]);
+        b.code[dead] = Op::Unless(buffer, b.code.len());
+        b.emit(Op::ResumeExit);
+        b.code[protect] = Op::Protect(dest, cleanup, b.code.len());
+        Ok(dest)
+    }
+}

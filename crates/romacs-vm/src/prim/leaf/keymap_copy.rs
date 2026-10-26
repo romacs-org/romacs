@@ -81,3 +81,14 @@ impl Leaf<'_> {
         Ok(element)
     }
 }
+
+impl Leaf<'_> {
+    /// One `lookup-key' walk; Err((item, filter, definition)) names the
+    /// menu filter it still needs.
+    pub(crate) fn lookup_key_walk(&mut self, map: Value, key: Value, defaults: bool, filters: Vec<(Value, Value)>)
+        -> std::result::Result<std::result::Result<Value, (Value, Value, Value)>, Fault> {
+        self.vm.lookup_key_walk(map, key, defaults, filters).map_err(|e| {
+            if e == "keymap required" { Fault::Wrong("keymapp", map) } else { Fault::Error(e) }
+        })
+    }
+}

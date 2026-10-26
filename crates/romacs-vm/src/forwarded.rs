@@ -58,6 +58,15 @@ pub(crate) enum Predicate {
     Symbolp,
 }
 
+/// EMACS_CONFIGURATION: this host's triple in config.guess's spelling.
+const HOST_CONFIGURATION: &str = if cfg!(target_arch = "x86_64") {
+    "x86_64-pc-linux-gnu"
+} else if cfg!(target_arch = "aarch64") {
+    "aarch64-unknown-linux-gnu"
+} else {
+    "unknown-unknown-linux-gnu"
+};
+
 /// C variables that no Rust code reads: GNU's DEFVAR site and initial value,
 /// installed as ordinary special variables on first intern. Being plain
 /// value cells, they can be let-bound and made buffer-local like any Lisp
@@ -223,6 +232,7 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "mouse-leave-buffer-hook", gnu: "callint.c:906", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "mouse-prefer-closest-glyph", gnu: "dispnew.c:7541", kind: Kind::Bool(false) },
     CVariable { name: "move-frame-functions", gnu: "frame.c:7504", kind: Kind::Lisp(Init::Nil) },
+    CVariable { name: "movemail-program-name", gnu: "callproc.c:2204", kind: Kind::Lisp(Init::Str("movemail")) },
     CVariable { name: "multiple-terminals-merge-keyboards", gnu: "keyboard.c:14491", kind: Kind::Bool(false) },
     CVariable { name: "native-comp-jit-compilation", gnu: "comp.c:5597", kind: Kind::Bool(true) },
     CVariable { name: "network-coding-system-alist", gnu: "coding.c:12067", kind: Kind::Lisp(Init::Nil) },
@@ -277,6 +287,8 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "special-mirror-table", gnu: "xdisp.c:39379", kind: Kind::Lisp(Init::CharTable(&CharTableInit { purpose: None, extras: &[], init: Init::Nil, ranges: &[] })) },
     CVariable { name: "symbols-with-pos-enabled", gnu: "data.c:4386", kind: Kind::Bool(false) },
     CVariable { name: "syntax-propertize--done", gnu: "syntax.c:3778", kind: Kind::Int(-1) },
+    CVariable { name: "system-configuration", gnu: "emacs.c:3517", kind: Kind::Lisp(Init::Str(HOST_CONFIGURATION)) },
+    CVariable { name: "system-configuration-options", gnu: "emacs.c:3521", kind: Kind::Lisp(Init::Str("")) },
     CVariable { name: "system-key-alist", gnu: "keyboard.c:14170", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "system-messages-locale", gnu: "emacs.c:3573", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "system-time-locale", gnu: "emacs.c:3581", kind: Kind::Lisp(Init::Nil) },

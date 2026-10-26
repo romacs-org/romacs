@@ -68,6 +68,19 @@ class LispLayoutTests(unittest.TestCase):
                     for notice in notices:
                         self.assertIn(notice, source)
                     self.assertIn('Adapted from GNU ert.el', source)
+                elif file == ROOT / 'rlisp/romacs-frame.el':
+                    # Derives frame.el's background-mode function and faces.el's
+                    # color API, and must retain both notices.
+                    for upstream, notice in (('gnu-lisp/frame.el', ';; Copyright (C) 1993-1994, 1996-1997, 2000-2026 Free Software\n;; Foundation, Inc.'),
+                                             ('gnu-lisp/faces.el', ';; Copyright (C) 1992-2026 Free Software Foundation, Inc.')):
+                        self.assertIn(notice, (ROOT / upstream).read_text())
+                        self.assertIn(notice, source)
+                    self.assertIn('Adapted from GNU frame.el', source)
+                elif file == ROOT / 'rlisp/romacs-keymap.el':
+                    # Derived from GNU src/keymap.c and src/keyboard.c, outside gnu-lisp/.
+                    self.assertIn(';; Copyright (C) 1985-1988, 1993-1995, 1998-2026 Free Software', source)
+                    self.assertIn(';; Copyright (C) 1985-1989, 1993-1997, 1999-2026 Free Software Foundation,', source)
+                    self.assertIn('Adapted from GNU src/keymap.c', source)
                 elif file == ROOT / 'rlisp/romacs-unidata.el':
                     # Derived from admin/unidata/unidata-gen.el, outside gnu-lisp/.
                     self.assertIn(';; Copyright (C) 2008-2026 Free Software Foundation, Inc.', source)

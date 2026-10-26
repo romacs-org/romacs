@@ -226,6 +226,31 @@ impl Reader<'_, '_> {
             }
         }
     }
+    /// lread.c `#:' / `#_': what makes the following name empty.
+    fn empty_symbol_follows(c: u32) -> bool {
+        c <= 32 || c == 0xa0 || b"\"';#()[]`,".iter().any(|&b| u32::from(b) == c)
+    }
+    /// A symbol token from FIRST up to a delimiter, backslash escapes
+    /// taken literally; true when any character was escaped.
+    fn symbol_token(&mut self, first: u32) -> Result<(String, bool)> {
+        let mut token = String::new();
+        let mut escaped = first == 92;
+        token.push(
+            char::from_u32(if escaped { self.next()? } else { first })
+                .ok_or("non-Unicode symbol name is not supported")?,
+        );
+        while self.peek().is_some_and(|c| !Self::delimiter(c)) {
+            let c = self.next()?;
+            if c == 92 {
+                escaped = true;
+                token.push(char::from_u32(self.next()?).ok_or("non-Unicode symbol name is not supported")?);
+            } else {
+                token.push(char::from_u32(c).ok_or("non-Unicode symbol name is not supported")?);
+            }
+        }
+        self.unread_lookahead()?;
+        Ok((token, escaped))
+    }
     fn delimiter(c: u32) -> bool {
         c.is_ascii_whitespace() || [40, 41, 91, 93, 34, 59, 39, 96, 44].contains(&c)
     }
@@ -699,8 +724,8 @@ impl Reader<'_, '_> {
     }
     /// lread.c read_char_escape's `\N{NAME}', NAME read as GNU does
     /// (whitespace runs fold to one space, no non-ASCII). `U+XXXX' is
-    /// decoded here; a Unicode name needs Lisp `char-from-name', which the
-    /// reader cannot call, and is refused.
+    /// decoded here; any other NAME is GNU's Lisp `char-from-name' with
+    /// IGNORE-CASE, called as a function stream is (roots kept).
     fn character_name(&mut self) -> Result<i64> {
         if self.next()? != 123 {
             return Err("Expected opening brace after \\N".into());
@@ -723,7 +748,12 @@ impl Reader<'_, '_> {
         }
         if name.is_empty() { return Err("Empty character name".into()); }
         let Some(hex) = name.strip_prefix("U+") else {
-            return Err(format!("VM2 reader: \\N{{{name}}} needs char-from-name"));
+            let function = self.vm.intern("char-from-name");
+            let string = self.vm.byte_string(name.as_bytes());
+            let code = self.vm.reader_call(function, &[string, Value::TRUE])?;
+            return code.integer_value()
+                .filter(|&code| (0..=0x10ffff).contains(&code) && !(0xd800..=0xdfff).contains(&code))
+                .ok_or_else(|| format!("\\N{{{name}}}"));
         };
         u32::from_str_radix(hex, 16).ok()
             .filter(|&code| !hex.starts_with('+') && code <= 0x10ffff && !(0xd800..=0xdfff).contains(&code))
@@ -831,6 +861,24 @@ impl Reader<'_, '_> {
                 111 | 79 => self.radix_integer(8),
                 120 | 88 => self.radix_integer(16),
                 c @ 48..=57 => self.numbered_dispatch(c, depth),
+                // ## -- the interned symbol whose name is empty.
+                35 => Ok(self.vm.intern("")),
+                // #:X uninterned, #_X without shorthand (VM2 has none): a
+                // symbol whatever the token looks like; nothing after it is
+                // the empty name.
+                dispatch @ (58 | 95) => {
+                    let uninterned = dispatch == 58;
+                    let name = match self.peek() {
+                        Some(c) if !Self::empty_symbol_follows(c) => { let first = self.next()?; self.symbol_token(first)?.0 }
+                        _ => String::new(),
+                    };
+                    Ok(if uninterned { self.vm.uninterned_symbol(&name) } else { self.vm.intern(&name) })
+                }
+                // #! starts an executable file's first line: skip it.
+                33 => {
+                    while self.peek().is_some_and(|c| c != 10) { self.next()?; }
+                    self.form_inner(depth)
+                }
                 _ => Err("unsupported # reader syntax".into()),
             },
             63 => {
@@ -945,27 +993,7 @@ impl Reader<'_, '_> {
                 }
             }
             first => {
-                let mut token = String::new();
-                let mut escaped = first == 92;
-                token.push(
-                    char::from_u32(if escaped { self.next()? } else { first })
-                        .ok_or("non-Unicode symbol name is not supported")?,
-                );
-                while self.peek().is_some_and(|c| !Self::delimiter(c)) {
-                    let c = self.next()?;
-                    if c == 92 {
-                        escaped = true;
-                        token.push(
-                            char::from_u32(self.next()?)
-                                .ok_or("non-Unicode symbol name is not supported")?,
-                        );
-                    } else {
-                        token.push(
-                            char::from_u32(c).ok_or("non-Unicode symbol name is not supported")?,
-                        );
-                    }
-                }
-                self.unread_lookahead()?;
+                let (token, escaped) = self.symbol_token(first)?;
                 if !escaped {
                     // GNU also accepts decimal integers with a trailing dot.
                     let integer = token.strip_suffix('.').unwrap_or(&token);
@@ -1010,6 +1038,13 @@ impl Reader<'_, '_> {
 }
 
 impl Vm {
+    /// A fresh symbol outside the obarray, as `make-symbol' makes.
+    pub(crate) fn uninterned_symbol(&mut self, name: &str) -> Value {
+        let value = self.generated_symbol(crate::expand::generated_id());
+        let slot = value.index_if(7).unwrap() - 1;
+        self.symbol_names[slot] = name.to_owned();
+        value
+    }
     /// Interning is stable for this VM's lifetime, independent of moving GC.
     pub(crate) fn intern(&mut self, name: &str) -> Value {
         match name {
@@ -1285,6 +1320,7 @@ impl Vm {
                 Object::Bignum(_)
                 | Object::Record(_)
                 | Object::BoolVector(_)
+                | Object::HashTable(_)
                 | Object::CharTable(_)
                 | Object::SubCharTable(_) => {
                     Ok(Form::Object(crate::handle::FormObject::new(self, value)))

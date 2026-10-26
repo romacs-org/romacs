@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "e5cb0d27bee1a84416143a5354a02ab4305fd60531adefcf0c1bdacf7c249c5d",
+  "source_fingerprint": "8661efbdc5a5c983909adcae62b375f61f994768260179b15ed69c8016d8d49b",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,21 +11,21 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 712,
-  "parsed_vm2_only": 712
+  "parsed_total": 740,
+  "parsed_vm2_only": 740
  },
  "primitives": {
   "#:vm2-closure-document": {
    "name": "#:vm2-closure-document",
    "implementation": "vm2",
    "variant": "Primitive::ClosureDocument",
-   "registered_at": "crates/romacs-vm/src/lib.rs:750"
+   "registered_at": "crates/romacs-vm/src/lib.rs:751"
   },
   "#:vm2-closure-metadata": {
    "name": "#:vm2-closure-metadata",
    "implementation": "vm2",
    "variant": "Primitive::ClosureMetadata",
-   "registered_at": "crates/romacs-vm/src/lib.rs:749"
+   "registered_at": "crates/romacs-vm/src/lib.rs:750"
   },
   "#:vm2-defface": {
    "name": "#:vm2-defface",
@@ -37,13 +37,13 @@
    "name": "#:vm2-defvar-boundp",
    "implementation": "vm2",
    "variant": "Primitive::DefvarBoundp",
-   "registered_at": "crates/romacs-vm/src/lib.rs:724"
+   "registered_at": "crates/romacs-vm/src/lib.rs:725"
   },
   "#:vm2-defvar-set-default": {
    "name": "#:vm2-defvar-set-default",
    "implementation": "vm2",
    "variant": "Primitive::DefvarSetDefault",
-   "registered_at": "crates/romacs-vm/src/lib.rs:725"
+   "registered_at": "crates/romacs-vm/src/lib.rs:726"
   },
   "#:vm2-hash-key": {
    "name": "#:vm2-hash-key",
@@ -63,6 +63,12 @@
    "variant": "Primitive::HashValueAt",
    "registered_at": "crates/romacs-vm/src/lib.rs:649"
   },
+  "#:vm2-lookup-key": {
+   "name": "#:vm2-lookup-key",
+   "implementation": "vm2",
+   "variant": "Primitive::LookupKey",
+   "registered_at": "crates/romacs-vm/src/lib.rs:712"
+  },
   "#:vm2-set-interactive-form": {
    "name": "#:vm2-set-interactive-form",
    "implementation": "vm2",
@@ -72,7 +78,7 @@
    "name": "#:vm2-temp-buffer",
    "implementation": "vm2",
    "variant": "Primitive::TempBuffer",
-   "registered_at": "crates/romacs-vm/src/lib.rs:744"
+   "registered_at": "crates/romacs-vm/src/lib.rs:745"
   },
   "#:vm2-yank-finalize": {
    "name": "#:vm2-yank-finalize",
@@ -172,6 +178,11 @@
    "variant": "Primitive::Abs",
    "registered_at": "crates/romacs-vm/src/lib.rs:498"
   },
+  "acos": {
+   "name": "acos",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/floatfns.rs:11"
+  },
   "active-minibuffer-window": {
    "name": "active-minibuffer-window",
    "implementation": "vm2",
@@ -196,7 +207,7 @@
    "name": "append",
    "implementation": "vm2",
    "variant": "Primitive::Append",
-   "registered_at": "crates/romacs-vm/src/lib.rs:728"
+   "registered_at": "crates/romacs-vm/src/lib.rs:729"
   },
   "apply": {
    "name": "apply",
@@ -225,6 +236,11 @@
    "name": "ash",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/bitwise.rs:65"
+  },
+  "asin": {
+   "name": "asin",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/floatfns.rs:14"
   },
   "assoc": {
    "name": "assoc",
@@ -261,7 +277,7 @@
    "name": "autoload-do-load",
    "implementation": "vm2",
    "variant": "Primitive::AutoloadDoLoad",
-   "registered_at": "crates/romacs-vm/src/lib.rs:746"
+   "registered_at": "crates/romacs-vm/src/lib.rs:747"
   },
   "backtrace--locals": {
    "name": "backtrace--locals",
@@ -551,7 +567,7 @@
   "ceiling": {
    "name": "ceiling",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/rounding.rs:189"
+   "registered_at": "crates/romacs-vm/src/prims/rounding.rs:199"
   },
   "char-after": {
    "name": "char-after",
@@ -705,6 +721,11 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/coding.rs:71"
   },
+  "color-values-from-color-spec": {
+   "name": "color-values-from-color-spec",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/face.rs:476"
+  },
   "command-remapping": {
    "name": "command-remapping",
    "implementation": "vm2",
@@ -786,6 +807,16 @@
    "variant": "Primitive::CopySyntaxTable",
    "registered_at": "crates/romacs-vm/src/lib.rs:663"
   },
+  "copysign": {
+   "name": "copysign",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/floatfns.rs:34"
+  },
+  "cos": {
+   "name": "cos",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/floatfns.rs:17"
+  },
   "current-buffer": {
    "name": "current-buffer",
    "implementation": "vm2",
@@ -806,7 +837,7 @@
    "name": "current-global-map",
    "implementation": "vm2",
    "variant": "Primitive::CurrentGlobalMap",
-   "registered_at": "crates/romacs-vm/src/lib.rs:713"
+   "registered_at": "crates/romacs-vm/src/lib.rs:714"
   },
   "current-indentation": {
    "name": "current-indentation",
@@ -863,19 +894,19 @@
    "name": "custom-variable-p",
    "implementation": "vm2",
    "variant": "Primitive::CustomVariableP",
-   "registered_at": "crates/romacs-vm/src/lib.rs:723"
+   "registered_at": "crates/romacs-vm/src/lib.rs:724"
   },
   "daemon-initialized": {
    "name": "daemon-initialized",
    "implementation": "vm2",
    "variant": "Primitive::DaemonInitialized",
-   "registered_at": "crates/romacs-vm/src/lib.rs:739"
+   "registered_at": "crates/romacs-vm/src/lib.rs:740"
   },
   "daemonp": {
    "name": "daemonp",
    "implementation": "vm2",
    "variant": "Primitive::Daemonp",
-   "registered_at": "crates/romacs-vm/src/lib.rs:738"
+   "registered_at": "crates/romacs-vm/src/lib.rs:739"
   },
   "decode-char": {
    "name": "decode-char",
@@ -988,10 +1019,20 @@
    "variant": "Primitive::DeleteChar",
    "registered_at": "crates/romacs-vm/src/lib.rs:537"
   },
+  "delete-directory-internal": {
+   "name": "delete-directory-internal",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:349"
+  },
   "delete-file": {
    "name": "delete-file",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/filesave.rs:130"
+  },
+  "delete-file-internal": {
+   "name": "delete-file-internal",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:338"
   },
   "delete-other-windows-internal": {
    "name": "delete-other-windows-internal",
@@ -1065,7 +1106,7 @@
    "name": "emacs-lisp-mode",
    "implementation": "vm2",
    "variant": "Primitive::EmacsLispMode",
-   "registered_at": "crates/romacs-vm/src/lib.rs:734"
+   "registered_at": "crates/romacs-vm/src/lib.rs:735"
   },
   "encode-char": {
    "name": "encode-char",
@@ -1108,13 +1149,13 @@
    "name": "equal",
    "implementation": "vm2",
    "variant": "Primitive::DeepEqual",
-   "registered_at": "crates/romacs-vm/src/lib.rs:726"
+   "registered_at": "crates/romacs-vm/src/lib.rs:727"
   },
   "erase-buffer": {
    "name": "erase-buffer",
    "implementation": "vm2",
    "variant": "Primitive::EraseBuffer",
-   "registered_at": "crates/romacs-vm/src/lib.rs:731"
+   "registered_at": "crates/romacs-vm/src/lib.rs:732"
   },
   "error": {
    "name": "error",
@@ -1163,6 +1204,11 @@
    "variant": "Primitive::ExpandFileName",
    "registered_at": "crates/romacs-vm/src/lib.rs:575"
   },
+  "expt": {
+   "name": "expt",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/floatfns.rs:100"
+  },
   "face-attribute-relative-p": {
    "name": "face-attribute-relative-p",
    "implementation": "vm2",
@@ -1172,13 +1218,23 @@
    "name": "fboundp",
    "implementation": "vm2",
    "variant": "Primitive::Fboundp",
-   "registered_at": "crates/romacs-vm/src/lib.rs:740"
+   "registered_at": "crates/romacs-vm/src/lib.rs:741"
+  },
+  "fceiling": {
+   "name": "fceiling",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/floatfns.rs:121"
   },
   "featurep": {
    "name": "featurep",
    "implementation": "vm2",
    "variant": "Primitive::Featurep",
    "registered_at": "crates/romacs-vm/src/lib.rs:567"
+  },
+  "ffloor": {
+   "name": "ffloor",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/floatfns.rs:124"
   },
   "file-accessible-directory-p": {
    "name": "file-accessible-directory-p",
@@ -1282,6 +1338,11 @@
    "variant": "Primitive::Fixnump",
    "registered_at": "crates/romacs-vm/src/lib.rs:651"
   },
+  "float": {
+   "name": "float",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/floatfns.rs:110"
+  },
   "float-time": {
    "name": "float-time",
    "implementation": "vm2",
@@ -1291,6 +1352,11 @@
    "name": "floatp",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/floatp.rs:5"
+  },
+  "floor": {
+   "name": "floor",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/rounding.rs:214"
   },
   "flush-standard-output": {
    "name": "flush-standard-output",
@@ -1311,7 +1377,7 @@
    "name": "force-mode-line-update",
    "implementation": "vm2",
    "variant": "Primitive::ForceModeLineUpdate",
-   "registered_at": "crates/romacs-vm/src/lib.rs:736"
+   "registered_at": "crates/romacs-vm/src/lib.rs:737"
   },
   "format": {
    "name": "format",
@@ -1339,12 +1405,17 @@
    "name": "forward-line",
    "implementation": "vm2",
    "variant": "Primitive::ForwardLine",
-   "registered_at": "crates/romacs-vm/src/lib.rs:732"
+   "registered_at": "crates/romacs-vm/src/lib.rs:733"
   },
   "forward-word": {
    "name": "forward-word",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/word_motion.rs:4"
+  },
+  "frame--face-hash-table": {
+   "name": "frame--face-hash-table",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/face.rs:469"
   },
   "frame-bottom-divider-width": {
    "name": "frame-bottom-divider-width",
@@ -1430,11 +1501,26 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/frame.rs:4"
   },
+  "frexp": {
+   "name": "frexp",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/floatfns.rs:61"
+  },
+  "fround": {
+   "name": "fround",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/floatfns.rs:127"
+  },
   "fset": {
    "name": "fset",
    "implementation": "vm2",
    "variant": "Primitive::Fset",
    "registered_at": "crates/romacs-vm/src/lib.rs:675"
+  },
+  "ftruncate": {
+   "name": "ftruncate",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/floatfns.rs:130"
   },
   "funcall": {
    "name": "funcall",
@@ -1471,7 +1557,7 @@
    "name": "get-buffer",
    "implementation": "vm2",
    "variant": "Primitive::GetBuffer",
-   "registered_at": "crates/romacs-vm/src/lib.rs:730"
+   "registered_at": "crates/romacs-vm/src/lib.rs:731"
   },
   "get-buffer-create": {
    "name": "get-buffer-create",
@@ -1498,6 +1584,11 @@
    "name": "get-load-suffixes",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/widen.rs:229"
+  },
+  "get-pos-property": {
+   "name": "get-pos-property",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/text_properties.rs:39"
   },
   "get-text-property": {
    "name": "get-text-property",
@@ -1540,7 +1631,7 @@
    "name": "global-set-key",
    "implementation": "vm2",
    "variant": "Primitive::GlobalSetKey",
-   "registered_at": "crates/romacs-vm/src/lib.rs:712"
+   "registered_at": "crates/romacs-vm/src/lib.rs:713"
   },
   "goto-char": {
    "name": "goto-char",
@@ -1621,6 +1712,11 @@
    "name": "indirect-function",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/widen.rs:102"
+  },
+  "indirect-variable": {
+   "name": "indirect-variable",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/vars.rs:222"
   },
   "insert": {
    "name": "insert",
@@ -1762,11 +1858,16 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/invisible.rs:20"
   },
+  "isnan": {
+   "name": "isnan",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/floatfns.rs:29"
+  },
   "kbd": {
    "name": "kbd",
    "implementation": "vm2",
    "variant": "Primitive::Kbd",
-   "registered_at": "crates/romacs-vm/src/lib.rs:715"
+   "registered_at": "crates/romacs-vm/src/lib.rs:716"
   },
   "key-binding": {
    "name": "key-binding",
@@ -1788,6 +1889,11 @@
    "name": "keymap-parent",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/keymap.rs:43"
+  },
+  "keymap-prompt": {
+   "name": "keymap-prompt",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/keymap.rs:107"
   },
   "keymapp": {
    "name": "keymapp",
@@ -1825,6 +1931,11 @@
    "name": "last-nonminibuffer-frame",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/frame.rs:12"
+  },
+  "ldexp": {
+   "name": "ldexp",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/floatfns.rs:68"
   },
   "length": {
    "name": "length",
@@ -1883,7 +1994,7 @@
    "name": "local-variable-if-set-p",
    "implementation": "vm2",
    "variant": "Primitive::LocalVariableIfSetP",
-   "registered_at": "crates/romacs-vm/src/lib.rs:722"
+   "registered_at": "crates/romacs-vm/src/lib.rs:723"
   },
   "local-variable-p": {
    "name": "local-variable-p",
@@ -1899,7 +2010,7 @@
    "name": "locate-library",
    "implementation": "vm2",
    "variant": "Primitive::LocateLibrary",
-   "registered_at": "crates/romacs-vm/src/lib.rs:737"
+   "registered_at": "crates/romacs-vm/src/lib.rs:738"
   },
   "lock-buffer": {
    "name": "lock-buffer",
@@ -1945,14 +2056,13 @@
   "lookup-key": {
    "name": "lookup-key",
    "implementation": "vm2",
-   "variant": "Primitive::LookupKey",
-   "registered_at": "crates/romacs-vm/src/lib.rs:711"
+   "registered_at": "crates/romacs-vm/src/prims/keymap.rs:129"
   },
   "macroexpand": {
    "name": "macroexpand",
    "implementation": "vm2",
    "variant": "Primitive::Macroexpand",
-   "registered_at": "crates/romacs-vm/src/lib.rs:748"
+   "registered_at": "crates/romacs-vm/src/lib.rs:749"
   },
   "make-bool-vector": {
    "name": "make-bool-vector",
@@ -1968,6 +2078,11 @@
    "name": "make-category-table",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/category.rs:73"
+  },
+  "make-char": {
+   "name": "make-char",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/charset.rs:80"
   },
   "make-char-table": {
    "name": "make-char-table",
@@ -1989,7 +2104,7 @@
    "name": "make-interpreted-closure",
    "implementation": "vm2",
    "variant": "Primitive::MakeInterpretedClosure",
-   "registered_at": "crates/romacs-vm/src/lib.rs:751"
+   "registered_at": "crates/romacs-vm/src/lib.rs:752"
   },
   "make-keymap": {
    "name": "make-keymap",
@@ -2005,7 +2120,7 @@
    "name": "make-local-variable",
    "implementation": "vm2",
    "variant": "Primitive::MakeLocalVariable",
-   "registered_at": "crates/romacs-vm/src/lib.rs:743"
+   "registered_at": "crates/romacs-vm/src/lib.rs:744"
   },
   "make-marker": {
    "name": "make-marker",
@@ -2017,13 +2132,13 @@
    "name": "make-obsolete",
    "implementation": "vm2",
    "variant": "Primitive::MakeObsolete",
-   "registered_at": "crates/romacs-vm/src/lib.rs:716"
+   "registered_at": "crates/romacs-vm/src/lib.rs:717"
   },
   "make-obsolete-variable": {
    "name": "make-obsolete-variable",
    "implementation": "vm2",
    "variant": "Primitive::MakeObsoleteVariable",
-   "registered_at": "crates/romacs-vm/src/lib.rs:717"
+   "registered_at": "crates/romacs-vm/src/lib.rs:718"
   },
   "make-overlay": {
    "name": "make-overlay",
@@ -2052,6 +2167,11 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/widen.rs:19"
   },
+  "make-temp-file-internal": {
+   "name": "make-temp-file-internal",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:296"
+  },
   "make-temp-name": {
    "name": "make-temp-name",
    "implementation": "vm2",
@@ -2061,7 +2181,7 @@
    "name": "make-variable-buffer-local",
    "implementation": "vm2",
    "variant": "Primitive::MakeVariableBufferLocal",
-   "registered_at": "crates/romacs-vm/src/lib.rs:721"
+   "registered_at": "crates/romacs-vm/src/lib.rs:722"
   },
   "make-vector": {
    "name": "make-vector",
@@ -2072,7 +2192,7 @@
    "name": "makunbound",
    "implementation": "vm2",
    "variant": "Primitive::Makunbound",
-   "registered_at": "crates/romacs-vm/src/lib.rs:742"
+   "registered_at": "crates/romacs-vm/src/lib.rs:743"
   },
   "map-char-table": {
    "name": "map-char-table",
@@ -2214,7 +2334,7 @@
    "name": "menu-bar-mode",
    "implementation": "vm2",
    "variant": "Primitive::MenuBarMode",
-   "registered_at": "crates/romacs-vm/src/lib.rs:735"
+   "registered_at": "crates/romacs-vm/src/lib.rs:736"
   },
   "message": {
    "name": "message",
@@ -2226,7 +2346,7 @@
    "name": "min",
    "implementation": "vm2",
    "variant": "Primitive::Min",
-   "registered_at": "crates/romacs-vm/src/lib.rs:727"
+   "registered_at": "crates/romacs-vm/src/lib.rs:728"
   },
   "minibuffer-depth": {
    "name": "minibuffer-depth",
@@ -2528,7 +2648,7 @@
    "name": "prin1-to-string",
    "implementation": "vm2",
    "variant": "Primitive::Prin1ToString",
-   "registered_at": "crates/romacs-vm/src/lib.rs:729"
+   "registered_at": "crates/romacs-vm/src/lib.rs:730"
   },
   "princ": {
    "name": "princ",
@@ -2759,7 +2879,7 @@
    "name": "romacs--read-host-event",
    "implementation": "vm2",
    "variant": "Primitive::ReadHostEvent",
-   "registered_at": "crates/romacs-vm/src/lib.rs:747"
+   "registered_at": "crates/romacs-vm/src/lib.rs:748"
   },
   "romacs--t2-assoc": {
    "name": "romacs--t2-assoc",
@@ -2804,7 +2924,7 @@
   "round": {
    "name": "round",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/rounding.rs:194"
+   "registered_at": "crates/romacs-vm/src/prims/rounding.rs:204"
   },
   "run-hook-with-args": {
    "name": "run-hook-with-args",
@@ -2840,7 +2960,7 @@
    "name": "search-backward",
    "implementation": "vm2",
    "variant": "Primitive::SearchBackward",
-   "registered_at": "crates/romacs-vm/src/lib.rs:752"
+   "registered_at": "crates/romacs-vm/src/lib.rs:753"
   },
   "search-forward": {
    "name": "search-forward",
@@ -2886,13 +3006,13 @@
    "name": "set",
    "implementation": "vm2",
    "variant": "Primitive::Set",
-   "registered_at": "crates/romacs-vm/src/lib.rs:741"
+   "registered_at": "crates/romacs-vm/src/lib.rs:742"
   },
   "set-advertised-calling-convention": {
    "name": "set-advertised-calling-convention",
    "implementation": "vm2",
    "variant": "Primitive::SetAdvertisedCallingConvention",
-   "registered_at": "crates/romacs-vm/src/lib.rs:718"
+   "registered_at": "crates/romacs-vm/src/lib.rs:719"
   },
   "set-buffer": {
    "name": "set-buffer",
@@ -3103,6 +3223,11 @@
    "variant": "Primitive::Signal",
    "registered_at": "crates/romacs-vm/src/lib.rs:512"
   },
+  "sin": {
+   "name": "sin",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/floatfns.rs:20"
+  },
   "single-key-description": {
    "name": "single-key-description",
    "implementation": "vm2",
@@ -3137,13 +3262,18 @@
    "name": "special-variable-p",
    "implementation": "vm2",
    "variant": "Primitive::SpecialVariableP",
-   "registered_at": "crates/romacs-vm/src/lib.rs:720"
+   "registered_at": "crates/romacs-vm/src/lib.rs:721"
   },
   "split-window-internal": {
    "name": "split-window-internal",
    "implementation": "vm2",
    "variant": "Primitive::SplitWindowInternal",
    "registered_at": "crates/romacs-vm/src/lib.rs:689"
+  },
+  "sqrt": {
+   "name": "sqrt",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/floatfns.rs:26"
   },
   "standard-case-table": {
    "name": "standard-case-table",
@@ -3285,7 +3415,7 @@
    "name": "switch-to-buffer",
    "implementation": "vm2",
    "variant": "Primitive::SwitchToBuffer",
-   "registered_at": "crates/romacs-vm/src/lib.rs:733"
+   "registered_at": "crates/romacs-vm/src/lib.rs:734"
   },
   "sxhash": {
    "name": "sxhash",
@@ -3321,7 +3451,7 @@
    "name": "symbol-value",
    "implementation": "vm2",
    "variant": "Primitive::SymbolValue",
-   "registered_at": "crates/romacs-vm/src/lib.rs:719"
+   "registered_at": "crates/romacs-vm/src/lib.rs:720"
   },
   "symbol-with-pos-p": {
    "name": "symbol-with-pos-p",
@@ -3349,6 +3479,11 @@
    "name": "take",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/fns.rs:92"
+  },
+  "tan": {
+   "name": "tan",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/floatfns.rs:23"
   },
   "terminal-coding-system": {
    "name": "terminal-coding-system",
@@ -3428,10 +3563,15 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/time.rs:338"
   },
+  "treesit-available-p": {
+   "name": "treesit-available-p",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/treesit.rs:5"
+  },
   "truncate": {
    "name": "truncate",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/rounding.rs:199"
+   "registered_at": "crates/romacs-vm/src/prims/rounding.rs:209"
   },
   "try-completion": {
    "name": "try-completion",
@@ -3498,7 +3638,7 @@
    "name": "use-local-map",
    "implementation": "vm2",
    "variant": "Primitive::UseLocalMap",
-   "registered_at": "crates/romacs-vm/src/lib.rs:714"
+   "registered_at": "crates/romacs-vm/src/lib.rs:715"
   },
   "user-full-name": {
    "name": "user-full-name",

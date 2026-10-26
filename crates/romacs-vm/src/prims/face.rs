@@ -465,3 +465,23 @@ fn display_supports_face_attributes_p(_cx, _attributes: Value; optional _display
     // are initial-terminal frames (VM2-WIN5), which support no attributes.
     Ok(Value::NIL)
 }}
+
+defsubr! { name = "frame--face-hash-table", gnu = "xfaces.c:4619", effect = Global,
+fn frame_face_hash_table(cx; optional frame: Value) {
+    // A live frame always has its face table, as GNU's frames do.
+    let frame = cx.face_frame(frame, true)?;
+    cx.face_table(frame, true)
+}}
+
+defsubr! { name = "color-values-from-color-spec", gnu = "xfaces.c:1029", effect = Pure,
+fn color_values_from_color_spec(cx, spec: Value) {
+    let bytes = cx.string_view(spec)?.bytes().to_vec();
+    // parse_color_spec reads a C string.
+    let bytes = bytes.split(|&b| b == 0).next().unwrap_or(&[]);
+    let Some((r, g, b)) = romacs_display_protocol::x11_colors::x11_color_spec_16bit(bytes) else {
+        return Ok(Value::NIL);
+    };
+    let mut list = Value::NIL;
+    for c in [b, g, r] { list = cx.cons(Value::integer(i64::from(c)).unwrap(), list); }
+    Ok(list)
+}}

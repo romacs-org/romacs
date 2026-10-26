@@ -295,8 +295,21 @@ impl Vm {
         }
         let path = std::fs::canonicalize(path)
             .map_err(|e| format!("file missing: {}: {e}", path.display()))?;
-        if self.loader.active.len() >= 128 || self.loader.active.contains(&path) {
+        if self.loader.active.len() >= 128 {
             return Err(format!("recursive source load: {}", path.display()));
+        }
+        // lread.c Fload: a file may be in progress three times; the fourth
+        // signals (error "Recursive load" FILE . LOADS-IN-PROGRESS).
+        if self.loader.active.iter().filter(|active| **active == path).count() > 3 {
+            let text = |vm: &mut Self, s: String| vm.literal(&Form::String(s));
+            let mut data = vec![text(self, "Recursive load".into())?, text(self, path.to_string_lossy().into_owned())?];
+            for active in self.loader.active.clone().iter().rev() {
+                data.push(text(self, active.to_string_lossy().into_owned())?);
+            }
+            let condition = self.intern("error");
+            let data = self.list_value(&data);
+            self.propagated_escape = Some(threaded::Escape::Signal(condition, data));
+            return Err(format!("Recursive load: {}", path.display()));
         }
         let bytes =
             std::fs::read(&path).map_err(|e| format!("file error: {}: {e}", path.display()))?;

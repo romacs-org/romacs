@@ -35,3 +35,8 @@ fn remove_list_of_text_properties(cx, start: Value, end: Value, list_of_properti
     }
     cx.remove_text_properties(start, end, &names, object)
 }}
+
+defsubr! { name = "get-pos-property", gnu = "editfns.c:275", effect = Reads,
+fn get_pos_property(cx, position: Value, prop: Value; optional object: Value) {
+    cx.get_pos_property(position, prop, object)
+}}

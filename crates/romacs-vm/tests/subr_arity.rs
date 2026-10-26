@@ -29,7 +29,7 @@ fn subr_arity_matches_recorded_gnu_and_lisp_representation() {
 fn subr_arity_reports_current_native_handler_bounds() {
     for (name, expected) in [
         ("apply", "(2 . many)"),
-        ("signal", "(2 . 2)"),
+        ("signal", "(1 . 2)"),
         ("plist-get", "(2 . 2)"),
         ("buffer-size", "(0 . 0)"),
         ("search-forward", "(1 . 4)"),

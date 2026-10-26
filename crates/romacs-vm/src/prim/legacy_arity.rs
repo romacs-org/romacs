@@ -79,7 +79,6 @@ pub(super) fn arity(primitive: Primitive) -> (usize, Option<usize>) {
         | MakeLocalVariable => (1, Some(1)),
         Cons
         | Throw
-        | Signal
         | Aref
         | Assq
         | PlistGet
@@ -140,7 +139,7 @@ pub(super) fn arity(primitive: Primitive) -> (usize, Option<usize>) {
         }
         SelfInsertCommand | DeleteChar | DeleteBackwardChar | Eval | Provide | Featurep
         | ExpandFileName | RawPropertiesAt | KillNew | CurrentKill | CopyMarker | LookingAt
-        | MatchString | SelectWindow | Macroexpand => (1, Some(2)),
+        | MatchString | SelectWindow | Macroexpand | Signal => (1, Some(2)),
         Require | Prin1ToString | SwitchToBuffer | AutoloadDoLoad => (1, Some(3)),
         PutProperty | SplitWindowInternal => (4, Some(5)),
         GetProperty | Defalias | GetCharProperty | SetMarker | DefineError | Gethash

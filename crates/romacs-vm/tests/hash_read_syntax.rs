@@ -23,8 +23,6 @@ const ORACLE: &str = include_str!("../evidence/hash-read-syntax/oracle.py");
 /// (case id, ledger row, VM2's exact answer).
 const DIVERGENT: &[(&str, &str, &str)] = &[
     // Completed numbered aliases are now checked against the GNU answer.
-    // A table read from SOURCE being compiled has no source spelling.
-    ("r-source-literal", "VM2-READ1", "VM2-ERROR source datum required"),
     // Hash-table limits/circles explicitly refuse; nested list print-level
     // now agrees with GNU and therefore has no divergence pin.
     ("p-print-length", "VM2-EV2", "(SIGNAL (error))"),

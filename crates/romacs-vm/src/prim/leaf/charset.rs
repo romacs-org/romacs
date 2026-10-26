@@ -301,3 +301,36 @@ impl Leaf<'_> {
         Ok(Value::NIL)
     }
 }
+
+impl Leaf<'_> {
+    /// charset.c Fmake_char: CODE1 is the most significant position code;
+    /// a missing one is its dimension's minimum.
+    pub fn make_char(&mut self, name: Value, codes: [Value; 4]) -> super::super::Out {
+        let i = self.charset_record(name)?;
+        let record = &self.vm.charsets.records[i];
+        let (dimension, space, iso, ascii) = (record.dimension as usize, record.space, record.iso_final >= 0, record.ascii_compatible);
+        let position = |cx: &mut Self, v: Value| -> std::result::Result<u32, Fault> {
+            let n = v.integer_value().filter(|&n| n >= 0).ok_or(Fault::Wrong("wholenump", v))?;
+            if n >= 0x100 {
+                let data = cx.cons(v, Value::NIL);
+                let data = cx.cons(Value::integer(0xFF).unwrap(), data);
+                let condition = cx.intern("args-out-of-range");
+                return Err(Fault::Signal(condition, data));
+            }
+            Ok(n as u32)
+        };
+        let mut code = if codes[0] == Value::NIL {
+            if ascii { 0 } else { self.vm.charsets.records[i].min }
+        } else {
+            let mut code = position(self, codes[0])?;
+            for k in 1..dimension.min(4) {
+                code <<= 8;
+                code |= if codes[k] == Value::NIL { space[(dimension - 1 - k) * 2] } else { position(self, codes[k])? };
+            }
+            code
+        };
+        if iso { code &= 0x7F7F_7F7F; }
+        let c = self.charset_decode(i, code)?.ok_or_else(|| Fault::Error("Invalid code(s)".into()))?;
+        Ok(Value::integer(c.into()).unwrap())
+    }
+}

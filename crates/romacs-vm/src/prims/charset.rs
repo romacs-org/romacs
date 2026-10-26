@@ -76,3 +76,8 @@ fn charset_of_char(cx: &mut Leaf<'_>, ch: Value, _: &[Value]) -> Next {
     if ch.integer_value().is_none() { return Ok(Step::Done(ch)); }
     Ok(Step::Done(cx.char_charset(ch, Value::NIL)?))
 }
+
+defsubr! { name = "make-char", gnu = "charset.c:1876", effect = Reads,
+fn make_char(cx, charset: Value; optional code1: Value, code2: Value, code3: Value, code4: Value) {
+    cx.make_char(charset, [code1, code2, code3, code4])
+}}

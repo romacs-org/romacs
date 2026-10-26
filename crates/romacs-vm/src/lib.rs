@@ -708,7 +708,8 @@ const PRIMITIVES: &[(&str, Primitive)] = &[
     ("make-sparse-keymap", Primitive::MakeSparseKeymap),
     ("keymapp", Primitive::Keymapp),
     ("key-binding", Primitive::KeyBinding),
-    ("lookup-key", Primitive::LookupKey),
+    // `lookup-key' is a T2 subr (prims/keymap.rs) so menu filters can run.
+    ("#:vm2-lookup-key", Primitive::LookupKey),
     ("global-set-key", Primitive::GlobalSetKey),
     ("current-global-map", Primitive::CurrentGlobalMap),
     ("use-local-map", Primitive::UseLocalMap),
@@ -924,7 +925,6 @@ fn lambda_arity(args: &[Form]) -> Result<(usize, usize, bool)> {
     let mut required = 0;
     let mut optional = false;
     let mut rest = false;
-    let mut seen = HashSet::new();
     for (i, arg) in args.iter().enumerate() {
         let name = arg.name()?;
         if name.source() == Some("&optional") && !optional && !rest {
@@ -935,7 +935,8 @@ fn lambda_arity(args: &[Form]) -> Result<(usize, usize, bool)> {
             rest = true;
             continue;
         }
-        if name.source().is_some_and(|n| n.starts_with('&')) || !seen.insert(name.clone()) {
+        // GNU binds a repeated name again; the last binding wins.
+        if name.source().is_some_and(|n| n.starts_with('&')) {
             return Err("invalid lambda argument list".into());
         }
         if matches!(name.source(), Some("nil" | "t" | "lexical-binding")) {
@@ -1122,6 +1123,12 @@ pub struct Vm {
     caches: Vec<Cache>,
     stack: Vec<Value>,
     external_roots: Vec<Value>,
+    /// Menu-item `:filter' results for the keymap walk in progress, as
+    /// (menu item, result); set and cleared around one walk, which never
+    /// collects.
+    keymap_filters: Vec<(Value, Value)>,
+    /// The first filter that walk needed: (menu item, filter, definition).
+    keymap_pending_filter: Option<(Value, Value, Value)>,
     dynamic: Vec<(usize, Value, Value, bool)>,
     conditions: conditions::Registry,
     /// Embedder `Rooted` handles; see handle.rs.
@@ -1224,6 +1231,8 @@ impl Vm {
             caches: vec![],
             stack: vec![],
             external_roots: vec![],
+            keymap_filters: Vec::new(),
+            keymap_pending_filter: None,
             dynamic: vec![],
             conditions: conditions::Registry::default(),
             rooted: handle::RootSet::default(),
@@ -1481,7 +1490,6 @@ impl Vm {
         let mut required = 0;
         let mut optional = false;
         let mut rest = false;
-        let mut seen = HashSet::new();
         for (i, arg) in args.iter().enumerate() {
             let name = arg.name()?;
             if name.source() == Some("&optional") && !optional && !rest {
@@ -1492,7 +1500,7 @@ impl Vm {
                 rest = true;
                 continue;
             }
-            if name.source().is_some_and(|n| n.starts_with('&')) || !seen.insert(name) {
+            if name.source().is_some_and(|n| n.starts_with('&')) {
                 return Err("invalid lambda argument list".into());
             }
             if !optional && !rest {
@@ -1898,6 +1906,7 @@ impl Vm {
                 let rest = &a[1..];
                 match head {
                     "save-excursion" => self.save_excursion(b, rest),
+                    "save-restriction" => self.save_restriction(b, rest),
                     "progn" => self.progn(b, rest),
                     "catch" if !rest.is_empty() => {
                         let tag = self.expr(b, &rest[0])?;

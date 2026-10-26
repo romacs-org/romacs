@@ -278,3 +278,78 @@ fn file_regular_p(cx, filename: Value) -> Step {
     native_encoding(cx)?;
     Ok(Step::Done(if std::fs::metadata(&path).is_ok_and(|m| m.is_file()) { Value::TRUE } else { Value::NIL }))
 }}
+
+/// gnulib gen_tempname's six random filename characters.
+fn temp_name_letters() -> String {
+    use std::hash::{BuildHasher, Hasher};
+    const LETTERS: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    let mut hasher = std::collections::hash_map::RandomState::new().build_hasher();
+    hasher.write_u128(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos()));
+    let mut bits = hasher.finish();
+    (0..6).map(|_| { let c = LETTERS[(bits % 62) as usize]; bits /= 62; c as char }).collect()
+}
+
+// Fmake_temp_file_internal: PREFIX, six random characters, SUFFIX, created
+// atomically as a file (mode 0600, DIR-FLAG nil), a directory (0700) or,
+// for DIR-FLAG 0, only a name that does not exist. TEXT, when non-empty,
+// is written by `write-region'.
+defsubr! { name = "make-temp-file-internal", gnu = "fileio.c:767", effect = Global,
+fn make_temp_file_internal(cx, prefix: Value, dir_flag: Value, suffix: Value, text: Value) -> Step {
+    use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+    let (head, tail) = (cx.string_text(prefix)?, cx.string_text(suffix)?);
+    native_encoding(cx)?;
+    let kind = if dir_flag == Value::NIL { 0 } else if dir_flag.integer_value() == Some(0) { 2 } else { 1 };
+    let mut attempt = 0;
+    let path = loop {
+        let path = format!("{head}{}{tail}", temp_name_letters());
+        let made = match kind {
+            0 => std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&path).map(drop),
+            1 => std::fs::DirBuilder::new().mode(0o700).create(&path),
+            _ => match std::fs::symlink_metadata(&path) {
+                Ok(_) => Err(std::io::Error::from_raw_os_error(libc::EEXIST)),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                Err(e) => Err(e),
+            },
+        };
+        attempt += 1;
+        match made {
+            Ok(()) => break path,
+            Err(e) if e.raw_os_error() == Some(libc::EEXIST) && attempt < 238328 => continue,
+            Err(e) => {
+                let operation = ["Creating file with prefix", "Creating directory with prefix", "Creating file name with prefix"][kind];
+                return Err(errno(cx, operation, &[prefix], e));
+            }
+        }
+    };
+    let multibyte = cx.string_view(prefix)?.is_multibyte() || cx.string_view(suffix)?.is_multibyte();
+    let file = cx.make_string(path.into_bytes(), multibyte);
+    if cx.string_view(text).is_ok_and(|view| !view.bytes().is_empty()) {
+        let write = cx.intern("write-region");
+        return Ok(Step::Call { f: write, args: vec![text, Value::NIL, file], then: temp_file_written, saved: vec![file] });
+    }
+    Ok(Step::Done(file))
+}}
+fn temp_file_written(_: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
+    Ok(Step::Done(saved[0]))
+}
+
+// Fdelete_file_internal: unlink the expanded FILENAME; a missing file is
+// not an error. files.el's `delete-file' handles handlers and trash.
+defsubr! { name = "delete-file-internal", gnu = "fileio.c:2602", effect = Global,
+fn delete_file_internal(cx, filename: Value) {
+    let (path, expanded) = name(cx, filename, false)?;
+    native_encoding(cx)?;
+    match cx.filesave_unlink(&path) {
+        Err(e) if e.raw_os_error() != Some(libc::ENOENT) => Err(errno(cx, "Removing old name", &[expanded], e)),
+        _ => Ok(Value::NIL),
+    }
+}}
+
+// Fdelete_directory_internal: rmdir the expanded directory file name.
+defsubr! { name = "delete-directory-internal", gnu = "fileio.c:2583", effect = Global,
+fn delete_directory_internal(cx, directory: Value) {
+    let (path, expanded) = name(cx, directory, true)?;
+    native_encoding(cx)?;
+    std::fs::remove_dir(&path).map_err(|e| errno(cx, "Removing directory", &[expanded], e))?;
+    Ok(Value::NIL)
+}}
