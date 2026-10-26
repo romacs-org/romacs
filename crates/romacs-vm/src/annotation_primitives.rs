@@ -782,6 +782,60 @@ impl Vm {
         limit.map_or(Ok(Value::NIL), |n| Value::integer(n).map_err(Fault::Error))
     }
 
+    /// textprop.c Ftext_property_not_all: the first position in START..END
+    /// whose PROPERTY (as `get-text-property' reads it) is not eq to VALUE.
+    /// A property is constant within an interval, so a per-position scan
+    /// returns GNU's interval start.
+    pub(crate) fn text_property_not_all_values(
+        &mut self,
+        start: Value,
+        end: Value,
+        property: Value,
+        value: Value,
+        object: Value,
+    ) -> crate::prim::Out {
+        use crate::prim::Fault;
+        let object = self.property_query_object(object)?;
+        // CHECK_STRING_OR_BUFFER comes first in validate_interval_range.
+        if self.str_view(object).is_none() && !matches!(self.object_if(object), Some(Object::Buffer(_) | Object::ByteBuffer(_))) {
+            return Err(Fault::Wrong("buffer-or-string-p", object));
+        }
+        let (mut from, mut to) = (self.text_property_position(start)?, self.text_property_position(end)?);
+        // validate_interval_range answers an empty range before checking it.
+        if from == to { return Ok(Value::NIL); }
+        if from > to { std::mem::swap(&mut from, &mut to); }
+        // validate_interval_range: BEGV..ZV of a buffer, 0..length of a string.
+        let (low, high) = if let Some(string) = self.str_view(object) { (0, string.len() as i64) } else {
+            match self.object_if(object) {
+                Some(Object::Buffer(b)) => {
+                    let r = b.accessible();
+                    (b.char_of_byte(r.start).map_err(Fault::Error)?.0 as i64 + 1, b.char_of_byte(r.end).map_err(Fault::Error)?.0 as i64 + 1)
+                }
+                Some(Object::ByteBuffer(b)) => (b.restriction.start.0 as i64 + 1, b.restriction.end.0 as i64 + 1),
+                _ => return Err(Fault::Wrong("buffer-or-string-p", object)),
+            }
+        };
+        if from < low || to > high { return Err(Fault::Range(start, end)); }
+        // No text or no property intervals: GNU consults no plist at all,
+        // not even default-text-properties.
+        let intervals = match self.object_if(object) {
+            Some(Object::String(s) | Object::RawString(s)) => !s.properties.is_empty(),
+            Some(Object::Buffer(b)) => !b.properties.is_empty(),
+            Some(Object::ByteBuffer(b)) => !b.properties.is_empty(),
+            _ => false,
+        };
+        if low == high || !intervals {
+            return Ok(if value == Value::NIL { Value::NIL } else { Value::integer(from).map_err(Fault::Error)? });
+        }
+        for at in from..to {
+            let raw = self.annotation_raw(object, at as usize).map_err(Fault::Error)?;
+            if self.annotation_resolve(&raw, property).map_err(Fault::Error)? != value {
+                return Value::integer(at).map_err(Fault::Error);
+            }
+        }
+        Ok(Value::NIL)
+    }
+
     pub(crate) fn next_single_char_property_change_values(
         &mut self,
         position: Value,

@@ -144,3 +144,73 @@ defsubr! { name = "internal-show-cursor-p", gnu = "dispnew.c:7444", effect = Rea
 fn internal_show_cursor_p(cx; optional window: Value) {
     Ok(if cx.windows().cursor_off(window)? { Value::NIL } else { Value::TRUE })
 }}
+
+// GNU's internal state when VARIABLE is nil (dispnew.c frame_and_buffer_state).
+const FRAME_BUFFER_STATE: &str = "#:vm2-frame-and-buffer-state";
+
+/// The entries dispnew.c records: each frame and its name, then each listed
+/// buffer (its name not starting with a space) with its read-only and
+/// modified flags; and the count of all live buffers.
+fn frame_buffer_entries(cx: &mut Leaf<'_>) -> std::result::Result<(Vec<Value>, usize), Fault> {
+    let mut entries = Vec::new();
+    let name_key = cx.intern("name");
+    let mut frames = cx.windows().frame_list()?;
+    while let Some((frame, rest)) = cx.pair(frames) {
+        let name = cx.windows().frame_parameter_entries(frame)?.into_iter().find(|(k, _)| *k == name_key).map_or(Value::NIL, |(_, v)| v);
+        entries.extend([frame, name]);
+        frames = rest;
+    }
+    let read_only = cx.intern("buffer-read-only");
+    let (mut buffers, mut count) = (cx.lifecycle_list(), 0);
+    while let Some((buffer, rest)) = cx.pair(buffers) {
+        count += 1;
+        if !cx.buffer_state(buffer).unwrap().name.as_deref().is_some_and(|name| name.starts_with(' ')) {
+            let flag = cx.buffer_local_read(read_only, buffer)?;
+            let state = cx.buffer_modification(buffer)?;
+            let modified = if state.save_modiff >= state.modiff { Value::NIL }
+                else if state.autosave_modiff == state.modiff { cx.intern("autosaved") } else { Value::TRUE };
+            entries.extend([buffer, flag, modified]);
+        }
+        buffers = rest;
+    }
+    Ok((entries, count))
+}
+
+defsubr! { name = "frame-or-buffer-changed-p", gnu = "dispnew.c:7048", effect = Global,
+fn frame_or_buffer_changed_p(cx; optional variable: Value) {
+    let lambda = cx.intern("lambda");
+    let mut state = if variable == Value::NIL {
+        match cx.hidden_value(FRAME_BUFFER_STATE) {
+            Value::NIL => { let fresh = cx.vector(&[lambda; 20]); cx.set_hidden_value(FRAME_BUFFER_STATE, fresh); fresh }
+            state => state,
+        }
+    } else {
+        if cx.kind(variable) != leaf::Kind::Symbol { return Err(Fault::Wrong("symbolp", variable)); }
+        cx.variable_value(variable)?.ok_or(Fault::Signal(cx.intern("void-variable"), cx.cons(variable, Value::NIL)))?
+    };
+    let (entries, buffers) = frame_buffer_entries(cx)?;
+    let old = if cx.kind(state) == leaf::Kind::Vector { Some(cx.vector_values(state)?) } else { None };
+    // Unchanged: every entry matches by eq and a lambda follows them.
+    if let Some(old) = &old
+        && old.len() > entries.len() && old.iter().zip(&entries).all(|(a, b)| a == b) && old[entries.len()] == lambda {
+        return Ok(Value::NIL);
+    }
+    let frame_count = { let mut n = 0; let mut f = cx.windows().frame_list()?; while let Some((_, r)) = cx.pair(f) { n += 1; f = r; } n };
+    let needed = 1 + 2 * frame_count + 3 * buffers;
+    let size = old.as_ref().map_or(0, Vec::len);
+    if old.is_none() || needed > size || needed + 20 < size / 2 {
+        state = cx.vector(&vec![lambda; needed + 20]);
+        if variable == Value::NIL { cx.set_hidden_value(FRAME_BUFFER_STATE, state); }
+        else { cx.variable_set(variable, state)?; }
+    }
+    for (i, &entry) in entries.iter().enumerate() {
+        cx.vector_set(state, Value::integer(i as i64).unwrap(), entry)?;
+    }
+    for i in entries.len()..cx.vector_len(state)? {
+        cx.vector_set(state, Value::integer(i as i64).unwrap(), lambda)?;
+    }
+    Ok(Value::TRUE)
+}}
+
+defsubr! { name = "frame-initial-p", gnu = "terminal.c:482", effect = Reads,
+fn frame_initial_p(cx; optional frame: Value) { cx.windows().frame_initial_p(frame) }}

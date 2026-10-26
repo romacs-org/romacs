@@ -409,3 +409,34 @@ fn utf_8_emacs_sources_load_gnu_characters() {
     compare(&[&expression]);
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+#[test]
+fn frame_and_buffer_state_queries_match_gnu() {
+    compare(&[
+        "(progn (defvar rt-s nil) (list (frame-or-buffer-changed-p 'rt-s) (frame-or-buffer-changed-p 'rt-s) (progn (get-buffer-create \"rt-x\") (frame-or-buffer-changed-p 'rt-s)) (frame-or-buffer-changed-p 'rt-s) (progn (get-buffer-create \" rt-hidden\") (frame-or-buffer-changed-p 'rt-s)) (progn (with-current-buffer \" rt-hidden\" (insert \"a\")) (frame-or-buffer-changed-p 'rt-s)) (progn (with-current-buffer \"rt-x\" (insert \"a\")) (frame-or-buffer-changed-p 'rt-s)) (progn (with-current-buffer \"rt-x\" (setq buffer-read-only t)) (frame-or-buffer-changed-p 'rt-s)) (frame-or-buffer-changed-p 'rt-s) (frame-or-buffer-changed-p) (frame-or-buffer-changed-p) (vectorp rt-s) (eq (aref rt-s (1- (length rt-s))) 'lambda)))",
+        "(progn (defvar rt-v [1 2]) (list (condition-case e (frame-or-buffer-changed-p 3) (error e)) (frame-or-buffer-changed-p 'rt-v) (condition-case e (frame-or-buffer-changed-p 'rt-unbound-var) (error e))))",
+        "(list (frame-initial-p) (frame-initial-p (selected-frame)) (frame-initial-p (frame-terminal)) (frame-initial-p 3))",
+        "(list left-margin (local-variable-if-set-p 'left-margin) (with-temp-buffer (setq left-margin 4) (list left-margin (local-variable-p 'left-margin))) left-margin (condition-case e (setq left-margin 'x) (error e)))",
+    ]);
+}
+
+#[test]
+fn syntax_motion_matches_gnu() {
+    compare(&[
+        "(with-temp-buffer (insert \"  foo-bar (baz) ;; x\") (goto-char 1) (list (skip-syntax-forward \" \") (point) (skip-syntax-forward \"w_\") (point) (skip-syntax-forward \"^(\") (point) (skip-syntax-forward \"(\") (skip-syntax-backward \"^ \") (point) (skip-syntax-backward \" \" 3) (point) (skip-syntax-forward \"w\" 100) (skip-syntax-forward \"\") (point)))",
+        "(list (condition-case e (skip-syntax-forward 3) (error e)) (condition-case e (with-temp-buffer (skip-syntax-forward \"w\" 'x)) (error e)) (with-temp-buffer (insert \"abc def\") (narrow-to-region 2 4) (goto-char 2) (list (skip-syntax-forward \"w\") (point) (skip-syntax-backward \"w\" 1) (point))))",
+        "(with-temp-buffer (insert \"ab cd\") (put-text-property 3 4 'syntax-table (string-to-syntax \"w\")) (goto-char 1) (list (skip-syntax-forward \"w\") (point) (let ((parse-sexp-lookup-properties t)) (goto-char 1) (list (skip-syntax-forward \"w\") (point)))))",
+        "(with-temp-buffer (let ((st (copy-syntax-table))) (modify-syntax-entry ?' \"'\" st) (modify-syntax-entry ?\\\\ \"\\\\\" st) (set-syntax-table st) (insert \"a ''b \\\\'c x\\\\\\\\'d\") (list (progn (goto-char 5) (backward-prefix-chars) (point)) (progn (goto-char 9) (backward-prefix-chars) (point)) (progn (goto-char 14) (backward-prefix-chars) (point)) (progn (goto-char 2) (backward-prefix-chars) (point)))))",
+        "(with-temp-buffer (let ((st (copy-syntax-table))) (modify-syntax-entry ?' \"'\" st) (modify-syntax-entry ?# \"_ p\" st) (modify-syntax-entry ?/ \"/\" st) (set-syntax-table st) (insert \"z #'#q /#r\") (list (progn (goto-char 6) (backward-prefix-chars) (point)) (progn (goto-char 10) (backward-prefix-chars) (point)))))",
+    ]);
+}
+
+#[test]
+fn text_property_not_all_matches_gnu() {
+    compare(&[
+        "(with-temp-buffer (insert \"abcdef\") (put-text-property 3 5 'face 'bold) (list (text-property-not-all 1 7 'face nil) (text-property-not-all 3 7 'face 'bold) (text-property-not-all 3 5 'face 'bold) (text-property-not-all 7 1 'face nil) (text-property-not-all 2 2 'face 'x) (text-property-not-all 1 3 'q 'x) (condition-case e (text-property-not-all 0 3 'face nil) (error e)) (condition-case e (text-property-not-all 1 9 'face nil) (error e))))",
+        "(let ((s (propertize \"abc\" 'p 1))) (list (text-property-not-all 0 3 'p 1 s) (text-property-not-all 0 3 'p 2 s) (condition-case e (text-property-not-all 0 4 'p 1 s) (error e)) (text-property-not-all 0 2 'x nil \"ab\") (text-property-not-all 0 2 'x 3 \"ab\")))",
+        "(with-temp-buffer (insert \"abc\") (put 'rt-cat 'face 'italic) (put-text-property 1 2 'category 'rt-cat) (list (text-property-not-all 1 4 'face 'italic) (let ((default-text-properties '(face italic))) (text-property-not-all 1 4 'face 'italic)) (let ((m (copy-marker 3))) (text-property-not-all 1 m 'face nil))))",
+        "(list (text-property-not-all 9 9 'face nil \"abc\") (condition-case e (text-property-not-all 0 9 'face nil \"abc\") (error e)) (let ((default-text-properties '(p 1))) (list (text-property-not-all 0 3 'p 1 \"abc\") (text-property-not-all 0 3 'p 1 (propertize \"abc\" 'q 2)))) (with-temp-buffer (insert \"abc\") (list (text-property-not-all 9 9 'face nil) (let ((default-text-properties '(p 1))) (text-property-not-all 1 3 'p 1)))) (with-temp-buffer (text-property-not-all 1 1 'p 1)) (condition-case e (text-property-not-all 0 0 'p nil 42) (error e)))",
+    ]);
+}

@@ -1340,6 +1340,15 @@ mod leaf {
         pub fn char_table_element(&self, table: Value, index: usize) -> super::Out {
             self.vm.char_table_get(table, index).map_err(Fault::Error)
         }
+        /// The value of a VM-private `#:vm2-' slot, unbound reading as nil.
+        pub fn hidden_value(&mut self, name: &str) -> Value {
+            let slot = self.vm.slot(name);
+            match self.vm.slots[slot].value { Value::UNBOUND => Value::NIL, value => value }
+        }
+        pub fn set_hidden_value(&mut self, name: &str, value: Value) {
+            let slot = self.vm.slot(name);
+            self.vm.slots[slot].value = value;
+        }
         /// TABLE's own value at INDEX or its default, ignoring the parent.
         pub fn char_table_own_element(&self, table: Value, index: usize) -> super::Out {
             self.vm.char_table_own(table, index).map_err(Fault::Error)

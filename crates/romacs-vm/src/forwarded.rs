@@ -480,6 +480,8 @@ pub(crate) static C_VARIABLES: &[CVariable] = &[
     CVariable { name: "major-mode", gnu: "buffer.c:5242", kind: Kind::PerBuffer { default: Init::Symbol("fundamental-mode"), predicate: Some(Predicate::Symbolp) } },
     CVariable { name: "mode-name", gnu: "buffer.c:5255", kind: Kind::PerBuffer { default: Init::Str("Fundamental"), predicate: None } },
     CVariable { name: "fill-column", gnu: "buffer.c:5259", kind: Kind::PerBuffer { default: Init::Fixnum(70), predicate: Some(Predicate::Integerp) } },
+    // Chain: compile.el's easy-mmode docstrings fill through back-to-indentation.
+    CVariable { name: "left-margin", gnu: "buffer.c:5279", kind: Kind::PerBuffer { default: Init::Fixnum(0), predicate: Some(Predicate::Integerp) } },
     // insert-file-contents / write-region (prims/fileio.rs): the per-buffer
     // C variables those DEFUNs read or set. Their other C variables are
     // plain specials (`Vm::declare_fileio_specials`) so they stay

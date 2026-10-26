@@ -386,6 +386,28 @@ impl Vm {
         let (class, _) = self.cons_pair(value).ok()?;
         SyntaxClass::from_code(class.as_integer().ok()?)
     }
+    /// The raw syntax code (class in the low byte, flags above) of C at
+    /// BYTE in the current buffer: its `syntax-table' property when
+    /// `parse-sexp-lookup-properties' is set, else the buffer's table.
+    pub(crate) fn syntax_raw_at(&mut self, c: u32, byte: usize) -> std::result::Result<i64, crate::prim::Fault> {
+        let current = self.regexp_current_syntax().map_err(|_| crate::prim::Fault::Error("syntax table required".into()))?;
+        let raw = |vm: &Self, entry: Value| vm.cons_pair(entry).ok().and_then(|(n, _)| n.integer_value());
+        if self.slots[self.names["parse-sexp-lookup-properties"]].value != Value::NIL {
+            let index = self.buffer_index().map_err(crate::prim::Fault::Error)?;
+            let property = match &self.objects[index] {
+                Object::Buffer(t) => t.properties.get_property(ByteOffset(byte), "syntax-table"),
+                Object::ByteBuffer(t) => t.properties.get(&ByteOffset(byte)).and_then(|p| p.get("syntax-table")).copied(),
+                _ => None,
+            };
+            if let Some(value) = property {
+                if self.regexp_syntax_table(value).is_ok() {
+                    return Ok(self.char_table_get(value, c as usize).ok().and_then(|e| raw(self, e)).unwrap_or(0));
+                }
+                if let Some(code) = raw(self, value) { return Ok(code); }
+            }
+        }
+        Ok(self.char_table_get(current, c as usize).ok().and_then(|e| raw(self, e)).unwrap_or(0))
+    }
     pub(super) fn regexp_syntax(&mut self, subject: Option<Value>) -> SearchResult<VmSyntax> {
         use std::sync::atomic::{AtomicUsize, Ordering};
         static NEXT: AtomicUsize = AtomicUsize::new(1);

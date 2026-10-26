@@ -1438,6 +1438,16 @@ impl<'a> Windows<'a> {
         let window = self.any_window(window)?;
         Ok(self.get(window)?.cursor_off)
     }
+    /// terminal.c Fframe_initial_p. VM2's one terminal is GNU's
+    /// output_initial kind, so every live frame is an initial frame.
+    pub(crate) fn frame_initial_p(&mut self, frame: Value) -> Out {
+        let frame = if frame == Value::NIL { self.frame() } else { frame };
+        if let Some(Object::Frame(f)) = self.vm.object_if(frame) {
+            return Ok(if f.live { Value::TRUE } else { Value::NIL });
+        }
+        // decode_terminal yields NULL for anything else: nil, not an error.
+        Ok(if self.terminal(frame).is_some() { Value::TRUE } else { Value::NIL })
+    }
     pub(crate) fn terminal_live_p(&mut self, object: Value) -> Value {
         if self.terminal(object).is_some() { Value::TRUE } else { Value::NIL }
     }

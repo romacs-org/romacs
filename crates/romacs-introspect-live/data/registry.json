@@ -8,14 +8,14 @@
   "provenance": {
     "generated_by": "romacs-introspect-live",
     "generated_on": "linux-x86_64",
-    "input_hash": "75543bcd49d582afa43012c19e6768cb9813fff4c0ccb34b2dfba22239035425",
+    "input_hash": "8a5824904e19f202d8910bab999c8cc31b9194b9a34480ec65e7d9e2afd79abb",
     "source_only_at_generation": [],
     "vm2_probe_panics": [],
-    "vm2_universe": 3294
+    "vm2_universe": 3309
   },
   "schema": 2,
   "vm2": {
-    "count": 695,
+    "count": 701,
     "entries": [
       "#:vm2-closure-document",
       "#:vm2-closure-metadata",
@@ -65,6 +65,7 @@
       "backtrace--locals",
       "backtrace-frame--internal",
       "backward-char",
+      "backward-prefix-chars",
       "bare-symbol",
       "bare-symbol-p",
       "beginning-of-line",
@@ -261,8 +262,10 @@
       "frame-bottom-divider-width",
       "frame-char-height",
       "frame-char-width",
+      "frame-initial-p",
       "frame-list",
       "frame-live-p",
+      "frame-or-buffer-changed-p",
       "frame-parameter",
       "frame-parameters",
       "frame-pixel-height",
@@ -582,6 +585,8 @@
       "single-key-description",
       "skip-chars-backward",
       "skip-chars-forward",
+      "skip-syntax-backward",
+      "skip-syntax-forward",
       "sort",
       "special-variable-p",
       "split-window-internal",
@@ -629,6 +634,7 @@
       "terpri",
       "test-completion",
       "text-properties-at",
+      "text-property-not-all",
       "text-quoting-style",
       "this-command-keys",
       "throw",

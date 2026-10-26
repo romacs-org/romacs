@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "d0c24f426cd1f4b21d6a308b81b075eef68637ebe72482ad189ca67b43c6a5f7",
+  "source_fingerprint": "9290c68bf56d58f0a61004992eb189a0a46ce841cdd6314b89174b8c4e5e9c02",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 687,
-  "parsed_vm2_only": 687
+  "parsed_total": 693,
+  "parsed_vm2_only": 693
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -278,6 +278,11 @@
    "implementation": "vm2",
    "variant": "Primitive::BackwardChar",
    "registered_at": "crates/romacs-vm/src/lib.rs:532"
+  },
+  "backward-prefix-chars": {
+   "name": "backward-prefix-chars",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/skip_chars.rs:24"
   },
   "bare-symbol": {
    "name": "bare-symbol",
@@ -1316,6 +1321,11 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/window.rs:192"
   },
+  "frame-initial-p": {
+   "name": "frame-initial-p",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/frame.rs:215"
+  },
   "frame-list": {
    "name": "frame-list",
    "implementation": "vm2",
@@ -1325,6 +1335,11 @@
    "name": "frame-live-p",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/window.rs:182"
+  },
+  "frame-or-buffer-changed-p": {
+   "name": "frame-or-buffer-changed-p",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/frame.rs:179"
   },
   "frame-parameter": {
    "name": "frame-parameter",
@@ -3012,6 +3027,16 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/skip_chars.rs:4"
   },
+  "skip-syntax-backward": {
+   "name": "skip-syntax-backward",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/skip_chars.rs:19"
+  },
+  "skip-syntax-forward": {
+   "name": "skip-syntax-forward",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/skip_chars.rs:14"
+  },
   "sort": {
    "name": "sort",
    "implementation": "vm2",
@@ -3259,6 +3284,11 @@
    "implementation": "vm2",
    "variant": "Primitive::RawPropertiesAt",
    "registered_at": "crates/romacs-vm/src/lib.rs:583"
+  },
+  "text-property-not-all": {
+   "name": "text-property-not-all",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/property_change.rs:14"
   },
   "text-quoting-style": {
    "name": "text-quoting-style",
