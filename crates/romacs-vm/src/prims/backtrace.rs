@@ -31,3 +31,18 @@ defsubr! { name = "backtrace--locals", gnu = "eval.c:4263", effect = Reads,
 fn backtrace_locals(cx, level: Value; optional base: Value) {
     cx.backtrace_locals(level, base)
 }}
+defsubr! { name = "backtrace-frame--internal", gnu = "eval.c:4079", effect = Global,
+fn backtrace_frame_internal(cx, function: Value, nframes: Value, base: Value) -> Step {
+    let count = nframes.integer_value().filter(|&n| n >= 0).ok_or(Fault::Wrong("wholenump", nframes))?;
+    let mut token = cx.backtrace_first(base)?;
+    for _ in 0..count {
+        let Some(at) = token else { break; };
+        token = cx.backtrace_entry(at)?.map(|(_, next)| next);
+    }
+    // backtrace_frame_apply: nil when no such frame exists.
+    let Some((args, _)) = token.map(|at| cx.backtrace_entry(at)).transpose()?.flatten() else {
+        return Ok(Step::Done(Value::NIL));
+    };
+    Ok(Step::Call { f: function, args, then: frame_result, saved: vec![] })
+}}
+fn frame_result(_: &mut Leaf<'_>, value: Value, _: &[Value]) -> Next { Ok(Step::Done(value)) }

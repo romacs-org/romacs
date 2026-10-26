@@ -202,7 +202,7 @@ impl Vm {
         }
     }
     /// Publish SLOT's local TABLE, retaining native Boolean forwarding.
-    fn install_local_table(&mut self, slot: usize, table: Value, explicit: bool) {
+    pub(super) fn install_local_table(&mut self, slot: usize, table: Value, explicit: bool) {
         self.slots[slot].local = table;
         self.slots[slot].explicit_local = explicit;
         self.variable_redirects.resize(self.variable_redirects.len().max(slot + 1), None);
@@ -266,6 +266,10 @@ impl Vm {
         Ok(self.slots[local].value)
     }
     pub(super) fn set_variable_value(&mut self, slot: usize, value: Value) -> Result<()> {
+        if !self.trapped.is_empty() {
+            if value == Value::UNBOUND { self.notify_watchers_at(slot, value, "makunbound", Some(Value::NIL))?; }
+            else { self.notify_watchers(slot, value, "set")?; }
+        }
         let base = self.indirect_variable(slot);
         if let Some(fwd) = self.native_forwarding(base) {
             if value == Value::UNBOUND {
@@ -293,6 +297,7 @@ impl Vm {
         Ok(())
     }
     pub(super) fn bind_variable(&mut self, slot: usize, value: Value) -> Result<()> {
+        if !self.trapped.is_empty() { self.notify_watchers(slot, value, "let")?; }
         let base = self.indirect_variable(slot);
         let local = self.variable_binding_slot(base, false)?;
         if let Some(fwd) = self.native_forwarding(base) && local == base {

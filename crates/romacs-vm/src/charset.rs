@@ -77,6 +77,9 @@ pub(super) struct Registry {
     pub jis_1978: Option<usize>,
     pub jis_0208: Option<usize>,
     pub ksc5601: Option<usize>,
+    /// Vchar_unify_table ranges (MIN-CHAR MAX-CHAR charset id); the unify
+    /// maps themselves load when a decoder first needs them, as in GNU.
+    pub unify_ranges: Vec<(i64, i64, usize)>,
 }
 
 #[allow(dead_code)] // Native definition metadata is retained even before encoders exist.
@@ -98,6 +101,8 @@ pub(super) struct Record {
     pub fast_map: [u8; 190],
     pub linear: bool,
     pub index_offset: i32,
+    /// CHARSET_UNIFIED_P: set by unify-charset, never by definition.
+    pub unified: bool,
 }
 
 impl Registry {
@@ -253,6 +258,7 @@ impl Vm {
                 fast_map: [0; 190],
                 linear: true,
                 index_offset: 0,
+                unified: false,
                 space,
                 dimension,
                 min: space[0],

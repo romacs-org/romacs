@@ -8,7 +8,8 @@
 
 ;;; Code:
 (defvar buffer-name-history nil)
-(defvar read-buffer-function 'romacs-read-buffer)
+;; read-buffer-function is a C variable (minibuf.c); install the owned reader.
+(setq read-buffer-function #'romacs-read-buffer)
 (defvar romacs-buffer--previous nil)
 
 (defun romacs-select-buffer (buffer &optional norecord)

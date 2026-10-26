@@ -90,3 +90,41 @@ fn environment_snapshot_is_local_to_each_vm() {
         .output().unwrap();
     assert!(result.status.success(), "synthetic snapshot child failed: {}", String::from_utf8_lossy(&result.stdout));
 }
+
+// GNU appends its installation's libexec helper directory (exec-directory) to
+// exec-path; Romacs installs no helpers, so the comparison drops GNU's tail.
+const EXEC_PATH_PROBE: &str = r#"(prin1 (list (butlast exec-path) (special-variable-p 'exec-path)
+  (let ((exec-path '("/let"))) (garbage-collect) exec-path)))"#;
+const EXEC_PATH_ROMACS: &str = r#"(prin1-to-string (list exec-path (special-variable-p 'exec-path)
+  (let ((exec-path '("/let"))) (garbage-collect) exec-path)))"#;
+
+#[test]
+fn exec_path_decodes_the_launch_path_like_gnu() {
+    if std::env::var_os("ROMACS_EXEC_PATH_CHILD").is_some() {
+        // First access is exec-path itself, before process-environment.
+        let value: String = serde_json::from_str(&Vm::new().eval_source(EXEC_PATH_ROMACS).unwrap().display().unwrap()).unwrap();
+        println!("ROMACS-EXEC-PATH:{value}");
+        return;
+    }
+    let oracle = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
+    for path in [Some(":/bin::/usr/bin:"), Some(""), None, Some("/usr/local/bin:/opt/λ/bin"), Some(":")] {
+        let configure = |command: &mut std::process::Command| {
+            command.env_clear().env("LANG", "C.UTF-8");
+            if let Some(path) = path { command.env("PATH", path); }
+        };
+        let mut gnu = std::process::Command::new(&oracle);
+        gnu.args(["-Q", "--batch", "--eval", EXEC_PATH_PROBE]);
+        configure(&mut gnu);
+        let gnu = gnu.output().unwrap();
+        assert!(gnu.status.success(), "oracle failed for {path:?}");
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap());
+        child.args(["--exact", "exec_path_decodes_the_launch_path_like_gnu", "--nocapture"]).env("ROMACS_EXEC_PATH_CHILD", "1");
+        configure(&mut child);
+        child.env("ROMACS_EXEC_PATH_CHILD", "1");
+        let child = child.output().unwrap();
+        let stdout = String::from_utf8_lossy(&child.stdout);
+        assert!(child.status.success(), "romacs child failed for {path:?}: {stdout}");
+        let romacs = stdout.split("ROMACS-EXEC-PATH:").nth(1).unwrap_or("").lines().next().unwrap_or("");
+        assert_eq!(romacs, String::from_utf8_lossy(&gnu.stdout), "PATH={path:?}");
+    }
+}

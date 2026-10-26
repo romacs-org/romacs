@@ -252,3 +252,29 @@ fn make_temp_name(cx, prefix: Value) {
     }
     Err(errno(cx, "Creating file name with prefix", &[prefix], std::io::Error::from_raw_os_error(libc::EEXIST)))
 }}
+
+/// fileio.c check_file_access: expand, dispatch a handler, then faccessat.
+fn check_file_access(cx: &mut Leaf<'_>, filename: Value, operation: &str, mode: i32) -> Next {
+    let (path, expanded) = name(cx, filename, false)?;
+    if let Some(call) = handler(cx, expanded, operation, vec![expanded])? { return call; }
+    native_encoding(cx)?;
+    Ok(Step::Done(if cx.filesave_access(&path, mode).is_ok() { Value::TRUE } else { Value::NIL }))
+}
+
+defsubr! { name = "file-exists-p", gnu = "fileio.c:3010", effect = Global,
+fn file_exists_p(cx, filename: Value) -> Step { check_file_access(cx, filename, "file-exists-p", libc::F_OK) }}
+
+defsubr! { name = "file-executable-p", gnu = "fileio.c:3022", effect = Global,
+fn file_executable_p(cx, filename: Value) -> Step { check_file_access(cx, filename, "file-executable-p", libc::X_OK) }}
+
+defsubr! { name = "file-readable-p", gnu = "fileio.c:3032", effect = Global,
+fn file_readable_p(cx, filename: Value) -> Step { check_file_access(cx, filename, "file-readable-p", libc::R_OK) }}
+
+defsubr! { name = "file-regular-p", gnu = "fileio.c:3359", effect = Global,
+fn file_regular_p(cx, filename: Value) -> Step {
+    // expand_and_dir_to_file, then stat following symlinks.
+    let (path, expanded) = name(cx, filename, true)?;
+    if let Some(call) = handler(cx, expanded, "file-regular-p", vec![expanded])? { return call; }
+    native_encoding(cx)?;
+    Ok(Step::Done(if std::fs::metadata(&path).is_ok_and(|m| m.is_file()) { Value::TRUE } else { Value::NIL }))
+}}

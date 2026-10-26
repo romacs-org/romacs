@@ -44,6 +44,10 @@ impl Vm {
         {
             return Err("code image requires a private quiescent world without cells".into());
         }
+        // The trap set is runtime state an image does not carry yet.
+        if !self.trapped.is_empty() {
+            return Err("VM2 code image of a world with variable watchers is unsupported".into());
+        }
         let mut builder = ImageBuilder::default();
         builder.string_raw(""); // directory is always string zero
         for _ in &self.functions {

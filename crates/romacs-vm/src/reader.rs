@@ -267,6 +267,34 @@ impl Reader<'_, '_> {
             format!("invalid-read-syntax {datum}"),
         )
     }
+    /// GNU lread.c read_bool_vector: `#&LENGTH"BYTES"`, a unibyte string of
+    /// exactly ceil(LENGTH/8) bytes (or one more, as Emacs 19 printed it).
+    fn bool_vector(&mut self, depth: usize) -> Result<Value> {
+        let mut length: usize = 0;
+        loop {
+            match self.peek() {
+                Some(c @ 48..=57) => {
+                    self.next()?;
+                    length = length.checked_mul(10).and_then(|n| n.checked_add((c - 48) as usize))
+                        .filter(|&n| n <= isize::MAX as usize / 8).ok_or_else(|| self.syntax("#&"))?;
+                }
+                Some(34) => break,
+                _ => { self.next()?; return Err(self.syntax("#&")); }
+            }
+        }
+        let string = self.form_inner(depth + 1)?;
+        let view = self.vm.str_view(string).ok_or("bool-vector literal string")?;
+        // Host-source literals keep ASCII text multibyte; its bytes are the same.
+        let (multibyte, bytes) = (view.is_multibyte() && !view.bytes().is_ascii(), view.bytes().to_vec());
+        let size = length.div_ceil(8);
+        if multibyte || !(bytes.len() == size || length == bytes.len().saturating_sub(1) * 8) {
+            return Err(self.syntax("#&..."));
+        }
+        let mut vector = crate::bool_vector::BoolVector::new(length, false)?;
+        vector.bytes.copy_from_slice(&bytes[..size]);
+        vector.mask_padding();
+        Ok(self.vm.allocate_object(Object::BoolVector(Box::new(vector))))
+    }
     /// GNU lread.c:3852 `#s(...)`: a record, or, when the first element is
     /// the symbol `hash-table`, a table built by `hash_table_from_plist`
     /// (lread.c:3153, dispatched at :3770-3780). `#s' must be followed
@@ -756,6 +784,7 @@ impl Reader<'_, '_> {
                 115 => self.record(depth),
                 94 => self.table(depth),
                 40 => self.property_string(depth),
+                38 => self.bool_vector(depth),
                 98 | 66 => self.radix_integer(2),
                 111 | 79 => self.radix_integer(8),
                 120 | 88 => self.radix_integer(16),
@@ -1204,6 +1233,7 @@ impl Vm {
             0 => match self.object(value)? {
                 Object::Bignum(_)
                 | Object::Record(_)
+                | Object::BoolVector(_)
                 | Object::CharTable(_)
                 | Object::SubCharTable(_) => {
                     Ok(Form::Object(crate::handle::FormObject::new(self, value)))

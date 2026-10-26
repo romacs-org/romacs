@@ -175,3 +175,24 @@ fn family_later_malformed_mutation_is_rejected_not_silently_dropped() {
         assert!(vm.frame_snapshot(400, 300).is_err(), "FAMILY_MALFORMED_MUTATION_SNAPSHOT {mutation}");
     }
 }
+
+#[test]
+fn registry_setter_matches_pinned_gnu() {
+    let oracle = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
+    let mut vm = Vm::new();
+    for input in [
+        "nil", "42", "'(42)", "'((\"ISO8859-1\" \"Iso10646-1\") (\"gb2312.1980\" \"GBK\"))",
+        "'((\"A\" ?B 66))", "'((foo))", "'((\"A\" . tail))", "'((\"A\") . tail)",
+        "'((\"A\") 42 (sym))", "(list (list \"ÉCOLE\" \"Λ\"))",
+    ] {
+        let source = format!(r#"(prin1-to-string (condition-case e
+            (let* ((input {input}) (result (internal-set-alternative-font-registry-alist input)))
+              (list result (and result (eq input result)) (and (consp result) (consp (car result)) (eq (car input) (car result))) input))
+          (error e)))"#);
+        let output = std::process::Command::new(&oracle).args(["-Q", "--batch", "--eval", &format!("(princ {source})")]).output().unwrap();
+        assert!(output.status.success(), "{input}: {}", String::from_utf8_lossy(&output.stderr));
+        let expected = String::from_utf8(output.stdout).unwrap();
+        let actual: String = serde_json::from_str(&evaluate(&mut vm, &source)).unwrap();
+        assert_eq!(actual, expected, "REGISTRY {input}");
+    }
+}

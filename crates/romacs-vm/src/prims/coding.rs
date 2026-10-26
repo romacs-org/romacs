@@ -213,3 +213,52 @@ defsubr! { name = "decode-coding-string", gnu = "coding.c:10487", effect = Globa
 fn decode_coding_string(cx, string: Value, coding: Value; optional nocopy: Value, buffer: Value) -> Step {
     convert_string(cx, false, string, coding, nocopy, buffer)
 }}
+
+defsubr! { name = "set-safe-terminal-coding-system-internal", gnu = "coding.c:10704", effect = Global,
+fn set_safe_terminal_coding_system_internal(cx, coding: Value) {
+    // Romacs writes no terminal output; the checked coding is kept for
+    // whatever later encodes for a terminal (safe_terminal_coding).
+    if cx.kind(coding) != leaf::Kind::Symbol { return Err(Fault::Wrong("symbolp", coding)); }
+    let coding = cx.coding_check(coding)?;
+    let slot = cx.intern("#:vm2-safe-terminal-coding");
+    cx.variable_set(slot, coding)?;
+    Ok(Value::NIL)
+}}
+
+defsubr! { name = "set-coding-system-priority", gnu = "coding.c:10875", effect = Global,
+fn set_coding_system_priority(cx; rest systems) { cx.set_coding_system_priority(systems) }}
+
+defsubr! { name = "coding-system-priority-list", gnu = "coding.c:10933", effect = Reads,
+fn coding_system_priority_list(cx; optional highestp: Value) { cx.coding_system_priority_list(highestp) }}
+
+defsubr! { name = "set-terminal-coding-system-internal", gnu = "coding.c:10682", effect = Global,
+fn set_terminal_coding_system_internal(cx, coding: Value; optional terminal: Value) {
+    let (terminal, _, _) = cx.windows().terminal_codings(terminal)?;
+    if cx.kind(coding) != leaf::Kind::Symbol { return Err(Fault::Wrong("symbolp", coding)); }
+    // setup_coding_system treats nil as undecided.
+    let coding = if cx.coding_check(coding)? == Value::NIL { cx.intern("undecided") } else { coding };
+    cx.windows().set_terminal_coding(terminal, false, coding)?;
+    Ok(Value::NIL)
+}}
+
+defsubr! { name = "terminal-coding-system", gnu = "coding.c:10720", effect = Reads,
+fn terminal_coding_system(cx; optional terminal: Value) {
+    let (_, coding, _) = cx.windows().terminal_codings(terminal)?;
+    // For backward compatibility, undecided reads as nil.
+    Ok(if coding == cx.intern("undecided") { Value::NIL } else { coding })
+}}
+
+defsubr! { name = "set-keyboard-coding-system-internal", gnu = "coding.c:10735", effect = Global,
+fn set_keyboard_coding_system_internal(cx, coding: Value; optional terminal: Value) {
+    let (terminal, _, _) = cx.windows().terminal_codings(terminal)?;
+    if cx.kind(coding) != leaf::Kind::Symbol { return Err(Fault::Wrong("symbolp", coding)); }
+    let coding = if coding == Value::NIL { cx.intern("no-conversion") } else { cx.coding_check(coding)?; coding };
+    cx.windows().set_terminal_coding(terminal, true, coding)?;
+    Ok(Value::NIL)
+}}
+
+defsubr! { name = "keyboard-coding-system", gnu = "coding.c:10753", effect = Reads,
+fn keyboard_coding_system(cx; optional terminal: Value) {
+    let (_, _, coding) = cx.windows().terminal_codings(terminal)?;
+    Ok(coding)
+}}

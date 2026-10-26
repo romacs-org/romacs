@@ -47,6 +47,8 @@ pub(super) struct Window {
     /// GNU `w->use_time` (window.c:767): `window_select_count` at the last
     /// recorded selection, 0 for a window never selected that way.
     pub use_time: u64,
+    /// GNU `w->cursor_off_p` (dispnew.c internal-show-cursor).
+    pub cursor_off: bool,
     pub end_distance: usize,
     pub end_valid: bool,
     pub force_start: bool,
@@ -80,6 +82,7 @@ impl Window {
             normal_lines: Value::NIL,
             normal_cols: Value::NIL,
             use_time: 0,
+            cursor_off: false,
             end_distance: 0,
             end_valid: false,
             force_start: false,
@@ -1351,6 +1354,33 @@ impl<'a> Windows<'a> {
     pub(crate) fn frame_live_p(&mut self, object: Value) -> Value {
         if matches!(self.vm.object_if(object), Some(Object::Frame(f)) if f.live) { Value::TRUE } else { Value::NIL }
     }
+    /// The frame's parameter alist entries, most recently added first
+    /// (frame.c f->param_alist). FRAME nil is the selected frame.
+    pub(crate) fn frame_parameter_entries(&mut self, frame: Value) -> std::result::Result<Vec<(Value, Value)>, Fault> {
+        self.any_frame(frame)?;
+        let frame = if frame == Value::NIL { self.frame() } else { frame };
+        Ok(self.vm.frame(frame).map_err(internal)?.parameters.clone())
+    }
+    pub(crate) fn check_live_frame(&mut self, frame: Value) -> std::result::Result<(), Fault> {
+        self.live_frame(frame)
+    }
+    /// FRAME_COLS and FRAME_LINES of the frame's text area.
+    pub(crate) fn frame_text_size(&mut self) -> (i64, i64) {
+        let state = &self.vm.window_state;
+        (i64::from(state.width / state.column.max(1)), i64::from(state.height / state.line.max(1)))
+    }
+    /// frame.c store_frame_param: replace an existing entry's value, else
+    /// push a new entry onto the front.
+    pub(crate) fn store_frame_parameter(&mut self, frame: Value, key: Value, value: Value) -> std::result::Result<(), Fault> {
+        self.live_frame(frame)?;
+        let frame = if frame == Value::NIL { self.frame() } else { frame };
+        let parameters = &mut self.vm.frame_mut(frame).map_err(internal)?.parameters;
+        match parameters.iter_mut().find(|(k, _)| *k == key) {
+            Some((_, v)) => *v = value,
+            None => parameters.insert(0, (key, value)),
+        }
+        Ok(())
+    }
     pub(crate) fn frame_p(&self, object: Value) -> Value {
         if matches!(self.vm.object_if(object), Some(Object::Frame(_))) { Value::TRUE } else { Value::NIL }
     }
@@ -1376,6 +1406,37 @@ impl<'a> Windows<'a> {
             _ => return None,
         };
         matches!(self.vm.object_if(terminal), Some(Object::Terminal(t)) if t.live).then_some(terminal)
+    }
+    /// decode_live_terminal, then the (terminal, keyboard) coding names.
+    pub(crate) fn terminal_codings(&mut self, object: Value) -> std::result::Result<(Value, Value, Value), Fault> {
+        self.vm.ensure_windows().map_err(internal)?;
+        let terminal = self.terminal(object).ok_or(Fault::Wrong("terminal-live-p", object))?;
+        match self.vm.object_if(terminal) {
+            Some(Object::Terminal(t)) => Ok((terminal, t.terminal_coding, t.keyboard_coding)),
+            _ => Err(Fault::Wrong("terminal-live-p", object)),
+        }
+    }
+    pub(crate) fn set_terminal_coding(&mut self, terminal: Value, keyboard: bool, coding: Value) -> std::result::Result<(), Fault> {
+        let index = terminal.index(0).map_err(internal)?.saturating_sub(1);
+        if let Some(Object::Terminal(t)) = self.vm.objects.get_mut(index) {
+            if keyboard { t.keyboard_coding = coding; } else { t.terminal_coding = coding; }
+        }
+        Ok(())
+    }
+    /// decode_any_window: nil is the selected window; dead windows count.
+    fn any_window(&mut self, window: Value) -> std::result::Result<Value, Fault> {
+        self.vm.ensure_windows().map_err(internal)?;
+        let window = if window == Value::NIL { self.vm.window_root(SELECTED) } else { window };
+        if matches!(self.vm.object_if(window), Some(Object::Window(_))) { Ok(window) } else { Err(Fault::Wrong("windowp", window)) }
+    }
+    pub(crate) fn set_cursor_off(&mut self, window: Value, off: bool) -> std::result::Result<(), Fault> {
+        let window = self.any_window(window)?;
+        self.vm.window_mut(window).map_err(internal)?.cursor_off = off;
+        Ok(())
+    }
+    pub(crate) fn cursor_off(&mut self, window: Value) -> std::result::Result<bool, Fault> {
+        let window = self.any_window(window)?;
+        Ok(self.get(window)?.cursor_off)
     }
     pub(crate) fn terminal_live_p(&mut self, object: Value) -> Value {
         if self.terminal(object).is_some() { Value::TRUE } else { Value::NIL }

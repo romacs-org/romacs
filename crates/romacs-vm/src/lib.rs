@@ -25,6 +25,8 @@ mod host_input;
 mod terminal_host;
 mod process_jobs;
 mod environment;
+mod watchers;
+mod user_db;
 pub use command::{CommandEvent, CommandOutcome, CommandSignal};
 pub use host_input::{HostEvent, HostFrame, HostInput};
 pub use terminal_host::{TerminalColor, TerminalHost, TerminalInputState, TerminalSnapshot, TerminalStyle, TerminalStyleRun};
@@ -1052,6 +1054,10 @@ pub struct Vm {
     host_input: Option<Box<dyn host_input::HostInput>>,
     process_jobs: process_jobs::Jobs,
     environment_snapshot: Option<Vec<Vec<u8>>>,
+    /// SYMBOL_TRAPPED_WRITE base slots: variables with watchers (watchers.rs).
+    trapped: HashSet<usize>,
+    /// etc/DOC as last read, keyed by path and modification time (prims/doc.rs).
+    doc_file: Option<(std::path::PathBuf, std::time::SystemTime, std::sync::Arc<Vec<u8>>)>,
     terminal_host: Option<Box<dyn terminal_host::TerminalHost>>,
     terminal_bindings: Vec<terminal_host::TerminalBinding>,
     pending_specials: HashSet<String>,
@@ -1162,6 +1168,8 @@ impl Vm {
             host_input: None,
             process_jobs: process_jobs::Jobs::default(),
             environment_snapshot: Some(environment::snapshot()),
+            trapped: HashSet::new(),
+            doc_file: None,
             terminal_host: None,
             terminal_bindings: Vec::new(),
             propagate_next: false,
@@ -1239,7 +1247,10 @@ impl Vm {
         vm.initialize_loader();
         vm.initialize_autoload();
         vm.declare_fileio_specials();
-        vm.specials.extend(["process-environment".into(), "initial-environment".into()]);
+        vm.specials.extend(["process-environment".into(), "initial-environment".into(), "exec-path".into()]);
+        // C specials are special before their symbols are first interned, so
+        // already-read forms compile their bindings dynamically.
+        vm.specials.extend(forwarded::C_SPECIALS.iter().map(|v| v.name.to_owned()));
         vm.declare_special_raw("inhibit-eol-conversion", Value::NIL);
         vm.declare_special_raw("text-quoting-style", Value::NIL);
         vm.declare_special_raw("internal--text-quoting-flag", Value::TRUE);
@@ -1359,6 +1370,7 @@ impl Vm {
         self.initialize_case_table_slot(name, i);
         self.initialize_face_slot(name, i);
         self.initialize_environment_slot(name);
+        self.initialize_c_special(name, i);
         if name == "charset-list" { self.ensure_charsets(); }
         prim::initialize_coding_slot(self, name);
         if name == "obarray" {
@@ -2339,10 +2351,30 @@ impl Vm {
         self.external_roots.clear();
         outcome
     }
+    /// The echo area's message for `current-message`, as an embedder that
+    /// renders the echo area itself shows or clears it.
+    pub fn set_echo_area_message(&mut self, text: Option<&str>) {
+        let value = text.map_or(Value::NIL, |t| self.make_lisp_string(t.as_bytes().to_vec(), !t.is_ascii()));
+        let slot = self.slot(prim::ECHO_AREA_MESSAGE);
+        self.slots[slot].value = value;
+    }
+    /// Unwinding restores every binding; a watcher's signal is dropped here
+    /// only because an escape is already in flight (see `unbind_one`).
     fn unbind(&mut self, n: usize) {
         for _ in 0..n {
+            let _ = self.unbind_one();
+        }
+    }
+    /// Restore the innermost binding, notifying watchers (`unlet`) first. A
+    /// watcher's signal is returned after the restore, in propagated_escape.
+    pub(crate) fn unbind_one(&mut self) -> Result<()> {
+        let mut watched = Ok(());
+        {
             let (slot, value, owner, let_default) = self.dynamic.pop().expect("compiler balances bindings");
             let symbol = self.backtrace.bindings.last().filter(|(at, _)| *at == self.dynamic.len()).map(|(_, symbol)| *symbol);
+            if !self.trapped.is_empty() && let Some(base) = symbol.and_then(|s| s.index_if(7)).map(|i| i - 1) {
+                watched = self.notify_watchers(base, value, "unlet");
+            }
             self.backtrace.unbind(self.dynamic.len());
             if let Some(base) = symbol.and_then(|symbol| symbol.index_if(7)).map(|index| index - 1)
                 && self.localized_boolean(base).is_some() && self.local_binding_slots.contains(&slot)
@@ -2353,16 +2385,17 @@ impl Vm {
                         self.slots[local.index(7).expect("private binding") - 1].value = value;
                     }
                 }
-                continue;
+                return watched;
             }
             if let Some(fwd) = self.native_forwarding(slot) {
                 self.unbind_forwarded(fwd, value, owner, let_default);
-                continue;
+                return watched;
             }
             if slot != self.buffer_slot || value == Value::NIL || self.live_buffer_value(value) {
                 self.slots[slot].value = value;
             }
         }
+        watched
     }
     #[inline(never)]
     fn primitive(&mut self, p: Primitive, start: usize, n: usize) -> Result<Value> {
@@ -2428,10 +2461,14 @@ impl Vm {
             return result;
         }
         if p == Message {
-            if n == 1 && self.stack[start] == Value::NIL {
+            // The echo area holds the last message; (message nil) clears it.
+            let echo = self.slot(prim::ECHO_AREA_MESSAGE);
+            if n >= 1 && self.stack[start] == Value::NIL {
+                self.slots[echo].value = Value::NIL;
                 return Ok(Value::NIL);
             }
             let value = self.format_string(start, n)?;
+            self.slots[echo].value = value;
             eprintln!("{}", self.source_string(value)?);
             return Ok(value);
         }

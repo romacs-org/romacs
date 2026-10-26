@@ -710,7 +710,9 @@ fn checked_unbind(e: &mut Engine<'_>, n: usize) -> Option<Escape> {
             let data = e.vm.list_value(&[predicate, value]);
             return Some(Escape::Signal(condition, data));
         }
-        e.vm.unbind(1);
+        if e.vm.unbind_one().is_err() {
+            return e.vm.propagated_escape.take();
+        }
     }
     None
 }
@@ -2961,7 +2963,10 @@ fn primitive_value(
     match call(e.vm, p, start, argc) {
         Ok(value) => Some(value),
         Err(error) => {
-            if let Some((condition, data)) = e.vm.primitive_condition(p, start, argc, &error) {
+            // A variable watcher's own signal travels behind set/makunbound's text.
+            if matches!(p, Primitive::Set | Primitive::Makunbound) && let Some(escape) = e.vm.propagated_escape.take() {
+                e.escape = Some(escape);
+            } else if let Some((condition, data)) = e.vm.primitive_condition(p, start, argc, &error) {
                 e.escape = Some(Escape::Signal(condition, data));
             }
             e.error = Some(error);
@@ -3627,7 +3632,10 @@ unsafe fn cold_step(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> bool 
                 Op::SetGlobal(slot, reg) => {
                     let value = *r.add(reg);
                     if let Err(error) = e.vm.set_variable_value(slot, value) {
-                        if let Some((condition, data)) = e.vm.forwarded_condition(&error, value) {
+                        // A variable watcher's own signal, else a forwarded store fault.
+                        if let Some(escape) = e.vm.propagated_escape.take() {
+                            e.escape = Some(escape);
+                        } else if let Some((condition, data)) = e.vm.forwarded_condition(&error, value) {
                             e.escape = Some(Escape::Signal(condition, data));
                         }
                         return Err(error);
@@ -3636,6 +3644,10 @@ unsafe fn cold_step(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> bool 
                 Op::Bind(slot, reg) => {
                     let value = *r.add(reg);
                     if let Err(error) = e.vm.bind_variable(slot, value) {
+                        if let Some(escape) = e.vm.propagated_escape.take() {
+                            e.escape = Some(escape);
+                            return Err(error);
+                        }
                         if let Some((condition, data)) = e.vm.forwarded_condition(&error, value) {
                             e.escape = Some(Escape::Signal(condition, data));
                         }

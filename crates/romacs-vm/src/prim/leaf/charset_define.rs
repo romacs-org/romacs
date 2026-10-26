@@ -226,7 +226,7 @@ impl Leaf<'_> {
         let id = old.map(|i| self.vm.charsets.records[i].attrs[0].integer_value().unwrap() as usize).unwrap_or(self.vm.charsets.ids.len());
         let mut attrs = [Value::NIL; 10]; attrs[0]=int(id as i64); attrs[1]=a[0]; attrs[2]=a[16]; attrs[8]=a[15];
         if offset.is_none() { attrs[3] = a[12]; attrs[6] = subset; attrs[7] = superset; }
-        let record = crate::charset::Record { attrs, space, dimension, min, max, offset: offset.map(|n| n as u32), iso_final, iso_revision, mule_id, ascii_compatible: a[8] != Value::NIL || (offset == Some(0) && max_char >= 128), supplementary: a[9] != Value::NIL, invalid, min_char, max_char, fast_map, linear, index_offset };
+        let record = crate::charset::Record { attrs, space, dimension, min, max, offset: offset.map(|n| n as u32), iso_final, iso_revision, mule_id, ascii_compatible: a[8] != Value::NIL || (offset == Some(0) && max_char >= 128), supplementary: a[9] != Value::NIL, invalid, min_char, max_char, fast_map, linear, index_offset, unified: false };
         // Attribute identity follows bindings, while native metadata follows ID.
         // Reuse an unshared replaced slot, or an unreachable retired slot, so
         // repeated redefinition does not retain obsolete Lisp plists forever.

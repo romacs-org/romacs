@@ -78,3 +78,6 @@ fn set_keymap_parent(cx, keymap: Value, parent: Value) {
     }
     Err(Fault::Circular(keymap))
 }}
+
+defsubr! { name = "copy-keymap", gnu = "keymap.c:1018", effect = Global,
+fn copy_keymap(cx, keymap: Value) { cx.copy_keymap(keymap, 0) }}

@@ -183,8 +183,9 @@
       (unless (eq (car leaves) keep) (romacs-gui-delete (car leaves)))
       (setq leaves (cdr leaves)))
     (select-window keep)))
-(defvar scroll-conservatively 101
-  "Scroll only enough to reveal point; zero requests automatic centering.")
+;; scroll-conservatively is a C variable (xdisp.c); Romacs prefers scrolling
+;; only enough to reveal point.
+(setq scroll-conservatively 101)
 (defvar last-command nil)
 (defvar romacs-gui-goal-column nil)
 (defun romacs-gui-vertical-motion (lines)

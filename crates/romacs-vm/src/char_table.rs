@@ -616,6 +616,12 @@ impl CharTable {
         if from < 128 { self.ascii = Self::ascii_from_root(&self.root); }
         Ok(())
     }
+    /// Rewrite every character entry (not purpose, default, parent or
+    /// extras), as map_char_table + set-char-table-range would.
+    pub(crate) fn map_entries(&mut self, map: &mut impl FnMut(&mut Value)) {
+        visit_char_table_node_values(&self.root, &mut HashSet::new(), map);
+        self.ascii = Self::ascii_from_root(&self.root);
+    }
     pub fn visit_values(&mut self, visit: &mut impl FnMut(&mut Value)) {
         self.visit_values_seen(&mut HashSet::new(), visit);
     }

@@ -25,9 +25,15 @@ impl Frame {
 pub(super) struct Terminal {
     pub frame: Value,
     pub live: bool,
+    /// Coding system names of TERMINAL_TERMINAL_CODING and
+    /// TERMINAL_KEYBOARD_CODING (terminal.c create_terminal defaults).
+    pub terminal_coding: Value,
+    pub keyboard_coding: Value,
 }
 impl Terminal {
-    pub fn visit_values(&mut self, f: &mut impl FnMut(&mut Value)) { f(&mut self.frame); }
+    pub fn visit_values(&mut self, f: &mut impl FnMut(&mut Value)) {
+        f(&mut self.frame); f(&mut self.terminal_coding); f(&mut self.keyboard_coding);
+    }
     pub fn storage_bytes(&self) -> usize { size_of::<Self>() }
 }
 impl Vm {
@@ -51,12 +57,15 @@ impl Vm {
         }
     }
     pub(super) fn allocate_initial_frame(&mut self, root: Value, minibuffer: Value) -> Result<()> {
+        let (undecided, no_conversion) = (self.intern("undecided"), self.intern("no-conversion"));
         let terminal = self.allocate_object(Object::Terminal(Box::new(Terminal {
-            frame: Value::NIL, live: true,
+            frame: Value::NIL, live: true, terminal_coding: undecided, keyboard_coding: no_conversion,
         })));
+        // make_initial_frame (frame.c:1441) names the initial frame F1.
+        let name = (self.intern("name"), self.make_lisp_string(b"F1".to_vec(), false));
         let frame = self.allocate_object(Object::Frame(Box::new(Frame {
             root, selected: root, minibuffer, terminal,
-            parameters: vec![], live: true,
+            parameters: vec![name], live: true,
         })));
         let Object::Terminal(t) = &mut self.objects[terminal.index(0)? - 1] else { unreachable!() };
         t.frame = frame;

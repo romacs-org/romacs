@@ -82,8 +82,12 @@ pub(crate) type Out = std::result::Result<Value, Fault>;
 
 /// The variable slot holding the closure -> interactive-spec table.
 pub(crate) const INTERACTIVE_TABLE: &str = "#:vm2-interactive-specs";
+/// The echo area's current message (xdisp.c echo_area_buffer contents).
+pub(crate) const ECHO_AREA_MESSAGE: &str = "#:vm2-echo-area-message";
 /// Lazy native root, traced and forwarded like INTERACTIVE_TABLE.
 pub(crate) const FONT_ALTERNATIVE_FAMILIES: &str = "#:vm2-font-alternative-families";
+/// xfaces.c Vface_alternative_font_registry_alist: staticpro'd, not a Lisp variable.
+pub(crate) const FONT_ALTERNATIVE_REGISTRIES: &str = "#:vm2-font-alternative-registries";
 
 /// A T2 continuation. A plain `fn` pointer: it cannot capture Rust state, so
 /// the only Values it sees are the callback's result and the saved registers.
@@ -178,6 +182,54 @@ mod leaf {
             let slot = self.vm.slot(super::FONT_ALTERNATIVE_FAMILIES);
             self.vm.slots[slot].value = raw;
             self.vm.display_state.set_font_alternative_families(names);
+        }
+        pub(crate) fn set_font_alternative_registries(&mut self, raw: Value) {
+            let slot = self.vm.slot(super::FONT_ALTERNATIVE_REGISTRIES);
+            self.vm.slots[slot].value = raw;
+            self.vm.display_state.free_realized_faces();
+        }
+        pub(crate) fn theme_face_attribute(&mut self, face: &str, keyword: &str, value: Value) {
+            self.vm.theme_face_attribute(face, keyword, value);
+        }
+        /// The bytes of a DOC file, read once per path and modification time.
+        pub(crate) fn doc_file_bytes(&mut self, path: &std::path::Path) -> Option<std::sync::Arc<Vec<u8>>> {
+            let modified = std::fs::metadata(path).and_then(|m| m.modified()).ok()?;
+            if let Some((cached, at, bytes)) = &self.vm.doc_file && cached == path && *at == modified {
+                return Some(bytes.clone());
+            }
+            let bytes = std::sync::Arc::new(std::fs::read(path).ok()?);
+            self.vm.doc_file = Some((path.to_path_buf(), modified, bytes.clone()));
+            Some(bytes)
+        }
+        pub(crate) fn symbol_slot_of(&self, v: Value) -> std::result::Result<usize, Fault> {
+            self.symbol_slot(v)
+        }
+        /// notify_variable_watchers from a leaf; a watcher's signal is the fault.
+        pub(crate) fn notify(&mut self, slot: usize, value: Value, operation: &str, place: Option<Value>) -> std::result::Result<(), Fault> {
+            if self.vm.trapped.is_empty() { return Ok(()); }
+            self.vm.notify_watchers_at(slot, value, operation, place).map_err(|text| match self.vm.propagated_escape.take() {
+                Some(crate::threaded::Escape::Signal(condition, data)) => Fault::Signal(condition, data),
+                _ => Fault::Error(text),
+            })
+        }
+        pub(crate) fn variable_watchable(&self, watcher: Value) -> bool {
+            super::native_watcher(self.vm, watcher).is_some()
+        }
+        pub(crate) fn put_symbol_property(&mut self, symbol: Value, key: Value, value: Value) -> std::result::Result<(), Fault> {
+            self.vm.put_symbol_property(symbol, key, value).map(|_| ()).map_err(Fault::Error)
+        }
+        pub(crate) fn trapped_variable(&self, symbol: Value) -> std::result::Result<bool, Fault> {
+            let slot = self.symbol_slot(symbol)?;
+            Ok(self.vm.variable_trapped(self.vm.indirect_variable(slot)))
+        }
+        pub(crate) fn request_redisplay(&mut self) {
+            self.vm.display_state.free_realized_faces();
+        }
+        pub(crate) fn trap_variable(&mut self, symbol: Value, trapped: bool) -> std::result::Result<(), Fault> {
+            let slot = self.symbol_slot(symbol)?;
+            let base = self.vm.indirect_variable(slot);
+            self.vm.set_variable_trapped(base, trapped);
+            Ok(())
         }
         pub(crate) fn set_font_selection_order(&mut self, order: [romacs_layout_input::FontSelectionAttribute; 4]) {
             self.vm.display_state.set_font_selection_order(order);
@@ -801,6 +853,7 @@ mod leaf {
                 return Err(Fault::SettingConstant(v));
             }
             let slot = self.vm.indirect_variable(self.symbol_slot(v)?);
+            self.notify(slot, value, "set", Some(Value::NIL))?;
             // Only an INTERNED keyword is SYMBOL_NOWRITE (GNU lread.c
             // intern_sym); an uninterned `:x' is an ordinary variable.
             let name = &self.vm.symbol_names[slot];
@@ -882,7 +935,10 @@ mod leaf {
                 return Err(Fault::SettingConstant(v));
             }
             let slot = self.symbol_slot(v)?;
-            self.vm.set_variable_value(slot, value).map_err(Fault::Error)
+            self.vm.set_variable_value(slot, value).map_err(|text| match self.vm.propagated_escape.take() {
+                Some(crate::threaded::Escape::Signal(condition, data)) => Fault::Signal(condition, data),
+                _ => Fault::Error(text),
+            })
         }
         /// Publish NEW as an alias of BASE once `defvaralias` has validated
         /// it. nil and t are immediates in VM2, so an alias of either targets
@@ -1401,6 +1457,7 @@ mod leaf {
     // Buffer text for prims/fileio.rs (src/prim/leaf/fileio.rs). A child
     // module, so it sees `vm`.
     mod map_keymap;
+    mod keymap_copy;
     mod fileio;
     mod filelock;
     mod file_attributes;
@@ -1594,6 +1651,32 @@ pub(crate) fn legacy_value(p: Primitive) -> Option<Value> {
         .map(|i| Value::reference(i, 6))
 }
 
+/// A watcher that is a native leaf subr, which can run at a write point
+/// without re-entering the engine. Symbols are resolved to their function.
+pub(crate) fn native_watcher(vm: &Vm, mut watcher: Value) -> Option<&'static PrimDesc> {
+    for _ in 0..64 {
+        if let Some(d) = generated(watcher) { return matches!(d.body, Body::Leaf(_)).then_some(d); }
+        let slot = watcher.index_if(7)?.checked_sub(1)?;
+        watcher = vm.slots.get(slot)?.function;
+    }
+    None
+}
+pub(crate) fn call_native_watcher(vm: &mut Vm, watcher: Value, args: &[Value]) -> crate::Result<()> {
+    let Some(d) = native_watcher(vm, watcher) else { return Err("VM2 variable watcher is not a native subr".into()); };
+    let Body::Leaf(f) = d.body else { unreachable!("native_watcher checks the body") };
+    let (condition, data) = if args.len() < d.min || d.max.is_some_and(|m| args.len() > m) {
+        let n = Value::integer(args.len() as i64).unwrap();
+        vm.condition("wrong-number-of-arguments", &[watcher, n])
+    } else {
+        match no_collection(vm, |vm| f(&mut Leaf::new(vm), args)) {
+            Ok(_) => return Ok(()),
+            Err(fault) => vm.fault(fault),
+        }
+    };
+    // funcall_subr passes the watcher's own signal through the write.
+    vm.propagated_escape = Some(crate::threaded::Escape::Signal(condition, data));
+    Err(format!("variable watcher {} signalled", d.name))
+}
 /// Tag-6 payloads at or above `PRIMITIVES.len()` name generated primitives.
 #[inline(always)]
 pub(crate) fn generated(v: Value) -> Option<&'static PrimDesc> {

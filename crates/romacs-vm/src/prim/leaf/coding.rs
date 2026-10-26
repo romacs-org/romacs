@@ -2,6 +2,10 @@
 use super::*;
 
 const ROOT: &str = "#:vm2-coding-system-registry";
+/// coding.c coding_categories[].id: the coding system set up for each
+/// category (nil while its id is -1), and coding_priorities[].
+const CATEGORY_SYSTEMS: &str = "#:vm2-coding-category-systems";
+const PRIORITIES: &str = "#:vm2-coding-priorities";
 const CATEGORIES: [&str; 21] = [
     "iso-7",
     "iso-7-tight",
@@ -1176,6 +1180,77 @@ impl Leaf<'_> {
         }
         let attrs = self.vector(&attrs);
         self.coding_publish(args[0], attrs, eol)?;
+        // Fdefine_coding_system_internal: the first definition in a category,
+        // or a redefinition of that same system, sets the category up.
+        let systems = self.coding_category_state(CATEGORY_SYSTEMS)?;
+        let current = self.vector_get(systems, num(category))?;
+        if current == Value::NIL || current == args[0] {
+            self.vector_set(systems, num(category), args[0])?;
+        }
         Ok(Value::NIL)
+    }
+    /// Hidden category vectors, created in syms_of_coding's initial state.
+    fn coding_category_state(&mut self, name: &str) -> super::super::Out {
+        let slot = self.vm.slot(name);
+        let value = self.vm.slots[slot].value;
+        if value != Value::UNBOUND { return Ok(value); }
+        let initial: Vec<Value> = if name == PRIORITIES { (0..CATEGORIES.len() as i64).map(num).collect() }
+            else { vec![Value::NIL; CATEGORIES.len()] };
+        let vector = self.vector(&initial);
+        self.vm.slots[slot].value = vector;
+        Ok(vector)
+    }
+    /// coding.c Fset_coding_system_priority.
+    pub fn set_coding_system_priority(&mut self, systems: &[Value]) -> super::super::Out {
+        self.coding_init()?;
+        let categories = self.coding_category_state(CATEGORY_SYSTEMS)?;
+        let priorities = self.coding_category_state(PRIORITIES)?;
+        let mut changed = [false; CATEGORIES.len()];
+        let mut order = Vec::with_capacity(CATEGORIES.len());
+        for &system in systems {
+            let spec = self.coding_required(system)?;
+            let attrs = self.vector_get(spec, num(0))?;
+            let category = self.vector_get(attrs, num(14))?.integer_value().unwrap_or(0) as usize;
+            if changed[category] { continue; }
+            changed[category] = true;
+            order.push(category);
+            if self.vector_get(categories, num(category as i64))? != Value::NIL {
+                self.vector_set(categories, num(category as i64), system)?;
+            }
+            let variable = self.intern(&format!("coding-category-{}", CATEGORIES[category]));
+            self.variable_set(variable, system)?;
+        }
+        for i in 0..CATEGORIES.len() {
+            let category = self.vector_get(priorities, num(i as i64))?.integer_value().unwrap_or(0) as usize;
+            if !changed[category] { order.push(category); }
+        }
+        let mut names = Vec::with_capacity(order.len());
+        for (i, &category) in order.iter().enumerate() {
+            self.vector_set(priorities, num(i as i64), num(category as i64))?;
+            names.push(self.intern(&format!("coding-category-{}", CATEGORIES[category])));
+        }
+        let list = self.coding_list(&names);
+        let variable = self.intern("coding-category-list");
+        self.variable_set(variable, list)?;
+        Ok(Value::NIL)
+    }
+    /// coding.c Fcoding_system_priority_list: the base names of the systems
+    /// set up for each category, in priority order.
+    pub fn coding_system_priority_list(&mut self, highestp: Value) -> super::super::Out {
+        self.coding_init()?;
+        let categories = self.coding_category_state(CATEGORY_SYSTEMS)?;
+        let priorities = self.coding_category_state(PRIORITIES)?;
+        let mut bases = Vec::new();
+        for i in 0..CATEGORIES.len() {
+            let category = self.vector_get(priorities, num(i as i64))?;
+            let system = self.vector_get(categories, category)?;
+            if system == Value::NIL { continue; }
+            let spec = self.coding_spec(system)?;
+            let attrs = self.vector_get(spec, num(0))?;
+            let base = self.vector_get(attrs, num(0))?;
+            if highestp != Value::NIL { return Ok(base); }
+            bases.push(base);
+        }
+        Ok(self.coding_list(&bases))
     }
 }

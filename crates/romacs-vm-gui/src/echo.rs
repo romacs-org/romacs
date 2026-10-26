@@ -8,8 +8,8 @@ use romacs_vm::{CommandSignal, Vm};
 
 /// Show `text` in the echo area: the minibuffer window's buffer. Never selects
 /// the minibuffer window, and restores the current buffer and its point.
-pub fn show(vm: &mut Vm, text: &str) -> Result<(), String> {
-    let text = serde_json::to_string(text).map_err(|error| error.to_string())?;
+pub fn show(vm: &mut Vm, message: &str) -> Result<(), String> {
+    let text = serde_json::to_string(message).map_err(|error| error.to_string())?;
     vm.eval_source(&format!(
         "(let ((old-buffer (current-buffer)) (old-point (point)) (inhibit-read-only t))
            (unwind-protect
@@ -17,6 +17,7 @@ pub fn show(vm: &mut Vm, text: &str) -> Result<(), String> {
                       (erase-buffer) (insert {text}))
              (set-buffer old-buffer) (goto-char old-point)))"
     ))?;
+    vm.set_echo_area_message(Some(message));
     Ok(())
 }
 
@@ -28,6 +29,7 @@ pub fn clear(vm: &mut Vm) -> Result<(), String> {
                (progn (set-buffer (window-buffer (minibuffer-window))) (erase-buffer))
              (set-buffer old-buffer) (goto-char old-point)))",
     )?;
+    vm.set_echo_area_message(None);
     Ok(())
 }
 
@@ -133,9 +135,10 @@ mod tests {
         assert_eq!(backend.display().unwrap(), "t");
         let outcome = presentation.command(&mut vm, &mut commands, CommandEvent::Character((1 << 27) | 'x' as i64)).unwrap().unwrap();
         assert_eq!(outcome.command.as_deref(), Some("execute-extended-command"));
-        let signal = outcome.signal.expect("M-x reports its unsupported minibuffer state");
-        assert_eq!(signal.condition, "void-variable");
-        assert_eq!(signal.data, "(minibuffer-completing-file-name)");
+        // With GNU's minibuffer variables present, M-x reaches the minibuffer
+        // read; this test attaches no keyboard, so it ends as GNU batch does.
+        let signal = outcome.signal.expect("M-x reports that no input is available");
+        assert_eq!((signal.condition.as_str(), signal.data.as_str()), ("end-of-file", "(\"Error reading from stdin\")"));
         let shown = text(&mut vm).unwrap();
         assert_eq!(shown, signal_message(&mut vm, &signal).unwrap());
         presentation.command(&mut vm, &mut commands, CommandEvent::Character('!' as i64)).unwrap();

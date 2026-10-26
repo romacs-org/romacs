@@ -36,6 +36,11 @@ impl DisplayState {
         self.previous.clear();
         self.version = self.version.wrapping_add(1);
     }
+    /// free_all_realized_faces: republish every window with fresh faces.
+    pub(super) fn free_realized_faces(&mut self) {
+        self.previous.clear();
+        self.version = self.version.wrapping_add(1);
+    }
     pub(super) fn set_font_selection_order(&mut self, order: [romacs_layout_input::FontSelectionAttribute; 4]) {
         if self.font_selection_order.set_order(order) {
             self.previous.clear();
@@ -220,6 +225,25 @@ impl Vm {
             self.display_state.version += 1;
         }
         changed
+    }
+    /// The Lisp face registry is authoritative; the display theme follows a
+    /// frame's `internal-set-lisp-face-attribute`. A value the theme cannot
+    /// represent stays in Lisp and is reported, never signalled.
+    pub(crate) fn theme_face_attribute(&mut self, face: &str, keyword: &str, value: Value) {
+        // faces.el gives a frame without a window system the terminal's own
+        // colours, "unspecified-fg"/"unspecified-bg" (tty-colors); the theme
+        // realizes those as its base colours.
+        let sentinel = self.str_view(value).is_some_and(|v| matches!(v.bytes(), b"unspecified-fg" | b"unspecified-bg"));
+        let value = if sentinel { self.intern("unspecified") } else { value };
+        let next = BoundedDatum::from_graph(&Graph(self), value.0).map_err(|e| e.to_string())
+            .and_then(|datum| self.display_state.theme.with_face_attribute(face, keyword, &datum).map_err(|e| e.to_string()));
+        match next {
+            Ok(next) => {
+                self.display_state.theme = next;
+                self.display_state.free_realized_faces();
+            }
+            Err(error) => self.display_state.diagnostics.push(format!("face {face} {keyword}: {error}")),
+        }
     }
     pub fn take_display_diagnostics(&mut self) -> Vec<String> {
         std::mem::take(&mut self.display_state.diagnostics)

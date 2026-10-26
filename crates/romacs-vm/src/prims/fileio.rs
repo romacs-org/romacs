@@ -174,7 +174,7 @@ pub(super) fn file_errno(cx: &mut Leaf<'_>, string: &str, name: Value, error: &s
 }
 
 /// The named refusal every unsupported path takes: `(error "VM2 ...")'.
-fn refuse(what: &str) -> Fault {
+pub(super) fn refuse(what: &str) -> Fault {
     Fault::Error(format!("VM2 {what} is unsupported"))
 }
 
@@ -657,9 +657,14 @@ fn locate_readable_file(cx: &mut Leaf<'_>, filename: Value, path: Value,
     suffixes: Value, predicate: Value) -> Out {
     let name = cx.string_text(filename)?;
     let multibyte = cx.string_view(filename)?.is_multibyte();
-    if predicate != Value::NIL {
-        return Err(refuse("locate-file-internal non-nil predicate"));
-    }
+    // openp: nil or t opens the file for reading; a natural number is an
+    // access(2) mode tested with AT_EACCESS. Function predicates need a Lisp
+    // call from inside the search and remain refused.
+    let access_mode = match predicate.integer_value() {
+        Some(mode) if mode >= 0 => Some(mode),
+        _ if predicate == Value::NIL || predicate == Value::TRUE => None,
+        _ => return Err(refuse("locate-file-internal function predicate")),
+    };
     let nil_path = path == Value::NIL;
     let mut roots = if nil_path { cx.cons(Value::NIL, Value::NIL) } else { path };
     let mut seen_roots = std::collections::HashSet::new();
@@ -702,8 +707,16 @@ fn locate_readable_file(cx: &mut Leaf<'_>, filename: Value, path: Value,
             let candidate_value = cx.make_string(candidate.as_bytes().to_vec(), multibyte || !candidate.is_ascii());
             // lread.c openp selects after suffix concatenation, even for an
             // absolute filename. A selected handler can run Lisp: still refuse.
-            refuse_locate_handler(cx, candidate_value, "file-exists-p")?;
-            if std::path::Path::new(&candidate).is_file() && open_for_reading(&candidate).is_ok() {
+            // A natural-number predicate tests access(2) without handlers.
+            if access_mode.is_none() {
+                refuse_locate_handler(cx, candidate_value, "file-exists-p")?;
+            }
+            let found = match access_mode {
+                None => std::path::Path::new(&candidate).is_file() && open_for_reading(&candidate).is_ok(),
+                Some(mode) => i32::try_from(mode).is_ok_and(|mode| cx.filesave_access(&candidate, mode).is_ok())
+                    && !std::path::Path::new(&candidate).is_dir(),
+            };
+            if found {
                 return Ok(candidate_value);
             }
         }
