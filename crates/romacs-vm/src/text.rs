@@ -61,6 +61,8 @@ pub struct Text {
     pub(crate) state: crate::bytes::BufferState,
     pub(crate) point: ByteOffset,
     pub(crate) syntax_table: Value,
+    /// The buffer's category table; nil means the standard one (category.c).
+    pub(crate) category_table: Value,
     #[cfg(test)]
     coordinate_steps: std::cell::Cell<usize>,
     #[cfg(test)]
@@ -90,6 +92,7 @@ impl Text {
             state: Default::default(),
             point: ByteOffset(0),
             syntax_table: Value::NIL,
+            category_table: Value::NIL,
             #[cfg(test)]
             coordinate_steps: std::cell::Cell::new(0),
             #[cfg(test)]
@@ -108,6 +111,7 @@ impl Text {
             state: self.state.clone(),
             bytes: self.as_str().as_bytes().to_vec(),
             syntax_table: self.syntax_table,
+            category_table: self.category_table,
             case_tables: [Value::NIL; 4],
             point: self.point,
             restriction: self.restriction.clone(),
@@ -130,6 +134,7 @@ impl Text {
         text.point = b.point;
         text.state = b.state.clone();
         text.syntax_table = b.syntax_table;
+        text.category_table = b.category_table;
         text.restriction = b.restriction.clone();
         text.properties = Properties::from_map(&b.properties);
         for (&at, values) in &b.properties {
@@ -637,6 +642,7 @@ impl Text {
     }
     pub(crate) fn visit_values(&mut self, visit: &mut impl FnMut(&mut Value)) {
         visit(&mut self.syntax_table);
+        visit(&mut self.category_table);
         self.properties.visit_values(visit);
     }
     pub(crate) fn storage_bytes(&self, capacity: bool) -> usize {

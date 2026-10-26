@@ -1458,6 +1458,7 @@ mod leaf {
     // module, so it sees `vm`.
     mod map_keymap;
     mod keymap_copy;
+    mod category;
     mod fileio;
     mod filelock;
     mod file_attributes;

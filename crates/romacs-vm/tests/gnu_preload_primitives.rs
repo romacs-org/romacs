@@ -287,3 +287,18 @@ fn review_three_regressions_match_gnu() {
     let id = vm.compile(&form).unwrap();
     assert_eq!(vm.execute(id).unwrap().display().unwrap(), "(chosen)");
 }
+
+#[test]
+fn category_tables_match_gnu() {
+    compare(&[
+        "(let ((tb (make-category-table))) (list (category-table-p tb) (category-table-p (make-char-table 'x)) (char-table-subtype tb) (length (char-table-extra-slot tb 0)) (get-unused-category tb)))",
+        "(let ((tb (make-category-table))) (define-category ?a \"alpha\" tb) (list (category-docstring ?a tb) (get-unused-category tb) (condition-case e (define-category ?a \"again\" tb) (error e))))",
+        "(let ((tb (make-category-table))) (define-category ?a \"alpha\" tb) (define-category ?b \"beta\" tb) (modify-category-entry '(?x . ?z) ?a tb) (modify-category-entry ?y ?b tb) (with-temp-buffer (set-category-table tb) (list (category-set-mnemonics (char-category-set ?x)) (category-set-mnemonics (char-category-set ?y)) (category-set-mnemonics (char-category-set ?w)) (eq (char-category-set ?x) (char-category-set ?z)))))",
+        "(let ((tb (make-category-table))) (define-category ?a \"alpha\" tb) (modify-category-entry '(#x4e00 . #x9fff) ?a tb) (modify-category-entry #x5000 ?a tb t) (with-temp-buffer (set-category-table tb) (list (category-set-mnemonics (char-category-set #x4e00)) (category-set-mnemonics (char-category-set #x5000)) (category-set-mnemonics (char-category-set #x9fff)) (category-set-mnemonics (char-category-set #xa000)))))",
+        "(let ((tb (make-category-table))) (list (condition-case e (modify-category-entry ?x ?q tb) (error e)) (condition-case e (define-category 7 \"x\" tb) (error e)) (condition-case e (category-docstring ?a 'nope) (error e))))",
+        "(list (category-set-mnemonics (make-category-set \"cab\")) (condition-case e (make-category-set \"\\x7f\") (error e)) (condition-case e (category-set-mnemonics (make-bool-vector 10 t)) (error e)))",
+        "(let* ((tb (make-category-table)) (cp (progn (define-category ?a \"alpha\" tb) (modify-category-entry ?x ?a tb) (copy-category-table tb)))) (modify-category-entry ?y ?a cp) (list (with-temp-buffer (set-category-table tb) (category-set-mnemonics (char-category-set ?y))) (with-temp-buffer (set-category-table cp) (list (category-set-mnemonics (char-category-set ?x)) (category-set-mnemonics (char-category-set ?y)))) (eq (char-table-extra-slot tb 0) (char-table-extra-slot cp 0))))",
+        "(category-table-p (make-char-table (make-symbol \"category-table\")))",
+        "(let ((tb (make-category-table))) (with-temp-buffer (set-category-table tb) (list (eq (category-table) tb) (with-temp-buffer (eq (category-table) (standard-category-table))))))",
+    ]);
+}

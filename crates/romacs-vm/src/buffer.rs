@@ -194,7 +194,7 @@ impl Vm {
         let index = value.index(0)? - 1;
         self.objects[index] = match &self.objects[index] {
             Object::ByteBuffer(_) => Object::ByteBuffer(Box::new(bytes::ByteBuffer {
-                state, bytes: vec![], syntax_table: Value::NIL, case_tables: [Value::NIL; 4],
+                state, bytes: vec![], syntax_table: Value::NIL, category_table: Value::NIL, case_tables: [Value::NIL; 4],
                 point: ByteOffset(0), restriction: ByteOffset(0)..ByteOffset(0),
                 properties: Default::default(), per_buffer: retained,
             })),
@@ -1007,6 +1007,7 @@ mod tests {
         let mut b = bytes::ByteBuffer {
             state: Default::default(),
             syntax_table: Value::NIL,
+            category_table: Value::NIL,
             case_tables: [Value::NIL; 4],
             bytes: vec![0xce, 0xbb],
             point: ByteOffset(1),

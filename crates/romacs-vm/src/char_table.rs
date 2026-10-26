@@ -588,6 +588,27 @@ impl CharTable {
         } else { CharTableNode::checked_get(&self.root, index)? };
         Ok(if value == Value::NIL { self.default } else { value })
     }
+    /// char_table_ref_and_range at slot granularity: INDEX's value (the
+    /// default for nil) and the inclusive character range of its slot.
+    pub(crate) fn span(&self, index: usize) -> Result<(Value, usize, usize)> {
+        if index >= Self::LEN { return Err("index out of range".into()); }
+        let mut current = Arc::clone(&self.root);
+        loop {
+            let (slot, from, width) = {
+                let node = current.lock().unwrap();
+                let width = CharTableNode::WIDTHS[node.depth];
+                let at = (index - node.min_char) / width;
+                (node.slots.get(at).cloned().ok_or("invalid sub-char-table geometry")?, node.min_char + at * width, width)
+            };
+            match slot {
+                CharTableSlot::Value(value) => {
+                    let value = if value == Value::NIL { self.default } else { value };
+                    return Ok((value, from, from + width - 1));
+                }
+                CharTableSlot::Node(child) => current = child,
+            }
+        }
+    }
     pub fn set(&mut self, index: usize, value: Value) -> Result<()> {
         self.set_range(index, index, value)
     }

@@ -40,6 +40,8 @@ pub(crate) struct ByteBuffer {
     pub(crate) state: BufferState,
     pub bytes: Vec<u8>,
     pub syntax_table: Value,
+    /// The buffer's category table; nil means the standard one (category.c).
+    pub category_table: Value,
     pub(crate) case_tables: [Value; 4],
     pub point: ByteOffset,
     pub restriction: Range<ByteOffset>,
@@ -100,6 +102,7 @@ impl ByteBuffer {
     }
     pub fn visit_values(&mut self, visit: &mut impl FnMut(&mut Value)) {
         visit(&mut self.syntax_table);
+        visit(&mut self.category_table);
         for root in &mut self.case_tables { visit(root); }
         self.per_buffer.visit_values(visit);
         for props in self.properties.values_mut() {
