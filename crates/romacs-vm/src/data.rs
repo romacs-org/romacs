@@ -600,7 +600,8 @@ impl Vm {
                 }
                 Aref | Aset if matches!(self.object_if(x), Some(Object::Record(_))) => ("fixnump", y),
                 Aref | Aset => ("integerp", y),
-                Add | Sub | Mul | Div | Abs | Less | Equal | Inc | Dec => {
+                CharAfter => ("integer-or-marker-p", x),
+                Add | Sub | Mul | Div | Abs | Less | Equal | Inc | Dec | Min | Max => {
                     let value = self.stack[start..start + argc]
                         .iter()
                         .copied()

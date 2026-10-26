@@ -76,6 +76,48 @@ impl Leaf<'_> {
         let c = ch.integer_value().filter(|&c| (0..=crate::lstring::MAX_CHAR as i64).contains(&c)).ok_or(Fault::Wrong("characterp", ch))?;
         Ok(self.charset_encode(i, c as u32)?.map_or(Value::NIL, |code| Value::integer(code.into()).unwrap()))
     }
+    fn named_charset_id(&mut self, name: &str) -> std::result::Result<usize, Fault> {
+        let symbol = self.intern(name);
+        let i = self.charset_record(symbol)?;
+        Ok(self.vm.charsets.records[i].attrs[0].integer_value().unwrap() as usize)
+    }
+    /// charset.h CHAR_CHARSET with charset.c char_charset: the first charset
+    /// in priority order that encodes C; for a Unicode character past the
+    /// prioritized head, `unicode'; else `emacs' or `eight-bit'.
+    pub fn char_charset_id(&mut self, c: u32) -> std::result::Result<usize, Fault> {
+        if c < 0x80 { return self.named_charset_id("ascii"); }
+        self.vm.ensure_charsets();
+        let ordered = self.vm.charsets.ordered.clone();
+        let head = self.vm.charsets.non_preferred_head;
+        for (at, &id) in ordered.iter().enumerate() {
+            let i = self.vm.charsets.ids[id];
+            if self.charset_encode(i, c)?.is_some() { return Ok(id); }
+            if c <= 0x10ffff && ordered.get(at + 1).copied() == head { return self.named_charset_id("unicode"); }
+        }
+        self.named_charset_id(if c <= crate::lstring::MAX_5_BYTE_CHAR { "emacs" } else { "eight-bit" })
+    }
+    fn charset_id_name(&self, id: usize) -> Value {
+        self.vm.charsets.records[self.vm.charsets.ids[id]].attrs[1]
+    }
+    /// charset.c Fchar_charset.
+    pub fn char_charset(&mut self, ch: Value, restriction: Value) -> super::super::Out {
+        let c = ch.integer_value().filter(|&c| (0..=crate::lstring::MAX_CHAR as i64).contains(&c))
+            .ok_or(Fault::Wrong("characterp", ch))? as u32;
+        if restriction == Value::NIL {
+            let id = self.char_charset_id(c)?;
+            return Ok(self.charset_id_name(id));
+        }
+        if self.pair(restriction).is_none() {
+            return Err(Fault::Error("VM2 char-charset with a coding-system RESTRICTION is not implemented".into()));
+        }
+        let mut tail = restriction;
+        while let Some((name, rest)) = self.pair(tail) {
+            let i = self.charset_record(name)?;
+            if self.charset_encode(i, c)?.is_some() { return Ok(name); }
+            tail = rest;
+        }
+        Ok(Value::NIL)
+    }
     /// charset.c Fmap_charset_chars's argument handling: the clamped code
     /// range, then map_charset_chars's calls in order.
     pub fn charset_map_calls(&mut self, name: Value, from: Value, to: Value) -> std::result::Result<Vec<Run>, Fault> {
@@ -231,6 +273,7 @@ impl Leaf<'_> {
             }
         }
         let registry = &mut self.vm.charsets;
+        registry.non_preferred_head = rest.first().copied();
         registry.ordered = head.into_iter().chain(rest).collect();
         registry.ordered_tick += 1;
         let ordered = registry.ordered.clone();

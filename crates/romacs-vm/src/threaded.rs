@@ -1452,7 +1452,6 @@ fn lower(vm: &Vm, op: Op) -> Inst {
                     (Primitive::Cons, 2) => cons,
                     (Primitive::Remainder, 2) => remainder,
                     (Primitive::Insert, 1) => insert_string,
-                    (Primitive::SearchForward, 1..=3) => search_character,
                     (Primitive::Aref, 2) | (Primitive::Length, 1) => sequence_read,
                     (Primitive::CharAfter, 0 | 1)
                     | (
@@ -3363,62 +3362,6 @@ unsafe fn remainder(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value
             return direct(e, r, pc);
         }
         *r.add(i.a) = Value::fixnum((x.0 as i64 >> 2) % (y.0 as i64 >> 2)).unwrap();
-        advance(e, r, pc)
-    }
-}
-unsafe fn search_character(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
-    unsafe {
-        let i = &*pc;
-        if e.vm.slots[i.b].function != i.value {
-            return direct(e, r, pc);
-        }
-        let needle = *r.add(i.d);
-        if needle == Value::NIL || needle.tag() != 0 {
-            return direct(e, r, pc);
-        }
-        let Some(data::Object::String(s)) = e.vm.objects.get(needle.payload() as usize - 1) else {
-            return direct(e, r, pc);
-        };
-        if s.len() != 1 {
-            return direct(e, r, pc);
-        }
-        let ch = s.get(coordinates::CharOffset(0)).unwrap() as u32;
-        let width = s.as_str().len();
-        let v = e.vm.slots[e.vm.buffer_slot].value;
-        if v == Value::NIL || v.tag() != 0 {
-            return direct(e, r, pc);
-        }
-        let Some(data::Object::Buffer(t)) = e.vm.objects.get_mut(v.payload() as usize - 1) else {
-            return direct(e, r, pc);
-        };
-        let bound = if i.e > 1 && *r.add(i.d + 1) != Value::NIL {
-            let x = *r.add(i.d + 1);
-            if x.tag() != 1 || x.0 as i64 >> 2 < 1 {
-                return direct(e, r, pc);
-            }
-            let Ok(b) = t.byte_of_char(coordinates::CharOffset((x.0 as i64 >> 2) as usize - 1))
-            else {
-                return direct(e, r, pc);
-            };
-            b
-        } else {
-            t.accessible().end
-        };
-        if bound < t.point || bound > t.accessible().end {
-            return direct(e, r, pc);
-        }
-        let value = if let Some(at) = t.find_character(ch, t.point, bound) {
-            t.point = coordinates::ByteOffset(at.0 + width);
-            Value::fixnum((t.char_of_byte(t.point).unwrap().0 + 1) as i64).unwrap()
-        } else if i.e > 2 && *r.add(i.d + 2) != Value::NIL {
-            if *r.add(i.d + 2) != Value::TRUE {
-                t.point = bound;
-            }
-            Value::NIL
-        } else {
-            return direct(e, r, pc);
-        };
-        *r.add(i.a) = value;
         advance(e, r, pc)
     }
 }

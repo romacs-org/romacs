@@ -28,19 +28,8 @@ impl Vm {
                 if n == 0 {
                     return Err("wrong primitive arity".into());
                 }
-                let mut out = self.stack[start];
-                self.number(out)?;
-                for i in 1..n {
-                    let v = self.stack[start + i];
-                    let number = self.number(v)?;
-                    if number.is_nan() {
-                        return Ok(v);
-                    }
-                    if self.numeric_cmp(v, out)? == Some(std::cmp::Ordering::Less) {
-                        out = v;
-                    }
-                }
-                Ok(out)
+                let args = self.stack[start..start + n].to_vec();
+                self.minmax(&args, std::cmp::Ordering::Less)
             }
             Append => {
                 if n == 0 {
@@ -447,3 +436,22 @@ impl PrintOptions {
         true
     }
 }
+
+impl Vm {
+    /// data.c minmax_driver: markers become their positions, a later
+    /// argument wins only when strictly better (ties keep the first, with
+    /// its own type), and a NaN that does not win is returned at once.
+    pub(super) fn minmax(&mut self, args: &[Value], better: std::cmp::Ordering) -> Result<Value> {
+        let mut accum = self.coerce_number(args[0], true)?;
+        for &arg in &args[1..] {
+            let value = self.coerce_number(arg, true)?;
+            if self.numeric_cmp(value, accum)? == Some(better) {
+                accum = value;
+            } else if self.number(value)?.is_nan() {
+                return Ok(value);
+            }
+        }
+        Ok(accum)
+    }
+}
+

@@ -947,15 +947,17 @@ impl Vm {
             if n != 2 {
                 return Err("wrong primitive arity".into());
             }
+            let a = self.scalar_position(self.stack[start])?;
+            let b = self.scalar_position(self.stack[start + 1])?;
             let index = self.buffer_index()?;
             let Object::Buffer(t) = &self.objects[index] else {
                 return Err("text buffer required".into());
             };
-            let a = usize::try_from(self.stack[start].as_integer()?)
+            let a = usize::try_from(a)
                 .ok()
                 .and_then(|v| v.checked_sub(1))
                 .ok_or("index out of range")?;
-            let b = usize::try_from(self.stack[start + 1].as_integer()?)
+            let b = usize::try_from(b)
                 .ok()
                 .and_then(|v| v.checked_sub(1))
                 .ok_or("index out of range")?;

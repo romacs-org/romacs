@@ -1482,6 +1482,7 @@ mod leaf {
     mod charset;
     mod coding;
     mod point_predicates;
+    mod subst_char;
     mod overlays;
     mod invisible;
     mod buffer_locals;

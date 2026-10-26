@@ -141,7 +141,7 @@ pub(super) fn arity(primitive: Primitive) -> (usize, Option<usize>) {
         SelfInsertCommand | DeleteChar | DeleteBackwardChar | Eval | Provide | Featurep
         | ExpandFileName | RawPropertiesAt | KillNew | CurrentKill | CopyMarker | LookingAt
         | MatchString | SelectWindow | Macroexpand => (1, Some(2)),
-        SearchForward | Require | Prin1ToString | SwitchToBuffer | AutoloadDoLoad => (1, Some(3)),
+        Require | Prin1ToString | SwitchToBuffer | AutoloadDoLoad => (1, Some(3)),
         PutProperty | SplitWindowInternal => (4, Some(5)),
         GetProperty | Defalias | GetCharProperty | SetMarker | DefineError | Gethash
         | ModifySyntaxEntry | SetWindowBuffer | SetWindowMargins | SetWindowStart
@@ -153,7 +153,7 @@ pub(super) fn arity(primitive: Primitive) -> (usize, Option<usize>) {
         RemoveOverlays => (0, Some(4)),
         StringMatch => (2, Some(4)),
         MatchData => (0, Some(3)),
-        ReSearchForward | ReSearchBackward | KeyBinding | LocateLibrary => (1, Some(4)),
+        ReSearchForward | ReSearchBackward | SearchForward | SearchBackward | KeyBinding | LocateLibrary => (1, Some(4)),
         WindowVscroll | WindowEnd | WindowTotalHeight | WindowResizeApply | WindowTotalWidth => {
             (0, Some(2))
         }

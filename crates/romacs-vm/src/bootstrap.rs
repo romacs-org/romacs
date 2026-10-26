@@ -231,20 +231,7 @@ impl Vm {
                     Value::NIL
                 },
             ),
-            Max => {
-                for &v in &a {
-                    self.number(v)?;
-                }
-                let mut out = a[0];
-                for &v in &a[1..] {
-                    if self.number(v)?.is_nan()
-                        || self.numeric_cmp(out, v)? == Some(std::cmp::Ordering::Less)
-                    {
-                        out = v;
-                    }
-                }
-                Ok(out)
-            }
+            Max => self.minmax(&a, std::cmp::Ordering::Greater),
             _ => unreachable!("bootstrap primitive dispatch"),
         }
     }

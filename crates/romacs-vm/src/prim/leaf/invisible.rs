@@ -2,28 +2,105 @@
 use super::*;
 
 impl Leaf<'_> {
-    pub fn native_current_column(&mut self) -> super::super::Out {
+    /// SANE_TAB_WIDTH of the current buffer.
+    fn tab_width(&mut self) -> std::result::Result<usize, Fault> {
+        let variable = self.intern("tab-width");
+        Ok(self.variable_value(variable)?.and_then(|v| v.integer_value())
+            .filter(|n| (1..=1000).contains(n)).unwrap_or(8) as usize)
+    }
+    /// Point's line within the accessible text, point's byte offset in it,
+    /// and the line's absolute byte start.
+    fn line_text(&mut self) -> std::result::Result<(String, usize, usize), Fault> {
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
-        let prefix = match &self.vm.objects[index] {
-            crate::data::Object::Buffer(b) => b.as_str()[..b.point.0].to_owned(),
-            crate::data::Object::ByteBuffer(b) => std::str::from_utf8(&b.bytes[..b.point.0])
-                .map_err(|_| Fault::Error("VM2 current-column cannot display non-UTF-8 bytes".into()))?.to_owned(),
+        let (text, low, point) = match &self.vm.objects[index] {
+            crate::data::Object::Buffer(b) => {
+                let r = b.accessible();
+                (&b.as_str()[r.start.0..r.end.0], r.start.0, b.point.0)
+            }
+            crate::data::Object::ByteBuffer(b) => {
+                let r = &b.restriction;
+                (std::str::from_utf8(&b.bytes[r.start.0..r.end.0])
+                    .map_err(|_| Fault::Error("VM2 columns cannot display non-UTF-8 bytes".into()))?, r.start.0, b.point.0)
+            }
             _ => unreachable!(),
         };
-        let variable = self.intern("tab-width");
-        let tab = self.variable_value(variable)?.and_then(|v| v.integer_value())
-            .filter(|n| (1..=1000).contains(n)).unwrap_or(8) as usize;
-        let line = prefix.rsplit('\n').next().unwrap_or("");
-        let mut column = 0usize;
-        let mut start = 0;
-        for (at, c) in line.char_indices() {
-            if c == '\t' || c.is_control() {
-                column += unicode_width::UnicodeWidthStr::width(&line[start..at]);
-                column += if c == '\t' { tab - column % tab } else { 2 };
-                start = at + c.len_utf8();
+        let point = point - low;
+        if !text.is_char_boundary(point) {
+            return Err(Fault::Error("VM2 columns cannot display non-UTF-8 bytes".into()));
+        }
+        let start = text[..point].rfind('\n').map_or(0, |at| at + 1);
+        let end = text[point..].find('\n').map_or(text.len(), |at| point + at);
+        Ok((text[start..end].to_owned(), point - start, low + start))
+    }
+    pub fn set_point_byte(&mut self, byte: usize) -> std::result::Result<(), Fault> {
+        let index = self.vm.buffer_index().map_err(Fault::Error)?;
+        match &mut self.vm.objects[index] {
+            crate::data::Object::Buffer(b) => b.point = crate::coordinates::ByteOffset(byte),
+            crate::data::Object::ByteBuffer(b) => b.point = crate::coordinates::ByteOffset(byte),
+            _ => unreachable!(),
+        }
+        Ok(())
+    }
+    /// Point to character position POSITION (1-based), already in range.
+    pub fn goto_char_position(&mut self, position: i64) -> std::result::Result<(), Fault> {
+        let index = self.vm.buffer_index().map_err(Fault::Error)?;
+        match &mut self.vm.objects[index] {
+            crate::data::Object::Buffer(b) => b.point = b.byte_of_char(crate::coordinates::CharOffset(position as usize - 1)).map_err(Fault::Error)?,
+            crate::data::Object::ByteBuffer(b) => b.point = crate::coordinates::ByteOffset(position as usize - 1),
+            _ => unreachable!(),
+        }
+        Ok(())
+    }
+    /// Columns C occupies at COLUMN (as current-column counts them).
+    fn char_columns(c: char, column: usize, tab: usize) -> usize {
+        if c == '\t' { tab - column % tab }
+        else if c.is_control() { 2 }
+        else { unicode_width::UnicodeWidthChar::width(c).unwrap_or(0) }
+    }
+    /// indent.c position_indentation from the start of point's line:
+    /// spaces and tabs, and characters of category `\s'.
+    pub fn current_indentation(&mut self) -> super::super::Out {
+        let tab = self.tab_width()?;
+        let (line, _, _) = self.line_text()?;
+        let table = self.current_category_table()?;
+        let mut column = 0;
+        for c in line.chars() {
+            match c {
+                ' ' => column += 1,
+                '\t' => column += tab - column % tab,
+                c if !c.is_ascii() && self.char_has_category(table, c as usize, b' ')? => column += 1,
+                _ => break,
             }
         }
-        column += unicode_width::UnicodeWidthStr::width(&line[start..]);
+        Value::integer(column as i64).map_err(Fault::Error)
+    }
+    /// indent.c scan_for_column toward GOAL on point's line, moving point
+    /// after the character that reaches it (or to the line end). Returns the
+    /// column reached and the absolute byte position and column before the
+    /// last character, with that character.
+    pub fn scan_to_column(&mut self, goal: usize) -> std::result::Result<(usize, usize, usize, Option<char>), Fault> {
+        let tab = self.tab_width()?;
+        let (line, _, low) = self.line_text()?;
+        let (mut column, mut at) = (0, 0);
+        let (mut prev_at, mut prev_column, mut prev_char) = (0, 0, None);
+        for c in line.chars() {
+            if column >= goal { break; }
+            (prev_at, prev_column, prev_char) = (at, column, Some(c));
+            column += Self::char_columns(c, column, tab);
+            at += c.len_utf8();
+        }
+        let index = self.vm.buffer_index().map_err(Fault::Error)?;
+        match &mut self.vm.objects[index] {
+            crate::data::Object::Buffer(b) => b.point = crate::coordinates::ByteOffset(low + at),
+            crate::data::Object::ByteBuffer(b) => b.point = crate::coordinates::ByteOffset(low + at),
+            _ => unreachable!(),
+        }
+        Ok((column, low + prev_at, prev_column, prev_char))
+    }
+    pub fn native_current_column(&mut self) -> super::super::Out {
+        let tab = self.tab_width()?;
+        let (line, point, _) = self.line_text()?;
+        let column = line[..point].chars().fold(0, |column, c| column + Self::char_columns(c, column, tab));
         Value::integer(column as i64).map_err(Fault::Error)
     }
 

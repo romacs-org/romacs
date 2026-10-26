@@ -489,6 +489,7 @@ enum Primitive {
     ClosureMetadata,
     ClosureDocument,
     MakeInterpretedClosure,
+    SearchBackward,
 }
 const PRIMITIVES: &[(&str, Primitive)] = &[
     ("+", Primitive::Add),
@@ -747,6 +748,7 @@ const PRIMITIVES: &[(&str, Primitive)] = &[
     ("#:vm2-closure-metadata", Primitive::ClosureMetadata),
     ("#:vm2-closure-document", Primitive::ClosureDocument),
     ("make-interpreted-closure", Primitive::MakeInterpretedClosure),
+    ("search-backward", Primitive::SearchBackward),
 ];
 #[cfg(test)]
 mod rest_tests;

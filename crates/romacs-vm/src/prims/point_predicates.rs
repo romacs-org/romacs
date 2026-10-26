@@ -27,3 +27,10 @@ fn eobp(cx) {
     let (_, end, _, _) = cx.point_boundaries()?;
     Ok(if end { Value::TRUE } else { Value::NIL })
 }}
+
+// char-before at point, with 0 for nil at the start of the accessible region.
+defsubr! { name = "preceding-char", gnu = "editfns.c:975", effect = Reads,
+fn preceding_char(cx) {
+    let c = cx.character_before(Value::NIL)?;
+    Ok(if c == Value::NIL { Value::integer(0).unwrap() } else { c })
+}}

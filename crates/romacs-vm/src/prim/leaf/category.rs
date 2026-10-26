@@ -67,6 +67,12 @@ impl Leaf<'_> {
         Ok(())
     }
 
+    /// CHAR_HAS_CATEGORY of C in TABLE.
+    pub(crate) fn char_has_category(&mut self, table: Value, c: usize, category: u8) -> std::result::Result<bool, Fault> {
+        let set = self.char_table_element(table, c)?;
+        Ok(self.bool_vector(set).ok().and_then(|bits| bits.get(category as usize)).unwrap_or(false))
+    }
+
     /// check_category_table: nil is the current buffer's table.
     pub(crate) fn check_category_table(&mut self, table: Value) -> super::super::Out {
         if table == Value::NIL { return self.current_category_table(); }

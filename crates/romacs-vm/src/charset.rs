@@ -106,6 +106,9 @@ pub(super) struct Registry {
     pub iso_list: Vec<usize>,
     pub mule_list: Vec<usize>,
     pub ordered_tick: u64,
+    /// Vcharset_non_preferred_head: the id starting the tail that the last
+    /// set-charset-priority left unprioritized; None is GNU's nil.
+    pub non_preferred_head: Option<usize>,
     pub jis_roman: Option<usize>,
     pub jis_1978: Option<usize>,
     pub jis_0208: Option<usize>,

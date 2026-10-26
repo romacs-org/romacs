@@ -440,3 +440,82 @@ fn text_property_not_all_matches_gnu() {
         "(list (text-property-not-all 9 9 'face nil \"abc\") (condition-case e (text-property-not-all 0 9 'face nil \"abc\") (error e)) (let ((default-text-properties '(p 1))) (list (text-property-not-all 0 3 'p 1 \"abc\") (text-property-not-all 0 3 'p 1 (propertize \"abc\" 'q 2)))) (with-temp-buffer (insert \"abc\") (list (text-property-not-all 9 9 'face nil) (let ((default-text-properties '(p 1))) (text-property-not-all 1 3 'p 1)))) (with-temp-buffer (text-property-not-all 1 1 'p 1)) (condition-case e (text-property-not-all 0 0 'p nil 42) (error e)))",
     ]);
 }
+
+#[test]
+fn indentation_matches_gnu() {
+    compare(&[
+        "(with-temp-buffer (list (insert-char ?x 3) (insert-char ?y) (insert-char ?z 0) (insert-char ?w -1) (buffer-string) (condition-case e (insert-char \"a\") (error e)) (condition-case e (insert-char ?a 'b) (error e))))",
+        "(with-temp-buffer (insert \"  \\tfoo\") (list (current-indentation) (progn (goto-char (point-max)) (current-column)) (progn (setq tab-width 4) (current-indentation))))",
+        "(with-temp-buffer (insert \"ab\") (list (indent-to 10) (buffer-string) (current-column) (let ((indent-tabs-mode nil)) (indent-to 14 2)) (buffer-string) (indent-to 3 1) (buffer-string) (condition-case e (indent-to 'x) (error e))))",
+        "(with-temp-buffer (insert \"a\\tb\\nxy\") (goto-char 1) (list (move-to-column 3) (point) (move-to-column 3 t) (buffer-string) (point) (move-to-column 20) (point) (progn (goto-char (point-max)) (move-to-column 5 t)) (buffer-string) (point) (condition-case e (move-to-column -1) (error e))))",
+        "(with-temp-buffer (list (preceding-char) (progn (insert \"ab\") (preceding-char)) (progn (goto-char 1) (preceding-char)) indent-tabs-mode))",
+    ]);
+}
+
+#[test]
+fn subst_char_in_region_matches_gnu() {
+    compare(&[
+        "(with-temp-buffer (insert (propertize \"abcabc\" 'face 'bold)) (let ((m (copy-marker 3))) (goto-char 4) (list (subst-char-in-region 1 7 ?b ?X) (buffer-string) (marker-position m) (point) (buffer-modified-p))))",
+        "(with-temp-buffer (insert \"aaa\") (set-buffer-modified-p nil) (list (subst-char-in-region 4 1 ?a ?b t) (buffer-string) (buffer-modified-p)))",
+        "(with-temp-buffer (insert \"a\") (list (condition-case e (subst-char-in-region 1 9 ?a ?b) (error e)) (subst-char-in-region 1 2 ?z ?b) (progn (setq buffer-read-only t) (condition-case e (subst-char-in-region 1 2 ?a ?b) (error (car e))))))",
+        "(with-temp-buffer (insert \"a\\u00e9a\") (list (subst-char-in-region 1 4 ?\\u00e9 ?e) (buffer-string) (subst-char-in-region 1 4 ?a ?\\u00e9) (buffer-string)))",
+    ]);
+}
+
+#[test]
+fn text_property_removal_matches_gnu() {
+    compare(&[
+        "(with-temp-buffer (insert \"abcdef\") (put-text-property 1 7 'face 'bold) (put-text-property 2 4 'x 1) (list (remove-text-properties 2 3 '(face nil)) (text-properties-at 1) (remove-text-properties 2 3 '(face nil)) (remove-list-of-text-properties 1 7 '(x q)) (text-properties-at 2) (set-text-properties 1 3 '(a 1 b 2)) (text-properties-at 1) (set-text-properties 1 7 nil) (text-properties-at 4) (buffer-string)))",
+        "(let ((s (propertize \"abc\" 'p 1 'q 2))) (list (remove-text-properties 0 2 '(p nil) s) s (set-text-properties 1 2 '(z 3) s) s (remove-list-of-text-properties 0 3 '(q) s) s (set-text-properties 0 3 nil s) s))",
+        "(list (condition-case e (with-temp-buffer (remove-text-properties 0 5 '(p nil))) (error e)) (condition-case e (set-text-properties 0 9 nil \"ab\") (error e)) (condition-case e (remove-list-of-text-properties 0 1 'p \"ab\") (error e)))",
+    ]);
+}
+
+#[test]
+fn literal_search_matches_gnu() {
+    compare(&[
+        "(with-temp-buffer (insert \"a.b a*b a.b\") (goto-char 1) (list (search-forward \".b\") (point) (search-forward \"*\" nil t) (search-forward \"zz\" nil t) (point) (search-backward \"a.b\") (point) (search-forward \"a.b\" nil t 2) (search-backward \"b\" 3 t) (condition-case e (search-forward \"zz\") (error e)) (search-forward \"zz\" nil 1) (point) (search-backward \"a\" nil t -1) (point)))",
+        "(with-temp-buffer (insert \"ABC abc\") (goto-char 1) (list (let ((case-fold-search t)) (search-forward \"abc\")) (let ((case-fold-search nil)) (goto-char 1) (search-forward \"abc\")) (match-beginning 0) (match-end 0) (let ((case-fold-search nil)) (search-backward \"AB\" nil t))))",
+        "(with-temp-buffer (insert \"ab\\nb\") (list (let ((case-fold-search nil)) (goto-char 1) (list (search-forward \"b\") (match-beginning 0) (search-forward \"\\n\" nil t) (match-beginning 0))) (let ((case-fold-search t)) (goto-char 1) (list (search-forward \"B\" nil t) (match-beginning 0) (match-end 0)))))",
+        "(with-temp-buffer (insert \"ABC\") (set (make-local-variable (quote case-fold-search)) nil) (goto-char 1) (list (search-forward \"abc\" nil t) (progn (goto-char 1) (re-search-forward \"abc\" nil t)) (string-match \"abc\" \"ABC\") (let ((case-fold-search t)) (goto-char 1) (search-forward \"abc\" nil t)) (with-temp-buffer (insert \"ABC\") (goto-char 1) (search-forward \"abc\" nil t))))",
+        "(with-temp-buffer (insert \"abc\") (goto-char 3) (list (condition-case e (search-forward \"a\" 1) (error e)) (condition-case e (search-backward \"a\" 3) (error e)) (condition-case e (search-forward 'a) (error e))))",
+    ]);
+}
+
+#[test]
+fn min_and_max_accept_markers_like_gnu() {
+    compare(&[
+        "(with-temp-buffer (insert \"abcd\") (list (min (copy-marker 3) 4) (max (copy-marker 3) 2) (max 1 (copy-marker 2) 1.5) (min 2.0 (copy-marker 2)) (min (copy-marker 4)) (condition-case e (min 'a 1) (error e)) (condition-case e (max 1 \"x\") (error e)) (max 0.0 -0.0) (min -0.0 0.0)))",
+    ]);
+}
+
+#[test]
+fn char_charset_matches_gnu() {
+    compare(&[
+        "(progn (set-charset-priority 'unicode) (list (char-charset ?a) (char-charset ?\\u00e9) (char-charset #x3fff80) (char-charset ?\\u00e9 '(iso-8859-1)) (char-charset ?\\u0100 '(iso-8859-1)) (char-charset ?a '(eight-bit)) (condition-case e (char-charset 'x) (error e))))",
+        "(progn (set-charset-priority 'iso-8859-1 'unicode) (with-temp-buffer (insert \"a\\u00e9\\u0100\") (list (charset-after 1) (charset-after 2) (charset-after 3) (charset-after 4) (charset-after) (charset-after 0) (progn (goto-char 2) (charset-after)) (condition-case e (charset-after 'x) (error e)))))",
+    ]);
+}
+
+#[test]
+fn legacy_buffer_primitives_accept_markers_like_gnu() {
+    compare(&[
+        "(with-temp-buffer (insert \"abcdef\") (list (markerp (goto-char (copy-marker 2))) (point) (buffer-substring (copy-marker 1) (copy-marker 3)) (buffer-substring-no-properties (copy-marker 3) 5) (char-after (copy-marker 2)) (progn (narrow-to-region (copy-marker 2) (copy-marker 4)) (prog1 (list (buffer-string) (point-min) (point-max)) (widen))) (progn (delete-region (copy-marker 1) (copy-marker 2)) (buffer-string)) (condition-case e (goto-char (make-marker)) (error e))))",
+        "(with-temp-buffer (insert (propertize \"abc\" 'face 'bold) \"def\") (narrow-to-region 2 5) (buffer-string))",
+    ]);
+}
+
+#[test]
+fn cus_start_built_ins_start_as_gnus_c_values() {
+    compare(&[
+        "(list gc-cons-threshold report-emacs-bug-address max-mini-window-height alter-fullscreen-frames auto-save-timeout polling-period (default-value 'parse-sexp-ignore-comments) maximum-scroll-margin hourglass-delay (stringp shell-file-name))",
+        "(list (default-value 'abbrev-mode) (default-value 'ctl-arrow) (default-value 'bidi-paragraph-direction) (default-value 'word-wrap) (default-value 'selective-display-ellipses) (default-value 'indicate-empty-lines) (default-value 'indicate-buffer-boundaries) (default-value 'scroll-up-aggressively) (default-value 'scroll-down-aggressively) (default-value 'cursor-type) (default-value 'line-spacing) (default-value 'cursor-in-non-selected-windows) (local-variable-if-set-p 'cursor-type) (with-temp-buffer (setq word-wrap t) (list word-wrap (local-variable-p 'word-wrap))) word-wrap)",
+    ]);
+}
+
+#[test]
+fn file_name_absolute_p_matches_gnu() {
+    compare(&[
+        "(list (file-name-absolute-p \"/a\") (file-name-absolute-p \"~\") (file-name-absolute-p \"~/x\") (file-name-absolute-p \"~root/x\") (file-name-absolute-p \"~root\") (file-name-absolute-p \"~rt-no-such-user/x\") (file-name-absolute-p \"a/b\") (file-name-absolute-p \"\") (condition-case e (file-name-absolute-p 'a) (error e)))",
+    ]);
+}

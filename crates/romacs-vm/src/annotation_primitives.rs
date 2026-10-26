@@ -188,7 +188,7 @@ impl Vm {
             None => Ok(Value::NIL),
         }
     }
-    fn scalar_position(&self, v: Value) -> Result<i64> {
+    pub(super) fn scalar_position(&self, v: Value) -> Result<i64> {
         if let Ok(n) = v.as_integer() {
             return Ok(n);
         }

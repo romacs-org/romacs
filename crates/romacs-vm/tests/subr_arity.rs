@@ -32,7 +32,7 @@ fn subr_arity_reports_current_native_handler_bounds() {
         ("signal", "(2 . 2)"),
         ("plist-get", "(2 . 2)"),
         ("buffer-size", "(0 . 0)"),
-        ("search-forward", "(1 . 3)"),
+        ("search-forward", "(1 . 4)"),
         ("copy-marker", "(1 . 2)"),
         ("overlays-at", "(1 . 1)"),
         ("set-window-vscroll", "(3 . 3)"),

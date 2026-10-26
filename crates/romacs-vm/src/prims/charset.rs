@@ -62,3 +62,17 @@ fn charset_called(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
     if walk != Value::integer(-1).unwrap() { cx.setcar(saved[4], Value::NIL)?; }
     next_charset_call(cx, saved)
 }
+
+defsubr! { name = "char-charset", gnu = "charset.c:2024", effect = Reads,
+fn char_charset(cx, ch: Value; optional restriction: Value) { cx.char_charset(ch, restriction) }}
+
+// Fcharset_after: char-after POS, then CHAR_CHARSET of a character.
+defsubr! { name = "charset-after", gnu = "charset.c:2063", effect = Reads,
+fn charset_after(cx; optional pos: Value) -> Step {
+    let f = cx.intern("char-after");
+    Ok(Step::Call { f, args: vec![pos], then: charset_of_char, saved: vec![] })
+}}
+fn charset_of_char(cx: &mut Leaf<'_>, ch: Value, _: &[Value]) -> Next {
+    if ch.integer_value().is_none() { return Ok(Step::Done(ch)); }
+    Ok(Step::Done(cx.char_charset(ch, Value::NIL)?))
+}

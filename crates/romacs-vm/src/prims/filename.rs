@@ -140,3 +140,25 @@ fn strip_embedded_absolute(
     }
     Ok(cx.make_string(bytes[start..].to_vec(), multibyte))
 }
+
+defsubr! { name = "file-name-absolute-p", gnu = "fileio.c:2967", effect = Reads,
+fn file_name_absolute_p(cx, filename: Value) {
+    let bytes = cx.string_bytes(filename)?;
+    // SSDATA is read as a C string.
+    let name = bytes.split(|&b| b == 0).next().unwrap_or(&[]);
+    let absolute = match name {
+        [b'/', ..] | [b'~'] | [b'~', b'/', ..] => true,
+        [b'~', rest @ ..] => user_homedir(rest),
+        _ => false,
+    };
+    Ok(if absolute { Value::TRUE } else { Value::NIL })
+}}
+
+/// GNU user_homedir: NAME, up to its first slash, is a login whose home
+/// directory is absolute.
+fn user_homedir(name: &[u8]) -> bool {
+    let login = name.split(|&b| b == b'/').next().unwrap_or(&[]);
+    std::str::from_utf8(login).ok().and_then(crate::user_db::by_name)
+        .and_then(|account| account.home)
+        .is_some_and(|home| home.starts_with('/'))
+}

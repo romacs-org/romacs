@@ -330,15 +330,15 @@ impl Vm {
         if (p as usize) >= SetMultibyte as usize {
             return self.edge_primitive(p, start, n);
         }
+        let args = self.buffer_primitive_args(p, start, n)?;
         let valid = match p {
             Remainder | DeleteRegion | Substring | Narrow => n == 2,
             SetBuffer | GotoChar | CharToByte | ByteToChar => n == 1,
-            CurrentBuffer | Point | PointMin | PointMax | BufferSize | Widen | BufferString => {
+            CurrentBuffer | Point | PointMin | PointMax | BufferSize | Widen => {
                 n == 0
             }
             CharAfter => n <= 1,
             Insert => true,
-            SearchForward => (1..=3).contains(&n),
             PutProperty => (4..=5).contains(&n),
             GetProperty => (2..=3).contains(&n),
             _ => false,
@@ -348,14 +348,14 @@ impl Vm {
         }
         if p == Remainder {
             return Value::integer(
-                self.stack[start]
+                args[0]
                     .as_integer()?
-                    .checked_rem(self.stack[start + 1].as_integer()?)
+                    .checked_rem(args[1].as_integer()?)
                     .ok_or("arithmetic error")?,
             );
         }
         if p == SetBuffer {
-            let mut v = self.stack[start];
+            let mut v = args[0];
             if let Some(name) = self.eval_buffer_name(v)? {
                 v = if name == "*scratch*" { self.create_named_buffer(&name, false)? }
                     else { self.named_buffer(&name).ok_or_else(|| format!("no buffer named {name}"))? };
@@ -365,7 +365,7 @@ impl Vm {
             return Ok(v);
         }
         let object = if (p == PutProperty && n == 5) || (p == GetProperty && n == 3) {
-            self.stack[start + n - 1]
+            args[n - 1]
         } else {
             Value::NIL
         };
@@ -392,7 +392,7 @@ impl Vm {
             self.ensure_buffer_writable()?;
         }
         if matches!(self.objects[index], Object::ByteBuffer(_)) {
-            return self.byte_buffer_primitive(p, start, n, index);
+            return self.byte_buffer_primitive(p, start, n, index, &args);
         }
         let mut inserted_properties = properties::Properties::new();
         let inserted = if p == Insert {
@@ -414,13 +414,11 @@ impl Vm {
                 }
             }
             bytes
-        } else if p == SearchForward {
-            self.string_bytes(self.stack[start])?
         } else {
             vec![]
         };
         let key = if matches!(p, PutProperty | GetProperty) {
-            let value = self.stack[start + if p == PutProperty { 2 } else { 1 }];
+            let value = args[if p == PutProperty { 2 } else { 1 }];
             let slot = value.index(7)?.checked_sub(1).ok_or("symbol required")?;
             Some(
                 self.names
@@ -430,6 +428,23 @@ impl Vm {
                     .0
                     .clone(),
             )
+        } else {
+            None
+        };
+        // Fchar_after: a marker's byte position, from the marker's own
+        // buffer, is read against this buffer's accessible region.
+        let char_after_marker = if p == CharAfter && n > 0 {
+            match self.object_if(args[0]) {
+                Some(Object::Marker(marker)) => {
+                    let anchor = marker.anchor.ok_or("Marker does not point anywhere")?;
+                    let Some(Object::Buffer(owner)) = self.object_if(marker.buffer) else {
+                        return Err("Marker does not point anywhere".into());
+                    };
+                    Some(ByteOffset(owner.anchors.resolve(anchor).ok_or("Marker does not point anywhere")? as usize))
+                }
+                Some(Object::Bignum(_)) => return Ok(Value::NIL),
+                _ => None,
+            }
         } else {
             None
         };
@@ -447,28 +462,24 @@ impl Vm {
             Ok(r)
         };
         match p {
-            BufferString => {
-                let mut s = Box::new(data::LispString::new(t.as_str()));
-                s.properties = t.properties.clone();
-                Ok(self.allocate_object(Object::String(s)))
-            }
             Point => Value::integer((t.char_of_byte(t.point)?.0 + 1) as i64),
             PointMin => Value::integer((t.char_of_byte(accessible.start)?.0 + 1) as i64),
             PointMax => Value::integer((t.char_of_byte(accessible.end)?.0 + 1) as i64),
             BufferSize => Value::integer(t.len_chars() as i64),
             GotoChar => {
-                let value = self.stack[start];
-                let c = value.as_integer()?.saturating_sub(1).max(0) as usize;
+                let c = args[0].as_integer()?.saturating_sub(1).max(0) as usize;
                 t.point = t
                     .byte_of_char(CharOffset(c.min(t.len_chars())))?
                     .clamp(accessible.start, accessible.end);
-                Ok(value)
+                Ok(self.stack[start])
             }
             CharAfter => {
-                let b = if n == 0 || self.stack[start] == Value::NIL {
+                let b = if let Some(b) = char_after_marker {
+                    b
+                } else if n == 0 || args[0] == Value::NIL {
                     t.point
                 } else {
-                    let c = self.stack[start].as_integer()?;
+                    let c = args[0].as_integer()?;
                     if c < 1 {
                         return Ok(Value::NIL);
                     }
@@ -491,48 +502,19 @@ impl Vm {
                 Ok(Value::NIL)
             }
             DeleteRegion => {
-                let r = region(self.stack[start], self.stack[start + 1])?;
+                let r = region(args[0], args[1])?;
                 t.replace(r, b"")?;
                 self.finish_annotation_edit(self.slots[self.buffer_slot].value)?;
                 Ok(Value::NIL)
             }
             Substring => {
-                let r = region(self.stack[start], self.stack[start + 1])?;
+                let r = region(args[0], args[1])?;
                 let string = Box::new(data::LispString::new(t.slice(r)?));
                 Ok(self.allocate_object(Object::String(string)))
             }
-            SearchForward => {
-                let bound = if n > 1 && self.stack[start + 1] != Value::NIL {
-                    t.byte_of_char(position(self.stack[start + 1])?)?
-                } else {
-                    accessible.end
-                };
-                if bound < t.point || bound > accessible.end {
-                    return Err("index out of range".into());
-                }
-                let found = if inserted.is_empty() {
-                    Some(t.point)
-                } else {
-                    t.bytes()[t.point.0..bound.0]
-                        .windows(inserted.len())
-                        .position(|s| s == inserted)
-                        .map(|b| ByteOffset(t.point.0 + b + inserted.len()))
-                };
-                if let Some(b) = found {
-                    t.point = b;
-                    Value::integer((t.char_of_byte(b)?.0 + 1) as i64)
-                } else if n > 2 && self.stack[start + 2] != Value::NIL {
-                    if self.stack[start + 2] != Value::TRUE {
-                        t.point = bound;
-                    }
-                    Ok(Value::NIL)
-                } else {
-                    Err("search failed".into())
-                }
-            }
             Narrow => {
-                let a = t.byte_of_char(position(self.stack[start])?)?;
-                let b = t.byte_of_char(position(self.stack[start + 1])?)?;
+                let a = t.byte_of_char(position(args[0])?)?;
+                let b = t.byte_of_char(position(args[1])?)?;
                 t.narrow(a.min(b)..a.max(b))?;
                 Ok(Value::NIL)
             }
@@ -541,7 +523,7 @@ impl Vm {
                 Ok(Value::NIL)
             }
             CharToByte | ByteToChar => {
-                let value = self.stack[start].as_integer()?;
+                let value = args[0].as_integer()?;
                 if value < 1 {
                     return Ok(Value::NIL);
                 }
@@ -562,12 +544,12 @@ impl Vm {
                     .unwrap_or(Ok(Value::NIL))
             }
             PutProperty => {
-                let r = region(self.stack[start], self.stack[start + 1])?;
-                t.put_property(r, key.as_ref().unwrap(), self.stack[start + 3]);
+                let r = region(args[0], args[1])?;
+                t.put_property(r, key.as_ref().unwrap(), args[3]);
                 Ok(Value::NIL)
             }
             GetProperty => {
-                let at = t.byte_of_char(position(self.stack[start])?)?;
+                let at = t.byte_of_char(position(args[0])?)?;
                 if at < accessible.start || at > accessible.end {
                     return Err("index out of range".into());
                 }
@@ -582,6 +564,30 @@ impl Vm {
 
 impl Vm {
     /// I/O embeddings can retain arbitrary octets without passing through text.
+    /// The arguments of a legacy buffer primitive, a marker in a position
+    /// slot replaced by its position (CHECK_FIXNUM_COERCE_MARKER); other
+    /// arguments, such as a property value, are left alone.
+    fn buffer_primitive_args(&self, p: Primitive, start: usize, n: usize) -> Result<Vec<Value>> {
+        use Primitive::*;
+        let positions: &[usize] = match p {
+            GotoChar | CharToByte | GetProperty => &[0],
+            DeleteRegion | Substring | Narrow | PutProperty => &[0, 1],
+            _ => &[],
+        };
+        let mut args = self.stack[start..start + n].to_vec();
+        for &slot in positions {
+            if let Some(&value) = args.get(slot)
+                && matches!(self.object_if(value), Some(Object::Marker(_)))
+            {
+                let position = self.marker_position_value(value)?;
+                if position == Value::NIL {
+                    return Err("Marker does not point anywhere".into());
+                }
+                args[slot] = position;
+            }
+        }
+        Ok(args)
+    }
     pub(crate) fn byte_string(&mut self, bytes: &[u8]) -> Value {
         self.allocate_object(Object::Bytes(bytes.to_vec()))
     }
@@ -652,8 +658,15 @@ impl Vm {
         let index = self.buffer_index()?;
         if p == BufferString {
             let o = match &self.objects[index] {
-                Object::Buffer(t) => Object::String(Box::new(data::LispString::new(t.as_str()))),
-                Object::ByteBuffer(b) => Object::Bytes(b.bytes.clone()),
+                Object::Buffer(t) => {
+                    let accessible = t.accessible();
+                    let mut s = data::LispString::new(t.slice(accessible.clone())?);
+                    s.properties = t.properties.slice(accessible);
+                    Object::String(Box::new(s))
+                }
+                Object::ByteBuffer(b) => {
+                    Object::Bytes(b.bytes[b.restriction.start.0..b.restriction.end.0].to_vec())
+                }
                 _ => unreachable!(),
             };
             return Ok(self.allocate_object(o));
@@ -682,7 +695,8 @@ impl Vm {
             if n != 1 {
                 return Err("wrong primitive arity".into());
             }
-            let result = self.byte_buffer_primitive(InsertFileBytes, start, n, index);
+            let args = self.stack[start..start + n].to_vec();
+            let result = self.byte_buffer_primitive(InsertFileBytes, start, n, index, &args);
             if result.is_ok() {
                 self.display_state.version += 1;
             }
@@ -730,6 +744,7 @@ impl Vm {
         start: usize,
         n: usize,
         index: usize,
+        args: &[Value],
     ) -> Result<Value> {
         use Primitive::*;
         let inserted = if p == Insert {
@@ -750,21 +765,14 @@ impl Vm {
             }
             out
         } else if p == InsertFileBytes {
-            let path = String::from_utf8(self.string_bytes(self.stack[start])?)
+            let path = String::from_utf8(self.string_bytes(args[0])?)
                 .map_err(|_| "invalid filename")?;
             std::fs::read(path).map_err(|e| e.to_string())?
-        } else if p == SearchForward {
-            let v = self.stack[start];
-            match self.object(v)? {
-                Object::Bytes(b) => b.clone(),
-                Object::String(s) if s.as_str().is_ascii() => s.as_str().as_bytes().to_vec(),
-                _ => return Err("bytes required".into()),
-            }
         } else {
             vec![]
         };
         let key = if matches!(p, PutProperty | GetProperty) {
-            let v = self.stack[start + if p == PutProperty { 2 } else { 1 }];
+            let v = args[if p == PutProperty { 2 } else { 1 }];
             let slot = v.index(7)?.checked_sub(1).ok_or("symbol required")?;
             Some(
                 self.names
@@ -797,16 +805,15 @@ impl Vm {
             PointMax => Value::integer((r.end.0 + 1) as i64),
             BufferSize => Value::integer(b.bytes.len() as i64),
             GotoChar => {
-                let v = self.stack[start];
-                b.point = ByteOffset(v.as_integer()?.saturating_sub(1).max(0) as usize)
+                b.point = ByteOffset(args[0].as_integer()?.saturating_sub(1).max(0) as usize)
                     .clamp(r.start, r.end);
-                Ok(v)
+                Ok(self.stack[start])
             }
             CharAfter => {
-                let at = if n == 0 || self.stack[start] == Value::NIL {
+                let at = if n == 0 || args[0] == Value::NIL {
                     b.point
                 } else {
-                    let i = self.stack[start].as_integer()?;
+                    let i = args[0].as_integer()?;
                     if i < 1 {
                         return Ok(Value::NIL);
                     }
@@ -824,52 +831,23 @@ impl Vm {
                 if p == InsertFileBytes {
                     b.point = at;
                     let count = Value::integer(inserted.len() as i64)?;
-                    Ok(self.list_value(&[self.stack[start], count]))
+                    Ok(self.list_value(&[args[0], count]))
                 } else {
                     Ok(Value::NIL)
                 }
             }
             DeleteRegion => {
-                b.replace(region(self.stack[start], self.stack[start + 1])?, b"")?;
+                b.replace(region(args[0], args[1])?, b"")?;
                 Ok(Value::NIL)
             }
             Substring => {
-                let r = region(self.stack[start], self.stack[start + 1])?;
+                let r = region(args[0], args[1])?;
                 let bytes = b.bytes[r.start.0..r.end.0].to_vec();
                 Ok(self.allocate_object(Object::Bytes(bytes)))
             }
-            SearchForward => {
-                let bound = if n > 1 && self.stack[start + 1] != Value::NIL {
-                    pos(self.stack[start + 1])?
-                } else {
-                    r.end
-                };
-                if bound < b.point || bound > r.end {
-                    return Err("index out of range".into());
-                }
-                let found = if inserted.is_empty() {
-                    Some(b.point.0)
-                } else {
-                    b.bytes[b.point.0..bound.0]
-                        .windows(inserted.len())
-                        .position(|s| s == inserted)
-                        .map(|p| b.point.0 + p + inserted.len())
-                };
-                if let Some(p) = found {
-                    b.point = ByteOffset(p);
-                    Value::integer((p + 1) as i64)
-                } else if n > 2 && self.stack[start + 2] != Value::NIL {
-                    if self.stack[start + 2] != Value::TRUE {
-                        b.point = bound;
-                    }
-                    Ok(Value::NIL)
-                } else {
-                    Err("search failed".into())
-                }
-            }
             Narrow => {
-                let a = pos(self.stack[start])?;
-                let z = pos(self.stack[start + 1])?;
+                let a = pos(args[0])?;
+                let z = pos(args[1])?;
                 let r = a.min(z)..a.max(z);
                 if r.end.0 > b.bytes.len() {
                     return Err("index out of range".into());
@@ -883,29 +861,29 @@ impl Vm {
                 Ok(Value::NIL)
             }
             CharToByte | ByteToChar => {
-                let p = self.stack[start].as_integer()?;
+                let p = args[0].as_integer()?;
                 if p < 1 || p as u64 > b.bytes.len() as u64 + 1 {
                     Ok(Value::NIL)
                 } else {
-                    Ok(self.stack[start])
+                    Ok(args[0])
                 }
             }
             PutProperty => {
                 let mut changed = false;
-                for p in region(self.stack[start], self.stack[start + 1])?.start.0
-                    ..region(self.stack[start], self.stack[start + 1])?.end.0
+                for p in region(args[0], args[1])?.start.0
+                    ..region(args[0], args[1])?.end.0
                 {
                     changed |= b.properties
                         .entry(ByteOffset(p))
                         .or_default()
-                        .insert(key.as_ref().unwrap().clone(), self.stack[start + 3])
-                        != Some(self.stack[start + 3]);
+                        .insert(key.as_ref().unwrap().clone(), args[3])
+                        != Some(args[3]);
                 }
                 if changed { b.state.record_change(false); }
                 Ok(Value::NIL)
             }
             GetProperty => {
-                let p = pos(self.stack[start])?;
+                let p = pos(args[0])?;
                 if p < r.start || p > r.end {
                     return Err("index out of range".into());
                 }
@@ -1352,6 +1330,20 @@ impl Vm {
         if !changed {
             return Ok(Value::NIL);
         }
+        self.text_property_commit(object, range, properties)?;
+        Ok(Value::TRUE)
+    }
+
+    /// Install PROPERTIES, already edited over RANGE, as OBJECT's: the
+    /// read-only checks and modification count of modify_text_properties
+    /// for a buffer.
+    fn text_property_commit(
+        &mut self,
+        object: Value,
+        range: std::ops::Range<ByteOffset>,
+        properties: properties::Properties,
+    ) -> std::result::Result<(), crate::prim::Fault> {
+        use crate::prim::Fault;
         if Self::image_value(object) {
             return Err(Fault::Error("immutable image string".into()));
         }
@@ -1386,6 +1378,76 @@ impl Vm {
             }
             _ => unreachable!(),
         }
+        Ok(())
+    }
+
+    /// textprop.c Fremove_text_properties / Fremove_list_of_text_properties:
+    /// t when some character in START..END carried one of NAMES.
+    pub(crate) fn remove_text_properties_native(
+        &mut self,
+        start: Value,
+        end: Value,
+        names: &[Value],
+        object: Value,
+    ) -> crate::prim::Out {
+        let object = if object == Value::NIL {
+            self.buffer_index().map_err(crate::prim::Fault::Error)?;
+            self.slots[self.buffer_slot].value
+        } else {
+            object
+        };
+        let Some((range, mut properties)) = self.text_property_region(start, end, object)? else {
+            return Ok(Value::NIL);
+        };
+        let keys = names.iter().map(|&name| self.text_property_key(name)).collect::<std::result::Result<Vec<_>, _>>()?;
+        let mut changed = false;
+        for key in &keys {
+            let mut at = range.start;
+            while at < range.end {
+                changed |= properties.get_property(at, key).is_some();
+                at = properties.next_change(at, range.end);
+            }
+            properties.remove(range.clone(), key);
+        }
+        if !changed {
+            return Ok(Value::NIL);
+        }
+        self.text_property_commit(object, range, properties)?;
+        Ok(Value::TRUE)
+    }
+
+    /// textprop.c set_text_properties: replace every property in START..END.
+    /// Text with no properties and a nil PROPERTIES is left alone and nil
+    /// returned; otherwise t (VM2-TEXTPROP-INTERVALS1).
+    pub(crate) fn set_text_properties_native(
+        &mut self,
+        start: Value,
+        end: Value,
+        plist: Value,
+        object: Value,
+    ) -> crate::prim::Out {
+        let pairs = self.text_property_pairs(plist)?;
+        let object = if object == Value::NIL {
+            self.buffer_index().map_err(crate::prim::Fault::Error)?;
+            self.slots[self.buffer_slot].value
+        } else {
+            object
+        };
+        let Some((range, mut properties)) = self.text_property_region(start, end, object)? else {
+            return Ok(Value::NIL);
+        };
+        if pairs.is_empty() && properties.is_empty() {
+            return Ok(Value::NIL);
+        }
+        for key in properties.properties_keys() {
+            properties.remove(range.clone(), &key);
+        }
+        // The newest key reads first; GNU keeps PROPERTIES' own order.
+        for (key, value) in pairs.into_iter().rev() {
+            let key = self.text_property_key(key)?;
+            properties.put(range.clone(), &key, value);
+        }
+        self.text_property_commit(object, range, properties)?;
         Ok(Value::TRUE)
     }
 

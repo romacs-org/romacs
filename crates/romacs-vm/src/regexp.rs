@@ -24,6 +24,8 @@ pub(super) fn is_regexp_primitive(p: Primitive) -> bool {
             | Primitive::MatchData
             | Primitive::ReSearchForward
             | Primitive::ReSearchBackward
+            | Primitive::SearchForward
+            | Primitive::SearchBackward
             | Primitive::SyntaxTable
             | Primitive::StandardSyntaxTable
             | Primitive::CopySyntaxTable
@@ -270,12 +272,13 @@ impl Vm {
         self.slots[self.names["inhibit-changing-match-data"]].value != Value::NIL
     }
     fn regexp_compile(
-        &self,
+        &mut self,
         pattern: &Input,
         multibyte: bool,
         syntax: &syntax::VmSyntax,
     ) -> SearchResult<regex::CompiledPattern> {
-        let folded = self.slots[self.names["case-fold-search"]].value != Value::NIL;
+        // The current buffer's binding: case-fold-search is often buffer-local.
+        let folded = self.variable_value(self.names["case-fold-search"])? != Value::NIL;
         let translation = folded.then(regex::CaseTranslation::standard);
         let mut compiled = regex::regex_compile_lisp_with_translation(
             &EmacsStr::new(&pattern.bytes, pattern.multibyte),
@@ -506,7 +509,7 @@ impl Vm {
             ModifySyntaxEntry => (2..=3).contains(&n),
             LookingAt | MatchString => (1..=2).contains(&n),
             StringMatch => (2..=4).contains(&n),
-            ReSearchForward | ReSearchBackward => (1..=4).contains(&n),
+            ReSearchForward | ReSearchBackward | SearchForward | SearchBackward => (1..=4).contains(&n),
             MatchData => n <= 3,
             _ => n == 1,
         };
@@ -586,13 +589,21 @@ impl Vm {
             }
             return Ok(Value::NIL);
         }
-        let count = if matches!(p, ReSearchForward | ReSearchBackward) && args[3] != Value::NIL {
+        let count = if matches!(p, ReSearchForward | ReSearchBackward | SearchForward | SearchBackward) && args[3] != Value::NIL {
             self.regexp_int(args[3])?
         } else {
             1
         };
-        let count = if p == ReSearchBackward { -count } else { count };
-        let pattern = self.regexp_input(args[0])?;
+        let count = if matches!(p, ReSearchBackward | SearchBackward) { -count } else { count };
+        let mut pattern = self.regexp_input(args[0])?;
+        // search_command with RE false: the same search over STRING quoted,
+        // which matches exactly where the literal does, with the same folding.
+        if matches!(p, SearchForward | SearchBackward) {
+            pattern.bytes = pattern.bytes.iter().flat_map(|&b| {
+                let special = b"[*.\\?+^$".contains(&b);
+                if special { vec![b'\\', b] } else { vec![b] }
+            }).collect();
+        }
         let index = self.buffer_index()?;
         let (input, base_byte, base_char, original) = match &self.objects[index] {
             Object::Buffer(t) => {

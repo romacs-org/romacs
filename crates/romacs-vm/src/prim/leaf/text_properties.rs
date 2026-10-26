@@ -32,4 +32,10 @@ impl Leaf<'_> {
     pub(crate) fn text_property_not_all(&mut self, start: Value, end: Value, property: Value, value: Value, object: Value) -> super::super::Out {
         self.vm.text_property_not_all_values(start, end, property, value, object)
     }
+    pub(crate) fn set_text_properties(&mut self, start: Value, end: Value, properties: Value, object: Value) -> super::super::Out {
+        self.vm.set_text_properties_native(start, end, properties, object)
+    }
+    pub(crate) fn remove_text_properties(&mut self, start: Value, end: Value, names: &[Value], object: Value) -> super::super::Out {
+        self.vm.remove_text_properties_native(start, end, names, object)
+    }
 }

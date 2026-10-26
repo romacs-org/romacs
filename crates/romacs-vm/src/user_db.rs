@@ -3,6 +3,8 @@
 pub(crate) struct Account {
     pub name: String,
     pub gecos: String,
+    /// pw_dir, absent when the entry has none.
+    pub home: Option<String>,
 }
 
 pub(crate) fn real_uid() -> u32 {
@@ -23,7 +25,8 @@ fn account(lookup: impl Fn(*mut libc::passwd, *mut libc::c_char, usize, *mut *mu
     let text = |p: *const libc::c_char| if p.is_null() { String::new() } else {
         unsafe { std::ffi::CStr::from_ptr(p) }.to_string_lossy().into_owned()
     };
-    Some(Account { name: text(entry.pw_name), gecos: text(entry.pw_gecos) })
+    let home = (!entry.pw_dir.is_null()).then(|| text(entry.pw_dir));
+    Some(Account { name: text(entry.pw_name), gecos: text(entry.pw_gecos), home })
 }
 
 pub(crate) fn by_uid(uid: u32) -> Option<Account> {

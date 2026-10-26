@@ -603,6 +603,22 @@ impl Text {
         self.state.record_text_change(end.0 - start.0 + s.chars().count());
         Ok(())
     }
+    /// Overwrite the characters of R with as many characters of the same
+    /// total byte length, keeping text properties, point and markers, as
+    /// GNU's subst-char-in-region does. The caller records the change.
+    pub(crate) fn overwrite(&mut self, r: Range<ByteOffset>, replacement: &str) -> Result<()> {
+        self.validate_range(&r)?;
+        if replacement.len() != r.end.0 - r.start.0 { return Err("overwrite length differs".into()); }
+        self.flush_tail();
+        let start = if self.is_ascii { r.start.0 } else { self.rope.byte_to_char(r.start.0) };
+        let end = if self.is_ascii { r.end.0 } else { self.rope.byte_to_char(r.end.0) };
+        self.invalidate_reads();
+        self.rope.remove(start..end);
+        self.rope.insert(start, replacement);
+        self.chars_len = self.rope.len_chars();
+        self.is_ascii = self.bytes_len == self.chars_len;
+        Ok(())
+    }
     /// Cursor movement is grapheme based, independently of Lisp scalar indexing.
     pub fn next_grapheme(&self, at: ByteOffset) -> Result<ByteOffset> {
         self.boundary(at)?;

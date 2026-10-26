@@ -74,6 +74,7 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     // listed only when that value equals pinned GNU's batch value, so no
     // initialization done later in C (init_*) is misrepresented.
     CVariable { name: "after-delete-frame-functions", gnu: "frame.c:7521", kind: Kind::Lisp(Init::Nil) },
+    CVariable { name: "alter-fullscreen-frames", gnu: "frame.c:7775", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "ambiguous-width-chars", gnu: "character.c:1123", kind: Kind::Lisp(Init::CharTable(&CharTableInit { purpose: None, extras: &[], init: Init::Nil, ranges: &[] })) },
     CVariable { name: "attempt-orderly-shutdown-on-fatal-signal", gnu: "keyboard.c:14401", kind: Kind::Bool(true) },
     CVariable { name: "attempt-stack-overflow-recovery", gnu: "keyboard.c:14392", kind: Kind::Bool(true) },
@@ -86,6 +87,7 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "auto-save-interval", gnu: "keyboard.c:13864", kind: Kind::Int(300) },
     CVariable { name: "auto-save-list-file-name", gnu: "fileio.c:6952", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "auto-save-no-message", gnu: "keyboard.c:13869", kind: Kind::Bool(false) },
+    CVariable { name: "auto-save-timeout", gnu: "keyboard.c:13873", kind: Kind::Lisp(Init::Fixnum(30)) },
     CVariable { name: "auto-save-visited-file-name", gnu: "fileio.c:6959", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "backtrace-on-error-noninteractive", gnu: "eval.c:4558", kind: Kind::Bool(true) },
     CVariable { name: "baud-rate", gnu: "dispnew.c:7487", kind: Kind::Int(0) },
@@ -139,6 +141,8 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "echo-keystrokes-help", gnu: "keyboard.c:13886", kind: Kind::Bool(true) },
     CVariable { name: "enable-character-translation", gnu: "coding.c:12111", kind: Kind::Lisp(Init::True) },
     CVariable { name: "enable-disabled-menus-and-buttons", gnu: "keyboard.c:14342", kind: Kind::Lisp(Init::Nil) },
+    CVariable { name: "eol-mnemonic-dos", gnu: "coding.c:12096", kind: Kind::Lisp(Init::Str("\\")) },
+    CVariable { name: "eol-mnemonic-mac", gnu: "coding.c:12101", kind: Kind::Lisp(Init::Str("/")) },
     CVariable { name: "expose-hidden-buffer", gnu: "frame.c:7750", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "face-remapping-alist", gnu: "xfaces.c:7718", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "fast-but-imprecise-scrolling", gnu: "window.c:9586", kind: Kind::Bool(false) },
@@ -148,18 +152,23 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "fontification-functions", gnu: "xdisp.c:39011", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "force-load-messages", gnu: "lread.c:5746", kind: Kind::Bool(false) },
     CVariable { name: "forward-comment-function", gnu: "syntax.c:3822", kind: Kind::Lisp(Init::Nil) },
+    CVariable { name: "frame-inhibit-implied-resize", gnu: "frame.c:7638", kind: Kind::Lisp(Init::True) },
     CVariable { name: "frame-resize-pixelwise", gnu: "frame.c:7625", kind: Kind::Bool(false) },
     CVariable { name: "frame-size-history", gnu: "frame.c:7695", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "garbage-collection-messages", gnu: "alloc.c:7495", kind: Kind::Bool(false) },
+    CVariable { name: "gc-cons-percentage", gnu: "alloc.c:7448", kind: Kind::Lisp(Init::Float(0.1)) },
+    CVariable { name: "gc-cons-threshold", gnu: "alloc.c:7434", kind: Kind::Int(800000) },
     CVariable { name: "global-mode-string", gnu: "xdisp.c:38701", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "glyph-table", gnu: "dispnew.c:7549", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "glyphless-char-display", gnu: "xdisp.c:39349", kind: Kind::Lisp(Init::CharTable(&CharTableInit { purpose: Some("glyphless-char-display"), extras: &[Init::Symbol("empty-box")], init: Init::Nil, ranges: &[] })) },
     CVariable { name: "help-form", gnu: "keyboard.c:13962", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "highlight-nonselected-windows", gnu: "xdisp.c:38819", kind: Kind::Bool(false) },
+    CVariable { name: "hourglass-delay", gnu: "xdisp.c:39318", kind: Kind::Lisp(Init::Fixnum(1)) },
     CVariable { name: "hscroll-margin", gnu: "xdisp.c:39085", kind: Kind::Int(5) },
     CVariable { name: "hscroll-step", gnu: "xdisp.c:39090", kind: Kind::Lisp(Init::Fixnum(0)) },
     CVariable { name: "iconify-child-frame", gnu: "frame.c:7735", kind: Kind::Lisp(Init::Symbol("iconify-top-level")) },
     CVariable { name: "image-scaling-factor", gnu: "image.c:13779", kind: Kind::Lisp(Init::Symbol("auto")) },
+    CVariable { name: "indent-tabs-mode", gnu: "indent.c:2579", kind: Kind::Bool(true) },
     CVariable { name: "inhibit--record-char", gnu: "keyboard.c:14454", kind: Kind::Bool(false) },
     CVariable { name: "inhibit-debugger", gnu: "eval.c:4479", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "inhibit-iso-escape-detection", gnu: "coding.c:12175", kind: Kind::Bool(false) },
@@ -191,6 +200,8 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "lread--unescaped-character-literals", gnu: "lread.c:5775", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "make-cursor-line-fully-visible", gnu: "xdisp.c:38931", kind: Kind::Lisp(Init::True) },
     CVariable { name: "make-pointer-invisible", gnu: "frame.c:7496", kind: Kind::Lisp(Init::True) },
+    CVariable { name: "max-mini-window-height", gnu: "xdisp.c:39037", kind: Kind::Lisp(Init::Float(0.25)) },
+    CVariable { name: "maximum-scroll-margin", gnu: "xdisp.c:38751", kind: Kind::Lisp(Init::Float(0.25)) },
     CVariable { name: "memory-full", gnu: "alloc.c:7514", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "menu-prompting", gnu: "keyboard.c:14001", kind: Kind::Bool(true) },
     CVariable { name: "menu-updating-frame", gnu: "xdisp.c:39120", kind: Kind::Lisp(Init::Nil) },
@@ -225,8 +236,10 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "overlay-arrow-position", gnu: "xdisp.c:38705", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "overline-margin", gnu: "xdisp.c:39296", kind: Kind::Int(2) },
     CVariable { name: "overriding-terminal-local-map", gnu: "keyboard.c:14128", kind: Kind::Lisp(Init::Nil) },
+    CVariable { name: "parse-sexp-ignore-comments", gnu: "syntax.c:3769", kind: Kind::Bool(false) },
     CVariable { name: "pgtk-lost-selection-functions", gnu: "pgtkselect.c:1919", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "pgtk-use-im-context-on-new-connection", gnu: "pgtkim.c:306", kind: Kind::Lisp(Init::True) },
+    CVariable { name: "polling-period", gnu: "keyboard.c:13892", kind: Kind::Lisp(Init::Float(2.0)) },
     CVariable { name: "post-select-region-hook", gnu: "keyboard.c:14469", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "printable-chars", gnu: "character.c:1131", kind: Kind::Lisp(Init::CharTable(&CharTableInit { purpose: None, extras: &[], init: Init::Nil, ranges: &[(32, 126, Init::True), (160, 0x3fff7f, Init::True)] })) },
     CVariable { name: "process-coding-system-alist", gnu: "coding.c:12051", kind: Kind::Lisp(Init::Nil) },
@@ -243,7 +256,9 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "read-symbol-shorthands", gnu: "lread.c:5884", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "recenter-redisplay", gnu: "window.c:9484", kind: Kind::Lisp(Init::Symbol("tty")) },
     CVariable { name: "record-all-keys", gnu: "keyboard.c:14462", kind: Kind::Bool(false) },
+    CVariable { name: "report-emacs-bug-address", gnu: "emacs.c:3613", kind: Kind::Lisp(Init::Str("bug-gnu-emacs@gnu.org")) },
     CVariable { name: "resize-mini-frames", gnu: "frame.c:7566", kind: Kind::Lisp(Init::Nil) },
+    CVariable { name: "resize-mini-windows", gnu: "xdisp.c:39045", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "ring-bell-function", gnu: "terminal.c:695", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "saved-region-selection", gnu: "keyboard.c:14363", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "scalable-fonts-allowed", gnu: "xfaces.c:7692", kind: Kind::Lisp(Init::Nil) },
@@ -257,6 +272,7 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "select-active-regions", gnu: "keyboard.c:14350", kind: Kind::Lisp(Init::True) },
     CVariable { name: "selection-coding-system", gnu: "w32select.c:1324", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "shared-game-score-directory", gnu: "callproc.c:2134", kind: Kind::Lisp(Init::Nil) },
+    CVariable { name: "shell-file-name", gnu: "callproc.c:2096", kind: Kind::Lisp(Init::Getenv("SHELL", "/bin/sh")) },
     CVariable { name: "show-trailing-whitespace", gnu: "xdisp.c:38640", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "special-mirror-table", gnu: "xdisp.c:39379", kind: Kind::Lisp(Init::CharTable(&CharTableInit { purpose: None, extras: &[], init: Init::Nil, ranges: &[] })) },
     CVariable { name: "symbols-with-pos-enabled", gnu: "data.c:4386", kind: Kind::Bool(false) },
@@ -285,6 +301,7 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "truncate-partial-width-windows", gnu: "xdisp.c:38768", kind: Kind::Lisp(Init::Fixnum(50)) },
     CVariable { name: "tty-erase-char", gnu: "keyboard.c:13948", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "underline-minimum-offset", gnu: "xdisp.c:39302", kind: Kind::Int(1) },
+    CVariable { name: "undo-outer-limit", gnu: "undo.c:459", kind: Kind::Lisp(Init::Fixnum(24000000)) },
     CVariable { name: "undo-strong-limit", gnu: "undo.c:447", kind: Kind::Int(240000) },
     CVariable { name: "unibyte-display-via-language-environment", gnu: "xdisp.c:39025", kind: Kind::Bool(false) },
     CVariable { name: "unicode-category-table", gnu: "character.c:1159", kind: Kind::Lisp(Init::Nil) },
@@ -336,6 +353,10 @@ pub(crate) enum Init {
     Fixnum(i64),
     Symbol(&'static str),
     Str(&'static str),
+    /// make_float (X).
+    Float(f64),
+    /// build_string (getenv (NAME) ?: FALLBACK), read at startup.
+    Getenv(&'static str, &'static str),
     SystemName,
     SourceDirectory,
     /// A proper list of the given elements.
@@ -482,6 +503,20 @@ pub(crate) static C_VARIABLES: &[CVariable] = &[
     CVariable { name: "fill-column", gnu: "buffer.c:5259", kind: Kind::PerBuffer { default: Init::Fixnum(70), predicate: Some(Predicate::Integerp) } },
     // Chain: compile.el's easy-mmode docstrings fill through back-to-indentation.
     CVariable { name: "left-margin", gnu: "buffer.c:5279", kind: Kind::PerBuffer { default: Init::Fixnum(0), predicate: Some(Predicate::Integerp) } },
+    // Chain: cus-start.el (preloaded) signals for a missing built-in.
+    CVariable { name: "abbrev-mode", gnu: "buffer.c:5265", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
+    CVariable { name: "ctl-arrow", gnu: "buffer.c:5294", kind: Kind::PerBuffer { default: Init::True, predicate: None } },
+    CVariable { name: "bidi-paragraph-direction", gnu: "buffer.c:5383", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
+    CVariable { name: "word-wrap", gnu: "buffer.c:5408", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
+    CVariable { name: "selective-display-ellipses", gnu: "buffer.c:5487", kind: Kind::PerBuffer { default: Init::True, predicate: None } },
+    CVariable { name: "indicate-empty-lines", gnu: "buffer.c:5612", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
+    CVariable { name: "indicate-buffer-boundaries", gnu: "buffer.c:5619", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
+    // GNU checks these two against `fraction' on set (VM2-CVAR-PRED1).
+    CVariable { name: "scroll-up-aggressively", gnu: "buffer.c:5678", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
+    CVariable { name: "scroll-down-aggressively", gnu: "buffer.c:5691", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
+    CVariable { name: "cursor-type", gnu: "buffer.c:5905", kind: Kind::PerBuffer { default: Init::True, predicate: None } },
+    CVariable { name: "line-spacing", gnu: "buffer.c:5928", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
+    CVariable { name: "cursor-in-non-selected-windows", gnu: "buffer.c:5939", kind: Kind::PerBuffer { default: Init::True, predicate: None } },
     // insert-file-contents / write-region (prims/fileio.rs): the per-buffer
     // C variables those DEFUNs read or set. Their other C variables are
     // plain specials (`Vm::declare_fileio_specials`) so they stay
@@ -741,6 +776,11 @@ impl Vm {
             Init::Symbol(name) => self.intern(name),
             // build_string: unibyte unless the text has a non-ASCII char.
             Init::Str(text) => self.make_lisp_string(text.as_bytes().to_vec(), !text.is_ascii()),
+            Init::Float(x) => self.allocate_object(data::Object::Float(x)),
+            Init::Getenv(name, fallback) => {
+                let text = std::env::var(name).unwrap_or_else(|_| fallback.to_owned());
+                self.make_lisp_string(text.as_bytes().to_vec(), !text.is_ascii())
+            }
             Init::SystemName => prim::prims::sysname::initial_value(self),
             Init::SourceDirectory => {
                 // CARGO_MANIFEST_DIR is captured while building this crate.
