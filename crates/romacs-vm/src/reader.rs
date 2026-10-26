@@ -225,6 +225,10 @@ impl Reader<'_, '_> {
     fn delimiter(c: u32) -> bool {
         c.is_ascii_whitespace() || [40, 41, 91, 93, 34, 59, 39, 96, 44].contains(&c)
     }
+    /// lread.c read_char_literal: what may follow `?C'.
+    fn char_literal_follows(c: u32) -> bool {
+        c <= 32 || b"\"';()[]#?`,.".iter().any(|&b| u32::from(b) == c)
+    }
     fn dot_follows(next: Option<u32>) -> bool {
         next.is_none_or(|c| {
             c <= 32 || c == 160 || [34, 39, 59, 40, 91, 35, 63, 96, 44].contains(&c)
@@ -803,7 +807,7 @@ impl Reader<'_, '_> {
                 };
                 let following = self.peek();
                 self.unread_lookahead()?;
-                if following.is_some_and(|c| !Self::delimiter(c)) {
+                if following.is_some_and(|c| !Self::char_literal_follows(c)) {
                     return Err("invalid character literal".into());
                 }
                 let base = n & !0x0fc00000;

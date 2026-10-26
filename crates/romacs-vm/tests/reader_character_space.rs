@@ -11,3 +11,19 @@ fn character_space_and_tab_end_before_adjacent_forms() {
         assert_eq!(vm.eval_source(source).unwrap().display().unwrap(), expected, "{source}");
     }
 }
+
+// lread.c read_char_literal: a literal may be followed by any control
+// character or one of "';()[]#?`,. (characters.el writes `(?ꪀ.  ?ꪯ)').
+#[test]
+fn character_literals_end_before_gnu_terminators() {
+    let mut vm = Vm::new();
+    for (source, expected) in [
+        ("(car (read-from-string \"(?\u{aa80}.  ?\u{aaaf})\"))", "(43648 . 43695)"),
+        ("(car (read-from-string \"(?a?b)\"))", "(97 98)"),
+        ("(car (read-from-string \"(?a#'b)\"))", "(97 (function b))"),
+        ("(car (read-from-string (string ?\\( ?? ?a 12 ?\\))))", "(97)"),
+        ("(condition-case e (read-from-string \"?ab\") (invalid-read-syntax 'refused))", "refused"),
+    ] {
+        assert_eq!(vm.eval_source(source).unwrap().display().unwrap(), expected, "{source}");
+    }
+}
