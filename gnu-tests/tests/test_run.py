@@ -40,30 +40,38 @@ def romacs_result(outcome, detail=None):
 
 
 class LoadPath(unittest.TestCase):
-    def test_core_owner_precedes_recursive_shadow_and_keeps_other_directories(self):
+    """load_path() reproduces GNU's installed load-path (lisp/subdirs.el)."""
+
+    def tree(self, root, relatives):
+        lisp = root / 'gnu-lisp'
+        for relative in relatives:
+            (lisp / relative).parent.mkdir(parents=True, exist_ok=True)
+            (lisp / relative).write_text(';; fixture\n')
+        return lisp
+
+    def test_immediate_subdirectories_in_gnu_subdirs_order(self):
         with tempfile.TemporaryDirectory(prefix='gts-load-path-') as tmp:
-            root = pathlib.Path(tmp)
-            lisp = root / 'gnu-lisp'
-            directories = [lisp, lisp / 'emacs-lisp', lisp / 'cedet',
-                           lisp / 'cedet/semantic', lisp / 'cedet/semantic/debug',
-                           lisp / 'textmodes']
-            for directory in directories:
-                directory.mkdir(parents=True, exist_ok=True)
-            for relative in ['emacs-lisp/debug.el', 'cedet/semantic/debug.el',
-                             'textmodes/extra-owner.el']:
-                (lisp / relative).write_bytes((run.ROOT / 'gnu-lisp/emacs-lisp/debug.el').read_bytes())
-            with patch.object(run, 'ROOT', root):
+            lisp = self.tree(pathlib.Path(tmp), [
+                'emacs-lisp/debug.el', 'progmodes/python.el', 'cedet/semantic/debug.el',
+                'cedet/semantic/wisent/python.el', 'obsolete/old.el', 'term/xterm.el',
+                'url/url.el', 'use-package/use-package.el', 'vc/vc.el', 'CVS/x', 'calc/calc.el'])
+            with patch.object(run, 'ROOT', pathlib.Path(tmp)):
                 paths = run.load_path()
-            self.assertEqual(paths[:2], [str(lisp), str(lisp / 'emacs-lisp')])
-            self.assertEqual(len(paths), len(set(paths)))
-            self.assertEqual(set(paths), set(map(str, directories)))
-            self.assertEqual(paths[2:], sorted(set(map(str, directories)) - set(paths[:2])))
+            names = ['vc', 'use-package', 'url', 'progmodes', 'emacs-lisp', 'cedet', 'calc', 'obsolete']
+            self.assertEqual(paths, [str(lisp)] + [str(lisp / n) for n in names])
             resolve = lambda name: next(pathlib.Path(p) / name for p in paths
                                         if (pathlib.Path(p) / name).is_file())
+            self.assertEqual(resolve('python.el'), lisp / 'progmodes/python.el')
             self.assertEqual(resolve('debug.el'), lisp / 'emacs-lisp/debug.el')
-            self.assertEqual(resolve('extra-owner.el'), lisp / 'textmodes/extra-owner.el')
 
-    def test_missing_core_directory_does_not_add_nonexistent_search_path(self):
+    def test_real_tree_matches_pinned_gnu_installation(self):
+        names = [pathlib.Path(p).name for p in run.load_path()[1:]]
+        self.assertEqual(names, ['vc', 'use-package', 'url', 'textmodes', 'progmodes', 'play',
+                                 'org', 'nxml', 'net', 'mh-e', 'mail', 'leim', 'language',
+                                 'international', 'image', 'gnus', 'eshell', 'erc', 'emulation',
+                                 'emacs-lisp', 'cedet', 'calendar', 'calc', 'obsolete'])
+
+    def test_missing_directories_are_not_added(self):
         with tempfile.TemporaryDirectory(prefix='gts-load-path-') as tmp:
             root = pathlib.Path(tmp)
             (root / 'gnu-lisp/textmodes').mkdir(parents=True)

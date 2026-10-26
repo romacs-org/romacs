@@ -573,12 +573,15 @@ def load_baseline(rel: str) -> dict:
 # romacs
 
 def load_path() -> list[str]:
+    """GNU's installed load-path: the Lisp root, then the immediate
+    subdirectories named by its generated subdirs.el (build-aux/update-subdirs):
+    reverse name order, obsolete last, term and VCS/backup names omitted."""
     lisp = ROOT / 'gnu-lisp'
-    directories = sorted(str(p) for p in lisp.rglob('*') if p.is_dir())
-    core = str(lisp / 'emacs-lisp')
-    return [str(lisp)] + ([core] if core in directories else []) + [
-        path for path in directories if path != core
-    ]
+    names = sorted(p.name for p in lisp.iterdir() if p.is_dir()
+                   and p.name not in ('term', 'RCS', 'CVS', 'Old')
+                   and not p.name.startswith('=') and not p.name.endswith(('~', '.orig', '.rej')))
+    ordered = [n for n in reversed(names) if n != 'obsolete'] + (['obsolete'] if 'obsolete' in names else [])
+    return [str(lisp)] + [str(lisp / name) for name in ordered]
 
 
 def build_adapter() -> pathlib.Path:
