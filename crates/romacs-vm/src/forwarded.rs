@@ -88,6 +88,7 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "baud-rate", gnu: "dispnew.c:7487", kind: Kind::Int(0) },
     CVariable { name: "bidi-inhibit-bpa", gnu: "xdisp.c:39274", kind: Kind::Bool(false) },
     CVariable { name: "blink-cursor-alist", gnu: "xdisp.c:39063", kind: Kind::Lisp(Init::Nil) },
+    CVariable { name: "char-code-property-alist", gnu: "chartab.c:1386", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "clone-indirect-buffer-hook", gnu: "buffer.c:6027", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "coding-system-require-warning", gnu: "coding.c:12166", kind: Kind::Bool(false) },
     CVariable { name: "combine-after-change-calls", gnu: "insdel.c:2571", kind: Kind::Lisp(Init::Nil) },

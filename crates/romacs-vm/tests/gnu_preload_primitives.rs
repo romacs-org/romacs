@@ -302,3 +302,56 @@ fn category_tables_match_gnu() {
         "(let ((tb (make-category-table))) (with-temp-buffer (set-category-table tb) (list (eq (category-table) tb) (with-temp-buffer (eq (category-table) (standard-category-table))))))",
     ]);
 }
+
+// Self-defined charsets of every method, so GNU -Q and a bare VM agree on
+// the inputs: MAP from a vector (duplicate characters and codes), a unified
+// OFFSET charset, a SUBSET and a SUPERSET.
+const CHARSETS: &str = "(progn (define-charset-internal 'rt-map 1 [32 127 0 0 0 0 0 0] nil nil nil nil nil nil nil nil nil [33 #x100 40 #x200 41 #x200 50 #x100 60 #x201] nil nil nil nil) (define-charset-internal 'rt-uni 2 [33 126 33 126 0 0 0 0] nil nil nil nil nil nil nil nil #x200000 nil nil nil [#x2121 #x3000 #x2122 #x3001 #x2221 #x3001 #x2123 #x3002] nil) (unify-charset 'rt-uni) (define-charset-internal 'rt-sub 1 [33 126 0 0 0 0 0 0] nil nil nil nil nil nil nil nil nil nil '(rt-map 40 60 -7) nil nil nil) (define-charset-internal 'rt-sup 1 [0 255 0 0 0 0 0 0] nil nil nil nil nil nil nil nil nil nil nil '((rt-map . 0) (ascii . 128)) nil nil))";
+
+#[test]
+fn charset_code_conversion_matches_gnu() {
+    let cases = [
+        "(list (decode-char 'rt-map 33) (decode-char 'rt-map 41) (decode-char 'rt-map 34) (decode-char 'rt-map 200) (encode-char #x200 'rt-map) (encode-char #x100 'rt-map) (encode-char ?A 'rt-map))",
+        "(list (decode-char 'rt-uni #x2121) (decode-char 'rt-uni #x2123) (decode-char 'rt-uni #x2124) (decode-char 'rt-uni #x2020) (encode-char #x3001 'rt-uni) (encode-char #x3002 'rt-uni) (encode-char #x3003 'rt-uni) (encode-char (decode-char 'rt-uni #x2130) 'rt-uni))",
+        "(list (decode-char 'rt-sub 33) (decode-char 'rt-sub 34) (encode-char #x200 'rt-sub) (encode-char #x201 'rt-sub) (encode-char #x100 'rt-sub))",
+        "(list (decode-char 'rt-sup 41) (decode-char 'rt-sup 193) (encode-char #x200 'rt-sup) (encode-char ?A 'rt-sup) (decode-char 'rt-sup 5))",
+        "(list (decode-char 'ascii 65) (decode-char 'ascii 200) (decode-char 'unicode '(1 . 2)) (encode-char #x10ffff 'unicode) (encode-char #x110000 'unicode))",
+        "(list (condition-case e (decode-char 'nope 1) (error e)) (condition-case e (decode-char 'ascii -1) (error e)) (condition-case e (encode-char -1 'ascii) (error e)) (condition-case e (encode-char ?a \"ascii\") (error e)))",
+    ];
+    let cases: Vec<String> = cases.iter().map(|c| format!("(progn {CHARSETS} {c})")).collect();
+    compare(&cases.iter().map(String::as_str).collect::<Vec<_>>());
+}
+
+// One reused cons per encoder or deunifier walk; a fresh one per OFFSET range.
+#[test]
+fn map_charset_chars_matches_gnu() {
+    let walk = "(lambda (cs &optional from to) (let (calls) (map-charset-chars (lambda (r a) (push (list (car r) (cdr r) a) calls)) cs 'arg from to) (nreverse calls)))";
+    let cases = [
+        "(list (funcall walk 'rt-map) (funcall walk 'rt-map 35 45) (funcall walk 'rt-uni) (funcall walk 'rt-uni #x2122 #x2221))",
+        "(list (funcall walk 'rt-sub) (funcall walk 'rt-sup) (funcall walk 'ascii) (funcall walk 'unicode 65 70))",
+        "(let (seen) (map-charset-chars (lambda (r _) (push r seen)) 'rt-map) (list (length seen) (eq (car seen) (car (cdr seen))) (car seen)))",
+        "(list (condition-case e (map-charset-chars #'ignore 'ascii nil -1) (error e)) (condition-case e (map-charset-chars #'ignore 'nope) (error e)))",
+    ];
+    let cases: Vec<String> = cases.iter().map(|c| format!("(progn {CHARSETS} (let ((walk {walk})) {c}))")).collect();
+    compare(&cases.iter().map(String::as_str).collect::<Vec<_>>());
+}
+
+// A uniprop table built by hand: a run-length block (decoded through extra
+// slot 4) and a simple block, read, written and mapped.
+const UNIPROP: &str = "(progn (put 'char-code-property-table 'char-table-extra-slots 5) (let ((tb (make-char-table 'char-code-property-table))) (set-char-table-range tb '(128 . 255) (string 2 5 (+ 128 3) 7 9 (+ 128 120))) (set-char-table-range tb '(256 . 383) (string 1 4 6 0 8)) (set-char-table-extra-slot tb 1 0) (set-char-table-extra-slot tb 2 1) (set-char-table-extra-slot tb 4 [z0 z1 z2 z3 z4 z5 z6 z7 z8 z9]) tb))";
+
+#[test]
+fn unicode_property_tables_match_gnu() {
+    let cases = [
+        "(list (aref tb 128) (aref tb 131) (aref tb 135) (aref tb 255) (aref tb 259) (aref tb 260) (aref tb 261) (aref tb 262))",
+        "(list (get-unicode-property-internal tb 130) (get-unicode-property-internal tb 131) (get-unicode-property-internal tb 260))",
+        "(progn (put-unicode-property-internal tb 129 'z2) (list (aref tb 128) (aref tb 129) (get-unicode-property-internal tb 129) (aref tb 130)))",
+        "(let (l) (map-char-table (lambda (k v) (push (cons k v) l)) tb) l)",
+        "(list (condition-case e (put-unicode-property-internal tb 129 'zz) (error e)) (condition-case e (get-unicode-property-internal (make-char-table 'x) ?a) (error e)) (condition-case e (get-unicode-property-internal 'x ?a) (error e)) (condition-case e (get-unicode-property-internal tb -1) (error e)))",
+        "(progn (set-char-table-extra-slot tb 2 2) (list (put-unicode-property-internal tb 140 4242) (get-unicode-property-internal tb 140) (char-table-extra-slot tb 4) (condition-case e (put-unicode-property-internal tb 141 1.5) (error e))))",
+        "(progn (set-char-table-extra-slot tb 2 0) (list (put-unicode-property-internal tb 142 ?x) (aref tb 142) (condition-case e (put-unicode-property-internal tb 143 'q) (error e))))",
+        "(let ((char-code-property-alist (list (cons 'p tb) (cons 'q \"rt-no-such-uni.el\")))) (list (eq (unicode-property-table-internal 'p) tb) (unicode-property-table-internal 'q) (unicode-property-table-internal 'r)))",
+    ];
+    let cases: Vec<String> = cases.iter().map(|c| format!("(let ((tb {UNIPROP})) {c})")).collect();
+    compare(&cases.iter().map(String::as_str).collect::<Vec<_>>());
+}

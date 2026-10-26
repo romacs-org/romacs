@@ -18,6 +18,39 @@ impl Record {
         }
         index.wrapping_sub(self.index_offset as u32) as i32
     }
+    /// GNU INDEX_TO_CODE_POINT.
+    pub fn code_point(&self, index: u32) -> u32 {
+        if self.linear { return index.wrapping_add(self.min); }
+        let mut index = index.wrapping_add(self.index_offset as u32);
+        let mut code = 0;
+        for i in 0..4 {
+            let n = self.space[2*i+1] - self.space[2*i] + 1;
+            let byte = if i == 3 { index } else { index % n };
+            code |= self.space[2*i].wrapping_add(byte) << (8*i);
+            index /= n;
+        }
+        code
+    }
+    pub(super) fn tables(&self, entries: &[map::Entry]) -> Tables {
+        let mut tables = Tables { encoder: Default::default(), decoder: Default::default() };
+        for entry in entries {
+            let from = self.code_index(entry.from);
+            let to = if entry.from == entry.to { from } else { self.code_index(entry.to) };
+            if from < 0 || to < 0 { continue; }
+            for (k, index) in (from..=to).enumerate() {
+                let c = entry.character + k as u32;
+                tables.encoder.entry(c).or_insert(index as u32);
+                tables.decoder.insert(index as u32, c);
+            }
+        }
+        tables
+    }
+    /// CHARSET_FAST_MAP_REF.
+    pub fn fast_map_has(&self, c: u32) -> bool {
+        let c = c as usize;
+        if c < 0x10000 { self.fast_map[c >> 10] & (1 << ((c >> 7) & 7)) != 0 }
+        else { self.fast_map.get((c >> 15) + 62).is_some_and(|bits| bits & (1 << ((c >> 12) & 7)) != 0) }
+    }
     pub(super) fn initialize_map(&mut self, entries: &[map::Entry]) {
         let Some(first) = entries.first() else { return };
         let mut min_char = first.character as i64;
@@ -103,6 +136,17 @@ pub(super) struct Record {
     pub index_offset: i32,
     /// CHARSET_UNIFIED_P: set by unify-charset, never by definition.
     pub unified: bool,
+    /// The encoder/deunifier and decoder load_charset builds from the map
+    /// (MAP) or unify map (OFFSET) on first use; unify-charset clears it.
+    pub tables: Option<std::rc::Rc<Tables>>,
+}
+
+/// GNU's per-charset mapping tables, holding code indexes, never Lisp values.
+pub(crate) struct Tables {
+    /// load_charset (charset, 2): character to index, the first entry wins.
+    pub encoder: std::collections::BTreeMap<u32, u32>,
+    /// load_charset (charset, 1): index to character, the last entry wins.
+    pub decoder: std::collections::BTreeMap<u32, u32>,
 }
 
 impl Registry {
@@ -259,6 +303,7 @@ impl Vm {
                 linear: true,
                 index_offset: 0,
                 unified: false,
+                tables: None,
                 space,
                 dimension,
                 min: space[0],
@@ -487,4 +532,24 @@ mod definition_tests {
         assert_eq!(before, (vm.charsets.records.len(), vm.charsets.iso.clone(), vm.charsets.mule.clone(), vm.charsets.ordered.clone()), "late failure must not publish");
         assert_ne!(vm.charsets.native_record(old).unwrap().fast_map[(70000 >> 15) + 62], 0);
     }
+}
+
+/// map_char_table_for_charset over a mapping TABLE's characters: maximal
+/// runs of succeeding characters, keeping only those whose CODE lies in
+/// FROM..TO when the walk is PARTIAL.
+pub(crate) fn char_runs(chars: impl Iterator<Item = u32>, partial: bool, from: u32, to: u32, code: impl Fn(u32) -> Option<u32>) -> Vec<(u32, u32)> {
+    let mut runs = Vec::new();
+    let mut open: Option<(u32, u32)> = None;
+    for c in chars {
+        if partial && !code(c).is_some_and(|code| from <= code && code <= to) {
+            runs.extend(open.take());
+            continue;
+        }
+        open = match open {
+            Some((start, end)) if end + 1 == c => Some((start, c)),
+            other => { runs.extend(other); Some((c, c)) }
+        };
+    }
+    runs.extend(open);
+    runs
 }

@@ -1,6 +1,10 @@
 use super::*;
 include!("charset_define.rs");
 
+/// One FUNCTION call of `map-charset-chars': its character range and the
+/// walk whose cons it shares, if any.
+pub(crate) struct Run { pub start: i64, pub end: i64, pub walk: Option<usize> }
+
 impl Leaf<'_> {
     fn charset_record(&mut self, name: Value) -> std::result::Result<usize, Fault> {
         self.vm.ensure_charsets();
@@ -57,7 +61,159 @@ impl Leaf<'_> {
         ranges.retain(|&(_, _, owner)| owner != id);
         ranges.push((min, max, id));
         self.vm.charsets.records[i].unified = true;
+        self.vm.charsets.records[i].tables = None;
         Ok(Value::NIL)
+    }
+    /// charset.c Fdecode_char.
+    pub fn decode_char(&mut self, name: Value, code: Value) -> super::super::Out {
+        let i = self.charset_record(name)?;
+        let code = self.charset_unsigned(code)?;
+        Ok(self.charset_decode(i, code)?.map_or(Value::NIL, |c| Value::integer(c.into()).unwrap()))
+    }
+    /// charset.c Fencode_char.
+    pub fn encode_char(&mut self, ch: Value, name: Value) -> super::super::Out {
+        let i = self.charset_record(name)?;
+        let c = ch.integer_value().filter(|&c| (0..=crate::lstring::MAX_CHAR as i64).contains(&c)).ok_or(Fault::Wrong("characterp", ch))?;
+        Ok(self.charset_encode(i, c as u32)?.map_or(Value::NIL, |code| Value::integer(code.into()).unwrap()))
+    }
+    /// charset.c Fmap_charset_chars's argument handling: the clamped code
+    /// range, then map_charset_chars's calls in order.
+    pub fn charset_map_calls(&mut self, name: Value, from: Value, to: Value) -> std::result::Result<Vec<Run>, Fault> {
+        let i = self.charset_record(name)?;
+        let (min, max) = (self.vm.charsets.records[i].min, self.vm.charsets.records[i].max);
+        let code = |v: Value, default: u32| -> std::result::Result<u32, Fault> {
+            if v == Value::NIL { return Ok(default); }
+            v.integer_value().filter(|&n| (0..=i64::from(u32::MAX)).contains(&n)).map(|n| n as u32).ok_or(Fault::Wrong("wholenump", v))
+        };
+        let (from, to) = (code(from, min)?.max(min), code(to, max)?.min(max));
+        let mut calls = Vec::new();
+        self.charset_map_into(i, from, to, &mut calls)?;
+        Ok(calls)
+    }
+    /// load_charset: the record's tables, read from its map (MAP) or
+    /// unify map (OFFSET) once and kept until unify-charset changes it.
+    fn charset_tables(&mut self, i: usize) -> std::result::Result<std::rc::Rc<crate::charset::Tables>, Fault> {
+        if let Some(tables) = &self.vm.charsets.records[i].tables { return Ok(tables.clone()); }
+        let record = &self.vm.charsets.records[i];
+        let (map, min, max) = (if record.offset.is_some() { record.attrs[8] } else { record.attrs[3] }, record.min, record.max);
+        let entries = if map == Value::NIL { Vec::new() } else { self.charset_map_entries(map, min, max)? };
+        let tables = std::rc::Rc::new(self.vm.charsets.records[i].tables(&entries));
+        self.vm.charsets.records[i].tables = Some(tables.clone());
+        Ok(tables)
+    }
+    fn subset_info(&self, info: Value) -> std::result::Result<(usize, u32, u32, u32), Fault> {
+        let info = self.vector_values(info)?;
+        let [parent, low, high, offset] = info[..] else { unreachable!("subset info has four slots") };
+        let field = |v: Value| v.integer_value().unwrap() as u32;
+        Ok((self.charset_by_id(parent)?, field(low), field(high), field(offset)))
+    }
+    /// The (charset id . code offset) parents of a SUPERSET charset.
+    fn superset_parents(&self, mut parents: Value) -> std::result::Result<Vec<(usize, u32)>, Fault> {
+        let mut out = Vec::new();
+        while let Some((head, rest)) = self.pair(parents) {
+            let (id, offset) = self.pair(head).expect("superset parent is a cons");
+            out.push((self.charset_by_id(id)?, offset.integer_value().unwrap() as u32));
+            parents = rest;
+        }
+        Ok(out)
+    }
+    /// charset.h DECODE_CHAR with charset.c decode_char.
+    pub fn charset_decode(&mut self, i: usize, code: u32) -> std::result::Result<Option<u32>, Fault> {
+        let record = &self.vm.charsets.records[i];
+        if code < 128 && record.ascii_compatible { return Ok(Some(code)); }
+        if code < record.min || code > record.max { return Ok(None); }
+        if record.attrs[6] != Value::NIL && record.offset.is_none() {
+            let (parent, low, high, offset) = self.subset_info(record.attrs[6])?;
+            let code = code.wrapping_sub(offset);
+            return if code < low || code > high { Ok(None) } else { self.charset_decode(parent, code) };
+        }
+        if record.offset.is_none() && record.attrs[3] == Value::NIL {
+            for (parent, offset) in self.superset_parents(record.attrs[7])? {
+                if let Some(c) = self.charset_decode(parent, code.wrapping_sub(offset))? { return Ok(Some(c)); }
+            }
+            return Ok(None);
+        }
+        let index = record.code_index(code);
+        if index < 0 { return Ok(None); }
+        let index = index as u32;
+        let Some(offset) = record.offset else {
+            return Ok(self.charset_tables(i)?.decoder.get(&index).copied());
+        };
+        let c = index + offset;
+        // Vchar_unify_table maps the upper code space to Unicode.
+        if record.unified && (0x110000..=0x3FFF7F).contains(&c) {
+            return Ok(Some(self.charset_tables(i)?.decoder.get(&index).copied().unwrap_or(c)));
+        }
+        Ok(Some(c))
+    }
+    /// charset.h ENCODE_CHAR with charset.c encode_char; None is the
+    /// invalid code.
+    pub fn charset_encode(&mut self, i: usize, c: u32) -> std::result::Result<Option<u32>, Fault> {
+        let record = &self.vm.charsets.records[i];
+        if c < 128 && record.ascii_compatible { return Ok(Some(c)); }
+        let invalid = record.invalid;
+        let mut c = c;
+        if record.unified {
+            let offset = record.offset.expect("only OFFSET charsets unify");
+            if let Some(&index) = self.charset_tables(i)?.encoder.get(&c) { c = offset + index; }
+        }
+        let record = &self.vm.charsets.records[i];
+        let code = if record.attrs[6] != Value::NIL && record.offset.is_none() {
+            let (parent, low, high, offset) = self.subset_info(record.attrs[6])?;
+            self.charset_encode(parent, c)?.filter(|&code| low <= code && code <= high).map(|code| code.wrapping_add(offset))
+        } else if record.offset.is_none() && record.attrs[3] == Value::NIL {
+            let mut found = None;
+            for (parent, offset) in self.superset_parents(record.attrs[7])? {
+                if let Some(code) = self.charset_encode(parent, c)? { found = Some(code.wrapping_add(offset)); break; }
+            }
+            found
+        } else if !record.fast_map_has(c) || i64::from(c) < record.min_char || i64::from(c) > record.max_char {
+            None
+        } else if let Some(offset) = record.offset {
+            Some(record.code_point(c - offset))
+        } else {
+            let tables = self.charset_tables(i)?;
+            tables.encoder.get(&c).map(|&index| self.vm.charsets.records[i].code_point(index))
+        };
+        Ok(code.filter(|&code| code != invalid))
+    }
+    /// charset.c map_charset_chars. Each encoder or deunifier walk passes one
+    /// reused cons (WALK names it); an OFFSET range is a fresh cons.
+    fn charset_map_into(&mut self, i: usize, from: u32, to: u32, calls: &mut Vec<Run>) -> std::result::Result<(), Fault> {
+        let record = &self.vm.charsets.records[i];
+        let partial = from > record.min || to < record.max;
+        let walk = |leaf: &mut Self, calls: &mut Vec<Run>| -> std::result::Result<(), Fault> {
+            let tables = leaf.charset_tables(i)?;
+            let mut codes = std::collections::HashMap::new();
+            if partial { for &c in tables.encoder.keys() { codes.insert(c, leaf.charset_encode(i, c)?); } }
+            let id = calls.len();
+            let runs = crate::charset::char_runs(tables.encoder.keys().copied(), partial, from, to, |c| codes[&c]);
+            calls.extend(runs.into_iter().map(|(start, end)| Run { start: start.into(), end: end.into(), walk: Some(id) }));
+            Ok(())
+        };
+        if let Some(offset) = record.offset {
+            let unified = record.unified;
+            let (start, end) = (record.code_index(from) as i64 + i64::from(offset), record.code_index(to) as i64 + i64::from(offset));
+            if unified { walk(self, calls)?; }
+            calls.push(Run { start, end, walk: None });
+        } else if record.attrs[3] != Value::NIL {
+            walk(self, calls)?;
+        } else if record.attrs[6] != Value::NIL {
+            let (parent, low, high, offset) = self.subset_info(record.attrs[6])?;
+            self.charset_map_into(parent, from.wrapping_sub(offset).max(low), to.wrapping_sub(offset).min(high), calls)?;
+        } else {
+            for (parent, offset) in self.superset_parents(record.attrs[7])? {
+                let (min, max) = (self.vm.charsets.records[parent].min, self.vm.charsets.records[parent].max);
+                let this_from = if from > offset { from - offset } else { 0 }.max(min);
+                let this_to = if to > offset { to - offset } else { 0 }.min(max);
+                self.charset_map_into(parent, this_from, this_to, calls)?;
+            }
+        }
+        Ok(())
+    }
+    fn charset_by_id(&self, id: Value) -> std::result::Result<usize, Fault> {
+        let id = id.integer_value().unwrap() as usize;
+        self.vm.charsets.ids.get(id).copied().ok_or(Fault::Error(format!("Invalid charset id: {id}")))
     }
     /// charset.c Fset_charset_priority: move CHARSETS, in order, to the
     /// front of Vcharset_ordered_list and refilter the ISO/emacs-mule lists.

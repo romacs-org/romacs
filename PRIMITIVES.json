@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "c24b836de521ede06c1d14614f5a9c902af9a7ca5bec7d68232429b6b80c94d5",
+  "source_fingerprint": "34dd48e2f1fb813ce47be5a6173d6bcb6dd4b4ae78dddf19e47143f2ab72b3db",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 678,
-  "parsed_vm2_only": 678
+  "parsed_total": 684,
+  "parsed_vm2_only": 684
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -827,6 +827,11 @@
    "variant": "Primitive::Daemonp",
    "registered_at": "crates/romacs-vm/src/lib.rs:736"
   },
+  "decode-char": {
+   "name": "decode-char",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/charset.rs:29"
+  },
   "decode-coding-string": {
    "name": "decode-coding-string",
    "implementation": "vm2",
@@ -1011,6 +1016,11 @@
    "implementation": "vm2",
    "variant": "Primitive::EmacsLispMode",
    "registered_at": "crates/romacs-vm/src/lib.rs:732"
+  },
+  "encode-char": {
+   "name": "encode-char",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/charset.rs:32"
   },
   "encode-coding-string": {
    "name": "encode-coding-string",
@@ -1434,6 +1444,11 @@
    "name": "get-truename-buffer",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/savejourney.rs:4"
+  },
+  "get-unicode-property-internal": {
+   "name": "get-unicode-property-internal",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/char_table.rs:86"
   },
   "get-unused-category": {
    "name": "get-unused-category",
@@ -1984,6 +1999,11 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/map_char_table.rs:16"
   },
+  "map-charset-chars": {
+   "name": "map-charset-chars",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/charset.rs:37"
+  },
   "map-keymap": {
    "name": "map-keymap",
    "implementation": "vm2",
@@ -2453,6 +2473,11 @@
    "implementation": "vm2",
    "variant": "Primitive::PutProperty",
    "registered_at": "crates/romacs-vm/src/lib.rs:544"
+  },
+  "put-unicode-property-internal": {
+   "name": "put-unicode-property-internal",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/char_table.rs:93"
   },
   "puthash": {
    "name": "puthash",
@@ -3292,6 +3317,11 @@
    "implementation": "vm2",
    "variant": "Primitive::ByteString",
    "registered_at": "crates/romacs-vm/src/lib.rs:548"
+  },
+  "unicode-property-table-internal": {
+   "name": "unicode-property-table-internal",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/char_table.rs:69"
   },
   "unify-charset": {
    "name": "unify-charset",

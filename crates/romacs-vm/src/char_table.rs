@@ -308,14 +308,58 @@ impl Vm {
         self.slots[slot].plist = plist;
     }
 
+    /// GNU UNIPROP_TABLE_P: purpose `char-code-property-table', 5 extras.
+    pub(crate) fn is_uniprop_table(&self, t: &CharTable) -> bool {
+        self.names.get("char-code-property-table")
+            .is_some_and(|&slot| t.purpose == Value::reference(slot + 1, 7) && t.extras.len() == 5)
+    }
+
+    /// The codes of VALUE when it is a compressed uniprop block
+    /// (GNU UNIPROP_COMPRESSED_FORM_P: a string starting with 1 or 2).
+    pub(crate) fn uniprop_compressed(&self, value: Value) -> Option<Vec<u32>> {
+        let codes: Vec<u32> = self.str_view(value)?.chars().collect();
+        matches!(codes.first(), Some(1 | 2)).then_some(codes)
+    }
+
     pub(crate) fn char_table_get(&self, mut table: Value, index: usize) -> Result<Value> {
         loop {
             let data::Object::CharTable(t) = self.object(table)? else { return Err("char-table required".into()); };
-            let value = t.get(index)?;
+            let mut value = t.get(index)?;
+            // GNU sub_char_table_ref uncompresses the block in place; reading
+            // it without storing keeps this lookup read-only.
+            if self.is_uniprop_table(t) {
+                if let Some(codes) = self.uniprop_compressed(value) {
+                    value = uniprop_block(&codes)?[index % 128];
+                    if value == Value::NIL { value = t.default; }
+                }
+            }
             if value != Value::NIL || !matches!(self.object_if(t.parent), Some(data::Object::CharTable(_))) { return Ok(value); }
             table = t.parent;
         }
     }
+}
+
+/// GNU uniprop_table_uncompress: the 128 values of a compressed block, whose
+/// CODES start with 1 (simple: start index, then values, 0 meaning nil) or
+/// 2 (run-length: each value optionally followed by 128 + count).
+pub(crate) fn uniprop_block(codes: &[u32]) -> Result<Vec<Value>> {
+    let mut values = vec![Value::NIL; 128];
+    let mut chars = codes[1..].iter().copied().peekable();
+    if codes[0] == 1 {
+        let start = chars.next().ok_or("incomplete Unicode property block")? as usize;
+        for (index, code) in (start..128).zip(chars) {
+            values[index] = if code == 0 { Value::NIL } else { Value::integer(i64::from(code)).unwrap() };
+        }
+    } else {
+        let mut index = 0;
+        while let Some(code) = chars.next() {
+            let count = if chars.peek().is_some_and(|&next| next >= 128) { chars.next().unwrap() as usize - 128 } else { 1 };
+            if index + count > 128 { return Err("Unicode property block exceeds 128 characters".into()); }
+            values[index..index + count].fill(Value::integer(i64::from(code)).unwrap());
+            index += count;
+        }
+    }
+    Ok(values)
 }
 
 /// Cloning a handle retains native storage after its parent slot is replaced.
