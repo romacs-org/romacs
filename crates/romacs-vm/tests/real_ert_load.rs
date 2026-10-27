@@ -184,6 +184,41 @@ fn daily_driver_load_slice_matches_gnu() {
     (put 'mouse-1 'event-kind nil)
     (set-window-buffer window old)
     (kill-buffer b)))"###,
+        r###"(list (mapcar (lambda (a) (secure-hash a "abc")) (secure-hash-algorithms)) (mapcar (lambda (a) (secure-hash a "")) '(md5 sha1 sha224 sha384 sha3-224 sha3-256 sha3-384 sha3-512)))"###,
+        r###"(list (secure-hash 'sha256 (make-string 200 ?x)) (secure-hash 'sha3-224 (make-string 144 ?y)) (secure-hash 'sha3-224 (make-string 143 ?y)) (secure-hash 'sha3-512 (make-string 72 ?z)) (secure-hash 'sha3-512 (make-string 71 ?z)) (secure-hash 'sha3-256 (make-string 1000 ?q)) (secure-hash 'sha512 (make-string 111 ?w)))"###,
+        r###"(list (secure-hash 'sha1 "abcdef" 1 -1) (secure-hash 'sha1 "abcdef" -3) (secure-hash 'sha1 (string-to-unibyte "\377\0\200")) (secure-hash 'md5 (string-to-unibyte "\377") 0 1) (string-to-list (secure-hash 'md5 "abc" nil nil t)) (multibyte-string-p (secure-hash 'md5 "abc")) (multibyte-string-p (secure-hash 'md5 "abc" nil nil t)) (length (secure-hash 'sha512 "abc" nil nil t)) (md5 "abc") (md5 "abcdef" 2 4) (md5 (string-to-unibyte "\377")))"###,
+        r###"(list (condition-case e (secure-hash 'nope "a") (error e)) (condition-case e (secure-hash "md5" "a") (error e)) (condition-case e (secure-hash 'md5 3) (error e)) (condition-case e (secure-hash 'md5 nil) (error e)) (condition-case e (secure-hash 'md5 '(1 2)) (error e)) (condition-case e (secure-hash 'md5 "abc" 2 9) (error e)) (condition-case e (secure-hash 'md5 "abc" 'x) (error e)) (condition-case e (secure-hash 'md5 'iv-auto) (error e)) (condition-case e (md5 "abc" nil nil 'nosuch) (error e)) (md5 "abc" nil nil 'nosuch t))"###,
+        r###"(list (find-operation-coding-system 'write-region 1 2 "a.tzst") (find-operation-coding-system 'insert-file-contents "x.el")
+      (find-operation-coding-system 'insert-file-contents (cons "x.elc" (current-buffer))) (find-operation-coding-system 'write-region 1 2 "plain.txt")
+      (let ((file-coding-system-alist (list (cons "\\.fn\\'" 'rt-foc-pair) (cons "\\.sym\\'" 'latin-1) (cons "\\.lam\\'" (lambda (args) 'latin-1))
+                                            (cons "\\.bad\\'" 3) (cons "\\.up\\'" 'utf-8) (cons "\\.ret\\'" 'rt-foc-coding) (cons "\\.no\\'" 'rt-foc-none))))
+        (defalias 'rt-foc-pair (lambda (args) (cons 'got (length args)))) (defalias 'rt-foc-coding (lambda (args) 'latin-1)) (defalias 'rt-foc-none (lambda (args) 'nosuch))
+        (list (find-operation-coding-system 'write-region 1 2 "a.fn") (find-operation-coding-system 'write-region 1 2 "a.sym")
+              (find-operation-coding-system 'write-region 1 2 "a.bad") (find-operation-coding-system 'write-region 1 2 "A.UP")
+              (find-operation-coding-system 'write-region 1 2 "a.ret") (find-operation-coding-system 'write-region 1 2 "a.no") (find-operation-coding-system 'write-region 1 2 "a.lam") (let ((case-fold-search t)) (find-operation-coding-system 'write-region 1 2 "a.UP"))))
+      (let ((process-coding-system-alist '(("cat" . utf-8)))) (find-operation-coding-system 'call-process "cat"))
+      (let ((network-coding-system-alist '((80 . latin-1)))) (find-operation-coding-system 'open-network-stream 1 2 3 80))
+      (mapcar (lambda (args) (condition-case e (apply #'find-operation-coding-system args) (error e)))
+              '(() (write-region) (car 1) ("x" 1) (write-region 1 2) (write-region 1 2 3) (insert-file-contents ("a" . 3))))
+      (progn (string-match "b" "abc") (find-operation-coding-system 'write-region 1 2 "a.tzst") (match-beginning 0))
+      (mapcar (lambda (s) (get s 'target-idx)) '(insert-file-contents write-region call-process start-process open-network-stream call-process-region))
+      (with-temp-buffer (insert "héllo") (setq buffer-file-name "/nonexistent/rt-x.txt") (secure-hash 'sha1 (current-buffer)))
+      (with-temp-buffer (insert "héllo") (setq buffer-file-name "/nonexistent/rt-x.tzst") (secure-hash 'sha1 (current-buffer)))
+      (condition-case e (secure-hash (make-symbol "sha256") "abc") (error e)))"###,
+        r###"(list (secure-hash 'sha256 "héllo ✓") (md5 "héllo") (md5 "héllo" nil nil 'latin-1) (md5 "héllo" nil nil 'nosuch t)
+      (condition-case e (md5 "héllo" nil nil 'nosuch) (error e))
+      (with-temp-buffer (insert "héllo\nworld")
+        (list (secure-hash 'sha256 (current-buffer)) (secure-hash 'sha1 (current-buffer) 2 5) (secure-hash 'sha1 (current-buffer) 5 2)
+              (progn (narrow-to-region 3 6) (list (secure-hash 'md5 (current-buffer)) (condition-case e (secure-hash 'md5 (current-buffer) 1 4) (error e))))
+              (let ((coding-system-for-write 'latin-1)) (widen) (secure-hash 'md5 (current-buffer))) (md5 (current-buffer) nil nil 'utf-16le)))
+      (with-temp-buffer (set-buffer-multibyte nil) (insert 200 10 65) (secure-hash 'sha1 (current-buffer)))
+      (with-temp-buffer (insert "plain ascii") (secure-hash 'sha256 (current-buffer)))
+      (list (find-coding-systems-region-internal "abc" nil) (find-coding-systems-region-internal "aé✓" nil) (find-coding-systems-region-internal "日本" nil)
+            (find-coding-systems-region-internal "aé✓" nil '(utf-8 utf-16)) (find-coding-systems-region-internal (string 233 #x3fffe9) nil)
+            (with-temp-buffer (insert "abé") (list (find-coding-systems-region-internal 1 3) (find-coding-systems-region-internal 1 4)
+                                                   (progn (narrow-to-region 1 2) (length (find-coding-systems-region-internal 1 4)))
+                                                   (condition-case e (find-coding-systems-region-internal 0 3) (error e)) (find-coding-systems-region-internal (copy-marker 1) 2)))
+            (with-temp-buffer (set-buffer-multibyte nil) (insert 200) (find-coding-systems-region-internal 1 2))))"###,
         r###"(let* ((sub (make-sparse-keymap "Sub")) (m (make-sparse-keymap)) (calls 0))
   (define-key sub [x] 'sub-x)
   (define-key m [menu-bar foo] `(menu-item "Foo" ,sub :filter (lambda (b) (setq calls (1+ calls)) b)))

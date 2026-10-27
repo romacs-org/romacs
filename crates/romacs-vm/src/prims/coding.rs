@@ -262,3 +262,25 @@ fn keyboard_coding_system(cx; optional terminal: Value) {
     let (_, _, coding) = cx.windows().terminal_codings(terminal)?;
     Ok(coding)
 }}
+
+defsubr! { name = "find-coding-systems-region-internal", gnu = "coding.c:9087", effect = Reads,
+fn find_coding_systems_region_internal(cx, start: Value, end: Value; optional exclude: Value) {
+    cx.find_coding_systems_region(start, end, exclude)
+}}
+
+// Ffind_operation_coding_system: the coding pair the alist for OPERATION
+// gives its target, calling a function entry with the whole argument list.
+defsubr! { name = "find-operation-coding-system", gnu = "coding.c:10763", effect = Global,
+fn find_operation_coding_system(cx, operation: Value; rest arguments) -> Step {
+    let args: Vec<Value> = std::iter::once(operation).chain(arguments.iter().copied()).collect();
+    match cx.find_operation_coding(&args)? {
+        Ok(value) => Ok(Step::Done(value)),
+        Err(function) => {
+            let list = cx.coding_list(&args);
+            Ok(Step::Call { f: function, args: vec![list], then: operation_coding_found, saved: vec![] })
+        }
+    }
+}}
+fn operation_coding_found(cx: &mut Leaf<'_>, val: Value, _: &[Value]) -> Next {
+    Ok(Step::Done(cx.operation_coding_pair(val)?))
+}

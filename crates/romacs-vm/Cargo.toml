@@ -17,6 +17,9 @@ num-bigint = "0.4"
 stacker.workspace = true
 libc.workspace = true
 sha2 = "0.11"
+# fns.c secure-hash: MD5 and SHA-1 (SHA-3 is crate::digest).
+md-5 = "0.11"
+sha1 = "0.11"
 unicode-segmentation = "1.13.2"
 unicode-width = "0.2.2"
 # Narrow ICU4X casing provider: simple scalar + contextual full-string Unicode.

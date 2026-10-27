@@ -42,6 +42,7 @@ use std::sync::Arc;
 mod code_image;
 mod sqlite;
 mod random;
+mod digest;
 mod posix_tz;
 mod tzfile;
 mod undo;

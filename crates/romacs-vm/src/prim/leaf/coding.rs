@@ -492,7 +492,7 @@ impl Leaf<'_> {
             .rev()
             .fold(Value::NIL, |tail, &v| self.cons(v, tail))
     }
-    fn coding_items(&self, mut list: Value) -> std::result::Result<Vec<Value>, Fault> {
+    pub(super) fn coding_items(&self, mut list: Value) -> std::result::Result<Vec<Value>, Fault> {
         let original = list;
         let mut seen = HashSet::default();
         let mut result = Vec::new();
@@ -666,6 +666,13 @@ impl Leaf<'_> {
             categories.push(self.intern(&name));
             let slot = self.vm.slot(&name);
             self.vm.slots[slot].value = no_conversion;
+        }
+        // syms_of_coding: which argument of each operation names its target.
+        let target_idx = self.intern("target-idx");
+        for (operation, index) in [("insert-file-contents", 0), ("write-region", 2), ("call-process", 0),
+                                   ("call-process-region", 2), ("start-process", 2), ("open-network-stream", 3)] {
+            let operation = self.intern(operation);
+            self.put_symbol_property(operation, target_idx, num(index))?;
         }
         let list = self.coding_list(&categories);
         let slot = self.vm.slot("coding-category-list");

@@ -1513,6 +1513,7 @@ mod leaf {
     mod sqlite;
     mod random;
     mod width;
+    mod coding_safe;
 }
 pub(crate) use leaf::{Leaf, Kind};
 

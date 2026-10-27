@@ -385,4 +385,105 @@ textprop.c Fprevious_single_char_property_change."
                 (unless (eq (get-char-property (1- position) prop object) initial)
                   (throw 'romacs--found position))))))))))
 
+;; fns.c's `secure-hash' and `md5': extract_data_from_object chooses and
+;; encodes the data, and `romacs--secure-hash' digests it.
+
+(defun romacs--hash-data (object start end coding-system noerror)
+  "The encoded bytes of OBJECT from START to END to digest.
+fns.c extract_data_from_object."
+  (cond
+   ((stringp object)
+    (unless coding-system
+      (setq coding-system (if (multibyte-string-p object)
+                              (coding-system-priority-list t)
+                            'raw-text)))
+    (unless (coding-system-p coding-system)
+      (if noerror
+          (setq coding-system 'raw-text)
+        (signal 'coding-system-error (list coding-system))))
+    (when (multibyte-string-p object)
+      (let ((last-coding-system-used last-coding-system-used))
+        (setq object (encode-coding-string object coding-system))))
+    (substring-no-properties object start end))
+   ((bufferp object)
+    (let ((text
+           (with-current-buffer object
+             (let ((b (if start (romacs--fixnum-coerce-marker start) (point-min)))
+                   (e (if end (romacs--fixnum-coerce-marker end) (point-max))))
+               (when (> b e) (setq b (prog1 e (setq e b))))
+               (unless (and (<= (point-min) b) (<= e (point-max)))
+                 (signal 'args-out-of-range (list start end)))
+               (unless coding-system
+                 ;; As write-region decides it.
+                 (if coding-system-for-write
+                     (setq coding-system coding-system-for-write)
+                   (let ((force-raw-text nil))
+                     (setq coding-system buffer-file-coding-system)
+                     (when (or (null coding-system)
+                               (not (local-variable-p 'buffer-file-coding-system)))
+                       (setq coding-system nil)
+                       (unless enable-multibyte-characters (setq force-raw-text t)))
+                     (when (and (null coding-system) (buffer-file-name object))
+                       (let ((val (find-operation-coding-system
+                                   'write-region b e (buffer-file-name object))))
+                         (when (and (consp val) (cdr val)) (setq coding-system (cdr val)))))
+                     (when (and (null coding-system) buffer-file-coding-system)
+                       (setq coding-system buffer-file-coding-system))
+                     (when (and (not force-raw-text)
+                                (boundp 'select-safe-coding-system-function)
+                                (fboundp select-safe-coding-system-function))
+                       (setq coding-system (funcall select-safe-coding-system-function
+                                                    b e coding-system nil)))
+                     (when force-raw-text (setq coding-system 'raw-text))))
+                 (unless (coding-system-p coding-system)
+                   (if noerror
+                       (setq coding-system 'raw-text)
+                     (signal 'coding-system-error (list coding-system)))))
+               (buffer-substring-no-properties b e)))))
+      (if (multibyte-string-p text)
+          (encode-coding-string text coding-system)
+        text)))
+   ((eq object 'iv-auto)
+    (if (natnump start)
+        (error "secure-hash `iv-auto' random data is not implemented")
+      (error "Without a length, `iv-auto' can't be used; see Elisp manual")))
+   (t (signal 'error (cons "Invalid object argument"
+                           (if (consp object) object (list (or object "nil"))))))))
+
+(defun secure-hash (algorithm object &optional start end binary)
+  "Return the secure hash of OBJECT, a buffer or string.
+ALGORITHM is a symbol specifying the hash to use:
+- md5      corresponds to MD5, produces a 32-character signature
+- sha1     corresponds to SHA-1, produces a 40-character signature
+- sha224   corresponds to SHA-2 (SHA-224), produces a 56-character signature
+- sha256   corresponds to SHA-2 (SHA-256), produces a 64-character signature
+- sha384   corresponds to SHA-2 (SHA-384), produces a 96-character signature
+- sha512   corresponds to SHA-2 (SHA-512), produces a 128-character signature
+- sha3-224 corresponds to SHA-3 (SHA3-224), produces a 56-character signature
+- sha3-256 corresponds to SHA-3 (SHA3-256), produces a 64-character signature
+- sha3-384 corresponds to SHA-3 (SHA3-384), produces a 96-character signature
+- sha3-512 corresponds to SHA-3 (SHA3-512), produces a 128-character signature
+
+The two optional arguments START and END are positions specifying for
+which part of OBJECT to compute the hash.  If nil or omitted, uses the
+whole OBJECT.
+
+The full list of algorithms can be obtained with `secure-hash-algorithms'.
+
+If BINARY is non-nil, returns a string in binary form.  In this case,
+the function returns a unibyte string whose length is half the number
+of characters it returns when BINARY is nil."
+  (unless (symbolp algorithm) (signal 'wrong-type-argument (list 'symbolp algorithm)))
+  (romacs--secure-hash algorithm (romacs--hash-data object start end nil nil) binary))
+
+(defun md5 (object &optional start end coding-system noerror)
+  "Return MD5 message digest of OBJECT, a buffer or string.
+The two optional arguments START and END are character positions
+specifying for which part of OBJECT the message digest should be
+computed.  CODING-SYSTEM encodes the text; by default it is what writing
+a buffer would use, or the most preferred coding system for a string.
+If NOERROR is non-nil, silently assume the `raw-text' coding if the
+guesswork fails."
+  (romacs--secure-hash 'md5 (romacs--hash-data object start end coding-system noerror)))
+
 ;;; prelude.el ends here
