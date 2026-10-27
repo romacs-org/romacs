@@ -396,6 +396,29 @@ See also `find-buffer-visiting'."
         (throw 'romacs--find-buffer buffer)))
     nil))
 
+;; eval.c's `buffer-local-toplevel-value' and its setter.
+
+(defun buffer-local-toplevel-value (symbol &optional buffer)
+  "Return SYMBOL's toplevel buffer-local value in BUFFER.
+\"Toplevel\" means outside of any let binding.
+BUFFER defaults to the current buffer.
+If SYMBOL has no local value in BUFFER, signals an error."
+  (let ((buffer (or buffer (current-buffer))))
+    (unless (local-variable-p symbol buffer) (signal 'void-variable (list symbol)))
+    (let ((cell (romacs--local-toplevel-cell symbol buffer)))
+      (if cell (cdr cell) (buffer-local-value symbol buffer)))))
+
+(defun set-buffer-local-toplevel-value (symbol value &optional buffer)
+  "Set SYMBOL's toplevel buffer-local value in BUFFER to VALUE.
+\"Toplevel\" means outside of any let-binding.
+BUFFER defaults to the current buffer.
+Makes SYMBOL buffer-local in BUFFER if it was not already."
+  (unless (romacs--set-local-toplevel-cell symbol (or buffer (current-buffer)) value)
+    (if buffer
+        (save-current-buffer (set-buffer buffer) (set (make-local-variable symbol) value))
+      (set (make-local-variable symbol) value)))
+  nil)
+
 ;; window.c's `minibuffer-selected-window'. minibuf.el, loaded on the
 ;; first minibuffer read, records the window as read_minibuf does.
 

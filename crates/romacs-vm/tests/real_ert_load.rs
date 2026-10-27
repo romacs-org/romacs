@@ -567,6 +567,32 @@ fn daily_driver_load_slice_matches_gnu() {
                                               (setq inner (eq (minibuffer-selected-window) b)) (throw 'exit nil))))))
         (condition-case e (read-from-minibuffer "outer") (error e)) (delete-window b) (list inner result (minibuffer-selected-window)))
       (condition-case e (set-window-combination-limit nil t) (error e)))"###,
+        r###"(progn (defvar rt-tl 0)
+  (prin1-to-string
+   (with-temp-buffer
+     (let ((b (current-buffer)))
+       (list (condition-case e (buffer-local-toplevel-value 'rt-tl) (error e)) (progn (setq-local rt-tl 1) (buffer-local-toplevel-value 'rt-tl))
+             (let ((rt-tl 2)) (list rt-tl (buffer-local-toplevel-value 'rt-tl) (set-buffer-local-toplevel-value 'rt-tl 3) rt-tl (buffer-local-toplevel-value 'rt-tl)))
+             rt-tl (let ((rt-tl 9)) (with-temp-buffer (set-buffer-local-toplevel-value 'rt-tl 5 b)) rt-tl) rt-tl
+             (with-temp-buffer (set-buffer-local-toplevel-value 'rt-tl 7) (list rt-tl (local-variable-p 'rt-tl)))
+             (with-temp-buffer (set-buffer-local-toplevel-value 'rt-tl 8 b) (list rt-tl (buffer-local-value 'rt-tl b)))
+             (progn (setq-local fill-column 40) (let ((fill-column 3)) (list (buffer-local-toplevel-value 'fill-column) (set-buffer-local-toplevel-value 'fill-column 50) fill-column)))
+             fill-column (let ((fill-column 3)) (condition-case e (with-temp-buffer (buffer-local-toplevel-value 'fill-column)) (error e)))
+             (condition-case e (buffer-local-toplevel-value 3) (error e)) rt-tl (default-value 'rt-tl)
+             ;; A local killed and made again inside the let: the let's own
+             ;; saved value is found and restored into the new local.
+             (with-temp-buffer (setq-local rt-tl 1)
+               (list (let ((rt-tl 2)) (kill-local-variable 'rt-tl) (setq-local rt-tl 3)
+                       (list (buffer-local-toplevel-value 'rt-tl) (set-buffer-local-toplevel-value 'rt-tl 4) rt-tl))
+                     rt-tl))
+             (with-temp-buffer (setq-local rt-tl 1) (list (let ((rt-tl 2)) (kill-local-variable 'rt-tl) rt-tl) rt-tl (local-variable-p 'rt-tl)))
+             (with-temp-buffer (setq-local rt-tl 1) (let ((rt-tl 2)) (kill-local-variable 'rt-tl) (setq-local rt-tl 5)) rt-tl)
+             (let ((k (generate-new-buffer "rt-kb")) r)
+               (with-current-buffer k (setq-local rt-tl 1) (let ((rt-tl 2)) (with-temp-buffer (kill-buffer k) (setq r (condition-case e (set-buffer-local-toplevel-value 'rt-tl 9 k) (error (list 'E e)))))))
+               r)
+             (with-temp-buffer (setq-local inhibit-modification-hooks t)
+               (list (let ((inhibit-modification-hooks nil)) (set-buffer-local-toplevel-value 'inhibit-modification-hooks '(hello)) (buffer-local-toplevel-value 'inhibit-modification-hooks))
+                     inhibit-modification-hooks)))))))"###,
         r###"(progn (require 'subr-x)
   (prin1-to-string
    (mapcar (lambda (f) (condition-case e (funcall f) (error e)))

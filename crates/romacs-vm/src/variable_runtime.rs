@@ -139,6 +139,20 @@ impl Vm {
         })
     }
 
+    /// GNU eval.c:766: the oldest SPECPDL_LET_LOCAL of exactly this symbol
+    /// in BUFFER, by the symbol each binding recorded and its owner buffer.
+    /// An ordinary or localized Boolean variable's local let was made on a
+    /// private slot; a per-buffer forwarded one on its own slot without the
+    /// LET_DEFAULT flag.
+    pub(super) fn local_toplevel_binding(&mut self, slot: usize, buffer: Value) -> Option<usize> {
+        let symbol = Value::reference(slot + 1, 7);
+        let buffer_forwarded = matches!(self.forwarding(slot), Some(forwarded::Fwd::Buffer(_)));
+        self.backtrace.bindings.iter().filter(|(_, bound)| *bound == symbol).map(|(at, _)| *at).find(|&at| {
+            let (bound, _, owner, let_default) = self.dynamic[at];
+            owner == buffer && if buffer_forwarded { bound == slot && !let_default } else { bound != slot }
+        })
+    }
+
     fn allocate_local_binding_slot(&mut self) -> usize {
         if let Some(slot) = self.free_local_binding_slots.pop() {
             return slot;

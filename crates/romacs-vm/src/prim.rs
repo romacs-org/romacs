@@ -878,6 +878,22 @@ mod leaf {
             self.vm.dynamic[binding].1 = value;
             Ok(true)
         }
+        /// The value saved by the oldest local let of V in BUFFER, if any.
+        pub fn local_toplevel_cell(&mut self, v: Value, buffer: Value) -> std::result::Result<Option<Value>, Fault> {
+            if v == Value::NIL || v == Value::TRUE { return Ok(None); }
+            let slot = self.symbol_slot(v)?;
+            let Some(binding) = self.vm.local_toplevel_binding(slot, buffer) else { return Ok(None) };
+            let value = self.vm.dynamic[binding].1;
+            if value == Value::UNBOUND { Err(Fault::VoidVariable(v)) } else { Ok(Some(value)) }
+        }
+        /// Replace that saved value; false when there is no such let.
+        pub fn local_toplevel_cell_set(&mut self, v: Value, buffer: Value, value: Value) -> std::result::Result<bool, Fault> {
+            if v == Value::NIL || v == Value::TRUE { return Ok(false); }
+            let slot = self.symbol_slot(v)?;
+            let Some(binding) = self.vm.local_toplevel_binding(slot, buffer) else { return Ok(false) };
+            self.vm.dynamic[binding].1 = value;
+            Ok(true)
+        }
         /// Resolve the current buffer's binding, including dynamic/local redirects.
         pub fn effective_cell(&mut self, v: Value) -> std::result::Result<Value, Fault> {
             if v == Value::NIL || v == Value::TRUE { return Ok(v); }

@@ -2460,12 +2460,17 @@ impl Vm {
                 watched = self.notify_watchers(base, value, "unlet");
             }
             self.backtrace.unbind(self.dynamic.len());
+            // A local let restores the owner's current local binding, if it
+            // still has one (GNU do_one_unbind, SPECPDL_LET_LOCAL): the local
+            // may have been killed and made again inside the let.
             if let Some(base) = symbol.and_then(|symbol| symbol.index_if(7)).map(|index| index - 1)
-                && self.localized_boolean(base).is_some() && self.local_binding_slots.contains(&slot)
+                && self.local_binding_slots.contains(&slot)
             {
                 if self.live_buffer_value(owner) {
                     let table = self.slots[base].local;
-                    if let Some(local) = self.declaration_hash_get(table, owner).expect("localized Boolean table") {
+                    if let Some(local) = self.declaration_hash_get(table, owner).expect("localized variable table") {
+                        // set-buffer-local-toplevel-value may have saved any object.
+                        let value = if self.localized_boolean(base).is_none() { value } else if value == Value::NIL { Value::NIL } else { Value::TRUE };
                         self.slots[local.index(7).expect("private binding") - 1].value = value;
                     }
                 }

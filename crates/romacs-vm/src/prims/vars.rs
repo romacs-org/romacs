@@ -217,6 +217,19 @@ fn set_default_toplevel_value(cx, symbol: Value, value: Value) {
     Ok(Value::NIL)
 }}
 
+// eval.c:842/861 buffer-local-toplevel-value and its setter (prelude.el)
+// read and replace the value a local let saved, through these.
+defsubr! { name = "romacs--local-toplevel-cell", gnu = "eval.c:766", effect = Global,
+fn local_toplevel_cell(cx, symbol: Value, buffer: Value) {
+    let symbol = self::symbol(cx, symbol)?;
+    Ok(match cx.local_toplevel_cell(symbol, buffer)? { Some(value) => cx.cons(Value::TRUE, value), None => Value::NIL })
+}}
+defsubr! { name = "romacs--set-local-toplevel-cell", gnu = "eval.c:766", effect = Global,
+fn set_local_toplevel_cell(cx, symbol: Value, buffer: Value, value: Value) {
+    let symbol = self::symbol(cx, symbol)?;
+    Ok(if cx.local_toplevel_cell_set(symbol, buffer, value)? { Value::TRUE } else { Value::NIL })
+}}
+
 // Findirect_variable: the end of OBJECT's variable-alias chain; anything
 // else is itself. defvaralias refuses cycles, so the chain ends.
 defsubr! { name = "indirect-variable", gnu = "data.c:1291", effect = Reads,

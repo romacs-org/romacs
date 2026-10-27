@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "685fc1495743593b15ebd73d22077654854cca3564029c04e7e9d8223122850a",
+  "source_fingerprint": "7780a81f56a98fe18cd4759d1cec064221851d167aef60d83d2565cfab87d5f3",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 918,
-  "parsed_vm2_only": 918
+  "parsed_total": 920,
+  "parsed_vm2_only": 920
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -1851,7 +1851,7 @@
   "indirect-variable": {
    "name": "indirect-variable",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/vars.rs:222"
+   "registered_at": "crates/romacs-vm/src/prims/vars.rs:235"
   },
   "insert": {
    "name": "insert",
@@ -3279,6 +3279,11 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/buffer_lifecycle.rs:66"
   },
+  "romacs--local-toplevel-cell": {
+   "name": "romacs--local-toplevel-cell",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/vars.rs:222"
+  },
   "romacs--oclosure-type": {
    "name": "romacs--oclosure-type",
    "implementation": "vm2",
@@ -3464,6 +3469,11 @@
    "name": "romacs--secure-hash",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/digest.rs:8"
+  },
+  "romacs--set-local-toplevel-cell": {
+   "name": "romacs--set-local-toplevel-cell",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/vars.rs:227"
   },
   "romacs--signal-description": {
    "name": "romacs--signal-description",
