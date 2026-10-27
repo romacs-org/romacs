@@ -48,11 +48,27 @@ pub(crate) struct ByteBuffer {
     pub(crate) case_tables: [Value; 4],
     pub point: ByteOffset,
     pub restriction: Range<ByteOffset>,
+    /// Restrictions saved by save-restriction, by id. A unibyte buffer holds
+    /// no markers, so it keeps each saved BEGV and ZV itself and moves them as
+    /// a left- and a right-biased marker (editfns.c save_restriction_save_1).
+    pub(crate) saved_restrictions: Vec<(u32, Range<ByteOffset>)>,
     pub properties: BTreeMap<ByteOffset, BTreeMap<String, Value>>,
     /// GNU keeps a buffer's interval tree once it had a property.
     pub had_intervals: bool,
     /// GNU's per-buffer variable slots (`struct buffer`, forwarded.rs).
     pub per_buffer: crate::forwarded::PerBuffer,
+}
+/// insdel.c adjust_markers_for_{insert,delete,replace}: where a marker at P
+/// lands when R is replaced by INSERTED bytes. RIGHT is its insertion type,
+/// which matters only for a pure insertion at P.
+fn moved(p: ByteOffset, r: &Range<ByteOffset>, inserted: usize, right: bool) -> ByteOffset {
+    if p < r.start || (p == r.start && !(right && r.is_empty())) {
+        p
+    } else if p >= r.end {
+        ByteOffset(p.0 - (r.end.0 - r.start.0) + inserted)
+    } else {
+        r.start
+    }
 }
 impl ByteBuffer {
     pub fn replace(&mut self, r: Range<ByteOffset>, inserted: &[u8]) -> Result<()> {
@@ -98,6 +114,9 @@ impl ByteBuffer {
         } else {
             shift(old.start)
         })..shift(old.end);
+        for (_, saved) in &mut self.saved_restrictions {
+            *saved = moved(saved.start, &r, inserted.len(), false)..moved(saved.end, &r, inserted.len(), true);
+        }
         self.bytes
             .splice(r.start.0..r.end.0, inserted.iter().copied());
         if r.start != r.end || !inserted.is_empty() {

@@ -292,6 +292,8 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "shell-file-name", gnu: "callproc.c:2096", kind: Kind::Lisp(Init::Getenv("SHELL", "/bin/sh")) },
     CVariable { name: "show-trailing-whitespace", gnu: "xdisp.c:38640", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "special-mirror-table", gnu: "xdisp.c:39379", kind: Kind::Lisp(Init::CharTable(&CharTableInit { purpose: None, extras: &[], init: Init::Nil, ranges: &[] })) },
+    CVariable { name: "standard-translation-table-for-decode", gnu: "coding.c:12116", kind: Kind::Lisp(Init::Nil) },
+    CVariable { name: "standard-translation-table-for-encode", gnu: "coding.c:12121", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "symbols-with-pos-enabled", gnu: "data.c:4386", kind: Kind::Bool(false) },
     CVariable { name: "syntax-propertize--done", gnu: "syntax.c:3778", kind: Kind::Int(-1) },
     CVariable { name: "system-configuration", gnu: "emacs.c:3517", kind: Kind::Lisp(Init::Str(HOST_CONFIGURATION)) },

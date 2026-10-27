@@ -280,6 +280,18 @@ replacement is case-independent and supports GNU's mode-name suffix removal.
   pins the exact condition so it cannot change unnoticed.
   <!-- symbols: save-excursion, copy-marker, set-buffer-multibyte -->
 
+- **VM2-RESTRICT1 — a unibyte buffer with a saved restriction stays unibyte.**
+  `save-restriction` in a narrowed unibyte buffer keeps the saved bounds in the
+  buffer (`src/bytes.rs`), moved as GNU moves its BEGV and ZV markers, because
+  unibyte buffers hold no markers. Converting such a buffer to multibyte
+  inside the form signals `cannot decode buffer with a saved restriction`
+  instead of carrying the bounds over: for `(with-temp-buffer
+  (set-buffer-multibyte nil) (insert "abc") (narrow-to-region 2 3) (list
+  (save-restriction (widen) (set-buffer-multibyte t)) (point-min) (point-max)))`
+  pinned GNU answers `(t 2 3)`. **Package-observable** for binary buffers
+  only; the signal is loud and leaves the buffer and its restriction intact.
+  <!-- symbols: save-restriction, set-buffer-multibyte -->
+
 - **VM2-BUFLIFE1 — missing process subsystem.** Pinned GNU
   `45b0f7699df36b3849edc3bdef37d4cb9e75b9ea` runs the default
   `process-kill-buffer-query-function` and returns t when killing a normal

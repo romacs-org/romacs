@@ -115,6 +115,7 @@ impl Text {
             case_tables: [Value::NIL; 4],
             point: self.point,
             restriction: self.restriction.clone(),
+            saved_restrictions: Vec::new(),
             properties: self
                 .properties
                 .to_map()

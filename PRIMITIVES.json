@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "1f812d9ad605323e91da1a4f647054b26adcfb5571be99dbd9b04c239065c051",
+  "source_fingerprint": "682b19fd954d235fdd53b6fad7eeb7889a5ced8de1c8a10622fed096ea17f450",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 838,
-  "parsed_vm2_only": 838
+  "parsed_total": 840,
+  "parsed_vm2_only": 840
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -3140,6 +3140,16 @@
    "variant": "Primitive::ReadHostEvent",
    "registered_at": "crates/romacs-vm/src/lib.rs:757"
   },
+  "romacs--restore-restriction": {
+   "name": "romacs--restore-restriction",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/special_forms.rs:84"
+  },
+  "romacs--save-restriction": {
+   "name": "romacs--save-restriction",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/special_forms.rs:81"
+  },
   "romacs--secure-hash": {
    "name": "romacs--secure-hash",
    "implementation": "vm2",
@@ -3538,7 +3548,7 @@
   "setq": {
    "name": "setq",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/special_forms.rs:79"
+   "registered_at": "crates/romacs-vm/src/prims/special_forms.rs:87"
   },
   "signal": {
    "name": "signal",
@@ -4065,7 +4075,7 @@
   "unwind-protect": {
    "name": "unwind-protect",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/special_forms.rs:82"
+   "registered_at": "crates/romacs-vm/src/prims/special_forms.rs:90"
   },
   "upcase": {
    "name": "upcase",
@@ -4157,7 +4167,7 @@
   "while": {
    "name": "while",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/special_forms.rs:85"
+   "registered_at": "crates/romacs-vm/src/prims/special_forms.rs:93"
   },
   "widen": {
    "name": "widen",

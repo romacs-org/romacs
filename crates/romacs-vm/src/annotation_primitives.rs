@@ -152,14 +152,14 @@ impl Vm {
             _ => Err("text buffer required".into()),
         }
     }
-    fn annotated_mut(&mut self, buffer: Value) -> Result<&mut annotations::AnnotatedBuffer> {
+    pub(super) fn annotated_mut(&mut self, buffer: Value) -> Result<&mut annotations::AnnotatedBuffer> {
         let i = buffer.index(0)?.checked_sub(1).ok_or("buffer required")?;
         match self.objects.get_mut(i) {
             Some(Object::Buffer(b)) => Ok(b),
             _ => Err("text buffer required".into()),
         }
     }
-    fn marker(&self, v: Value) -> Result<&Marker> {
+    pub(super) fn marker(&self, v: Value) -> Result<&Marker> {
         match self.object(v)? {
             Object::Marker(m) => Ok(m),
             _ => Err("marker required".into()),
