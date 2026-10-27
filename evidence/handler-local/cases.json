@@ -61,17 +61,17 @@
   },
   {
     "id": "insert-file-contents-unrelated",
-    "source": "(progn (setq text-quoting-style 'straight) (setq default-directory @DIR@ buffer-file-name @FILE@ coding-system-for-read 'utf-8-unix coding-system-for-write 'utf-8-unix set-auto-coding-function nil file-coding-system-alist nil write-region-annotate-functions nil write-region-post-annotation-function nil buffer-file-format nil inhibit-file-name-operation nil inhibit-file-name-handlers nil) (fmakunbound 'after-insert-file-set-coding) (fmakunbound 'format-decode) (setq file-name-handler-alist '((\"^/remote:\" . hl-handler))) (progn (insert-file-contents buffer-file-name) (equal (buffer-string) \"hello\\n\")))",
+    "source": "(progn (setq text-quoting-style 'straight) (setq default-directory @DIR@ buffer-file-name @FILE@ coding-system-for-read nil coding-system-for-write 'utf-8-unix set-auto-coding-function nil file-coding-system-alist nil write-region-annotate-functions nil write-region-post-annotation-function nil buffer-file-format nil inhibit-file-name-operation nil inhibit-file-name-handlers nil) (fmakunbound 'after-insert-file-set-coding) (fmakunbound 'format-decode) (setq file-name-handler-alist '((\"^/remote:\" . hl-handler))) (progn (insert-file-contents buffer-file-name) (equal (buffer-string) \"hello\\n\")))",
     "expected": "t"
   },
   {
     "id": "insert-file-contents-filtered",
-    "source": "(progn (setq text-quoting-style 'straight) (setq default-directory @DIR@ buffer-file-name @FILE@ coding-system-for-read 'utf-8-unix coding-system-for-write 'utf-8-unix set-auto-coding-function nil file-coding-system-alist nil write-region-annotate-functions nil write-region-post-annotation-function nil buffer-file-format nil inhibit-file-name-operation nil inhibit-file-name-handlers nil) (fmakunbound 'after-insert-file-set-coding) (fmakunbound 'format-decode) (put 'hl-handler 'operations '(unrelated-operation)) (setq file-name-handler-alist '((\".\" . hl-handler))) (progn (insert-file-contents buffer-file-name) (equal (buffer-string) \"hello\\n\")))",
+    "source": "(progn (setq text-quoting-style 'straight) (setq default-directory @DIR@ buffer-file-name @FILE@ coding-system-for-read nil coding-system-for-write 'utf-8-unix set-auto-coding-function nil file-coding-system-alist nil write-region-annotate-functions nil write-region-post-annotation-function nil buffer-file-format nil inhibit-file-name-operation nil inhibit-file-name-handlers nil) (fmakunbound 'after-insert-file-set-coding) (fmakunbound 'format-decode) (put 'hl-handler 'operations '(unrelated-operation)) (setq file-name-handler-alist '((\".\" . hl-handler))) (progn (insert-file-contents buffer-file-name) (equal (buffer-string) \"hello\\n\")))",
     "expected": "t"
   },
   {
     "id": "insert-file-contents-inhibited",
-    "source": "(progn (setq text-quoting-style 'straight) (setq default-directory @DIR@ buffer-file-name @FILE@ coding-system-for-read 'utf-8-unix coding-system-for-write 'utf-8-unix set-auto-coding-function nil file-coding-system-alist nil write-region-annotate-functions nil write-region-post-annotation-function nil buffer-file-format nil inhibit-file-name-operation nil inhibit-file-name-handlers nil) (fmakunbound 'after-insert-file-set-coding) (fmakunbound 'format-decode) (setq file-name-handler-alist '((\".\" . hl-handler)) inhibit-file-name-operation 'insert-file-contents inhibit-file-name-handlers '(hl-handler)) (put 'hl-handler 'operations '(insert-file-contents)) (progn (insert-file-contents buffer-file-name) (equal (buffer-string) \"hello\\n\")))",
+    "source": "(progn (setq text-quoting-style 'straight) (setq default-directory @DIR@ buffer-file-name @FILE@ coding-system-for-read nil coding-system-for-write 'utf-8-unix set-auto-coding-function nil file-coding-system-alist nil write-region-annotate-functions nil write-region-post-annotation-function nil buffer-file-format nil inhibit-file-name-operation nil inhibit-file-name-handlers nil) (fmakunbound 'after-insert-file-set-coding) (fmakunbound 'format-decode) (setq file-name-handler-alist '((\".\" . hl-handler)) inhibit-file-name-operation 'insert-file-contents inhibit-file-name-handlers '(hl-handler)) (put 'hl-handler 'operations '(insert-file-contents)) (progn (insert-file-contents buffer-file-name) (equal (buffer-string) \"hello\\n\")))",
     "expected": "t"
   },
   {
@@ -141,7 +141,7 @@
   },
   {
     "id": "insert-file-contents-nil-winner",
-    "source": "(progn (setq text-quoting-style 'straight) (setq default-directory @DIR@ buffer-file-name @FILE@ coding-system-for-read 'utf-8-unix coding-system-for-write 'utf-8-unix set-auto-coding-function nil file-coding-system-alist nil write-region-annotate-functions nil write-region-post-annotation-function nil buffer-file-format nil inhibit-file-name-operation nil inhibit-file-name-handlers nil) (fmakunbound 'after-insert-file-set-coding) (fmakunbound 'format-decode) (setq file-name-handler-alist '((\".\" . nil) (\".\" . hl-handler))) (progn (insert-file-contents buffer-file-name) (equal (buffer-string) \"hello\\n\")))",
+    "source": "(progn (setq text-quoting-style 'straight) (setq default-directory @DIR@ buffer-file-name @FILE@ coding-system-for-read nil coding-system-for-write 'utf-8-unix set-auto-coding-function nil file-coding-system-alist nil write-region-annotate-functions nil write-region-post-annotation-function nil buffer-file-format nil inhibit-file-name-operation nil inhibit-file-name-handlers nil) (fmakunbound 'after-insert-file-set-coding) (fmakunbound 'format-decode) (setq file-name-handler-alist '((\".\" . nil) (\".\" . hl-handler))) (progn (insert-file-contents buffer-file-name) (equal (buffer-string) \"hello\\n\")))",
     "expected": "t"
   },
   {
@@ -179,7 +179,7 @@
   },
   {
     "id": "insert-file-contents-selected",
-    "source": "(progn (setq text-quoting-style 'straight) (setq default-directory @DIR@ buffer-file-name @FILE@ coding-system-for-read 'utf-8-unix coding-system-for-write 'utf-8-unix set-auto-coding-function nil file-coding-system-alist nil write-region-annotate-functions nil write-region-post-annotation-function nil buffer-file-format nil inhibit-file-name-operation nil inhibit-file-name-handlers nil) (fmakunbound 'after-insert-file-set-coding) (fmakunbound 'format-decode) (defun hl-handler (&rest args) (error \"HL selected insert-file-contents\")) (put 'hl-handler 'operations '(insert-file-contents)) (setq file-name-handler-alist '((\".\" . hl-handler))) (condition-case e (progn (insert-file-contents buffer-file-name) (equal (buffer-string) \"hello\\n\")) (error (car (cdr e)))))",
+    "source": "(progn (setq text-quoting-style 'straight) (setq default-directory @DIR@ buffer-file-name @FILE@ coding-system-for-read nil coding-system-for-write 'utf-8-unix set-auto-coding-function nil file-coding-system-alist nil write-region-annotate-functions nil write-region-post-annotation-function nil buffer-file-format nil inhibit-file-name-operation nil inhibit-file-name-handlers nil) (fmakunbound 'after-insert-file-set-coding) (fmakunbound 'format-decode) (defun hl-handler (&rest args) (error \"HL selected insert-file-contents\")) (put 'hl-handler 'operations '(insert-file-contents)) (setq file-name-handler-alist '((\".\" . hl-handler))) (condition-case e (progn (insert-file-contents buffer-file-name) (equal (buffer-string) \"hello\\n\")) (error (car (cdr e)))))",
     "candidate_expected": "\"VM2 insert-file-contents matching file name handler is unsupported\"",
     "expected": "\"HL selected insert-file-contents\""
   },

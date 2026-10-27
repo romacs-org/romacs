@@ -147,6 +147,120 @@ fn write_region_coding_matches_gnu() {
 
 // GNU's write path runs a pre-write conversion and encode translation table
 // even on ASCII text; Romacs refuses both before opening the destination.
+// fileio.c Finsert_file_contents from the coding decision on, on the
+// loadup chain: set-auto-coding on the file's bytes as unibyte text (or a
+// work buffer when the buffer has text), file-coding-system-alist,
+// detection in priority order, decoding, the visit bookkeeping and the Lisp
+// tail. Each case reads FILE, holding the case's bytes; the printed result
+// must be pinned GNU's.
+#[test]
+fn insert_file_contents_coding_matches_gnu() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut vm = bootstrapped_with(&root, "rlisp/romacs-loadup-bootstrap.el");
+    let dir = std::env::temp_dir().join(format!("rt-insert-coding-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    // Only a local buffer-file-coding-system: GNU's startup sets the default
+    // (set-locale-environment), which the loadup chain does not run. Undo
+    // lists are compared where GNU records no insertion: VM2 records no
+    // insertion undo (DIVERGENCES.md VM2-EDIT-HOOKS1).
+    let state = "last-coding-system-used (buffer-string) (and (local-variable-p 'buffer-file-coding-system) buffer-file-coding-system) (point) (buffer-modified-p) enable-multibyte-characters";
+    let read = format!("(with-temp-buffer (list (cdr (insert-file-contents FILE)) {state}))");
+    let big = [vec![b'x'; 6000], b"\n;; Local Variables:\n;; coding: latin-1\n;; End:\n\xe9\n".to_vec()].concat();
+    let cases: Vec<(&str, Vec<u8>, String)> = vec![
+        ("txt", "* Heading\nλ body\n".into(), read.clone()),
+        ("txt", b"hi\n".to_vec(), read.clone()),
+        ("txt", b"a\r\nb\r\n".to_vec(), read.clone()),
+        ("txt", b"a\rb\r".to_vec(), read.clone()),
+        ("txt", b"a\0b".to_vec(), read.clone()),
+        // auto-coding-regexp-alist: the signature, then a coding cookie.
+        ("txt", b"\xef\xbb\xbfx\n".to_vec(), read.clone()),
+        ("el", b";; -*- coding: latin-1 -*-\ncaf\xe9\n".to_vec(), read.clone()),
+        // The cookie in the 3 KiB tail, into an empty buffer and into text.
+        ("el", big.clone(), "(with-temp-buffer (list (cdr (insert-file-contents FILE)) last-coding-system-used (substring (buffer-string) -3)))".into()),
+        ("el", big, "(with-temp-buffer (insert \"AB\") (goto-char 2) (list (cdr (insert-file-contents FILE)) last-coding-system-used (substring (buffer-string) -4) (point)))".into()),
+        ("txt", "λ\r\n".into(), "(with-temp-buffer (insert \"AB\") (goto-char 2) (list (cdr (insert-file-contents FILE)) last-coding-system-used (buffer-string) (point) deactivate-mark))".into()),
+        ("txt", "* Heading\nλ body\n".into(), "(with-temp-buffer (set-buffer-multibyte nil) (list (cdr (insert-file-contents FILE)) last-coding-system-used (buffer-string)))".into()),
+        ("txt", b"a\r\nb\r\n".to_vec(), "(with-temp-buffer (set-buffer-multibyte nil) (list (cdr (insert-file-contents FILE)) last-coding-system-used (buffer-string)))".into()),
+        ("txt", b"a\r\nb\r\n".to_vec(), "(with-temp-buffer (list (cdr (insert-file-contents-literally FILE)) last-coding-system-used (buffer-string) enable-multibyte-characters))".into()),
+        ("txt", b"\xce\xbb\0\xff".to_vec(), "(with-temp-buffer (set-buffer-multibyte nil) (list (cdr (insert-file-contents-literally FILE)) last-coding-system-used (append (buffer-string) nil)))".into()),
+        ("txt", b"caf\xe9\n".to_vec(), "(with-temp-buffer (list (cdr (let ((coding-system-for-read 'latin-1)) (insert-file-contents FILE))) last-coding-system-used (buffer-string)))".into()),
+        ("txt", b"hi\n".to_vec(), "(with-temp-buffer (list (cdr (let ((coding-system-for-read 'utf-8)) (insert-file-contents FILE))) last-coding-system-used))".into()),
+        ("txt", b"hi\n".to_vec(), "(with-temp-buffer (list (cdr (let ((coding-system-for-read 'raw-text)) (insert-file-contents FILE t))) last-coding-system-used enable-multibyte-characters))".into()),
+        ("txt", "* Heading\nλ body\n".into(), "(with-temp-buffer (list (cdr (insert-file-contents FILE nil 2 9)) (buffer-string) last-coding-system-used))".into()),
+        // Visiting: the undo list starts empty, the buffer unmodified.
+        ("txt", "* Heading\nλ body\n".into(), format!("(with-temp-buffer (buffer-enable-undo) (list (cdr (insert-file-contents FILE t)) buffer-undo-list {state}))")),
+        ("txt", b"".to_vec(), format!("(with-temp-buffer (list (cdr (insert-file-contents FILE t)) {state}))")),
+        // set-auto-coding-function sees the bytes as the unibyte text of the
+        // buffer, undo off; a non-local exit leaves the buffer as it was.
+        ("txt", "é\n".into(), "(let* ((seen nil) (set-auto-coding-function (lambda (f n) (setq seen (list (equal f FILE) n enable-multibyte-characters (append (buffer-string) nil) buffer-undo-list (point))) 'latin-1))) (with-temp-buffer (buffer-enable-undo) (list (cdr (insert-file-contents FILE)) seen last-coding-system-used (buffer-string))))".into()),
+        ("txt", "é\n".into(), "(let ((set-auto-coding-function (lambda (&rest _) (error \"rt-boom\")))) (with-temp-buffer (buffer-enable-undo) (list (condition-case e (insert-file-contents FILE) (error (cadr e))) (buffer-string) enable-multibyte-characters buffer-undo-list)))".into()),
+        // The work buffer of a buffer with text.
+        ("txt", "é\n".into(), "(let* ((seen nil) (set-auto-coding-function (lambda (f n) (setq seen (list (buffer-name) n enable-multibyte-characters (append (buffer-string) nil) buffer-undo-list buffer-read-only)) nil))) (with-temp-buffer (insert \"x\") (list (cdr (insert-file-contents FILE)) seen last-coding-system-used)))".into()),
+        // file-coding-system-alist: a function entry gets the arguments.
+        ("rtfn", "é\n".into(), "(let* ((seen nil) (file-coding-system-alist (list (cons \"\\\\.rtfn\\\\'\" (lambda (args) (setq seen (list (car args) (length args) (nthcdr 2 args))) '(latin-1 . latin-1)))))) (with-temp-buffer (list (cdr (insert-file-contents FILE)) seen last-coding-system-used (buffer-string))))".into()),
+        // CHECK_CODING_SYSTEM evaluates a lazy coding system's define form.
+        ("txt", "é\n".into(), "(progn (put 'rt-ifc-lazy 'coding-system-define-form '(define-coding-system-alias 'rt-ifc-lazy 'latin-1)) (with-temp-buffer (list (cdr (let ((coding-system-for-read 'rt-ifc-lazy)) (insert-file-contents FILE))) last-coding-system-used (buffer-string))))".into()),
+        // The Lisp tail: format-decode, then after-insert-file-functions
+        // with both inhibit variables bound and undo off.
+        ("txt", b"Content-Type: text/enriched\nText-Width: 70\n\n<bold>hi</bold>\n".to_vec(), "(with-temp-buffer (list (cdr (insert-file-contents FILE)) (buffer-string) buffer-file-format))".into()),
+        ("txt", b"hi\n".to_vec(), "(let* ((seen nil) (after-insert-file-functions (list (lambda (n) (setq seen (list n inhibit-modification-hooks inhibit-point-motion-hooks buffer-undo-list)) (insert \"Z\") (1+ n))))) (with-temp-buffer (buffer-enable-undo) (list (cdr (insert-file-contents FILE)) seen (buffer-string))))".into()),
+        ("txt", b"hi\n".to_vec(), "(let ((after-insert-file-functions (list (lambda (_) 99)))) (with-temp-buffer (condition-case e (insert-file-contents FILE) (error e))))".into()),
+        // A visited missing file decides and records before it signals.
+        ("txt", b"".to_vec(), "(with-temp-buffer (delete-file FILE) (list (condition-case e (let ((coding-system-for-read 'latin-1)) (insert-file-contents FILE t)) (error (car e))) last-coding-system-used (and (local-variable-p 'buffer-file-coding-system) buffer-file-coding-system) (buffer-modified-p)))".into()),
+        ("txt", b"".to_vec(), "(with-temp-buffer (delete-file FILE) (list (condition-case e (let ((coding-system-for-read 'raw-text)) (insert-file-contents FILE t)) (error (car e))) last-coding-system-used enable-multibyte-characters))".into()),
+    ];
+    let binary = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
+    let mut failures = Vec::new();
+    for (index, (extension, bytes, expression)) in cases.iter().enumerate() {
+        let file = dir.join(format!("case-{index}.{extension}"));
+        let expression = expression.replace("FILE", &format!("{:?}", file.to_str().unwrap()));
+        let source = format!("(let ((print-escape-newlines t) (print-escape-control-characters t)) (string-to-list (prin1-to-string (condition-case err {expression} (error (list 'signal err))))))");
+        std::fs::write(&file, bytes).unwrap();
+        let output = std::process::Command::new(&binary).current_dir(&dir)
+            .args(["-Q", "--batch", "--eval", &format!("(prin1 {source})")]).output().unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        let expected = String::from_utf8(output.stdout).unwrap();
+        std::fs::write(&file, bytes).unwrap();
+        let actual = vm.eval_source(&source).unwrap().display().unwrap();
+        if actual != expected {
+            let text = |codes: &str| codes.trim_matches(|c| c == '(' || c == ')').split_whitespace()
+                .filter_map(|n| n.parse::<u32>().ok().and_then(char::from_u32)).collect::<String>();
+            failures.push(format!("{expression}\n  GNU    {}\n  Romacs {}", text(&expected), text(&actual)));
+        }
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+// What insert-file-contents cannot decode yet it refuses before the buffer
+// changes, with the decision's buffer state restored.
+#[test]
+fn insert_file_contents_refuses_unsupported_decoding_intact() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut vm = bootstrapped_with(&root, "rlisp/romacs-loadup-bootstrap.el");
+    let dir = std::env::temp_dir().join(format!("rt-insert-refuse-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let cases: [(&[u8], &str); 4] = [
+        // GNU's detection reaches the ISO-2022 and charset detectors.
+        (b"caf\xe9\n", "coding detection of the iso-7 category"),
+        (b"a\x1b$Bb\n", "coding detection of ISO-2022 escape and shift codes"),
+        (b"\xe9\0\xff\0", "coding detection of the utf-16-auto category"),
+        // A raw byte GNU keeps as an eight-bit character.
+        (b"\xc3", "insert-file-contents of raw bytes into a multibyte buffer"),
+    ];
+    for (index, (bytes, refusal)) in cases.into_iter().enumerate() {
+        let file = dir.join(format!("case-{index}.txt"));
+        std::fs::write(&file, bytes).unwrap();
+        let probe = format!("(with-temp-buffer (insert \"keep\") (goto-char 3) (buffer-enable-undo) (let ((before buffer-undo-list) (lcsu last-coding-system-used)) (list (condition-case e (insert-file-contents {:?}) (error (cadr e))) (buffer-string) (point) (eq buffer-undo-list before) (eq last-coding-system-used lcsu) enable-multibyte-characters)))", file.to_str().unwrap());
+        let actual = vm.eval_source(&probe).unwrap().display().unwrap();
+        assert_eq!(actual, format!("(\"VM2 {refusal} is unsupported\" \"keep\" 3 t t t)"), "{bytes:?}");
+        let empty = format!("(with-temp-buffer (list (condition-case e (insert-file-contents {:?}) (error (cadr e))) (buffer-size) enable-multibyte-characters buffer-undo-list))", file.to_str().unwrap());
+        let actual = vm.eval_source(&empty).unwrap().display().unwrap();
+        assert_eq!(actual, format!("(\"VM2 {refusal} is unsupported\" 0 t t)"), "empty {bytes:?}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn write_region_refuses_unsupported_conversion_before_opening() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
@@ -214,6 +328,39 @@ fn save_restriction_unibyte_matches_gnu() {
     let refused = vm.eval_source(r#"(prin1-to-string (with-temp-buffer (set-buffer-multibyte nil) (insert "abc") (narrow-to-region 2 3) (list (condition-case e (save-restriction (widen) (set-buffer-multibyte t)) (error (cadr e))) (point-min) (point-max) enable-multibyte-characters)))"#).unwrap().display().unwrap();
     let refused: String = serde_json::from_str(&refused).unwrap_or(refused);
     assert_eq!(refused, r#"("cannot decode buffer with a saved restriction" 2 3 nil)"#);
+}
+
+// save-excursion and buffer-substring in a unibyte buffer, which holds no
+// markers: the saved point moves as GNU's left-biased excursion marker does
+// and is restored on return, error and throw unless the buffer was killed;
+// substrings are unibyte. GNU's coding decision runs set-auto-coding there.
+#[test]
+fn save_excursion_unibyte_matches_gnu() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut vm = bootstrapped_with(&root, "rlisp/romacs-loadup-bootstrap.el");
+    let setup = r#"(defmacro rt-ux (&rest body)
+  `(with-temp-buffer (set-buffer-multibyte nil) (insert "ab\351def") (goto-char 4)
+     (list (condition-case e (progn ,@body) (error (list 'E e))) (point) (buffer-string))))"#;
+    let source = r#"(prin1-to-string
+  (list
+   (rt-ux (save-excursion (goto-char 1) (insert "B") (point)))
+   (rt-ux (save-excursion (insert "S") (point)))
+   (rt-ux (save-excursion (goto-char 2) (delete-region 2 5) (point)))
+   (rt-ux (save-excursion (goto-char 5) (delete-region 5 7)))
+   (rt-ux (save-excursion (narrow-to-region 1 2) (goto-char 1)) (list (point-min) (point-max)))
+   (rt-ux (save-excursion (goto-char 6) (error "boom")))
+   (rt-ux (catch 'out (save-excursion (goto-char 6) (save-excursion (goto-char 2) (insert "n")) (throw 'out (point)))))
+   (rt-ux (let ((b (current-buffer))) (save-excursion (set-buffer (get-buffer-create " rt-ux-other")) (insert "zz")) (eq b (current-buffer))))
+   (rt-ux (list (buffer-substring 2 4) (multibyte-string-p (buffer-substring 2 4)) (progn (goto-char 1) (re-search-forward "\\(\351\\)d" nil t) (match-string 1))))
+   (let ((b (generate-new-buffer " rt-ux-kill")) (o (get-buffer-create " rt-ux-survivor"))) (with-current-buffer b (set-buffer-multibyte nil) (insert "abc")) (list (with-current-buffer b (save-excursion (kill-buffer b) (set-buffer o) 'done)) (buffer-live-p b)))))"#;
+    let binary = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
+    let output = std::process::Command::new(binary).args(["-Q", "--batch", "--eval", setup, "--eval", &format!("(princ {source})")]).output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let expected = String::from_utf8(output.stdout).unwrap();
+    vm.eval_source(setup).unwrap();
+    let printed = vm.eval_source(source).unwrap().display().unwrap();
+    let actual: String = serde_json::from_str(&printed).unwrap_or(printed);
+    assert_eq!(actual, expected);
 }
 
 // The runtime pieces Gnosis and emacs-hermes reach, on the full loadup chain.

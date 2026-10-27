@@ -116,6 +116,7 @@ impl Text {
             point: self.point,
             restriction: self.restriction.clone(),
             saved_restrictions: Vec::new(),
+            saved_points: Vec::new(),
             properties: self
                 .properties
                 .to_map()

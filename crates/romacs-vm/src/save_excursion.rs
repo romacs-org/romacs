@@ -1,6 +1,6 @@
 //! GNU editfns.c:776-840: an excursion is a left-biased point marker,
 //! not a numeric position or a binding of the current-buffer slot.
-use crate::{Builder, Form, Op, Primitive, Result, Value, Vm, anchors::Bias, annotations::Marker, coordinates::ByteOffset, data::Object};
+use crate::{Builder, Form, Op, Primitive, Result, Value, Vm, anchors::Bias, annotations::Marker, coordinates::{ByteOffset, CharOffset}, data::Object};
 
 impl Vm {
     // Use immutable native callable constants: rebinding Lisp function cells
@@ -23,8 +23,8 @@ impl Vm {
 
     pub(super) fn save_excursion(&mut self, b: &mut Builder, body: &[Form]) -> Result<usize> {
         use Primitive::*;
-        let point = Self::excursion_call(b, Point, &[]);
-        let marker = Self::excursion_call(b, CopyMarker, &[point]);
+        let subr = |name| crate::prim::subr_named(name).expect("save-excursion subr");
+        let marker = Self::native_call(b, subr("romacs--save-excursion"), &[]);
         let window = Self::excursion_call(b, SelectedWindow, &[]);
         let shown = Self::excursion_call(b, WindowBuffer, &[window]);
         let original = Self::excursion_call(b, CurrentBuffer, &[]);
@@ -34,14 +34,8 @@ impl Vm {
         let result = self.progn(b, body)?;
         b.emit(Op::LeaveProtect(result));
         let cleanup = b.code.len();
-        let buffer = Self::excursion_call(b, MarkerBuffer, &[marker]);
+        let buffer = Self::native_call(b, subr("romacs--restore-excursion"), &[marker]);
         let dead = b.emit(Op::Unless(buffer, 0));
-        Self::excursion_call(b, SetBuffer, &[buffer]);
-        let position = Self::excursion_call(b, MarkerPosition, &[marker]);
-        Self::excursion_call(b, GotoChar, &[position]);
-        let nil = b.reg();
-        b.emit(Op::Const(nil, Value::NIL));
-        Self::excursion_call(b, SetMarker, &[marker, nil]);
         let not_shown = b.emit(Op::Unless(was_shown, 0));
         let live = Self::excursion_call(b, WindowLiveP, &[window]);
         let dead_window = b.emit(Op::Unless(live, 0));
@@ -67,6 +61,61 @@ impl Vm {
 }
 
 impl Vm {
+    /// editfns.c save_excursion_save: a left-biased marker at point. A
+    /// unibyte buffer, which holds no markers, keeps the saved point itself
+    /// and moves it as that marker would move (bytes.rs); its data is
+    /// (BUFFER . ID).
+    pub(crate) fn save_excursion_data(&mut self) -> Result<Value> {
+        let index = self.buffer_index()?;
+        let buffer = self.slots[self.buffer_slot].value;
+        match &mut self.objects[index] {
+            Object::Buffer(t) => {
+                let anchor = t.anchors.create(t.point.0 as u32, Bias::Left).expect("excursion anchor");
+                Ok(self.allocate_object(Object::Marker(Box::new(Marker { buffer, anchor: Some(anchor), bias: Bias::Left }))))
+            }
+            Object::ByteBuffer(b) => {
+                let id = b.saved_points.iter().map(|&(id, _)| id + 1).max().unwrap_or(0);
+                b.saved_points.push((id, b.point));
+                self.conses.push((buffer, Value::integer(id.into())?));
+                Ok(Value::reference(self.conses.len() - 1, 3))
+            }
+            _ => Err("buffer required".into()),
+        }
+    }
+
+    /// editfns.c save_excursion_restore's buffer and point half: unless the
+    /// buffer was killed, make it current and move point to the saved
+    /// position (clipped to the accessible portion, as goto-char does), then
+    /// detach the marker. Returns the buffer, or nil when it was killed.
+    pub(crate) fn restore_excursion_data(&mut self, data: Value) -> Result<Value> {
+        if let Ok((buffer, id)) = self.cons_pair(data) {
+            // Killing a buffer drops its text and saved points.
+            if !self.buffer_state(buffer)?.live { return Ok(Value::NIL); }
+            let Object::ByteBuffer(b) = &mut self.objects[buffer.index(0)? - 1] else {
+                return Err("VM2 save-excursion lost its unibyte point".into());
+            };
+            let at = b.saved_points.iter().position(|&(k, _)| i64::from(k) == id.as_integer().unwrap_or(-1))
+                .ok_or("VM2 save-excursion lost its unibyte point")?;
+            let (_, point) = b.saved_points.remove(at);
+            b.point = point.clamp(b.restriction.start, b.restriction.end);
+            self.slots[self.buffer_slot].value = buffer;
+            self.display_state.version += 1;
+            return Ok(buffer);
+        }
+        let buffer = self.marker(data)?.buffer;
+        if buffer == Value::NIL { return Ok(Value::NIL); }
+        self.require_live_buffer(buffer)?;
+        self.slots[self.buffer_slot].value = buffer;
+        let position = self.marker_position_value(data)?.as_integer()?;
+        let t = self.annotated_mut(buffer)?;
+        let accessible = t.accessible();
+        let c = position.saturating_sub(1).max(0) as usize;
+        t.point = t.byte_of_char(CharOffset(c.min(t.len_chars())))?.clamp(accessible.start, accessible.end);
+        self.set_marker_object(data, Value::NIL, Value::NIL)?;
+        self.display_state.version += 1;
+        Ok(buffer)
+    }
+
     /// GNU editfns.c Fsave_restriction: save the restriction, run BODY, and
     /// restore it on every exit. Cleanup does not change the current buffer.
     pub(super) fn save_restriction(&mut self, b: &mut Builder, body: &[Form]) -> Result<usize> {

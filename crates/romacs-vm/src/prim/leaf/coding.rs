@@ -1453,3 +1453,230 @@ impl Leaf<'_> {
         Ok(self.coding_list(&bases))
     }
 }
+
+/// coding.c EOL_SEEN_* bits.
+const EOL_SEEN_LF: u8 = 1;
+const EOL_SEEN_CR: u8 = 2;
+const EOL_SEEN_CRLF: u8 = 4;
+
+/// adjust_coding_eol_type's choice for the EOL bits seen: the index of the
+/// unix, dos or mac subsidiary, LF winning over CRLF over CR.
+fn eol_index(seen: u8) -> Option<usize> {
+    if seen & EOL_SEEN_LF != 0 { Some(0) } else if seen & EOL_SEEN_CRLF != 0 { Some(1) }
+    else if seen & EOL_SEEN_CR != 0 { Some(2) } else { None }
+}
+const CATEGORY_UTF_8_AUTO: usize = 6;
+const CATEGORY_UTF_8_NOSIG: usize = 7;
+const CATEGORY_UTF_8_SIG: usize = 8;
+const CATEGORY_RAW_TEXT: usize = 19;
+const MASK_UTF_8: u32 = 1 << CATEGORY_UTF_8_AUTO | 1 << CATEGORY_UTF_8_NOSIG | 1 << CATEGORY_UTF_8_SIG;
+const MASK_UTF_16: u32 = 0b11111 << 9;
+const MASK_ANY: u32 = (1 << CATEGORIES.len()) - 1;
+
+/// coding.c coding_detection_info.
+#[derive(Default)]
+struct DetectInfo { checked: u32, found: u32, rejected: u32 }
+
+/// coding.c detect_coding_utf_8 over BYTES, of which the first HEAD_ASCII
+/// are ASCII. GNU detects before CODING_MODE_LAST_BLOCK is set, so a
+/// sequence cut short by the end of the text does not reject.
+fn detect_utf_8(bytes: &[u8], head_ascii: usize, info: &mut DetectInfo) -> bool {
+    info.checked |= MASK_UTF_8;
+    let mut at = head_ascii;
+    let mut nchars = head_ascii;
+    let mut bom = false;
+    if at == 0 && bytes.len() > 3 && bytes[..3] == [0xEF, 0xBB, 0xBF] {
+        bom = true;
+        at = 3;
+        nchars += 1;
+    }
+    'chars: loop {
+        let Some(&c) = bytes.get(at) else { break };
+        at += 1;
+        if c < 0x80 {
+            nchars += 1;
+            if c == b'\r' && bytes.get(at) == Some(&b'\n') { at += 1; nchars += 1; }
+            continue;
+        }
+        // Each continuation octet, then the lead forms of 2..5 octets; GNU's
+        // 5-octet test also requires c < MAX_MULTIBYTE_LEADING_CODE (0xF8),
+        // so no 5-octet form is accepted.
+        for leading in [0xE0u8 & c == 0xC0, 0xF0 & c == 0xE0, 0xF8 & c == 0xF0, 0xFC & c == 0xF8 && c < 0xF8] {
+            let Some(&next) = bytes.get(at) else { break 'chars };
+            at += 1;
+            if next & 0xC0 != 0x80 {
+                info.rejected |= MASK_UTF_8;
+                return false;
+            }
+            if leading { nchars += 1; continue 'chars; }
+        }
+        info.rejected |= MASK_UTF_8;
+        return false;
+    }
+    if bom {
+        info.found |= MASK_UTF_8;
+    } else {
+        info.rejected |= 1 << CATEGORY_UTF_8_SIG;
+        if nchars < bytes.len() { info.found |= 1 << CATEGORY_UTF_8_AUTO | 1 << CATEGORY_UTF_8_NOSIG; }
+    }
+    true
+}
+
+impl Leaf<'_> {
+    /// decode_coding_gap's ASCII fast path (coding.c:7928-7970): for
+    /// all-ASCII BYTES and an ASCII-compatible coding with undecided EOL,
+    /// check_ascii's EOL bits pick the subsidiary (an index into its EOL
+    /// vector), which the string decoder does not do.
+    pub(crate) fn coding_ascii_eol(&mut self, bytes: &[u8], attrs: Value) -> std::result::Result<Option<usize>, Fault> {
+        if !bytes.is_ascii() || self.vector_get(attrs, num(5))? == Value::NIL
+            || self.flag_variable("disable-ascii-optimization")? || self.flag_variable("inhibit-eol-conversion")? {
+            return Ok(None);
+        }
+        let mut seen = 0;
+        let mut at = 0;
+        while at < bytes.len() {
+            match bytes[at] {
+                b'\r' if bytes.get(at + 1) == Some(&b'\n') => { seen |= EOL_SEEN_CRLF; at += 1; }
+                b'\r' => seen |= EOL_SEEN_CR,
+                b'\n' => seen |= EOL_SEEN_LF,
+                _ => {}
+            }
+            at += 1;
+        }
+        Ok(eol_index(seen))
+    }
+
+    fn flag_variable(&mut self, name: &str) -> std::result::Result<bool, Fault> {
+        let symbol = self.intern(name);
+        Ok(self.variable_value(symbol)?.is_some_and(|v| v != Value::NIL))
+    }
+
+    /// coding.c detect_coding for a coding system with attribute vector ATTRS
+    /// over BYTES: the system found, if any, and the EOL subsidiary index
+    /// (adjust_coding_eol_type) its scan saw.
+    /// Only the undecided type and the utf-8-auto category detect; the
+    /// detectors VM2 implements are UTF-8's, and reaching any other (ISO-2022
+    /// escapes, UTF-16 for text with NUL and 8-bit bytes, the charset, CCL
+    /// and CJK categories) refuses rather than guess.
+    pub(crate) fn coding_detect(&mut self, bytes: &[u8], attrs: Value) -> std::result::Result<(Option<Value>, Option<usize>), Fault> {
+        let refuse = |what: &str| Fault::Error(format!("VM2 coding detection of {what} is unsupported"));
+        let kind = self.vector_get(attrs, num(3))?;
+        let category = self.vector_get(attrs, num(14))?.integer_value().unwrap_or(0) as usize;
+        if category == CATEGORY_UTF_8_AUTO && kind != self.intern("undecided") {
+            let systems = self.vector_get(attrs, num(24))?;
+            let Some((sig, nosig)) = self.pair(systems) else { return Ok((None, None)) };
+            let head_ascii = bytes.iter().take_while(|&&b| b < 0x80).count();
+            if head_ascii == bytes.len() { return Ok((Some(nosig), None)) }
+            let mut info = DetectInfo::default();
+            if !detect_utf_8(bytes, head_ascii, &mut info) { return Ok((None, None)) }
+            return Ok((Some(if info.found & 1 << CATEGORY_UTF_8_SIG != 0 { sig } else { nosig }), None));
+        }
+        if kind != self.intern("undecided") {
+            return Ok((None, None));
+        }
+        // inhibit_flag (encode_inhibit_flag (ATTR), VARIABLE).
+        let inhibit = |this: &mut Self, index: i64, variable: &str| -> std::result::Result<bool, Fault> {
+            let flag = this.vector_get(attrs, num(index))?;
+            let encoded = if flag == Value::NIL { -1 } else if flag == Value::TRUE { 1 } else { 0 };
+            Ok(0 < encoded + i32::from(this.flag_variable(variable)?))
+        };
+        let inhibit_nbd = inhibit(self, 27, "inhibit-null-byte-detection")?;
+        let inhibit_ied = inhibit(self, 28, "inhibit-iso-escape-detection")?;
+        let prefer_utf_8 = self.vector_get(attrs, num(29))? != Value::NIL;
+        let scan_eol = !self.flag_variable("disable-ascii-optimization")? && !self.flag_variable("inhibit-eol-conversion")?;
+        let (mut head_ascii, mut null_byte, mut eight_bit, mut eol_seen) = (0, false, false, 0u8);
+        let mut at = 0;
+        while at < bytes.len() {
+            let c = bytes[at];
+            if c & 0x80 != 0 {
+                eight_bit = true;
+                if null_byte { break }
+            } else if c < 0x20 {
+                if matches!(c, 0x1B | 0x0E | 0x0F) && !inhibit_ied {
+                    return Err(refuse("ISO-2022 escape and shift codes"));
+                } else if c == 0 && !inhibit_nbd {
+                    null_byte = true;
+                    if eight_bit { break }
+                } else if scan_eol {
+                    if c == b'\r' {
+                        if bytes.get(at + 1) == Some(&b'\n') {
+                            eol_seen |= EOL_SEEN_CRLF;
+                            at += 1;
+                            if !eight_bit { head_ascii += 1; }
+                        } else {
+                            eol_seen |= EOL_SEEN_CR;
+                        }
+                    } else if c == b'\n' {
+                        eol_seen |= EOL_SEEN_LF;
+                    }
+                }
+                if !eight_bit { head_ascii += 1; }
+            } else if !eight_bit {
+                head_ascii += 1;
+            }
+            at += 1;
+        }
+        if !null_byte && !eight_bit && head_ascii >= bytes.len() {
+            return Ok((None, eol_index(eol_seen)));
+        }
+        let systems = self.coding_category_state(CATEGORY_SYSTEMS)?;
+        let priorities = self.coding_category_state(PRIORITIES)?;
+        let mut order = Vec::with_capacity(CATEGORY_RAW_TEXT);
+        for i in 0..CATEGORY_RAW_TEXT {
+            let category = self.vector_get(priorities, num(i as i64))?.integer_value().unwrap_or(0) as usize;
+            order.push((category, self.vector_get(systems, num(category as i64))?));
+        }
+        let mut info = DetectInfo::default();
+        let mut chosen = None;
+        // With every byte 7-bit only ISO-2022 could be found, and its
+        // escapes already refused, so the walk finds nothing.
+        if head_ascii < bytes.len() {
+            if null_byte {
+                info.checked |= !MASK_UTF_16;
+                info.rejected |= !MASK_UTF_16;
+            } else if prefer_utf_8 && detect_utf_8(bytes, head_ascii, &mut info) {
+                info.checked |= !MASK_UTF_8;
+                info.rejected |= !MASK_UTF_8;
+            }
+            for &(category, system) in &order {
+                let bit = 1u32 << category;
+                if system == Value::NIL {
+                    info.rejected |= bit;
+                } else if category >= CATEGORY_RAW_TEXT {
+                    continue;
+                } else if info.checked & bit != 0 {
+                    if info.found & bit != 0 { chosen = Some((category, system)); break }
+                } else if (CATEGORY_UTF_8_AUTO..=CATEGORY_UTF_8_SIG).contains(&category) {
+                    if detect_utf_8(bytes, head_ascii, &mut info) && info.found & bit != 0 { chosen = Some((category, system)); break }
+                } else {
+                    return Err(refuse(&format!("the {} category", CATEGORIES[category])));
+                }
+            }
+        }
+        let found = if let Some((category, system)) = chosen {
+            if category == CATEGORY_UTF_8_AUTO {
+                let attrs = self.coding_required(system)?;
+                let attrs = self.vector_get(attrs, num(0))?;
+                let systems = self.vector_get(attrs, num(24))?;
+                match self.pair(systems) {
+                    Some((sig, nosig)) => if info.found & 1 << CATEGORY_UTF_8_SIG != 0 { sig } else { nosig },
+                    None => system,
+                }
+            } else {
+                system
+            }
+        } else if null_byte {
+            self.intern("no-conversion")
+        } else if info.rejected & MASK_ANY == MASK_ANY {
+            self.intern("raw-text")
+        } else if info.rejected != 0 {
+            match order.iter().find(|(category, _)| info.rejected & 1 << category == 0) {
+                Some(&(_, system)) => system,
+                None => return Ok((None, eol_index(eol_seen))),
+            }
+        } else {
+            return Ok((None, eol_index(eol_seen)));
+        };
+        Ok((Some(found), eol_index(eol_seen)))
+    }
+}

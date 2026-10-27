@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "7e3bef64be623a3440a1bde0186c87ec1319d7107ff7d2386f06852c1833efb1",
+  "source_fingerprint": "743f59dfe975ebb11ef25841301b9f003b645a163163fd0185a5e0aa11e7d0c0",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 843,
-  "parsed_vm2_only": 843
+  "parsed_total": 848,
+  "parsed_vm2_only": 848
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -1420,7 +1420,7 @@
   "find-file-name-handler": {
    "name": "find-file-name-handler",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:829"
+   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:493"
   },
   "find-operation-coding-system": {
    "name": "find-operation-coding-system",
@@ -3109,6 +3109,21 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/closure_documentation.rs:3"
   },
+  "romacs--code-converting-work": {
+   "name": "romacs--code-converting-work",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/insert_coding.rs:339"
+  },
+  "romacs--insert-file-contents-format": {
+   "name": "romacs--insert-file-contents-format",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/insert_coding.rs:606"
+  },
+  "romacs--insert-file-contents-undecide": {
+   "name": "romacs--insert-file-contents-undecide",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/insert_coding.rs:329"
+  },
   "romacs--keymap-at-point": {
    "name": "romacs--keymap-at-point",
    "implementation": "vm2",
@@ -3150,10 +3165,20 @@
    "variant": "Primitive::ReadHostEvent",
    "registered_at": "crates/romacs-vm/src/lib.rs:757"
   },
+  "romacs--restore-excursion": {
+   "name": "romacs--restore-excursion",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/special_forms.rs:92"
+  },
   "romacs--restore-restriction": {
    "name": "romacs--restore-restriction",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/special_forms.rs:84"
+  },
+  "romacs--save-excursion": {
+   "name": "romacs--save-excursion",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/special_forms.rs:89"
   },
   "romacs--save-restriction": {
    "name": "romacs--save-restriction",
@@ -3470,7 +3495,7 @@
   "set-visited-file-modtime": {
    "name": "set-visited-file-modtime",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:131"
+   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:129"
   },
   "set-window-buffer": {
    "name": "set-window-buffer",
@@ -3563,7 +3588,7 @@
   "setq": {
    "name": "setq",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/special_forms.rs:87"
+   "registered_at": "crates/romacs-vm/src/prims/special_forms.rs:95"
   },
   "signal": {
    "name": "signal",
@@ -4090,7 +4115,7 @@
   "unwind-protect": {
    "name": "unwind-protect",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/special_forms.rs:90"
+   "registered_at": "crates/romacs-vm/src/prims/special_forms.rs:98"
   },
   "upcase": {
    "name": "upcase",
@@ -4167,7 +4192,7 @@
   "verify-visited-file-modtime": {
    "name": "verify-visited-file-modtime",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:65"
+   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:63"
   },
   "visible-frame-list": {
    "name": "visible-frame-list",
@@ -4177,12 +4202,12 @@
   "visited-file-modtime": {
    "name": "visited-file-modtime",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:42"
+   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:40"
   },
   "while": {
    "name": "while",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/special_forms.rs:93"
+   "registered_at": "crates/romacs-vm/src/prims/special_forms.rs:101"
   },
   "widen": {
    "name": "widen",

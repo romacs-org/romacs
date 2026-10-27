@@ -52,6 +52,9 @@ pub(crate) struct ByteBuffer {
     /// no markers, so it keeps each saved BEGV and ZV itself and moves them as
     /// a left- and a right-biased marker (editfns.c save_restriction_save_1).
     pub(crate) saved_restrictions: Vec<(u32, Range<ByteOffset>)>,
+    /// Points saved by save-excursion, by id, each moved as GNU's
+    /// left-biased excursion marker would move (editfns.c save_excursion_save).
+    pub(crate) saved_points: Vec<(u32, ByteOffset)>,
     pub properties: BTreeMap<ByteOffset, BTreeMap<String, Value>>,
     /// GNU keeps a buffer's interval tree once it had a property.
     pub had_intervals: bool,
@@ -116,6 +119,9 @@ impl ByteBuffer {
         })..shift(old.end);
         for (_, saved) in &mut self.saved_restrictions {
             *saved = moved(saved.start, &r, inserted.len(), false)..moved(saved.end, &r, inserted.len(), true);
+        }
+        for (_, saved) in &mut self.saved_points {
+            *saved = moved(*saved, &r, inserted.len(), false);
         }
         self.bytes
             .splice(r.start.0..r.end.0, inserted.iter().copied());

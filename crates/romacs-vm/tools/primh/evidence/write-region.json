@@ -1487,12 +1487,26 @@
   }
  ],
  "pinned": {
-  "write-region/0198": "VALUE",
+  "write-region/0198": "SIGNAL-VS-VALUE",
+  "write-region/0199": "SIGNAL-VS-VALUE",
+  "write-region/0200": "SIGNAL-VS-VALUE",
+  "write-region/0205": "SIGNAL-VS-VALUE",
+  "write-region/0206": "SIGNAL-VS-VALUE",
+  "write-region/0207": "SIGNAL-VS-VALUE",
+  "write-region/0208": "SIGNAL-VS-VALUE",
+  "write-region/0209": "SIGNAL-VS-VALUE",
+  "write-region/0210": "SIGNAL-VS-VALUE",
+  "write-region/0211": "SIGNAL-VS-VALUE",
+  "write-region/0212": "SIGNAL-VS-VALUE",
+  "write-region/0214": "SIGNAL-VS-VALUE",
+  "write-region/0216": "SIGNAL-VS-VALUE",
+  "write-region/0219": "SIGNAL-VS-VALUE",
   "write-region/0224": "SIGNAL-VS-VALUE",
   "write-region/0225": "SIGNAL-VS-VALUE",
   "write-region/0226": "SIGNAL-VS-VALUE",
   "write-region/0227": "SIGNAL-VS-VALUE",
   "write-region/0228": "SIGNAL-VS-VALUE",
-  "write-region/0229": "SIGNAL-VS-VALUE"
+  "write-region/0229": "SIGNAL-VS-VALUE",
+  "write-region/0232": "SIGNAL-VS-VALUE"
  }
 }

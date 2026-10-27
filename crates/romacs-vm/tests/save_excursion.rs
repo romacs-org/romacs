@@ -80,10 +80,8 @@ fn window_no_longer_showing_buffer() {
 }
 
 #[test]
-fn excursion_rejects_unibyte_buffers_until_markers_support_them() {
-    // VM2-EXCUR1: the saved position goes through copy-marker, whose substrate
-    // is multibyte-only, so a unibyte buffer leaks wrong-type-argument instead
-    // of restoring. Pinned GNU answers (42 2) for this fixture. Pin the exact
-    // condition so the boundary cannot move unnoticed in either direction.
-    check("(with-temp-buffer (set-buffer-multibyte nil) (insert \"abc\") (goto-char 2) (condition-case c (list (save-excursion (goto-char 1) 42) (point)) (error c)))", "(wrong-type-argument listp 2)", "SAVE_EXCURSION_UNIBYTE_SUBSET");
+fn excursion_restores_point_in_unibyte_buffers() {
+    // VM2-EXCUR1 resolved: a unibyte buffer keeps its saved point itself.
+    // Pinned GNU answers (42 2) for this fixture.
+    check("(with-temp-buffer (set-buffer-multibyte nil) (insert \"abc\") (goto-char 2) (condition-case c (list (save-excursion (goto-char 1) 42) (point)) (error c)))", "(42 2)", "SAVE_EXCURSION_UNIBYTE");
 }

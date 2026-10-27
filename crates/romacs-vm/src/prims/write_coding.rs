@@ -197,7 +197,7 @@ fn realize(cx: &mut Leaf<'_>, name: Value, r: Vec<Value>) -> Next {
 
 /// CHECK_CODING_SYSTEM (NAME): Ok(spec), or Err(NAME) when its define form
 /// must be evaluated first. Otherwise Fcheck_coding_system's signals.
-fn need(cx: &mut Leaf<'_>, name: Value) -> std::result::Result<std::result::Result<Value, Value>, Fault> {
+pub(super) fn need(cx: &mut Leaf<'_>, name: Value) -> std::result::Result<std::result::Result<Value, Value>, Fault> {
     if cx.kind(name) != Kind::Symbol { return Err(Fault::Wrong("symbolp", name)); }
     let spec = cx.coding_spec(name)?;
     if spec != Value::NIL { return Ok(Ok(spec)); }
@@ -252,7 +252,7 @@ fn inherit_eol(cx: &mut Leaf<'_>, val: Value, parent: Value) -> std::result::Res
 /// the raw-text subsidiary with VAL's EOL (raw-text itself when VAL's is
 /// undecided). GNU reads VAL's spec without CHECK_CODING_SYSTEM; a lazy one
 /// is realized rather than read as missing.
-fn raw_text_coding_system(cx: &mut Leaf<'_>, val: Value) -> std::result::Result<std::result::Result<Value, Value>, Fault> {
+pub(super) fn raw_text_coding_system(cx: &mut Leaf<'_>, val: Value) -> std::result::Result<std::result::Result<Value, Value>, Fault> {
     let raw = raw_text(cx)?;
     if val == Value::NIL { return Ok(Ok(raw)); }
     let spec = match need(cx, val)? { Ok(spec) => spec, Err(name) => return Ok(Err(name)) };
