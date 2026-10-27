@@ -176,7 +176,9 @@ impl Vm {
         f.capture_mutations = Vec::new();
         self.request_code.live[id] = false;
         self.request_code.free.push(id);
-        self.execution.release_entry(id);
+        for program in self.programs_mut() {
+            program.release_entry(id);
+        }
     }
 
     pub(super) fn finish_request(&mut self, mut outcome: Result<Value>) -> Result<Value> {
@@ -236,7 +238,9 @@ impl Vm {
                 self.request_code.free_caches.push(id);
             }
         }
-        self.execution.retire_code(marks);
+        for program in self.programs_mut() {
+            program.retire_code(marks);
+        }
         self.request_code.since_collection = 0;
     }
 }

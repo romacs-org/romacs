@@ -396,7 +396,7 @@ pub(super) struct CharTableNode {
 
 impl CharTableNode {
     pub(super) const WIDTHS: [usize; 4] = [65536, 4096, 128, 1];
-    const SIZES: [usize; 4] = [64, 16, 32, 128];
+    pub(super) const SIZES: [usize; 4] = [64, 16, 32, 128];
 
     fn new(depth: usize, min_char: usize, value: Value) -> CharTableNodeHandle {
         Arc::new(Mutex::new(Self {
@@ -443,6 +443,15 @@ impl CharTableNode {
         }
     }
 
+    /// HANDLE's own geometry, without its children: a node keeps its depth
+    /// and first character for life.
+    pub(super) fn validate_node(handle: &CharTableNodeHandle, depth: usize, min_char: usize) -> Result<()> {
+        let node = handle.lock().unwrap();
+        if depth > 3 || node.depth != depth || node.min_char != min_char || node.slots.len() != Self::SIZES[depth] {
+            return Err("invalid sub-char-table geometry".into());
+        }
+        Ok(())
+    }
     pub(super) fn validate_traversal(handle: &CharTableNodeHandle, depth: usize, min_char: usize) -> Result<()> {
         let slots = {
             let node = handle.lock().unwrap();

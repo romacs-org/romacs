@@ -411,8 +411,9 @@ impl Vm {
                         _ => {}
                     }
                 }
-                self.execution
-                    .trace_function(id, &mut pending, &mut code_pending);
+                for program in std::iter::once(&self.execution).chain(&self.spare_programs) {
+                    program.trace_function(id, &mut pending, &mut code_pending);
+                }
             }
             let Some(mut v) = pending.pop() else { continue };
             // Walk the cdr spine directly: a list is the common editor graph,
@@ -731,7 +732,9 @@ impl Vm {
                 rewrite(&mut Arc::get_mut(lazy).expect("lazy body is private at a wait point").body);
             }
         }
-        self.execution.visit_values(&mut |v| rewrite(v));
+        for program in std::iter::once(&mut self.execution).chain(self.spare_programs.iter_mut()) {
+            program.visit_values(&mut |v| rewrite(v));
+        }
         self.conditions.visit_values(&mut |v| rewrite(v));
         self.objects
             .shrink_to(self.objects.len().saturating_mul(2).max(1024));

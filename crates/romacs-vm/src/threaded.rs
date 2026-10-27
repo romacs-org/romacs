@@ -103,6 +103,7 @@ mod control_tests {
             apply_function: None,
             apply_mark: None,
             stack_used: 0,
+            apply_scratch: Vec::new(),
             depth_base: 0,
             regs: std::ptr::null_mut(),
             function: 0,
@@ -220,6 +221,7 @@ mod control_tests {
             apply_function: None,
             apply_mark: None,
             stack_used: 0,
+            apply_scratch: Vec::new(),
             depth_base: 0,
             regs: std::ptr::null_mut(),
             function: 0,
@@ -983,6 +985,9 @@ pub(super) struct Engine<'a> {
     code: Vec<Vec<Inst>>,
     rest: RestStack,
     stack_used: usize,
+    /// The (OFFSET, COUNT) windows `apply` wrote at the end of the
+    /// registers, cleared on exit with the used prefix.
+    apply_scratch: Vec<(usize, usize)>,
     frames: Vec<Frame>,
     // Physical continuations can own several real calls (an apply chain).
     // K machinery itself has no public activation.
@@ -1057,6 +1062,7 @@ pub(super) fn assert_opaque_rest_compaction() {
             activations: vec![(0, Some(desc))],
         },
         stack_used: 0,
+        apply_scratch: Vec::new(),
         frames: vec![],
         call_marks: vec![None],
         native_mark: None,
@@ -1138,15 +1144,18 @@ impl Vm {
         result
     }
 
-    /// After a nested engine run: its lowered code goes (the suspended engine
-    /// owns the program), but its register storage, all NIL again, is kept
-    /// for the next nested run instead of being reallocated and refilled.
+    /// After a nested engine run, whose program the suspended engine does not
+    /// own: keep it, registers all NIL again and lowered code intact, for the
+    /// next nested run instead of reallocating, refilling and relowering.
     pub(super) fn end_nested_execution(&mut self) {
-        let registers = std::mem::take(&mut self.execution.registers);
-        self.execution = Program::default();
-        if !registers.is_empty() {
-            self.spare_registers.push(registers);
+        let program = std::mem::take(&mut self.execution);
+        if !program.registers.is_empty() {
+            self.spare_programs.push(program);
         }
+    }
+    /// Every retained program: the current one and the nested spares.
+    pub(super) fn programs_mut(&mut self) -> impl Iterator<Item = &mut Program> {
+        std::iter::once(&mut self.execution).chain(self.spare_programs.iter_mut())
     }
 
     pub(crate) fn pending_eval_escape(&self) -> Option<(Value, Value)> {
@@ -1199,6 +1208,11 @@ fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Va
         return Err(error);
     }
     let mut program = std::mem::take(&mut vm.execution);
+    if program.registers.is_empty() {
+        if let Some(spare) = vm.spare_programs.pop() {
+            program = spare;
+        }
+    }
     program.code.resize_with(vm.functions.len(), Vec::new);
     if let Err(error) = lower_function(
         vm,
@@ -1218,9 +1232,6 @@ fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Va
         .and_then(|n| n.checked_add(4096))
         .ok_or("register storage overflow")?;
     vm.stack = std::mem::take(&mut program.registers);
-    if vm.stack.is_empty() {
-        vm.stack = vm.spare_registers.pop().unwrap_or_default();
-    }
     vm.stack.resize(size, Value::NIL);
     vm.stack[..args.len()].copy_from_slice(args);
     let regs = vm.stack.as_mut_ptr();
@@ -1231,6 +1242,7 @@ fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Va
     program.rest.activations.push((0, None));
     let mut engine = Engine {
         stack_used: vm.functions[function].regs.max(args.len()),
+        apply_scratch: Vec::new(),
         depth_base: vm.eval_depth,
         vm,
         code: program.code,
@@ -1286,6 +1298,9 @@ fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Va
     // Only entered frames can have written values. Clear that prefix, not all
     // reserved frames; retaining zeroed storage avoids reinitializing it.
     engine.vm.stack[..engine.stack_used].fill(Value::NIL);
+    for &(offset, count) in &engine.apply_scratch {
+        engine.vm.stack[offset..offset + count].fill(Value::NIL);
+    }
     engine.rest.values.clear();
     engine.rest.activations.clear();
     engine.vm.execution = Program {
@@ -2761,10 +2776,15 @@ fn t2_prepare_apply(
     start: usize,
     argc: usize,
 ) -> Option<(Value, usize, usize)> {
-    // prepare_apply writes the disjoint scratch window at the end.
-    e.stack_used = e.vm.stack.len();
+    // prepare_apply writes a disjoint scratch window at the end.
     match e.vm.prepare_apply(start, argc) {
-        Ok(window) => Some(window),
+        Ok(window) => {
+            match e.apply_scratch.iter_mut().find(|(offset, _)| *offset == window.1) {
+                Some((_, count)) => *count = (*count).max(window.2),
+                None => e.apply_scratch.push((window.1, window.2)),
+            }
+            Some(window)
+        }
         Err(error) => {
             e.error = Some(error);
             None

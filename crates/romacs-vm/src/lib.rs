@@ -1115,9 +1115,11 @@ pub struct Vm {
     request_code: request_code::RequestCode,
     register_width: usize,
     execution: threaded::Program,
-    /// Zeroed register storage of finished nested engine runs, reused by the
-    /// next one (`threaded::Vm::end_nested_execution`).
-    spare_registers: Vec<Vec<Value>>,
+    /// Programs of finished nested engine runs (registers all NIL again,
+    /// lowered code kept), reused by the next nested run
+    /// (`threaded::Vm::end_nested_execution`). Code invalidation and the
+    /// collector reach them as they reach `execution`.
+    spare_programs: Vec<threaded::Program>,
     closures: Vec<Closure>,
     cells: Vec<Value>,
     cell_pairs: HashMap<usize, Value>,
@@ -1226,7 +1228,7 @@ impl Vm {
             request_code: request_code::RequestCode::default(),
             register_width: 1,
             execution: threaded::Program::default(),
-            spare_registers: Vec::new(),
+            spare_programs: Vec::new(),
             closures: vec![],
             cells: vec![],
             cell_pairs: HashMap::new(),

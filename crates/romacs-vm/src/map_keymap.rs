@@ -94,14 +94,14 @@ impl Chartab {
         Ok(true)
     }
     fn next(&mut self, cx: &mut Leaf<'_>) -> std::result::Result<Option<(Value, Value)>, Fault> {
-        // Callbacks may mutate or detach retained nodes between resumptions.
-        cx.map_table_validate(self.table)?;
+        // Callbacks may mutate the table between resumptions. A node keeps its
+        // geometry for life and was checked when the walk entered it, so only
+        // the slot counts the index arithmetic relies on are rechecked.
         for frame in &self.frames {
-            let (depth, min) = {
-                let n = frame.node.lock().unwrap();
-                (n.depth, n.min_char)
-            };
-            CharTableNode::validate_traversal(&frame.node, depth, min).map_err(Fault::Error)?;
+            let n = frame.node.lock().unwrap();
+            if n.depth > 3 || n.slots.len() != CharTableNode::SIZES[n.depth] {
+                return Err(Fault::Error("invalid sub-char-table geometry".into()));
+            }
         }
         loop {
             if self.frames.is_empty() {
@@ -161,6 +161,8 @@ impl Chartab {
                     )?;
                     match slot {
                         CharTableSlot::Node(node) => {
+                            let depth = self.frames[n].node.lock().unwrap().depth + 1;
+                            CharTableNode::validate_node(&node, depth, c).map_err(Fault::Error)?;
                             if self.frames[n].to >= (c + width) as i64 {
                                 self.to = (c + width) as i64 - 1;
                             }
