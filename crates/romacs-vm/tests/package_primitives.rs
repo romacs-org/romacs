@@ -1,8 +1,8 @@
 //! C primitives and variables emacs-hermes reaches, against pinned GNU:
 //! line-number-at-pos, text-property-any, get-buffer-process (no process
 //! exists), frame-first-window, timer-idle-list, and the subrs in the
-//! special forms' function cells, and print-gensym as gnosis's serializer
-//! binds it.
+//! special forms' function cells, print-gensym as gnosis's serializer
+//! binds it, and `random' seeded as GNU seeds glibc's generator.
 use romacs_vm::Vm;
 
 /// One expression per line.
@@ -24,6 +24,7 @@ const CASES: &str = r###"
 (list (type-of (symbol-function 'if)) (cl-type-of (symbol-function 'if)) (type-of (symbol-function 'car)) (cl-type-of (symbol-function 'car)) (condition-case e (eval '(defvar x 1 nil 4) t) (error e)) (condition-case e (eval '(defconst x 1 nil 4) t) (error e)) (condition-case e (eval '(defvar 1 2 nil 4) t) (error e)) (condition-case e (eval '(defconst 1 2 nil 4) t) (error e)))
 (let ((s (make-symbol "g")) (e (make-symbol "")) (print-gensym t)) (list (prin1-to-string (list s s 'a :k e nil t)) (let ((print-circle t)) (prin1-to-string (list s s e e 'zz))) (prin1-to-string (list s) nil '((gensym . nil))) (let ((print-gensym nil)) (prin1-to-string s nil '((gensym . t)))) (let ((print-charset-text-property t)) (prin1-to-string (propertize "ab" 'face 'bold))) (let ((print-circle t)) (prin1-to-string (list (intern "x" (obarray-make)) 'y)))))
 (let ((print-gensym t) (print-circle t) (x (intern "x" (obarray-make)))) (list (prin1-to-string (list x x)) (prin1-to-string (list (make-symbol "quote") (make-symbol "x"))) (prin1-to-string '(quote a)) (prin1-to-string '(function f))))
+(progn (random "abc") (list (random) (random 10) (random 1000000) (random (expt 2 70)) (random (expt 2 64)) (random most-positive-fixnum) (progn (random "") (random 100)) (progn (random "a longer seed string") (list (random 7) (random 7))) (condition-case e (random 0) (error e)) (condition-case e (random -5) (error e)) (condition-case e (random (- (expt 2 70))) (error e)) (fixnump (random nil)) (fixnump (random 'x)) (progn (random t) (< -1 (random 5) 5))))
 "###;
 
 #[test]

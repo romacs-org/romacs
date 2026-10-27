@@ -1505,6 +1505,7 @@ mod leaf {
     mod backtrace;
     mod text_properties;
     mod sqlite;
+    mod random;
 }
 pub(crate) use leaf::{Leaf, Kind};
 

@@ -41,6 +41,7 @@ type NameSet<K> = std::collections::HashSet<K, foldhash::fast::RandomState>;
 use std::sync::Arc;
 mod code_image;
 mod sqlite;
+mod random;
 mod gc;
 mod handle;
 pub use handle::{Arg, Fixed, Local, Rooted};
@@ -1128,6 +1129,8 @@ pub struct Vm {
     closures: Vec<Closure>,
     cells: Vec<Value>,
     cell_pairs: HashMap<usize, Value>,
+    /// fns.c `random's generator, seeded from entropy as at GNU startup.
+    random: random::Random,
     conses: Vec<(Value, Value)>,
     objects: Vec<data::Object>,
     caches: Vec<Cache>,
@@ -1237,6 +1240,7 @@ impl Vm {
             closures: vec![],
             cells: vec![],
             cell_pairs: HashMap::default(),
+            random: random::Random::from_entropy(),
             conses: vec![],
             objects: vec![],
             caches: vec![],
