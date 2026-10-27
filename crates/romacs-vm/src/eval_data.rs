@@ -168,7 +168,7 @@ impl Vm {
                 // print_circle_candidate_p: uninterned symbols too under print-gensym.
                 let gensym = options.gensym && self.printed_as_gensym(v)
                     && !self.obarray_symbol_names.contains_key(&(v.payload() as usize - 1));
-                if !gensym && v.tag() != 3 && !matches!(self.object_if(v), Some(data::Object::Vector(_) | data::Object::Record(_) | data::Object::CharTable(_))) && !self.str_view(v).is_some_and(|s| !s.bytes().is_empty()) { continue; }
+                if !gensym && v.tag() != 3 && !matches!(self.object_if(v), Some(data::Object::Vector(_) | data::Object::Record(_) | data::Object::CharTable(_) | data::Object::HashTable(_))) && !self.str_view(v).is_some_and(|s| !s.bytes().is_empty()) { continue; }
                 let count = options.graph.get_mut().counts.entry((0, v.0)).or_default();
                 *count += 1;
                 if *count > 1 { continue; }
@@ -176,6 +176,11 @@ impl Vm {
                 else if let Some(data::Object::Vector(v) | data::Object::Record(v)) = self.object_if(v) { pending.extend(v.iter().copied().map(CharTableSlot::Value)); }
                 else if let Some(data::Object::CharTable(t)) = self.object_if(v) {
                     pending.extend(t.print_slots());
+                }
+                else if let Some(data::Object::HashTable(t)) = self.object_if(v) {
+                    // Entries print in order; push them reversed onto the stack.
+                    let entries: Vec<Value> = t.entries().flat_map(|(_, k, v)| [k, v]).collect();
+                    pending.extend(entries.into_iter().rev().map(CharTableSlot::Value));
                 }
                 else if quoted {
                     for (_, _, properties) in self.print_string_properties(v) {
@@ -260,9 +265,14 @@ impl Vm {
             Some(data::Object::SubCharTable(node)) => (1, char_table::char_table_node_id(node) as u64),
             _ => (0, value.0),
         };
+        let container = value.tag() == 3 || matches!(self.object_if(value),
+            Some(data::Object::Vector(_) | data::Object::Record(_) | data::Object::HashTable(_)));
         let prefix = {
             let mut graph = options.graph.borrow_mut();
-            if graph.nesting >= 100 { return Err("print nesting limit exceeded".into()); }
+            if graph.nesting + graph.quotes >= 100 { return Err("print nesting limit exceeded".into()); }
+            if !options.circle && container && let Some(depth) = graph.path.iter().position(|&p| p == value.0) {
+                return Ok(format!("#{depth}"));
+            }
             if graph.counts.get(&key).is_some_and(|&n| n > 1) {
                 if let Some(id) = graph.labels.get(&key) { return Ok(format!("#{id}#")); }
                 let id = graph.labels.len() + 1;
@@ -270,9 +280,17 @@ impl Vm {
                 format!("#{id}=")
             } else { String::new() }
         };
-        options.graph.borrow_mut().nesting += 1;
+        {
+            let mut graph = options.graph.borrow_mut();
+            graph.nesting += 1;
+            graph.path.push(value.0);
+        }
         let body = self.print_body(value, quoted, options, depth);
-        options.graph.borrow_mut().nesting -= 1;
+        {
+            let mut graph = options.graph.borrow_mut();
+            graph.nesting -= 1;
+            graph.path.pop();
+        }
         body.map(|body| prefix + &body)
     }
 
@@ -345,7 +363,23 @@ impl Vm {
                         // Only the interned `quote' and `function', not namesakes.
                         let interned = |name: &str| self.names.get(name).is_some_and(|&slot| car == Value::reference(slot + 1, 7));
                         let prefix = if interned("quote") { Some("'") } else if interned("function") { Some("#'") } else { None };
-                        if let Some(prefix) = prefix { return Ok(format!("{prefix}{}", self.print_object(arg, quoted, options, depth)?)); }
+                        if let Some(prefix) = prefix {
+                            // print.c's shorthand is tail recursion: the quoted
+                            // object takes this list's depth, so it is not on
+                            // the path, and a quote cycle is bounded by depth.
+                            let own = {
+                                let mut graph = options.graph.borrow_mut();
+                                graph.nesting -= 1;
+                                graph.quotes += 1;
+                                graph.path.pop()
+                            };
+                            let printed = self.print_object(arg, quoted, options, depth);
+                            let mut graph = options.graph.borrow_mut();
+                            graph.nesting += 1;
+                            graph.quotes -= 1;
+                            graph.path.extend(own);
+                            return Ok(format!("{prefix}{}", printed?));
+                        }
                     }
                 }
             }
@@ -377,9 +411,7 @@ impl Vm {
             });
         }
         if let Some(data::Object::HashTable(t)) = self.object_if(value) {
-            if options.circle { return Err("hash-table print-circle is not supported".into()); }
-            if options.length.is_some() { return Err("hash-table print-length is not supported".into()); }
-            let bytes = self.print_table(t, |vm, v| vm.print_object(v, quoted, options, depth + 1).map(String::into_bytes))?;
+            let bytes = self.print_table(t, options.length, |vm, v| vm.print_object(v, quoted, options, depth + 1).map(String::into_bytes))?;
             return String::from_utf8(bytes).map_err(|e| e.to_string());
         }
         if let Some(data::Object::Float(n)) = self.object_if(value) {
@@ -425,7 +457,11 @@ impl Vm {
 }
 
 #[derive(Default)]
-struct PrintGraph { counts: HashMap<(u8, u64), usize>, labels: HashMap<(u8, u64), usize>, nesting: usize }
+/// NESTING is the print depth; PATH the objects being printed at each depth
+/// (print.c being_printed), which a container met again prints as #DEPTH
+/// without print-circle; QUOTES counts the quote shorthands in progress,
+/// which take no depth of their own but still bound the recursion.
+struct PrintGraph { counts: HashMap<(u8, u64), usize>, labels: HashMap<(u8, u64), usize>, nesting: usize, path: Vec<u64>, quotes: usize }
 struct PrintOptions {
     graph: std::cell::RefCell<PrintGraph>,
     length: Option<usize>, level: Option<i64>, quoted: bool, newlines: bool,

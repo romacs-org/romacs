@@ -272,7 +272,7 @@ impl Vm {
             return Ok(out);
         }
         if let Some(crate::data::Object::HashTable(t)) = self.object_if(value) {
-            return self.print_table(t, |vm, v| vm.format_print(v, quoted, depth + 1));
+            return self.print_table(t, None, |vm, v| vm.format_print(v, quoted, depth + 1));
         }
         self.display(value).map(String::into_bytes)
     }

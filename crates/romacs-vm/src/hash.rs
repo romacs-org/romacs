@@ -1052,7 +1052,7 @@ impl Vm {
     }
     /// GNU 30+ printed representation: `eql`, nil weakness and size are implicit.
     pub(super) fn display_table(&self, t: &HashTable, depth: usize) -> Result<String> {
-        let bytes = self.print_table(t, |vm, v| vm.display_depth(v, depth + 1).map(String::into_bytes))?;
+        let bytes = self.print_table(t, None, |vm, v| vm.display_depth(v, depth + 1).map(String::into_bytes))?;
         String::from_utf8(bytes).map_err(|e| e.to_string())
     }
     /// GNU `print_object`'s PVEC_HASH_TABLE arm (print.c:2631-2675): the
@@ -1061,9 +1061,12 @@ impl Vm {
     /// in entry order. ELEMENT prints each key and value with the CALLER's
     /// printer, so `prin1`/`princ` and their escapes apply inside the table
     /// exactly as they do outside it.
+    /// `#s(hash-table ...)`, with at most LIMIT entries (print-length) then
+    /// "...".
     pub(super) fn print_table(
         &self,
         t: &HashTable,
+        limit: Option<usize>,
         mut element: impl FnMut(&Self, Value) -> Result<Vec<u8>>,
     ) -> Result<Vec<u8>> {
         let mut out = "#s(hash-table".to_owned();
@@ -1079,10 +1082,12 @@ impl Vm {
         let mut out = out.into_bytes();
         if t.count() > 0 {
             let mut items = vec![];
-            for (_, k, v) in t.entries() {
+            let shown = limit.unwrap_or(usize::MAX).min(t.count());
+            for (_, k, v) in t.entries().take(shown) {
                 items.push(element(self, k)?);
                 items.push(element(self, v)?);
             }
+            if shown < t.count() { items.push(b"...".to_vec()); }
             out.extend_from_slice(b" data (");
             out.extend(items.join(&b' '));
             out.push(b')');
