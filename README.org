@@ -1,7 +1,16 @@
 #+title: Romacs
 
-An editor for people and their agents, combining Emacs Lisp's freedom with
-a Rust core built for speed.
+Romacs is an AI lisp machine.  Combining Emacs Lisp's freedom with a Rust core
+built for speed.
+
+#+BEGIN_QUOTE
+All original content in this project has been written with AI Agents
+except for this paragraph.  I’m not a programmer, and have no
+background in CS or tech, just a hobbyist with strong opinions.
+
+The goal of this project is for me to have a malleable system that is
+100% maintained by my agents, tailored to my needs.
+#+END_QUOTE
 
 * Direction
 
@@ -10,9 +19,8 @@ Rust handles the machinery; Elisp keeps commands, keybindings and policy
 editable without a rebuild. The goal is broad GNU Elisp compatibility,
 not a replica of GNU Emacs's internals.
 
-Make editor state explicit and queryable, maintain derived views incrementally,
-and let humans and agents work side by side without stealing each other's
-cursor. Fast interaction and useful machine interfaces belong in the foundation.
+A user should be limited only by his imagination by what he can do
+with romacs.
 
 * Source layout
 
