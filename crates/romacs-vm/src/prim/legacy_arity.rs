@@ -111,7 +111,7 @@ pub(super) fn arity(primitive: Primitive) -> (usize, Option<usize>) {
         | DefvarSetDefault
         | DeepEqual
         | Set => (2, Some(2)),
-        Apply => (2, None),
+        Apply => (1, None),
         Aset
         | Put
         | YankPropertyRun

@@ -7,3 +7,10 @@ fn closure_document(cx, function: Value) {
     }
     Ok(cx.closure_document(function))
 }}
+
+defsubr! { name = "romacs--closure-arity", gnu = "eval.c:3537", effect = Reads,
+fn closure_arity(cx, function: Value) {
+    let (required, positional, rest) = cx.closure_arity(function).ok_or(Fault::Wrong("closurep", function))?;
+    let maximum = if rest { cx.intern("many") } else { Value::integer(positional as i64).unwrap() };
+    Ok(cx.cons(Value::integer(required as i64).unwrap(), maximum))
+}}

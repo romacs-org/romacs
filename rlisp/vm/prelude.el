@@ -396,6 +396,50 @@ See also `find-buffer-visiting'."
         (throw 'romacs--find-buffer buffer)))
     nil))
 
+;; eval.c's `func-arity' and its `lambda_arity'.  Closure parameter
+;; counts come from the compiled function.
+
+(defun romacs--lambda-arity (fun)
+  (unless (consp (cdr fun)) (signal 'invalid-function (list fun)))
+  (let ((args (car (cdr fun))) (min 0) (max 0) optional result)
+    (while (and (consp args) (not result))
+      (let ((next (car args)))
+        (cond ((not (symbolp next)) (signal 'invalid-function (list fun)))
+              ((eq next '&rest) (setq result (cons min 'many)))
+              ((eq next '&optional) (setq optional t))
+              (t (unless optional (setq min (1+ min)))
+                 (setq max (1+ max)))))
+      (setq args (cdr args)))
+    (cond (result)
+          (args (signal 'invalid-function (list fun)))
+          (t (cons min max)))))
+
+(defun func-arity (function)
+  "Return minimum and maximum number of args allowed for FUNCTION.
+FUNCTION must be a function of some kind.
+The returned value is a cons cell (MIN . MAX).  MIN is the minimum number
+of args.  MAX is the maximum number, or the symbol `many', for a
+function with `&rest' args, or `unevalled' for a special form."
+  (let ((original function) result)
+    (while (not result)
+      (setq function original)
+      (when (and (symbolp function) function)
+        (setq function (symbol-function function))
+        (when (symbolp function) (setq function (indirect-function function))))
+      (when (and (consp function) (eq (car function) 'macro))
+        (setq function (cdr function)))
+      (cond ((subrp function) (setq result (subr-arity function)))
+            ((closurep function) (setq result (romacs--closure-arity function)))
+            ((null function) (signal 'void-function (list original)))
+            ((not (and (consp function) (symbolp (car function))))
+             (signal 'invalid-function (list original)))
+            ((eq (car function) 'lambda)
+             (setq result (romacs--lambda-arity function)))
+            ((eq (car function) 'autoload)
+             (autoload-do-load function original nil))
+            (t (signal 'invalid-function (list original)))))
+    result))
+
 ;; buffer.c's `set-buffer-major-mode' and editfns.c's
 ;; `insert-buffer-substring', composed of the primitives their C calls.
 

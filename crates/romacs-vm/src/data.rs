@@ -418,18 +418,21 @@ impl Vm {
         start: usize,
         argc: usize,
     ) -> Result<(Value, usize, usize)> {
-        if argc < 2 {
+        if argc < 1 {
             return Err("wrong primitive arity".into());
         }
-        let target = self.stack[start];
+        // GNU eval.c Fapply: FUNCTION, ARGS..., then the spread list; with a
+        // single argument the list's first element is the function.
         let tail = self.list_values(self.stack[start + argc - 1])?;
-        let mut values = self.stack[start + 1..start + argc - 1].to_vec();
+        let mut values = self.stack[start..start + argc - 1].to_vec();
         values.extend(tail);
+        let target = values.first().copied().unwrap_or(Value::NIL);
+        let values = values.get(1..).unwrap_or_default();
         if values.len() > 4096 {
             return Err("apply argument limit exceeded".into());
         }
         let offset = self.stack.len() - 4096;
-        self.stack[offset..offset + values.len()].copy_from_slice(&values);
+        self.stack[offset..offset + values.len()].copy_from_slice(values);
         Ok((target, offset, values.len()))
     }
     #[inline(never)]

@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "9efa5ee14cfa2676835c5ef0e7620f10b70354e6e4e0c36a85dee56d4b6f59f7",
+  "source_fingerprint": "7a70b4988e7ee99f40dda3dbf31b828da3d6c07cea0729afafe3c218eb0f1c94",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 906,
-  "parsed_vm2_only": 906
+  "parsed_total": 907,
+  "parsed_vm2_only": 907
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -3223,6 +3223,11 @@
    "name": "romacs--clipboard-text",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/clipboard.rs:4"
+  },
+  "romacs--closure-arity": {
+   "name": "romacs--closure-arity",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/closure_documentation.rs:11"
   },
   "romacs--closure-document": {
    "name": "romacs--closure-document",

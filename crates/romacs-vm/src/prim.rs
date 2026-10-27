@@ -344,6 +344,12 @@ mod leaf {
             closure.index_if(4).and_then(|i| self.vm.closures.get(i))
                 .map(|c| c.metadata.get(4).copied().unwrap_or(c.document)).unwrap_or(Value::NIL)
         }
+        /// A closure's (REQUIRED, POSITIONAL, REST) parameter counts.
+        pub(crate) fn closure_arity(&self, closure: Value) -> Option<(usize, usize, bool)> {
+            let c = self.vm.closures.get(closure.index_if(4)?)?;
+            let f = self.vm.functions.get(c.function)?;
+            Some((f.required, f.arity, f.rest))
+        }
         pub(crate) fn set_interactive_spec(&mut self, closure: Value, spec: Value, thunk: Value) -> std::result::Result<(), Fault> {
             let slot = self.vm.slot(super::INTERACTIVE_TABLE);
             if self.vm.slots[slot].value == Value::UNBOUND {
