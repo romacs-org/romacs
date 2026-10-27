@@ -997,12 +997,11 @@ impl Reader<'_, '_> {
                 if !escaped {
                     // GNU also accepts decimal integers with a trailing dot.
                     let integer = token.strip_suffix('.').unwrap_or(&token);
-                    if let Ok(n) = integer.parse::<i64>() {
-                        return Value::integer(n);
-                    }
                     let digits = integer.strip_prefix(['+', '-']).unwrap_or(integer);
                     if !digits.is_empty() && digits.bytes().all(|c| c.is_ascii_digit()) {
-                        return Err("fixnum overflow (bignums not implemented)".into());
+                        // A fixnum when it fits, else a bignum.
+                        let n: num_bigint::BigInt = integer.parse().map_err(|_| "invalid integer")?;
+                        return Ok(self.vm.bigint(n));
                     }
                     // A lone `.' token here was followed by `)` or `]`,
                     // which GNU's dot test excludes (`dot_follows`): it is

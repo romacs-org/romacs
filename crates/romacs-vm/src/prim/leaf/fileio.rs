@@ -198,10 +198,18 @@ impl Leaf<'_> {
     /// GNU verify_interval_modification's insertion boundary checks, including
     /// read-only supplied by a category and selective inhibit-read-only lists.
     pub fn fileio_check_insertion(&mut self, inhibit: Value) -> std::result::Result<(), Fault> {
-        if inhibit != Value::NIL && self.kind(inhibit) != Kind::Cons { return Ok(()) }
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
         let data::Object::Buffer(t) = &self.vm.objects[index] else { return Ok(()) };
         let at = t.point;
+        self.check_insertion_read_only(at, inhibit)
+    }
+
+    /// verify_interval_modification for an insertion at AT: a `read-only'
+    /// character on either side whose property would stick to the new text.
+    pub fn check_insertion_read_only(&mut self, at: ByteOffset, inhibit: Value) -> std::result::Result<(), Fault> {
+        if inhibit != Value::NIL && self.kind(inhibit) != Kind::Cons { return Ok(()) }
+        let index = self.vm.buffer_index().map_err(Fault::Error)?;
+        let data::Object::Buffer(t) = &self.vm.objects[index] else { return Ok(()) };
         let left = (at > t.accessible().start).then(|| ByteOffset(at.0 - 1));
         let right = (at < t.accessible().end).then_some(at);
         let ro = self.intern("read-only");

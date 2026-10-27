@@ -16,7 +16,6 @@ REVIEWED = {
         'read-from-string/0165': ('VALUE', 'VM2-READ2'),
         'read-from-string/0166': ('VALUE', 'VM2-READ3'),
         'read-from-string/0167': ('VALUE', 'VM2-READ3'),
-        'read-from-string/0168': ('SIGNAL-VS-VALUE', 'VM2-READ4'),
         'read-from-string/0169': ('SIGNAL-VS-VALUE', 'VM2-READ4'),
         'read-from-string/0170': ('DATA', 'VM2-READ5'),
         'read-from-string/0171': ('SIGNAL-VS-VALUE', 'VM2-READ1'),

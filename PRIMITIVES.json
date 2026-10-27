@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "8661efbdc5a5c983909adcae62b375f61f994768260179b15ed69c8016d8d49b",
+  "source_fingerprint": "dcef57b8ead2ea714b0d62606d70eb588dc5ef97d13a813d96a9f088efbe93d1",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 740,
-  "parsed_vm2_only": 740
+  "parsed_total": 741,
+  "parsed_vm2_only": 741
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -3562,6 +3562,11 @@
    "name": "time-subtract",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/time.rs:338"
+  },
+  "translate-region-internal": {
+   "name": "translate-region-internal",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/translate_region.rs:4"
   },
   "treesit-available-p": {
    "name": "treesit-available-p",

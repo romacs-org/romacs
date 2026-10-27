@@ -175,6 +175,40 @@ fn daily_driver_load_slice_matches_gnu() {
         r###"(list (condition-case e (condition-case err (signal 'file-missing '("a" "b")) (file-missing (signal err))) (error e)) (condition-case e (signal '(arith-error 1 2)) (arith-error (list 'caught e))) (condition-case e (signal nil 3) (error e)) (condition-case e (apply #'signal '((error "g"))) (error e)) (condition-case e (signal 'error nil) (error e)))"###,
         r###"(let* ((f (make-temp-file "rt-x")) (d (make-temp-file "rt-y" t)) (n (make-temp-file-internal (expand-file-name "rt-z" temporary-file-directory) 0 ".txt" nil))) (prog1 (list (file-regular-p f) (file-directory-p d) (file-exists-p n) (string-suffix-p ".txt" n) (length (file-name-nondirectory f)) (format "%o" (file-modes f)) (format "%o" (file-modes d)) (condition-case e (make-temp-file-internal "/nonexistent-dir/x" nil "" nil) (error (list (car e) (cadr e) (caddr e)))) (condition-case e (delete-directory (expand-file-name "rt-none-dir" temporary-file-directory)) (error (list (car e) (cadr e))))) (delete-file f) (delete-directory d)))"###,
         r###"(list (num-processors 'current) (keymap-prompt (make-sparse-keymap "Hi")) (keymap-prompt (list 'keymap (make-sparse-keymap "Inner") "Outer")) (list system-configuration movemail-program-name) (stringp user-mail-address) custom-delayed-init-variables)"###,
+        r###"(let ((tt (make-translation-table '((?a . ?b) (?c . ?é) (?e . ?e))))
+      (seq (make-translation-table-from-alist '(([?l ?o] . ?L) ([?q] . [?Q ?Q]) ([?d] . [?x ?y])))))
+  (list (with-temp-buffer (insert (propertize "abcde" 'face 'bold)) (list (translate-region-internal 1 6 tt) (buffer-string) (point)))
+        (with-temp-buffer (insert "hello quiz d") (list (translate-region-internal 1 (point-max) seq) (buffer-string)))
+        (with-temp-buffer (insert "abc") (list (translate-region-internal 1 4 "zyxwvutsrqponmlkjihgfedcbaZYXWVUTSRQPONMLKJIHGFEDCBA9876543210zyxwvutsrqponmlkjihgfedcbaABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789zyxwvutsrqponmlkjihgfedcba") (buffer-string)))
+        (with-temp-buffer (insert "abc") (condition-case e (translate-region-internal 1 4 (make-char-table 'foo)) (error e)))
+        (with-temp-buffer (insert "abc") (condition-case e (translate-region-internal 1 9 tt) (error (car e))))
+        (with-temp-buffer (insert "aaaa") (let ((m (copy-marker 3))) (translate-region-internal 1 5 tt) (list (buffer-string) (marker-position m))))
+        (progn (require 'ucs-normalize) (list (ucs-normalize-NFD-string "é") (ucs-normalize-NFC-string "é") (ucs-normalize-NFKC-string "ﬁ")))))"###,
+        r###"(list (read "18446744073709551615") (read "-18446744073709551616") (read "+123456789012345678901234567890") (read "2305843009213693952") (read "123.") (bignump (read "4611686018427387904")))"###,
+        r###"(let ((vb (make-translation-table-from-alist '((?b . [?B]))))
+      (ce (make-translation-table '((?b . ?é))))
+      (seq (make-translation-table-from-alist '(([?b ?c] . [?X ?Y ?Z]))))
+      (bad (make-translation-table-from-alist '((?b . [?B nil])))))
+  (list (with-temp-buffer (insert (propertize "abc" 'face 'bold)) (translate-region-internal 1 4 vb) (buffer-string))
+        (with-temp-buffer (insert "abc") (goto-char 2) (let ((m (copy-marker 3)) (m2 (copy-marker 2))) (translate-region-internal 1 4 ce) (list (buffer-string) (point) (marker-position m) (marker-position m2))))
+        (with-temp-buffer (insert "abcd") (goto-char 3) (let ((m1 (copy-marker 2)) (m2 (copy-marker 3)) (m3 (copy-marker 4)) (m4 (copy-marker 5))) (list (translate-region-internal 1 5 seq) (buffer-string) (point) (mapcar #'marker-position (list m1 m2 m3 m4)))))
+        (with-temp-buffer (insert "abc") (goto-char 4) (translate-region-internal 1 4 seq) (list (buffer-string) (point)))
+        (with-temp-buffer (insert "abc") (condition-case e (translate-region-internal 1 4 bad) (error e)))
+        (with-temp-buffer (insert "abc") (set-buffer-modified-p nil) (list (translate-region-internal 1 4 (make-translation-table '((?z . ?y)))) (buffer-modified-p)))
+        (with-temp-buffer (set-buffer-modified-p nil) (list (translate-region-internal 1 1 vb) (buffer-modified-p)))))"###,
+        r###"(let ((up (make-translation-table '((?b . ?B)))))
+  (list (with-temp-buffer (insert "abc") (put-text-property 2 3 'read-only t) (set-buffer-modified-p nil) (list (condition-case e (translate-region-internal 1 4 up) (error e)) (buffer-string) (buffer-modified-p)))
+        (with-temp-buffer (insert "abc") (put-text-property 1 4 'inhibit-read-only t) (setq buffer-read-only t) (list (condition-case e (translate-region-internal 1 4 up) (error e)) (buffer-string)))
+        (with-temp-buffer (insert "abc") (setq buffer-read-only t) (list (condition-case e (translate-region-internal 1 4 up) (error (car e))) (buffer-string)))
+        (with-temp-buffer (insert "abc") (put-text-property 2 3 'read-only 'rt-tag) (list (let ((inhibit-read-only '(rt-tag))) (translate-region-internal 1 4 up)) (buffer-string)))
+        (with-temp-buffer (insert "abc") (put-text-property 2 3 'read-only "nope") (condition-case e (translate-region-internal 1 4 up) (error e)))
+        (with-temp-buffer (insert "abc") (let ((after-change-functions (list #'ignore))) (list (translate-region-internal 1 4 up) (buffer-string))))))"###,
+        r###"(let ((tt (make-char-table 'translation-table)))
+  (list (with-temp-buffer (insert "abc") (put-text-property 1 4 'read-only t) (set-buffer-modified-p nil) (list (condition-case e (translate-region-internal 2 2 tt) (error e)) (buffer-modified-p)))
+        (with-temp-buffer (insert "abc") (put-text-property 1 2 'read-only t) (set-buffer-modified-p nil) (list (condition-case e (translate-region-internal 2 2 tt) (error e)) (buffer-modified-p)))
+        (with-temp-buffer (insert "abc") (put-text-property 2 3 'read-only t) (set-buffer-modified-p nil) (list (condition-case e (translate-region-internal 2 2 tt) (error e)) (buffer-modified-p)))
+        (with-temp-buffer (insert "abc") (put-text-property 1 4 'read-only t) (let ((inhibit-read-only t)) (translate-region-internal 2 2 tt)))
+        (with-temp-buffer (insert "abc") (put-text-property 1 4 'read-only t) (setq buffer-read-only t) (set-buffer-modified-p nil) (list (condition-case e (translate-region-internal 2 2 tt) (error (car e))) (buffer-modified-p)))))"###,
     ].iter().map(|s| s.to_string()).chain([recursive]).collect();
     let binary = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
     let mut failures = Vec::new();

@@ -1350,7 +1350,7 @@ impl Vm {
         if matches!(self.object_if(object), Some(Object::Buffer(_))) {
             let current = self.slots[self.buffer_slot].value;
             self.slots[self.buffer_slot].value = object;
-            let result = self.check_text_property_edit(object, range.clone());
+            let result = self.check_text_property_edit(object, range.clone(), true);
             self.slots[self.buffer_slot].value = current;
             result?;
         }
@@ -1710,10 +1710,14 @@ impl Vm {
         crate::prim::Fault::Signal(symbol, self.list_value(data))
     }
 
-    fn check_text_property_edit(
+    /// prepare_to_modify_buffer's read-only checks over RANGE of buffer
+    /// OBJECT; with REFUSE_HOOKS, also refuse an edit that GNU would run
+    /// modification hooks for (text-property changes do; VM2-EDIT-HOOKS1).
+    pub(crate) fn check_text_property_edit(
         &mut self,
         object: Value,
         range: std::ops::Range<ByteOffset>,
+        refuse_hooks: bool,
     ) -> std::result::Result<(), crate::prim::Fault> {
         use crate::prim::Fault;
         let Object::Buffer(buffer) = self.object(object).map_err(Fault::Error)? else {
@@ -1731,7 +1735,7 @@ impl Vm {
         }
         let selective = self.cons_pair(inhibit).is_ok();
         let ignore = inhibit != Value::NIL && !selective;
-        let hooks = self.text_property_variable("inhibit-modification-hooks")? == Value::NIL;
+        let hooks = refuse_hooks && self.text_property_variable("inhibit-modification-hooks")? == Value::NIL;
         let mut property_hooks = false;
         let mut at = range.start;
         while at < range.end {

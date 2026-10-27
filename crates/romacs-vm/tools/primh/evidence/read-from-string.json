@@ -1137,7 +1137,6 @@
   "read-from-string/0164": "VALUE",
   "read-from-string/0166": "VALUE",
   "read-from-string/0167": "VALUE",
-  "read-from-string/0168": "SIGNAL-VS-VALUE",
   "read-from-string/0169": "SIGNAL-VS-VALUE",
   "read-from-string/0170": "DATA",
   "read-from-string/0174": "VALUE"

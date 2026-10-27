@@ -1480,6 +1480,7 @@ mod leaf {
     mod coding;
     mod point_predicates;
     mod subst_char;
+    mod translate_region;
     mod overlays;
     mod invisible;
     mod buffer_locals;
