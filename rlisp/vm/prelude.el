@@ -385,6 +385,59 @@ textprop.c Fprevious_single_char_property_change."
                 (unless (eq (get-char-property (1- position) prop object) initial)
                   (throw 'romacs--found position))))))))))
 
+;; editfns.c fields: find_field (editfns.c:374) and the five primitives over
+;; it. A field is a run of characters whose `field' char-property is `eq';
+;; stickiness decides which field a position between two belongs to.
+(defun romacs--find-field (pos merge-at-boundary beg-limit end-limit end)
+  "editfns.c find_field: the start, or with END the end, of the field at POS."
+  (setq pos (if pos (romacs--fixnum-coerce-marker pos) (point)))
+  (let* ((after-field (get-char-property pos 'field))
+         (before-field (if (> pos (point-min)) (get-char-property (1- pos) 'field) after-field))
+         (at-field-start nil)
+         (at-field-end nil))
+    (unless merge-at-boundary
+      (let ((field (get-pos-property pos 'field)))
+        (unless (eq field after-field) (setq at-field-end t))
+        (unless (eq field before-field) (setq at-field-start t))
+        ;; Not a zero-length field but a non-editable one, such as a prompt.
+        (when (and (null field) at-field-start at-field-end)
+          (setq at-field-end nil at-field-start nil))))
+    (if end
+        (if at-field-end pos
+          (when (and merge-at-boundary (eq after-field 'boundary))
+            (setq pos (next-single-char-property-change pos 'field nil end-limit)))
+          (or (next-single-char-property-change pos 'field nil end-limit) (point-max)))
+      (if at-field-start pos
+        (when (and merge-at-boundary (eq before-field 'boundary))
+          (setq pos (previous-single-char-property-change pos 'field nil beg-limit)))
+        (or (previous-single-char-property-change pos 'field nil beg-limit) (point-min))))))
+
+(defun field-beginning (&optional pos escape-from-edge limit)
+  "Return the beginning of the field surrounding POS (editfns.c:521)."
+  (romacs--find-field pos escape-from-edge limit nil nil))
+
+(defun field-end (&optional pos escape-from-edge limit)
+  "Return the end of the field surrounding POS (editfns.c:536)."
+  (romacs--find-field pos escape-from-edge nil limit t))
+
+(defun field-string (&optional pos)
+  "Return the contents of the field surrounding POS as a string (editfns.c:499)."
+  (setq pos (if pos (romacs--fixnum-coerce-marker pos) (point)))
+  (buffer-substring (romacs--find-field pos nil nil nil nil) (romacs--find-field pos nil nil nil t)))
+
+(defun field-string-no-properties (&optional pos)
+  "Return the contents of the field around POS, without text properties (editfns.c:510)."
+  (setq pos (if pos (romacs--fixnum-coerce-marker pos) (point)))
+  (buffer-substring-no-properties (romacs--find-field pos nil nil nil nil)
+                                  (romacs--find-field pos nil nil nil t)))
+
+(defun delete-field (&optional pos)
+  "Delete the field surrounding POS (editfns.c:486)."
+  (setq pos (if pos (romacs--fixnum-coerce-marker pos) (point)))
+  (let ((beg (romacs--find-field pos nil nil nil nil))
+        (end (romacs--find-field pos nil nil nil t)))
+    (if (< beg end) (delete-region beg end))))
+
 ;; buffer.c's `find-buffer'.
 (defun find-buffer (variable value)
   "Return the buffer with buffer-local VARIABLE `equal' to VALUE.

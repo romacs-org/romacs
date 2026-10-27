@@ -124,7 +124,7 @@ pub(super) fn arity(primitive: Primitive) -> (usize, Option<usize>) {
         | SetWindowParameter
         | MakeObsolete
         | SetAdvertisedCallingConvention => (3, Some(3)),
-        CurrentBuffer | Point | PointMin | PointMax | BufferSize | ThisCommandKeys | Widen
+        CurrentBuffer | Point | PointMin | PointMax | BufferSize | Widen
         | BufferString | EncodeBufferUtf8 | DecodeBufferUtf8 | CacheStats | CacheClear
         | CacheEntries | MakeMarker | SyntaxTable | StandardSyntaxTable | SelectedWindow
         | SelectedFrame | CurrentGlobalMap | EraseBuffer | EmacsLispMode | Daemonp

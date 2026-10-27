@@ -765,13 +765,15 @@ Finternal_default_process_sentinel."
 ;; keyboard.c Fcommand_error_default_function.
 (defun command-error-default-function (data context signal)
   "Produce default output for unhandled error message.
-In batch, write it to stderr and exit, as GNU does."
+In batch, write it to stderr and exit, as GNU does; a `minibuffer-quit'
+rings the bell and is printed to standard output instead."
   (or (stringp context) (signal 'wrong-type-argument (list 'stringp context)))
-  (let ((text (concat context (if signal (format "%s: " signal) "") (error-message-string data))))
-    (if (and noninteractive
-             (not (memq 'minibuffer-quit (get (car-safe data) 'error-conditions))))
-        (progn (message "%s" text) (kill-emacs -1))
-      (message "%s" text)))
+  (let ((text (concat context (if signal (format "%s: " signal) "") (error-message-string data)))
+        (minibuffer-quit (memq 'minibuffer-quit (get (car-safe data) 'error-conditions))))
+    (cond ((and noninteractive (not minibuffer-quit))
+           (message "%s" text) (kill-emacs -1))
+          (noninteractive (ding t) (princ text t))
+          (t (when minibuffer-quit (ding t)) (message "%s" text))))
   nil)
 
 (defun romacs--process-error (err context)

@@ -224,7 +224,6 @@ impl Vm {
             "last-command",
             "current-prefix-arg",
             "prefix-arg",
-            "#:command-keys",
         ] {
             if !self.names.contains_key(name) {
                 self.declare_special_raw(name, Value::NIL);
@@ -255,8 +254,10 @@ impl Vm {
             vec![
                 sym("last-command-event"),
                 quote(event_form.clone()),
-                sym("#:command-keys"),
+                sym(crate::prim::prims::keyboard::COMMAND_KEYS),
                 Form::Vector(vec![event_form.clone()]),
+                sym(crate::prim::prims::keyboard::SINGLE_KEY_START),
+                Form::Int(0),
             ],
         ))?;
         // The GUI records the keys of a sequence it resolved itself.
@@ -415,17 +416,10 @@ impl Vm {
         let valid = match p {
             SelfInsertCommand | DeleteChar | DeleteBackwardChar => (1..=2).contains(&n),
             ForwardChar | BackwardChar | BeginningOfLine | EndOfLine => n <= 1,
-            ThisCommandKeys => n == 0,
             _ => false,
         };
         if !valid {
             return Err(CommandFault::Internal("wrong primitive arity".into()));
-        }
-        if p == ThisCommandKeys {
-            return Ok(self
-                .names
-                .get("#:command-keys")
-                .map_or(Value::NIL, |&s| self.slots[s].value));
         }
         let count = if n == 0
             || (self.stack[start] == Value::NIL
@@ -581,6 +575,21 @@ impl Vm {
             CommandEvent::Character(c) => RecentKey::Char(*c),
             CommandEvent::Named(name) => RecentKey::Event(name.clone()),
         });
+    }
+    /// record_char for an event, or with COMMAND the command loop's
+    /// (nil . COMMAND), as the Lisp half reads them. Only the shapes
+    /// `RecentKey' holds are recorded: characters, symbol events and symbol
+    /// commands; a mouse event or an anonymous command is left out.
+    pub(crate) fn record_recent_value(&mut self, value: Value, command: bool) {
+        let name = |vm: &Self| value.index_if(7).and_then(|i| vm.symbol_names.get(i.checked_sub(1)?)).cloned();
+        let key = if command {
+            if value == Value::NIL { Some(RecentKey::Command("nil".into())) } else { name(self).map(RecentKey::Command) }
+        } else if let Some(c) = value.integer_value() {
+            Some(RecentKey::Char(c))
+        } else {
+            name(self).map(RecentKey::Event)
+        };
+        if let Some(key) = key { self.record_recent_key(key); }
     }
     /// record_char: keep the last RECENT_KEYS entries.
     fn record_recent_key(&mut self, key: RecentKey) {

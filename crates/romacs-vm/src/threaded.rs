@@ -2911,7 +2911,7 @@ fn primitive_target(p: Primitive) -> PrimitiveCall {
     match p {
         ClosureMetadata | ClosureDocument | MakeInterpretedClosure => Vm::interpreted_closure_primitive,
         SelfInsertCommand | ForwardChar | BackwardChar | BeginningOfLine | EndOfLine
-        | DeleteChar | DeleteBackwardChar | ThisCommandKeys => {
+        | DeleteChar | DeleteBackwardChar => {
             Vm::command_primitive
         }
         TempBuffer => Vm::eval_buffer_primitive,
@@ -2976,7 +2976,7 @@ fn primitive_value(
     // allocations below: `list_value` only pushes, and collection is request
     // driven, which is the same sequencing `condition_call` and `hash_call` rely
     // on.
-    if (Primitive::SelfInsertCommand as usize..=Primitive::ThisCommandKeys as usize)
+    if (Primitive::SelfInsertCommand as usize..=Primitive::DeleteBackwardChar as usize)
         .contains(&(p as usize))
     {
         let mut signal = None;
