@@ -133,18 +133,35 @@ fn canonical_value(cx: &mut Leaf<'_>, name: Value, default: Value) -> std::resul
 }
 
 /// GNU get_homedir: HOME, else the passwd entry of LOGNAME, USER or the
-/// real user, else "". The variables come from `process-environment'.
+/// real user, else "". The variables come from `process-environment' and
+/// are read as C strings, ending at a NUL. A home that is not absolute,
+/// an empty HOME included, is taken relative to the working directory
+/// Emacs started in (emacs_wd), as splice_dir_file joins them.
 fn home_directory(cx: &mut Leaf<'_>) -> std::result::Result<Vec<u8>, Fault> {
-    if let Some(home) = super::environment::egetenv(cx, "HOME")? { return Ok(home); }
-    let mut account = None;
-    for variable in ["LOGNAME", "USER"] {
-        let user = super::environment::egetenv(cx, variable)?;
-        account = user.and_then(|u| crate::user_db::by_name(std::str::from_utf8(&u).ok()?));
-        if account.is_some() { break; }
+    let c_string = |mut bytes: Vec<u8>| { if let Some(nul) = bytes.iter().position(|&b| b == 0) { bytes.truncate(nul) } bytes };
+    let home = match super::environment::egetenv(cx, "HOME")? {
+        Some(home) => c_string(home),
+        None => {
+            let mut account = None;
+            for variable in ["LOGNAME", "USER"] {
+                let Some(user) = super::environment::egetenv(cx, variable)? else { continue };
+                account = std::str::from_utf8(&c_string(user)).ok().and_then(crate::user_db::by_name);
+                if account.is_some() { break; }
+            }
+            match account.or_else(|| crate::user_db::by_uid(crate::user_db::real_uid())).and_then(|account| account.home) {
+                Some(home) => home.into_bytes(),
+                None => return Ok(Vec::new()),
+            }
+        }
+    };
+    if home.first() == Some(&b'/') {
+        return Ok(home);
     }
-    Ok(account.or_else(|| crate::user_db::by_uid(crate::user_db::real_uid()))
-        .and_then(|account| account.home)
-        .unwrap_or_default().into_bytes())
+    let wd = std::env::current_dir().map_err(|_| Fault::Error("$HOME is relative to unknown directory".into()))?;
+    let mut spliced = std::os::unix::ffi::OsStrExt::as_bytes(wd.as_os_str()).to_vec();
+    if spliced.last().is_some_and(|&b| b != b'/') { spliced.push(b'/'); }
+    spliced.extend_from_slice(&home);
+    Ok(spliced)
 }
 
 /// fileio.c:1395: HOME's bytes as build_string makes them, decoded with

@@ -1072,6 +1072,11 @@ fn default_directory_and_expansion_match_gnu() {
         r#"(let ((process-environment (cons (string-to-unibyte "HOME=/rt\351h") process-environment))) (mapcar (lambda (r) (list r (multibyte-string-p r) (string-bytes r))) (list (expand-file-name (string-to-unibyte "~/x") (string-to-unibyte "/")) (expand-file-name (string-to-multibyte "~/x") (string-to-multibyte "/")) (expand-file-name "~/é" "/") (expand-file-name (string-to-unibyte "~") "/d/") (expand-file-name (string-to-unibyte "~root/x") (string-to-unibyte "/")))))"#,
         r#"(let ((process-environment (cons "HOME=/rtéh" process-environment))) (mapcar (lambda (r) (list r (multibyte-string-p r))) (list (expand-file-name (string-to-unibyte "~/x") (string-to-unibyte "/")) (expand-file-name (string-to-multibyte "~/x") "/") (expand-file-name "~" "/"))))"#,
         r#"(let ((process-environment (list "HOME" "LOGNAME=root"))) (list (expand-file-name "~") (expand-file-name "~/x")))"#,
+        // get_homedir reads HOME as a C string and takes a relative or empty
+        // HOME from the working directory Emacs started in.
+        r#"(let ((process-environment (cons "HOME=" process-environment))) (list (expand-file-name "~/tmp/victim") (expand-file-name "~") (expand-file-name "~/")))"#,
+        r#"(let ((process-environment (cons "HOME=rel/h" process-environment))) (list (expand-file-name "~/x") (expand-file-name "~")))"#,
+        r#"(let ((process-environment (cons (concat "HOME=/rt" (string 0) "junk") process-environment))) (list (expand-file-name "~/x") (expand-file-name "~")))"#,
         // set-file-modes and set-file-times expand against the buffer's
         // directory explicitly, which a handler sees.
         r#"(progn (setq rt-log nil rt-dir default-directory) (defalias 'rt-rec (lambda (op &rest args) (setq rt-log (cons (cons op args) rt-log)) (if (eq op 'expand-file-name) (concat rt-dir "a") (let ((inhibit-file-name-handlers '(rt-rec)) (inhibit-file-name-operation op)) (apply op args))))) (let ((file-name-handler-alist '(("\\`rt-rel" . rt-rec)))) (list (with-temp-buffer (setq default-directory "rt-rel/") (list (set-file-modes "f" 384) (set-file-times "g" '(0 0)))) (reverse rt-log) (file-modes (concat rt-dir "a")) (time-convert (file-attribute-modification-time (file-attributes (concat rt-dir "a"))) 'integer))))"#,
