@@ -34,7 +34,7 @@ impl Commands {
         // command_event currently consumes complete single events. A private
         // named transport event projects the already resolved full key sequence
         // into that existing command path, without retaining a heap index.
-        vm.eval_source(&format!("(define-key (current-global-map) [romacs-gui-sequence] (key-binding {sequence}))"))?;
+        vm.eval_source(&format!("(define-key (current-global-map) [romacs-gui-sequence] (key-binding {sequence} nil t))"))?;
         vm.command_event(CommandEvent::Named("romacs-gui-sequence".into())).map(Some)
     }
 }

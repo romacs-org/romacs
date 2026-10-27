@@ -11,7 +11,11 @@
 ;; `local-map' properties at point and the local and global maps.  GNU
 ;; computes it in C; Romacs computes it here, in GNU's order.
 ;;
-;; Adapted from GNU src/keymap.c (`current-active-maps',
+;; `key-binding' is GNU's composition over them: the native primitive
+;; consults only the local and global maps, so a bare VM keeps it until
+;; this file replaces it.
+;;
+;; Adapted from GNU src/keymap.c (`current-active-maps', `key-binding',
 ;; `current_minor_maps', `click_position') and src/keyboard.c
 ;; (`posn-point', `menu_item_eval_property').
 
@@ -115,6 +119,45 @@ means to return the active maps for that window's buffer."
             (when (and olp overriding-terminal-local-map)
               (push overriding-terminal-local-map keymaps))))
         keymaps))))
+
+(defun key-binding (key &optional accept-default no-remap position)
+  "Return the binding for command KEY in current keymaps.
+KEY is a string or vector, a sequence of keystrokes.  The binding is
+probably a symbol with a function definition.
+
+Normally, `key-binding' ignores bindings for t, which act as default
+bindings, used when nothing else in the keymap applies; this makes it
+usable as a general function for probing keymaps.  However, if the
+optional second argument ACCEPT-DEFAULT is non-nil, `key-binding' does
+recognize the default bindings, just as `read-key-sequence' does.
+
+Like the normal command loop, `key-binding' will remap the command
+resulting from looking up KEY by looking up the command in the
+current keymaps.  However, if the optional third argument NO-REMAP
+is non-nil, `key-binding' returns the unmapped command.
+
+If KEY is a key sequence initiated with the mouse, the used keymaps
+will depend on the clicked mouse position with regard to the buffer
+and possible local keymaps on strings.
+
+If the optional argument POSITION is non-nil, it specifies a mouse
+position as returned by `event-start' and `event-end', and the lookup
+occurs in the keymaps associated with it instead of KEY.  It can also
+be a number or marker, in which case the keymap properties at the
+specified buffer position instead of point are used."
+  (unless (and (null position) (vectorp key) (= (length key) 0))
+    (when (and (null position) (vectorp key))
+      ;; A mouse click's own position, past a symbolic prefix such as
+      ;; `mode-line'.
+      (let ((event (aref key (if (and (symbolp (aref key 0)) (> (length key) 1)) 1 0))))
+        (when (and (consp event) (consp (cdr event))
+                   (eq (get (car event) 'event-kind) 'mouse-click))
+          (setq position (event-start event)))))
+    (let ((value (lookup-key (current-active-maps t position) key accept-default)))
+      (unless (or (null value) (integerp value))
+        (or (and (null no-remap) (symbolp value)
+                 (command-remapping value position))
+            value)))))
 
 (provide 'romacs-keymap)
 ;;; romacs-keymap.el ends here

@@ -328,6 +328,26 @@ impl Vm {
             Err("Invalid base event".into())
         }
     }
+    /// keyboard.c lucid_event_type_list_p: a proper list of symbols and
+    /// fixnums not headed by a mode-line-like area symbol.
+    fn lucid_event_type_list_p(&self, object: Value) -> bool {
+        let Ok((head, _)) = self.cons_pair(object) else { return false };
+        if ["help-echo", "vertical-line", "mode-line", "tab-line", "header-line"].iter()
+            .any(|name| self.names.get(*name).is_some_and(|&slot| head == Value::reference(slot + 1, 7))) {
+            return false;
+        }
+        let mut tail = object;
+        for _ in 0..=self.list_limit() {
+            match self.cons_pair(tail) {
+                Ok((element, rest)) => {
+                    if element.integer_value().is_none() && element.tag() != 7 && element != Value::NIL && element != Value::TRUE { return false; }
+                    tail = rest;
+                }
+                Err(_) => return tail == Value::NIL,
+            }
+        }
+        false
+    }
     fn key_events(&mut self, sequence: Value) -> Result<Vec<KeyEvent>> {
         let (raw, bytes) = if let Some(view) = self.str_view(sequence) {
             (view.chars().map(|c| Value::integer(c as i64).unwrap()).collect(), !view.is_multibyte())
@@ -338,7 +358,17 @@ impl Vm {
         let mut events = vec![];
         for (input_index, mut event) in raw.into_iter().enumerate() {
             if event.tag() == 3 {
-                event = self.key_event_from_list(event)?;
+                // keymap.c: a modifier list (lucid_event_type_list_p) is
+                // converted; another list, such as a mouse click, stands
+                // for its EVENT_HEAD. A character head would be define-key's
+                // (FROM . TO) range, which VM2 does not store.
+                event = if self.lucid_event_type_list_p(event) {
+                    self.key_event_from_list(event)?
+                } else {
+                    let head = self.cons_pair(event)?.0;
+                    if head.integer_value().is_some() { return Err("character range key events are unsupported".into()); }
+                    head
+                };
             }
             if event.tag() == 7 {
                 event = self.canonical_key_event_symbol(event)?;
