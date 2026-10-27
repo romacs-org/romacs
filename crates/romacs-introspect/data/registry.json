@@ -8,14 +8,14 @@
   "provenance": {
     "generated_by": "romacs-introspect-live",
     "generated_on": "linux-x86_64",
-    "input_hash": "41cbbd50daf15bc8bdb8479ad49cb273a2ad8b4baf5b1a44f09e87987c941b01",
+    "input_hash": "575b8f41855312af24dc6f2cef6bd334d2cee851076f9d2aa62be647323c6572",
     "source_only_at_generation": [],
     "vm2_probe_panics": [],
-    "vm2_universe": 4058
+    "vm2_universe": 4076
   },
   "schema": 2,
   "vm2": {
-    "count": 929,
+    "count": 934,
     "entries": [
       "#:vm2-closure-document",
       "#:vm2-closure-metadata",
@@ -50,6 +50,7 @@
       "acos",
       "active-minibuffer-window",
       "add-face-text-property",
+      "add-name-to-file",
       "add-text-properties",
       "add-variable-watcher",
       "all-completions",
@@ -172,6 +173,7 @@
       "constrain-to-field",
       "copy-alist",
       "copy-category-table",
+      "copy-file",
       "copy-hash-table",
       "copy-keymap",
       "copy-marker",
@@ -272,6 +274,7 @@
       "file-locked-p",
       "file-modes",
       "file-name-absolute-p",
+      "file-name-all-completions",
       "file-name-as-directory",
       "file-name-case-insensitive-p",
       "file-name-directory",
@@ -467,6 +470,7 @@
       "make-sparse-keymap",
       "make-string",
       "make-symbol",
+      "make-symbolic-link",
       "make-temp-file-internal",
       "make-temp-name",
       "make-variable-buffer-local",
@@ -729,6 +733,7 @@
       "set-default",
       "set-default-toplevel-value",
       "set-file-modes",
+      "set-file-times",
       "set-frame-selected-window",
       "set-keyboard-coding-system-internal",
       "set-keymap-parent",

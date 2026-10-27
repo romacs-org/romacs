@@ -854,3 +854,146 @@ fn process_waits_run_timers_like_gnu() {
     let actual: String = serde_json::from_str(&printed).unwrap_or(printed);
     assert_eq!(actual, expected);
 }
+
+// fileio.c Fcopy_file, Fadd_name_to_file, Fmake_symbolic_link and
+// Fset_file_times, dired.c Ffile_name_all_completions, and the files.el
+// callers that reach them, on the loadup chain. Each case runs in DIR, a
+// fresh copy of one fixture; its printed value and DIR afterwards (names,
+// kinds, link targets, contents, modes, link counts and any time not
+// "now") must be pinned GNU's.
+#[test]
+fn file_names_links_and_copies_match_gnu() {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut vm = bootstrapped_with(&root, "rlisp/romacs-loadup-bootstrap.el");
+    let dir = std::env::temp_dir().join(format!("rt-file-links-{}", std::process::id()));
+    const OLD: i64 = 1_000_000_000;
+    let fixture = || {
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("sub")).unwrap();
+        let times = std::fs::FileTimes::new()
+            .set_accessed(std::time::UNIX_EPOCH + std::time::Duration::new(OLD as u64, 500))
+            .set_modified(std::time::UNIX_EPOCH + std::time::Duration::new(OLD as u64, 500));
+        for (name, text, mode) in [("a", "hello", 0o640), ("sub/inner", "inner\n", 0o600), ("Big.TXT", "", 0o644), ("x.elc", "", 0o644)] {
+            std::fs::write(dir.join(name), text).unwrap();
+            std::fs::set_permissions(dir.join(name), std::fs::Permissions::from_mode(mode)).unwrap();
+            std::fs::File::options().write(true).open(dir.join(name)).unwrap().set_times(times).unwrap();
+        }
+        for (target, name) in [("a", "ln"), ("sub", "dl"), ("absent", "dangling")] {
+            std::os::unix::fs::symlink(target, dir.join(name)).unwrap();
+        }
+    };
+    fn snapshot(base: &Path, at: &Path, out: &mut Vec<String>) {
+        let mut entries: Vec<_> = std::fs::read_dir(at).unwrap().map(|e| e.unwrap().path()).collect();
+        entries.sort();
+        for path in entries {
+            let meta = std::fs::symlink_metadata(&path).unwrap();
+            let time = |seconds: i64, nanos: i64| if seconds < 1_500_000_000 { format!("{seconds}.{nanos}") } else { "now".into() };
+            let times = format!("m{} a{}", time(meta.mtime(), meta.mtime_nsec()), time(meta.atime(), meta.atime_nsec()));
+            let name = path.strip_prefix(base).unwrap().display().to_string();
+            if meta.file_type().is_symlink() {
+                out.push(format!("{name} -> {} {times}", std::fs::read_link(&path).unwrap().display()));
+            } else if meta.is_dir() {
+                out.push(format!("{name}/ {:o}", meta.mode() & 0o7777));
+                snapshot(base, &path, out);
+            } else {
+                out.push(format!("{name} {:o} n{} {times} {:?}", meta.mode() & 0o7777, meta.nlink(), std::fs::read_to_string(&path).unwrap()));
+            }
+        }
+    }
+    let cases = [
+        // copy-file
+        r#"(copy-file "a" "b")"#,
+        r#"(copy-file "a" "ln")"#,
+        r#"(copy-file "a" "a" t)"#,
+        r#"(copy-file "absent" "b")"#,
+        r#"(copy-file "sub" "b")"#,
+        r#"(copy-file "a" "sub/")"#,
+        // FILE's last component is expanded under a directory NEWNAME: `~'
+        // names the home directory, which exists (nothing is written).
+        r#"(progn (copy-file "a" "./~") (copy-file "./~" "sub/"))"#,
+        r#"(copy-file "a" "sub" t)"#,
+        r#"(copy-file "a" "nodir/b")"#,
+        r#"(copy-file "a" "dangling" t)"#,
+        r#"(copy-file "ln" "b" nil t)"#,
+        r#"(copy-file "a" "b" 0)"#,
+        r#"(list (copy-file "a" "b") (copy-file "sub/inner" "b" t) (file-modes "b"))"#,
+        r#"(progn (set-file-modes "a" #o751) (copy-file "a" "b" nil nil t))"#,
+        r#"(progn (set-file-modes "a" #o751) (copy-file "a" "b" nil nil nil t))"#,
+        r#"(list (copy-file "a" "b") (copy-file "a" "b" 'yes t nil t) (file-modes "b"))"#,
+        r#"(copy-file 1 "b")"#,
+        r#"(copy-file "a" 1)"#,
+        "(copy-file \"a\\0\" \"b\")",
+        // add-name-to-file
+        r#"(list (add-name-to-file "a" "h") (file-attribute-link-number (file-attributes "a")))"#,
+        r#"(add-name-to-file "a" "ln")"#,
+        r#"(add-name-to-file "sub/inner" "a" t)"#,
+        r#"(add-name-to-file "a" "sub" t)"#,
+        r#"(add-name-to-file "absent" "h")"#,
+        r#"(add-name-to-file "a" "sub/")"#,
+        r#"(add-name-to-file "ln" "h")"#,
+        // make-symbolic-link
+        r#"(list (make-symbolic-link "absent" "l2") (file-symlink-p "l2"))"#,
+        r#"(list (make-symbolic-link "/:/x" "l2") (make-symbolic-link "~/foo" "l3"))"#,
+        r#"(list (make-symbolic-link "/:/x" "l2" 0) (make-symbolic-link "~/foo" "l3" 0) (make-symbolic-link "x/a" "sub/"))"#,
+        r#"(make-symbolic-link "a" "ln")"#,
+        r#"(make-symbolic-link "zz" "ln" t)"#,
+        r#"(make-symbolic-link "zz" "sub" t)"#,
+        r#"(make-symbolic-link "x/.." "sub/")"#,
+        r#"(make-symbolic-link "x/" "sub/")"#,
+        r#"(make-symbolic-link "a" "nodir/l")"#,
+        "(make-symbolic-link \"a\\0b\" \"l2\")",
+        r#"(make-symbolic-link 1 "l2")"#,
+        // set-file-times
+        r#"(list (set-file-times "a" '(1234 . 1)) (file-attribute-modification-time (file-attributes "a")) (file-attribute-access-time (file-attributes "a")))"#,
+        r#"(list (set-file-times "a" 1234.25) (set-file-times "sub/inner" '(0 100 5 7)) (set-file-times "x.elc" -1.5))"#,
+        r#"(list (set-file-times "ln" 777 'nofollow) (set-file-times "dl" 778))"#,
+        r#"(list (set-file-times "a") (< (abs (float-time (time-subtract (file-attribute-modification-time (file-attributes "a")) nil))) 60))"#,
+        r#"(set-file-times "absent" 0)"#,
+        r#"(set-file-times "absent" 'foo)"#,
+        r#"(set-file-times 1 0)"#,
+        // file-name-all-completions
+        r#"(sort (file-name-all-completions "" default-directory) #'string<)"#,
+        // Regexps match with the standard canonical table, not the buffer's.
+        r#"(with-temp-buffer (let ((tbl (copy-case-table (standard-case-table)))) (set-case-syntax-pair ?X ?b tbl) (set-case-table tbl) (let ((completion-ignore-case t) (completion-regexp-list (list "X"))) (sort (file-name-all-completions "" default-directory) #'string<))))"#,
+        r#"(list (file-name-all-completions "s" default-directory) (file-name-all-completions "zz" default-directory) (sort (file-name-all-completions "." "sub") #'string<))"#,
+        r#"(let ((completion-ignore-case t)) (sort (file-name-all-completions "b" default-directory) #'string<))"#,
+        r#"(let ((completion-ignore-case nil)) (file-name-all-completions "b" default-directory))"#,
+        r#"(let ((completion-regexp-list '("^[a-d]" "l"))) (sort (file-name-all-completions "" default-directory) #'string<))"#,
+        r#"(let ((completion-regexp-list '("\\("))) (file-name-all-completions "" default-directory))"#,
+        r#"(file-name-all-completions "" "absent/")"#,
+        r#"(file-name-all-completions "" "a")"#,
+        r#"(list (condition-case e (file-name-all-completions 1 "sub") (error e)) (file-name-all-completions "" 1))"#,
+        // Handlers receive the expanded names and every argument.
+        r#"(progn (defalias 'rt-fh (lambda (op &rest args) (list op args))) (put 'rt-fh 'operations '(copy-file add-name-to-file make-symbolic-link set-file-times file-name-all-completions)) (let ((file-name-handler-alist '(("\\`/rt-fh:" . rt-fh)))) (list (copy-file "/rt-fh:x" "b" 1 2 3 4) (copy-file "a" "/rt-fh:y/") (add-name-to-file "/rt-fh:x" "h" 7) (make-symbolic-link "t" "/rt-fh:z" 7) (set-file-times "/rt-fh:x" 5 'nofollow) (file-name-all-completions "q" "/rt-fh:d/") (file-name-all-completions "/rt-fh:q" "sub"))))"#,
+        // Existing names, by other save-side primitives.
+        r#"(list (condition-case e (make-directory-internal "sub") (error e)) (condition-case e (rename-file "a" "ln") (error e)))"#,
+        // files.el's directory walk. Names are made relative by hand:
+        // `file-relative-name' and `copy-directory' (through `file-truename')
+        // probe every ancestor's case sensitivity, which VM2 refuses when a
+        // shared ancestor changes during the probe.
+        r#"(mapcar (lambda (f) (substring f (length default-directory))) (directory-files-recursively default-directory "" t))"#,
+        r#"(mapcar (lambda (f) (substring f (length default-directory))) (directory-files-recursively default-directory "e" nil nil t))"#,
+    ];
+    let binary = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
+    let directory = format!("{}/", dir.display());
+    let mut failures = Vec::new();
+    for expression in cases {
+        let source = format!("(progn (setq default-directory {directory:?}) (string-to-list (prin1-to-string (condition-case err {expression} (error (list 'signal err))))))");
+        fixture();
+        let output = std::process::Command::new(&binary).args(["-Q", "--batch", "--eval", &format!("(prin1 {source})")]).output().unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        let mut expected = (String::from_utf8(output.stdout).unwrap(), vec![]);
+        snapshot(&dir, &dir, &mut expected.1);
+        fixture();
+        let mut actual = (vm.eval_source(&source).unwrap().display().unwrap(), vec![]);
+        snapshot(&dir, &dir, &mut actual.1);
+        if actual != expected {
+            let text = |codes: &str| codes.trim_matches(|c| c == '(' || c == ')').split_whitespace()
+                .filter_map(|n| n.parse::<u32>().ok().and_then(char::from_u32)).collect::<String>();
+            failures.push(format!("{expression}\n  GNU    {} {:?}\n  Romacs {} {:?}", text(&expected.0), expected.1, text(&actual.0), actual.1));
+        }
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}

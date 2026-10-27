@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "f049811102380e9ebc9c170c97dff94578a4c281731a5611934b16f2155ebb9f",
+  "source_fingerprint": "f292bc1ed7022162cb51720664da5a9b8cb1cf9154f6e70a2f096beb0af7c655",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 921,
-  "parsed_vm2_only": 921
+  "parsed_total": 926,
+  "parsed_vm2_only": 926
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -198,6 +198,11 @@
    "name": "add-face-text-property",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/text_properties.rs:124"
+  },
+  "add-name-to-file": {
+   "name": "add-name-to-file",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:514"
   },
   "add-text-properties": {
    "name": "add-text-properties",
@@ -834,6 +839,11 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/category.rs:67"
   },
+  "copy-file": {
+   "name": "copy-file",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:421"
+  },
   "copy-hash-table": {
    "name": "copy-hash-table",
    "implementation": "vm2",
@@ -924,12 +934,12 @@
   "current-time-string": {
    "name": "current-time-string",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/time.rs:593"
+   "registered_at": "crates/romacs-vm/src/prims/time.rs:599"
   },
   "current-time-zone": {
    "name": "current-time-zone",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/time.rs:601"
+   "registered_at": "crates/romacs-vm/src/prims/time.rs:607"
   },
   "current-window-configuration": {
    "name": "current-window-configuration",
@@ -982,7 +992,7 @@
   "decode-time": {
    "name": "decode-time",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/time.rs:633"
+   "registered_at": "crates/romacs-vm/src/prims/time.rs:639"
   },
   "defalias": {
    "name": "defalias",
@@ -1093,17 +1103,17 @@
   "delete-directory-internal": {
    "name": "delete-directory-internal",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:349"
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:352"
   },
   "delete-file": {
    "name": "delete-file",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:130"
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:135"
   },
   "delete-file-internal": {
    "name": "delete-file-internal",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:338"
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:341"
   },
   "delete-other-windows-internal": {
    "name": "delete-other-windows-internal",
@@ -1141,12 +1151,12 @@
   "directory-files": {
    "name": "directory-files",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filename.rs:28"
+   "registered_at": "crates/romacs-vm/src/prims/filename.rs:40"
   },
   "directory-name-p": {
    "name": "directory-name-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filename.rs:166"
+   "registered_at": "crates/romacs-vm/src/prims/filename.rs:230"
   },
   "display-supports-face-attributes-p": {
    "name": "display-supports-face-attributes-p",
@@ -1202,7 +1212,7 @@
   "encode-time": {
    "name": "encode-time",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/time.rs:744"
+   "registered_at": "crates/romacs-vm/src/prims/time.rs:750"
   },
   "end-of-line": {
    "name": "end-of-line",
@@ -1346,12 +1356,12 @@
   "file-executable-p": {
    "name": "file-executable-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:267"
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:270"
   },
   "file-exists-p": {
    "name": "file-exists-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:264"
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:267"
   },
   "file-locked-p": {
    "name": "file-locked-p",
@@ -1361,12 +1371,17 @@
   "file-modes": {
    "name": "file-modes",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:162"
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:167"
   },
   "file-name-absolute-p": {
    "name": "file-name-absolute-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filename.rs:144"
+   "registered_at": "crates/romacs-vm/src/prims/filename.rs:208"
+  },
+  "file-name-all-completions": {
+   "name": "file-name-all-completions",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/filename.rs:87"
   },
   "file-name-as-directory": {
    "name": "file-name-as-directory",
@@ -1391,12 +1406,12 @@
   "file-readable-p": {
    "name": "file-readable-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:270"
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:273"
   },
   "file-regular-p": {
    "name": "file-regular-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:273"
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:276"
   },
   "file-symlink-p": {
    "name": "file-symlink-p",
@@ -1411,7 +1426,7 @@
   "file-writable-p": {
    "name": "file-writable-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:145"
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:150"
   },
   "fillarray": {
    "name": "fillarray",
@@ -1447,7 +1462,7 @@
   "float-time": {
    "name": "float-time",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/time.rs:685"
+   "registered_at": "crates/romacs-vm/src/prims/time.rs:691"
   },
   "floatp": {
    "name": "floatp",
@@ -1494,7 +1509,7 @@
   "format-time-string": {
    "name": "format-time-string",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/time.rs:581"
+   "registered_at": "crates/romacs-vm/src/prims/time.rs:587"
   },
   "forward-char": {
    "name": "forward-char",
@@ -2288,7 +2303,7 @@
   "make-directory-internal": {
    "name": "make-directory-internal",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:121"
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:126"
   },
   "make-frame-invisible": {
    "name": "make-frame-invisible",
@@ -2373,15 +2388,20 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/widen.rs:19"
   },
+  "make-symbolic-link": {
+   "name": "make-symbolic-link",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:529"
+  },
   "make-temp-file-internal": {
    "name": "make-temp-file-internal",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:296"
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:299"
   },
   "make-temp-name": {
    "name": "make-temp-name",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:225"
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:228"
   },
   "make-variable-buffer-local": {
    "name": "make-variable-buffer-local",
@@ -3196,7 +3216,7 @@
   "rename-file": {
    "name": "rename-file",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:187"
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:192"
   },
   "replace-match": {
    "name": "replace-match",
@@ -3738,7 +3758,12 @@
   "set-file-modes": {
    "name": "set-file-modes",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:176"
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:181"
+  },
+  "set-file-times": {
+   "name": "set-file-times",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:558"
   },
   "set-frame-selected-window": {
    "name": "set-frame-selected-window",
@@ -3825,7 +3850,7 @@
   "set-time-zone-rule": {
    "name": "set-time-zone-rule",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/time.rs:919"
+   "registered_at": "crates/romacs-vm/src/prims/time.rs:925"
   },
   "set-visited-file-modtime": {
    "name": "set-visited-file-modtime",
@@ -4217,7 +4242,7 @@
   "substitute-in-file-name": {
    "name": "substitute-in-file-name",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filename.rs:77"
+   "registered_at": "crates/romacs-vm/src/prims/filename.rs:141"
   },
   "substring": {
    "name": "substring",
@@ -4369,27 +4394,27 @@
   "time-add": {
    "name": "time-add",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/time.rs:335"
+   "registered_at": "crates/romacs-vm/src/prims/time.rs:341"
   },
   "time-convert": {
    "name": "time-convert",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/time.rs:244"
+   "registered_at": "crates/romacs-vm/src/prims/time.rs:250"
   },
   "time-equal-p": {
    "name": "time-equal-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/time.rs:373"
+   "registered_at": "crates/romacs-vm/src/prims/time.rs:379"
   },
   "time-less-p": {
    "name": "time-less-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/time.rs:368"
+   "registered_at": "crates/romacs-vm/src/prims/time.rs:374"
   },
   "time-subtract": {
    "name": "time-subtract",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/time.rs:338"
+   "registered_at": "crates/romacs-vm/src/prims/time.rs:344"
   },
   "translate-region-internal": {
    "name": "translate-region-internal",
