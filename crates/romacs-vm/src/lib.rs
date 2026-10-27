@@ -42,6 +42,8 @@ use std::sync::Arc;
 mod code_image;
 mod sqlite;
 mod random;
+mod posix_tz;
+mod tzfile;
 mod gc;
 mod handle;
 pub use handle::{Arg, Fixed, Local, Rooted};
@@ -1131,6 +1133,11 @@ pub struct Vm {
     cell_pairs: HashMap<usize, Value>,
     /// fns.c `random's generator, seeded from entropy as at GNU startup.
     random: random::Random,
+    /// glibc's localtime_offset: the last mktime result's difference from
+    /// its local time, where the next encode-time starts its search.
+    mktime_offset: i64,
+    /// glibc's rule_dstoff, which __tzfile_default lends a rule-less TZ.
+    tz_rule_dstoff: i64,
     conses: Vec<(Value, Value)>,
     objects: Vec<data::Object>,
     caches: Vec<Cache>,
@@ -1241,6 +1248,8 @@ impl Vm {
             cells: vec![],
             cell_pairs: HashMap::default(),
             random: random::Random::from_entropy(),
+            mktime_offset: 0,
+            tz_rule_dstoff: 0,
             conses: vec![],
             objects: vec![],
             caches: vec![],

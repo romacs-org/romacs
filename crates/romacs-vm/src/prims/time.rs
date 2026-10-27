@@ -394,95 +394,74 @@ fn numeric_zone(offset: i64) -> Zone {
         else { format!("{sign}{:02}{:02}{:02}", n/3600,n/60%60,n%60) };
     Zone { offset, name, dst: false }
 }
-// Fixed POSIX rules only. DST rules require the TZif transition table below.
-fn fixed_rule(rule: &str) -> Option<Zone> {
-    let (name, tail) = if let Some(s) = rule.strip_prefix('<') {
-        let end = s.find('>')?; (&s[..end], &s[end+1..])
-    } else {
-        let end = rule.find(|c: char| !c.is_ascii_alphabetic()).unwrap_or(rule.len());
-        (&rule[..end], &rule[end..])
-    };
-    if name.len() < 3 { return None; }
-    let (sign, tail) = if let Some(t) = tail.strip_prefix('-') { (-1, t) }
-        else { (1, tail.strip_prefix('+').unwrap_or(tail)) };
-    let mut components = tail.split(':');
-    let h: i64 = components.next()?.parse().ok()?;
-    let m: i64 = components.next().map(str::parse).transpose().ok()?.unwrap_or(0);
-    let s: i64 = components.next().map(str::parse).transpose().ok()?.unwrap_or(0);
-    if components.next().is_some() || !(0..=24).contains(&h) || !(0..=59).contains(&m) || !(0..=59).contains(&s) { return None; }
-    Some(Zone { offset: -sign*(h*3600+m*60+s), name: name.into(), dst: false })
+fn zone(cx: &mut Leaf<'_>, value: Value, seconds: i64) -> std::result::Result<Zone, Fault> {
+    zone_rule(cx, value)?.at(seconds)
 }
-fn tzif(bytes: &[u8], seconds: i64) -> Option<Zone> {
-    fn counts(b: &[u8], at: usize) -> Option<[usize; 6]> {
-        if b.get(at..at+4)? != b"TZif" { return None; }
-        let mut out = [0;6];
-        for (i, n) in out.iter_mut().enumerate() { *n = u32::from_be_bytes(b.get(at+20+i*4..at+24+i*4)?.try_into().ok()?) as usize; }
-        Some(out)
-    }
-    fn size(c: [usize;6], width: usize) -> Option<usize> {
-        c[3].checked_mul(width+1)?.checked_add(c[4].checked_mul(6)?)?
-            .checked_add(c[5])?.checked_add(c[2].checked_mul(width+4)?)?.checked_add(c[1])?.checked_add(c[0])
-    }
-    let first = counts(bytes, 0)?;
-    let (start, width, c) = if bytes[4] == b'2' || bytes[4] == b'3' || bytes[4] == b'4' {
-        let start = 44usize.checked_add(size(first, 4)?)?;
-        (start+44, 8, counts(bytes, start)?)
-    } else { (44, 4, first) };
-    // Reject leap-second tables rather than misinterpreting their timescale.
-    if c[2] != 0 || c[4] == 0 { return None; }
-    let end = start.checked_add(size(c, width)?)?;
-    bytes.get(..end)?;
-    let mut selected = 0usize;
-    let mut last = None;
-    for i in 0..c[3] {
-        let at = start+i*width;
-        let time = if width == 8 { i64::from_be_bytes(bytes[at..at+8].try_into().ok()?) }
-            else { i32::from_be_bytes(bytes[at..at+4].try_into().ok()?) as i64 };
-        if time <= seconds { selected = *bytes.get(start+c[3]*width+i)? as usize; }
-        last = Some(time);
-    }
-    // A non-fixed POSIX footer defines future transitions not represented above.
-    if last.is_some_and(|t| seconds > t) && width == 8 {
-        let tail = std::str::from_utf8(bytes.get(end..)?).ok()?.trim_matches('\n');
-        if !tail.is_empty() {
-            if let Some(z) = fixed_rule(tail) { return Some(z); }
-            return None;
+/// tzlookup: a zone fixed at one offset, or a TZif file's transitions.
+enum ZoneRule { Fixed(Zone), Posix(crate::posix_tz::PosixTz), Tzif(crate::tzfile::TzFile) }
+impl ZoneRule {
+    fn at(&self, seconds: i64) -> std::result::Result<Zone, Fault> {
+        match self {
+            ZoneRule::Fixed(zone) => Ok(zone.clone()),
+            ZoneRule::Posix(tz) => Ok(posix_zone(tz.at(seconds))),
+            ZoneRule::Tzif(file) => file.at(seconds).map(posix_zone).ok_or_else(|| Fault::Error("VM2 unsupported TZif rule or timestamp".into())),
         }
     }
-    if selected >= c[4] { return None; }
-    let at = start+c[3]*(width+1)+selected*6;
-    let offset = i32::from_be_bytes(bytes[at..at+4].try_into().ok()?) as i64;
-    let names = start+c[3]*(width+1)+c[4]*6;
-    let name_at = bytes[at+5] as usize;
-    let name_bytes = bytes.get(names+name_at..names+c[5])?;
-    let end = name_bytes.iter().position(|&b| b == 0)?;
-    Some(Zone { offset, name: std::str::from_utf8(&name_bytes[..end]).ok()?.into(), dst: bytes[at+4] != 0 })
 }
-fn zone(cx: &mut Leaf<'_>, value: Value, seconds: i64) -> std::result::Result<Zone, Fault> {
-    if value == Value::TRUE { return Ok(numeric_zone(0)); }
-    if let Some(n) = value.integer_value() { return Ok(numeric_zone(n)); }
+fn zone_rule(cx: &mut Leaf<'_>, value: Value) -> std::result::Result<ZoneRule, Fault> {
+    if value == Value::TRUE { return Ok(ZoneRule::Fixed(numeric_zone(0))); }
+    if let Some(n) = value.integer_value() { return Ok(ZoneRule::Fixed(numeric_zone(n))); }
     if let Some((offset, tail)) = cx.pair(value) {
         if let (Some(n), Some((name, _))) = (offset.integer_value(), cx.pair(tail)) {
             let name = cx.string_text(name).map_err(|_| Fault::Wrong("sequencep", name))?;
-            return Ok(Zone { offset: n, name, dst: false });
+            // tzlookup hands glibc "<NAME>[-]H:MM:SS".
+            let a = n.unsigned_abs();
+            let rule = format!("<{name}>{}{}:{:02}:{:02}", if n < 0 { "" } else { "-" }, a / 3600, a / 60 % 60, a % 60);
+            return Ok(ZoneRule::Posix(crate::posix_tz::PosixTz::parse(&rule)));
         }
         return Err(zone_fault(cx, value));
     }
     let wall = cx.symbol_name(value).ok().as_deref() == Some("wall");
     let rule = if value == Value::NIL { std::env::var("TZ").ok() }
         else if wall { None } else { Some(cx.string_text(value).map_err(|_| zone_fault(cx, value))?) };
-    if let Some(rule) = rule.as_deref() {
-        if rule.is_empty() { return Ok(Zone { offset: 0, name: "UTC".into(), dst: false }); }
-        if let Some(z) = fixed_rule(rule) { return Ok(z); }
-    }
-    let path = match rule.as_deref().map(|r| r.strip_prefix(':').unwrap_or(r)) {
+    // tzset_internal: the empty string is UTC; a leading colon is ignored;
+    // a readable zone file wins; with no file, nothing or the default file
+    // is UTC, and any other string is a POSIX rule.
+    let utc = || ZoneRule::Fixed(Zone { offset: 0, name: "UTC".into(), dst: false });
+    let rule = rule.as_deref().map(|r| r.strip_prefix(':').unwrap_or(r));
+    if rule == Some("") { return Ok(utc()); }
+    let path = match rule {
         None => std::path::PathBuf::from("/etc/localtime"),
         Some(r) if r.starts_with('/') => std::path::PathBuf::from(r),
-        Some(r) => std::path::PathBuf::from("/usr/share/zoneinfo").join(r),
+        Some(r) => std::path::PathBuf::from(ZONEINFO).join(r),
     };
-    let bytes = std::fs::read(path).map_err(|_| zone_fault(cx, value))?;
-    tzif(&bytes, seconds).ok_or_else(|| Fault::Error("VM2 unsupported TZif rule or timestamp".into()))
+    match std::fs::read(&path) {
+        Ok(bytes) if bytes.starts_with(b"TZif") => {
+            let file = crate::tzfile::TzFile::parse(&bytes)
+                .ok_or_else(|| Fault::Error("VM2 unsupported TZif rule or timestamp".into()))?;
+            let retained = cx.tz_rule_dstoff();
+            cx.set_tz_rule_dstoff(file.rule_dstoff(retained));
+            Ok(ZoneRule::Tzif(file))
+        }
+        _ => {
+            let Some(rule) = rule else { return Ok(utc()) };
+            let posix = crate::posix_tz::PosixTz::parse(rule);
+            if posix.ruleless && let Some((std, dst)) = posix.zones()
+                && let Some(rules) = std::fs::read(std::path::Path::new(ZONEINFO).join("posixrules")).ok()
+                    .and_then(|bytes| crate::tzfile::TzFile::parse(&bytes)) {
+                let retained = cx.tz_rule_dstoff();
+                cx.set_tz_rule_dstoff(rules.rule_dstoff(retained));
+                if let Some(file) = rules.with_default(std, dst, retained) {
+                    cx.set_tz_rule_dstoff(dst.offset);
+                    return Ok(ZoneRule::Tzif(file));
+                }
+            }
+            Ok(ZoneRule::Posix(posix))
+        }
+    }
 }
+const ZONEINFO: &str = "/usr/share/zoneinfo";
+fn posix_zone(local: crate::posix_tz::Local) -> Zone { Zone { offset: local.offset, name: local.name, dst: local.dst } }
 struct Calendar { year: i64, month: i64, day: i64, hour: i64, minute: i64, second: i64, weekday: i64, yearday: i64, days: i64 }
 fn civil_days(year: i64, month: i64, day: i64) -> i64 {
     let y = year - i64::from(month <= 2);
@@ -616,7 +595,14 @@ fn current_time_zone(cx; optional time: Value, tz: Value) {
     let seconds=stamp(cx,time,true)?.seconds()?;
     let z=zone(cx,tz,seconds)?;
     calendar(seconds,z.offset)?;
-    let name=cx.string(&z.name);
+    // With no abbreviation, the name is the numeric offset: +HH[MM[SS]].
+    let name = if z.name.is_empty() {
+        let n = z.offset.unsigned_abs();
+        let mut name = format!("{}{:02}", if z.offset < 0 { '-' } else { '+' }, n / 3600);
+        if n % 3600 != 0 { name += &format!("{:02}", n / 60 % 60); if n % 60 != 0 { name += &format!("{:02}", n % 60); } }
+        name
+    } else { z.name.clone() };
+    let name=cx.string(&name);
     let tail=cx.cons(name,Value::NIL);
     let offset=cx.bigint(z.offset.into());
     Ok(cx.cons(offset,tail))
@@ -693,6 +679,125 @@ fn float_time(cx; optional time: Value) {
     if cx.float_value(time).is_ok() {return Ok(time);}
     let s=stamp(cx,time,false)?;
     Ok(cx.float(stamp_float(s)))
+}}
+
+/// check_tm_member: a fixnum, less OFFSET, as a C int.
+fn tm_member(value: Value, offset: i64) -> std::result::Result<i64, Fault> {
+    let n = value.integer_value().ok_or(Fault::Wrong("fixnump", value))?;
+    let member = n.checked_sub(offset).ok_or_else(time_overflow)?;
+    i32::try_from(member).map(i64::from).map_err(|_| time_overflow())
+}
+
+/// __mktime_internal (gnulib/glibc mktime.c) for a zone: the time whose
+/// local time in RULE is LOCAL (seconds since the epoch as if in UTC).
+/// It starts from OFFSET, the previous result's difference, which it
+/// updates as glibc's per-process localtime_offset; a spring-forward gap
+/// prefers the time whose DST flag differs from ISDST (-1: the DST one), and
+/// a mismatched ISDST borrows the offset of a time within a year that has
+/// it, or else moves the time by an hour.
+fn mktime(rule: &ZoneRule, local: i64, isdst: i64, offset: &mut i64) -> std::result::Result<i64, Fault> {
+    let t0 = local.checked_add(*offset).ok_or_else(time_overflow)?;
+    let (mut t, mut t1, mut t2, mut dst2) = (t0, t0, t0, false);
+    let mut zone = rule.at(t)?;
+    let mut probes = 6;
+    loop {
+        let dt = local - t.checked_add(zone.offset).ok_or_else(time_overflow)?;
+        if dt == 0 { break; }
+        let gap = if isdst < 0 { dst2 <= zone.dst } else { (isdst != 0) != zone.dst };
+        if t == t1 && t != t2 && gap {
+            *offset = t - local;
+            return Ok(t);
+        }
+        probes -= 1;
+        if probes == 0 { return Err(time_overflow()); }
+        (t1, t2, t, dst2) = (t2, t, t.checked_add(dt).ok_or_else(time_overflow)?, zone.dst);
+        zone = rule.at(t)?;
+    }
+    if isdst >= 0 && (isdst != 0) != zone.dst {
+        const STRIDE: i64 = 601_200;
+        const BOUND: i64 = 366 * 24 * 60 * 60 + 1 + STRIDE;
+        let found = 'probe: {
+            for delta in (STRIDE..BOUND).step_by(STRIDE as usize) {
+                for direction in [-1, 1] {
+                    let other = rule.at(t + delta * direction)?;
+                    if other.dst == (isdst != 0) { break 'probe Some(local - other.offset); }
+                }
+            }
+            None
+        };
+        // With no such time nearby, glibc (2.44 on the reference host)
+        // takes daylight saving as one hour ahead of standard time.
+        t = found.unwrap_or_else(|| t + 3600 * (i64::from(zone.dst) - i64::from(isdst != 0)));
+    }
+    *offset = t - local;
+    Ok(t)
+}
+
+defsubr! { name = "encode-time", gnu = "timefns.c:1657", effect = Global,
+fn encode_time(cx, time: Value; rest args) {
+    let nargs = 1 + args.len();
+    let (mut zone, mut isdst) = (Value::NIL, -1i64);
+    let fields = if nargs == 1 {
+        let mut fields = [Value::NIL; 6];
+        let mut tail = time;
+        for field in &mut fields {
+            let (car, cdr) = cx.pair(tail).ok_or(Fault::Wrong("consp", tail))?;
+            *field = car;
+            tail = cdr;
+        }
+        if tail != Value::NIL {
+            let (_, rest) = cx.pair(tail).ok_or(Fault::Wrong("consp", tail))?;
+            let (dst, rest2) = cx.pair(rest).ok_or(Fault::Wrong("consp", rest))?;
+            let (z, _) = cx.pair(rest2).ok_or(Fault::Wrong("consp", rest2))?;
+            zone = z;
+            if cx.kind(dst) == Kind::Symbol && z.integer_value().is_none() && cx.pair(z).is_none() {
+                isdst = i64::from(dst != Value::NIL);
+            }
+        }
+        fields
+    } else if nargs < 6 {
+        let name = cx.intern("encode-time");
+        return Err(Fault::WrongNumberOfArguments(name, Value::integer(nargs as i64).unwrap()));
+    } else {
+        if nargs > 6 { zone = args[args.len() - 1]; }
+        [time, args[0], args[1], args[2], args[3], args[4]]
+    };
+    // SEC is floor (TICKS / HZ); the remainder rides along in the result.
+    let stamp = exact_stamp(cx, fields[0])?;
+    let seconds = floor_ratio(stamp.ticks.clone(), &stamp.hz);
+    let subseconds = &stamp.ticks - &seconds * &stamp.hz;
+    let second = match i64::try_from(&seconds).ok().and_then(|n| Value::integer(n).ok()) {
+        Some(value) => tm_member(value, 0)?,
+        None => { let value = cx.bigint(seconds); return Err(Fault::Wrong("fixnump", value)); }
+    };
+    let (minute, hour, day) = (tm_member(fields[1], 0)?, tm_member(fields[2], 0)?, tm_member(fields[3], 0)?);
+    let (month, year) = (tm_member(fields[4], 1)?, tm_member(fields[5], 1900)?);
+    // Out-of-range members are carried by date arithmetic, as mktime does;
+    // seconds outside 0..59 are searched clamped and added back after.
+    let year = year + 1900 + month.div_euclid(12);
+    let days = civil_days(year, month.rem_euclid(12) + 1, 1) + day - 1;
+    let clamped = second.clamp(0, 59);
+    let local = days.checked_mul(86400).and_then(|s| s.checked_add(hour * 3600 + minute * 60 + clamped)).ok_or_else(time_overflow)?;
+    let utc = zone == Value::TRUE || zone.integer_value() == Some(0);
+    let rule = zone_rule(cx, zone)?;
+    // mktime_z runs timegm for UTC, which keeps its own offset guess.
+    let mut offset = if utc { 0 } else { cx.mktime_offset() };
+    let value = mktime(&rule, local, if utc { -1 } else { isdst }, &mut offset)?;
+    if !utc { cx.set_mktime_offset(offset); }
+    let value = value.checked_add(second - clamped).ok_or_else(time_overflow)?;
+    calendar(value, rule.at(value)?.offset)?;
+    if stamp.hz == num_bigint::BigInt::from(1) {
+        if list_time_output(cx)? {
+            let high = cx.bigint(value.div_euclid(65536).into());
+            let low = Value::integer(value.rem_euclid(65536)).unwrap();
+            let tail = cx.cons(low, Value::NIL);
+            return Ok(cx.cons(high, tail));
+        }
+        return Ok(cx.bigint(value.into()));
+    }
+    let ticks = cx.bigint(num_bigint::BigInt::from(value) * &stamp.hz + subseconds);
+    let hz = match stamp.identity { FrequencyIdentity::Lisp(hz) => hz, FrequencyIdentity::FloatPower(_) => cx.bigint(stamp.hz) };
+    Ok(cx.cons(ticks, hz))
 }}
 
 #[cfg(test)]

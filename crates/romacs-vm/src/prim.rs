@@ -203,6 +203,10 @@ mod leaf {
             self.vm.doc_file = Some((path.to_path_buf(), modified, bytes.clone()));
             Some(bytes)
         }
+        pub(crate) fn mktime_offset(&self) -> i64 { self.vm.mktime_offset }
+        pub(crate) fn set_mktime_offset(&mut self, offset: i64) { self.vm.mktime_offset = offset; }
+        pub(crate) fn tz_rule_dstoff(&self) -> i64 { self.vm.tz_rule_dstoff }
+        pub(crate) fn set_tz_rule_dstoff(&mut self, offset: i64) { self.vm.tz_rule_dstoff = offset; }
         pub(crate) fn symbol_slot_of(&self, v: Value) -> std::result::Result<usize, Fault> {
             self.symbol_slot(v)
         }
