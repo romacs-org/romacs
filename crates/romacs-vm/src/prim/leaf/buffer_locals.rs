@@ -90,13 +90,14 @@ impl Leaf<'_> {
             if self.vm.local_binding_slots.contains(&slot) || self.vm.indirect_variable(slot) != slot { continue; }
             let symbol = Value::reference(slot + 1, 7);
             if !self.has_buffer_local(symbol, buffer)? { continue; }
+            let file_coding = self.vm.names.get("buffer-file-coding-system") == Some(&slot);
             if let Some(Fwd::Buffer(_)) = self.vm.forwarding(slot) {
-                self.clear_local_slot(slot, buffer)?;
+                // buffer_permanent_local_flags (buffer.c:4811).
+                if !(file_coding && kill_permanent == Value::NIL) { self.clear_local_slot(slot, buffer)?; }
                 continue;
             }
             let property = self.vm.symbol_property(symbol, permanent).map_err(Fault::Error)?;
-            let builtin_permanent = slot == self.vm.truncate_lines_slot
-                || self.vm.names.get("buffer-file-coding-system") == Some(&slot);
+            let builtin_permanent = slot == self.vm.truncate_lines_slot || file_coding;
             if kill_permanent == Value::NIL && (property != Value::NIL || builtin_permanent) {
                 if property == permanent_hook {
                     let value = match self.buffer_local_read(symbol, buffer) {

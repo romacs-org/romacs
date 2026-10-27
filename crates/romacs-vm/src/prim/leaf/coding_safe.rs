@@ -5,20 +5,22 @@ use crate::coordinates::CharOffset;
 use crate::data::Object;
 
 impl Leaf<'_> {
-    /// get_translation_table (ATTRS, true): the coding system's encode
-    /// table, with symbols read through their `translation-table'
-    /// property, then the standard one; nil when translation is off.
-    fn coding_encode_translation(&mut self, attrs: Value) -> std::result::Result<Vec<Value>, Fault> {
+    /// get_translation_table (ATTRS, true) as translate_char applies it: its
+    /// char-tables in order, none when translation is off. A nil own table
+    /// leaves the standard value as it is; otherwise the own table (a symbol
+    /// read through its `translation-table' property, or a list whose symbol
+    /// elements are) comes first, then the standard one if a char-table.
+    pub(crate) fn coding_encode_translation(&mut self, attrs: Value) -> std::result::Result<Vec<Value>, Fault> {
         let enabled = self.intern("enable-character-translation");
         if self.variable_value(enabled)?.unwrap_or(Value::NIL) == Value::NIL { return Ok(Vec::new()); }
         let standard = self.intern("standard-translation-table-for-encode");
         let standard = self.variable_value(standard)?.unwrap_or(Value::NIL);
         let own = self.vector_get(attrs, Value::integer(7).expect("index"))?;
         let property = self.intern("translation-table");
-        let mut tables = Vec::new();
-        let mut table_of = |leaf: &mut Self, v: Value| -> std::result::Result<Value, Fault> {
+        let table_of = |leaf: &mut Self, v: Value| -> std::result::Result<Value, Fault> {
             if leaf.kind(v) == Kind::Symbol && v != Value::NIL { leaf.vm.symbol_property(v, property).map_err(Fault::Error) } else { Ok(v) }
         };
+        let mut tables = Vec::new();
         if own == Value::NIL {
             tables.push(standard);
         } else {
@@ -29,7 +31,22 @@ impl Leaf<'_> {
             }
             if self.kind(standard) == Kind::CharTable { tables.push(standard); }
         }
-        Ok(tables.into_iter().filter(|&t| self.kind(t) == Kind::CharTable).collect())
+        let mut out = Vec::new();
+        let mut seen = HashSet::default();
+        for table in tables { self.translation_char_tables(table, &mut seen, &mut out)?; }
+        Ok(out)
+    }
+    /// translate_char's walk: a char-table, or the tables of each element
+    /// of a list; anything else translates nothing.
+    fn translation_char_tables(&self, table: Value, seen: &mut HashSet<u64>, out: &mut Vec<Value>) -> std::result::Result<(), Fault> {
+        if self.kind(table) == Kind::CharTable { out.push(table); return Ok(()); }
+        let mut tail = table;
+        while let Some((car, cdr)) = self.pair(tail) {
+            if !seen.insert(tail.0) { return Err(Fault::Circular(table)); }
+            self.translation_char_tables(car, seen, out)?;
+            tail = cdr;
+        }
+        Ok(())
     }
     /// char_encodable_p: some charset of the coding system encodes C after
     /// translation (CHAR_CHARSET_P is encodability).

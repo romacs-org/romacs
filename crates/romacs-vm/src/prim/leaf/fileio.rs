@@ -273,17 +273,21 @@ impl Leaf<'_> {
         Ok(inserted)
     }
 
-    /// The UTF-8 bytes of characters FROM..TO (1-based, FROM <= TO, already
-    /// validated against the widened buffer) of the current multibyte buffer.
+    /// The bytes of characters FROM..TO (1-based, FROM <= TO, already
+    /// validated against the widened buffer) of the current buffer: the
+    /// internal UTF-8 of a multibyte buffer, the octets of a unibyte one.
     pub fn buffer_text_bytes(&mut self, from: i64, to: i64) -> std::result::Result<Vec<u8>, Fault> {
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
-        let data::Object::Buffer(t) = &self.vm.objects[index] else {
-            return Err(Fault::Error("VM2 write-region from a unibyte buffer is unsupported".into()));
-        };
         let char_of = |p: i64| CharOffset((p - 1).max(0) as usize);
-        let a: ByteOffset = t.byte_of_char(char_of(from)).map_err(Fault::Error)?;
-        let b: ByteOffset = t.byte_of_char(char_of(to)).map_err(Fault::Error)?;
-        Ok(t.bytes()[a.0..b.0].to_vec())
+        match &self.vm.objects[index] {
+            data::Object::Buffer(t) => {
+                let a: ByteOffset = t.byte_of_char(char_of(from)).map_err(Fault::Error)?;
+                let b: ByteOffset = t.byte_of_char(char_of(to)).map_err(Fault::Error)?;
+                Ok(t.bytes()[a.0..b.0].to_vec())
+            }
+            data::Object::ByteBuffer(b) => Ok(b.bytes[char_of(from).0..char_of(to).0].to_vec()),
+            _ => Err(Fault::Error("buffer required".into())),
+        }
     }
 
     /// GNU `Ffboundp`: the function cell is not void.

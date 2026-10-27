@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "bf1736114e62803dc0e5fcadc0c274a844c525e7f6d56779e7467fcbf23910b1",
+  "source_fingerprint": "7e3bef64be623a3440a1bde0186c87ec1319d7107ff7d2386f06852c1833efb1",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 840,
-  "parsed_vm2_only": 840
+  "parsed_total": 843,
+  "parsed_vm2_only": 843
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -1420,7 +1420,7 @@
   "find-file-name-handler": {
    "name": "find-file-name-handler",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:792"
+   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:829"
   },
   "find-operation-coding-system": {
    "name": "find-operation-coding-system",
@@ -2179,7 +2179,7 @@
   "locate-file-internal": {
    "name": "locate-file-internal",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:651"
+   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:688"
   },
   "locate-library": {
    "name": "locate-library",
@@ -3150,6 +3150,16 @@
    "variant": "Primitive::ReadHostEvent",
    "registered_at": "crates/romacs-vm/src/lib.rs:757"
   },
+  "romacs--restore-restriction": {
+   "name": "romacs--restore-restriction",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/special_forms.rs:84"
+  },
+  "romacs--save-restriction": {
+   "name": "romacs--save-restriction",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/special_forms.rs:81"
+  },
   "romacs--secure-hash": {
    "name": "romacs--secure-hash",
    "implementation": "vm2",
@@ -3184,6 +3194,11 @@
    "name": "romacs--term-send",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/terminal.rs:8"
+  },
+  "romacs--write-region-body": {
+   "name": "romacs--write-region-body",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:576"
   },
   "romacs-find-buffer-visiting": {
    "name": "romacs-find-buffer-visiting",
@@ -3548,7 +3563,7 @@
   "setq": {
    "name": "setq",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/special_forms.rs:79"
+   "registered_at": "crates/romacs-vm/src/prims/special_forms.rs:87"
   },
   "signal": {
    "name": "signal",
@@ -4075,7 +4090,7 @@
   "unwind-protect": {
    "name": "unwind-protect",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/special_forms.rs:82"
+   "registered_at": "crates/romacs-vm/src/prims/special_forms.rs:90"
   },
   "upcase": {
    "name": "upcase",
@@ -4167,7 +4182,7 @@
   "while": {
    "name": "while",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/special_forms.rs:85"
+   "registered_at": "crates/romacs-vm/src/prims/special_forms.rs:93"
   },
   "widen": {
    "name": "widen",

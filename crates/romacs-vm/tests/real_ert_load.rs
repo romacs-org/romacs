@@ -81,6 +81,141 @@ fn charset_coding_systems_match_gnu() {
     assert_eq!(actual, expected);
 }
 
+// fileio.c choose_write_coding_system and the encoding after it, on the
+// loadup chain's coding systems: the value and the bytes written must be
+// pinned GNU's. Each case writes the file FILE, named by its extension.
+#[test]
+fn write_region_coding_matches_gnu() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut vm = bootstrapped_with(&root, "rlisp/romacs-loadup-bootstrap.el");
+    let dir = std::env::temp_dir().join(format!("rt-write-coding-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let cases: [(&str, &str); 23] = [
+        ("txt", r#"(with-temp-buffer (insert "héllo\n") (list (write-region nil nil FILE) last-coding-system-used))"#),
+        // file-coding-system-alist's prefer-utf-8, then select-safe-coding-system.
+        ("el", r#"(with-temp-buffer (insert "λ x\n") (write-region nil nil FILE) last-coding-system-used)"#),
+        ("bin", r#"(with-temp-buffer (set-buffer-multibyte nil) (insert "h\351\n") (write-region nil nil FILE) last-coding-system-used)"#),
+        ("txt", r#"(let ((coding-system-for-write 'latin-1)) (write-region "café\n" nil FILE) last-coding-system-used)"#),
+        ("txt", r#"(with-temp-buffer (setq buffer-file-coding-system 'utf-8-dos) (insert "a\nb") (write-region nil nil FILE) last-coding-system-used)"#),
+        ("txt", r#"(with-temp-buffer (setq buffer-file-coding-system 'latin-1) (insert "é") (write-region nil nil FILE) (list last-coding-system-used (local-variable-p 'buffer-file-coding-system)))"#),
+        // A nil START widens: the whole buffer, the restriction kept.
+        ("txt", r#"(with-temp-buffer (insert "xéyz") (narrow-to-region 2 3) (write-region nil nil FILE) (list last-coding-system-used (point-min) (point-max)))"#),
+        ("txt", r#"(with-temp-buffer (insert "été") (let ((coding-system-for-write 'utf-8)) (write-region 2 2 FILE)) last-coding-system-used)"#),
+        ("txt", r#"(progn (write-region "é" nil FILE) last-coding-system-used)"#),
+        // A function entry of the alist receives write-region's seven arguments.
+        ("rtfn", r#"(let* ((seen nil) (file-coding-system-alist (list (cons "\\.rtfn\\'" 'rt-rtfn-coding)))) (defalias 'rt-rtfn-coding (lambda (args) (setq seen (list (car args) (nth 1 args) (nth 2 args) (length args))) 'latin-1)) (with-temp-buffer (insert "é!") (write-region nil nil FILE) (list seen last-coding-system-used)))"#),
+        ("txt", r#"(let ((select-safe-coding-system-function 'rt-select-utf-16le)) (defalias 'rt-select-utf-16le (lambda (&rest _) 'utf-16le)) (with-temp-buffer (insert "é\n") (write-region nil nil FILE) last-coding-system-used))"#),
+        // The function sees the widened buffer of a nil START.
+        ("txt", r#"(let* ((seen nil) (select-safe-coding-system-function 'rt-select-seen)) (defalias 'rt-select-seen (lambda (from to &rest _) (setq seen (list from to (point-min) (point-max))) nil)) (with-temp-buffer (insert "abcé") (narrow-to-region 2 3) (write-region nil nil FILE) (list seen last-coding-system-used (point-min) (point-max))))"#),
+        ("txt", r#"(let* ((seen nil) (coding-system-require-warning t) (coding-system-for-write 'latin-1) (select-safe-coding-system-function 'rt-select-warned)) (defalias 'rt-select-warned (lambda (_from _to codings &rest _) (setq seen codings) 'utf-8)) (write-region "é" nil FILE) (list seen last-coding-system-used))"#),
+        ("txt", r#"(with-temp-buffer (setq buffer-file-coding-system 'raw-text-dos) (insert "é\n") (write-region nil nil FILE) last-coding-system-used)"#),
+        ("txt", r#"(let ((coding-system-for-write 'undecided-dos)) (write-region "é\nx" nil FILE) last-coding-system-used)"#),
+        ("txt", r#"(list (let ((coding-system-for-write 'rt-nosuch)) (condition-case e (write-region "x" nil FILE) (error e))) (file-exists-p FILE))"#),
+        // CHECK_CODING_SYSTEM evaluates a lazy coding system's define form.
+        ("txt", r#"(progn (put 'rt-lazy 'coding-system-define-form '(define-coding-system-alias 'rt-lazy 'latin-1)) (let ((coding-system-for-write 'rt-lazy)) (write-region "é" nil FILE)) (list last-coding-system-used (get 'rt-lazy 'coding-system-define-form)))"#),
+        ("txt", r#"(list (let ((select-safe-coding-system-function (lambda (&rest _) 'utf-8))) (condition-case e (write-region "x" nil FILE) (error (list (car e) (cadr e))))) (let ((select-safe-coding-system-function 'rt-select-string)) (defalias 'rt-select-string (lambda (&rest _) "utf-8")) (condition-case e (write-region "x" nil FILE) (error e))))"#),
+        // One save-restriction extent covers the choice and the write: a lazy
+        // define form sees the widened buffer, and a narrowing select
+        // function is undone on return, error and throw.
+        ("txt", r#"(progn (defvar rt-lazy-seen nil) (put 'rt-lazy-wide 'coding-system-define-form '(progn (setq rt-lazy-seen (list (point-min) (point-max))) (define-coding-system-alias 'rt-lazy-wide 'latin-1))) (with-temp-buffer (insert "abcd") (narrow-to-region 2 3) (let ((coding-system-for-write 'rt-lazy-wide)) (write-region nil nil FILE)) (list rt-lazy-seen last-coding-system-used (point-min) (point-max))))"#),
+        ("txt", r#"(let ((select-safe-coding-system-function 'rt-select-narrow)) (defalias 'rt-select-narrow (lambda (&rest _) (narrow-to-region 2 3) nil)) (with-temp-buffer (insert "abcd") (write-region nil nil FILE) (list last-coding-system-used (point-min) (point-max))))"#),
+        ("txt", r#"(progn (defvar rt-escape nil) (defalias 'rt-select-escape (lambda (&rest _) (narrow-to-region 2 3) (if rt-escape (throw 'rt-escape 'thrown) (error "rt-escape")))) (let ((select-safe-coding-system-function 'rt-select-escape)) (with-temp-buffer (insert "abcd") (list (condition-case e (write-region nil nil FILE) (error (cadr e))) (point-min) (point-max) (progn (setq rt-escape t) (catch 'rt-escape (write-region 1 4 FILE))) (point-min) (point-max)))))"#),
+        // A narrowed unibyte buffer keeps its restriction across the extent.
+        ("txt", r#"(with-temp-buffer (set-buffer-multibyte nil) (insert "abcd") (narrow-to-region 2 4) (list (let ((coding-system-for-write 'no-conversion)) (write-region 2 4 FILE)) last-coding-system-used (point-min) (point-max)))"#),
+        ("txt", r#"(with-temp-buffer (set-buffer-multibyte nil) (insert "abcd") (narrow-to-region 2 4) (list (let ((coding-system-for-write 'no-conversion)) (write-region nil nil FILE)) (point-min) (point-max)))"#),
+    ];
+    let binary = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
+    let mut failures = Vec::new();
+    for (index, (extension, expression)) in cases.iter().enumerate() {
+        let file = dir.join(format!("case-{index}.{extension}"));
+        let expression = expression.replace("FILE", &format!("{:?}", file.to_str().unwrap()));
+        let source = format!("(string-to-list (prin1-to-string (condition-case err {expression} (error (list 'signal err)))))");
+        let output = std::process::Command::new(&binary).args(["-Q", "--batch", "--eval", &format!("(prin1 {source})")]).output().unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        let expected = (String::from_utf8(output.stdout).unwrap(), std::fs::read(&file).ok());
+        let _ = std::fs::remove_file(&file);
+        let actual = (vm.eval_source(&source).unwrap().display().unwrap(), std::fs::read(&file).ok());
+        if actual != expected {
+            let text = |codes: &str| codes.trim_matches(|c| c == '(' || c == ')').split_whitespace()
+                .filter_map(|n| n.parse::<u32>().ok().and_then(char::from_u32)).collect::<String>();
+            failures.push(format!("{expression}\n  GNU    {} {:?}\n  Romacs {} {:?}", text(&expected.0), expected.1, text(&actual.0), actual.1));
+        }
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+// GNU's write path runs a pre-write conversion and encode translation table
+// even on ASCII text; Romacs refuses both before opening the destination.
+#[test]
+fn write_region_refuses_unsupported_conversion_before_opening() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut vm = bootstrapped_with(&root, "rlisp/romacs-loadup-bootstrap.el");
+    let dir = std::env::temp_dir().join(format!("rt-write-refuse-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let setup = r#"(defvar rt-pre-called nil) (defalias 'rt-pre-write (lambda (_from _to) (setq rt-pre-called t) (goto-char (point-min)) (insert "PRE"))) (define-coding-system 'rt-pre-utf-8 "Pre." :coding-type 'utf-8 :mnemonic ?U :charset-list '(unicode) :pre-write-conversion 'rt-pre-write) (define-coding-system 'rt-tbl-utf-8 "Tbl." :coding-type 'utf-8 :mnemonic ?U :charset-list '(unicode) :encode-translation-table (make-translation-table '((?a . ?b))))"#;
+    // An own table, and a standard one that is a list of char-tables.
+    let cases = [
+        ("(coding-system-for-write 'rt-pre-utf-8)", "PREabc", "pre-write-conversion"),
+        ("(coding-system-for-write 'rt-tbl-utf-8)", "bbc", "translation table"),
+        ("(coding-system-for-write 'utf-8) (standard-translation-table-for-encode (list (make-translation-table '((?a . ?b)))))", "bbc", "translation table"),
+    ];
+    let binary = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
+    for (index, (coding, gnu_bytes, refusal)) in cases.into_iter().enumerate() {
+        let file = dir.join(format!("case-{index}.txt"));
+        let write = format!(r#"(let ({coding}) (write-region "abc" nil {:?}))"#, file.to_str().unwrap());
+        std::fs::write(&file, b"old\n").unwrap();
+        let output = std::process::Command::new(&binary)
+            .args(["-Q", "--batch", "--eval", &format!("(progn {setup} {write})")]).output().unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(std::fs::read(&file).unwrap(), gnu_bytes.as_bytes(), "pinned GNU converts {coding}");
+        std::fs::write(&file, b"old\n").unwrap();
+        let probe = format!("(progn {setup} (list (condition-case e {write} (error (cadr e))) rt-pre-called))");
+        let actual = vm.eval_source(&probe).unwrap().display().unwrap();
+        assert!(actual.contains(refusal) && actual.ends_with(" nil)"), "{coding}: {actual}");
+        assert_eq!(std::fs::read(&file).unwrap(), b"old\n", "{coding} left the destination intact");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// save-restriction in a narrowed unibyte buffer: the saved bounds move as
+// GNU's BEGV and ZV markers do across insertions and deletions, and are
+// restored on return, error and throw unless the buffer was killed.
+#[test]
+fn save_restriction_unibyte_matches_gnu() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut vm = bootstrapped_with(&root, "rlisp/romacs-loadup-bootstrap.el");
+    let setup = r#"(defmacro rt-ub (&rest body)
+  `(with-temp-buffer (set-buffer-multibyte nil) (insert "abcdef") (narrow-to-region 3 5) (goto-char 4)
+     (list (condition-case e (progn ,@body) (error (list 'E e))) (point-min) (point-max) (point) (save-restriction (widen) (buffer-string)))))"#;
+    let source = r#"(prin1-to-string
+  (list
+   (rt-ub (save-restriction (widen) (goto-char 1) (insert "B") (goto-char 4) (insert "S") (goto-char 7) (insert "E") (goto-char 9) (insert "A") (list (point-min) (point-max))))
+   (rt-ub (save-restriction (narrow-to-region 4 4) (insert "in") (buffer-string)))
+   (rt-ub (save-restriction (widen) (delete-region 2 4)))
+   (rt-ub (save-restriction (widen) (delete-region 4 6)))
+   (rt-ub (save-restriction (widen) (delete-region 1 7)))
+   (rt-ub (save-restriction (widen) (narrow-to-region 1 2) (error "boom")))
+   (rt-ub (catch 'out (save-restriction (widen) (goto-char 6) (insert "x") (throw 'out 'thrown))))
+   (rt-ub (save-restriction (narrow-to-region 4 5) (save-restriction (widen) (goto-char 1) (insert "N")) (list (point-min) (point-max))))
+   (rt-ub (save-restriction (widen) (goto-char 7) (point)))
+   (rt-ub (let ((b (current-buffer))) (prog1 (save-restriction (widen) (set-buffer (get-buffer-create " rt-other")) (list 'other (point-min))) (set-buffer b))))
+   (let ((b (generate-new-buffer " rt-ukill"))) (with-current-buffer b (set-buffer-multibyte nil) (insert "abc") (narrow-to-region 2 3)) (list (with-current-buffer b (save-restriction (kill-buffer b) 'done)) (buffer-live-p b)))))"#;
+    let binary = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
+    let output = std::process::Command::new(binary).args(["-Q", "--batch", "--eval", setup, "--eval", &format!("(princ {source})")]).output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let expected = String::from_utf8(output.stdout).unwrap();
+    vm.eval_source(setup).unwrap();
+    let printed = vm.eval_source(source).unwrap().display().unwrap();
+    let actual: String = serde_json::from_str(&printed).unwrap_or(printed);
+    assert_eq!(actual, expected);
+    // VM2-RESTRICT1: GNU converts such a buffer (t 2 3 t); Romacs refuses
+    // and leaves the buffer unibyte with its restriction.
+    let refused = vm.eval_source(r#"(prin1-to-string (with-temp-buffer (set-buffer-multibyte nil) (insert "abc") (narrow-to-region 2 3) (list (condition-case e (save-restriction (widen) (set-buffer-multibyte t)) (error (cadr e))) (point-min) (point-max) enable-multibyte-characters)))"#).unwrap().display().unwrap();
+    let refused: String = serde_json::from_str(&refused).unwrap_or(refused);
+    assert_eq!(refused, r#"("cannot decode buffer with a saved restriction" 2 3 nil)"#);
+}
+
 // The runtime pieces Gnosis and emacs-hermes reach, on the full loadup chain.
 #[test]
 fn daily_driver_load_slice_matches_gnu() {
@@ -134,6 +269,9 @@ fn daily_driver_load_slice_matches_gnu() {
         (let ((other (generate-new-buffer " rt"))) (with-current-buffer other (insert "abcdef") (narrow-to-region 2 4))
           (list (save-restriction (set-buffer other) (widen) (buffer-string)) (eq (current-buffer) other) (with-current-buffer other (list (point-min) (point-max)))))
         (condition-case e (save-restriction (narrow-to-region 2 3) (error "boom")) (error (list e (point-min) (point-max))))
+        (with-current-buffer (generate-new-buffer " rt-unibyte") (set-buffer-multibyte nil) (insert "abc")
+          (list (save-restriction (narrow-to-region 2 3) (buffer-string)) (point-min) (point-max)))
+        (let ((killed (generate-new-buffer " rt-killed"))) (list (with-current-buffer killed (save-restriction (kill-buffer killed) 'done)) (buffer-live-p killed)))
         (save-restriction)
         (save-restriction 1 2 3)))"###,
         r###"(with-temp-buffer

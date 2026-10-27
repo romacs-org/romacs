@@ -292,6 +292,8 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "shell-file-name", gnu: "callproc.c:2096", kind: Kind::Lisp(Init::Getenv("SHELL", "/bin/sh")) },
     CVariable { name: "show-trailing-whitespace", gnu: "xdisp.c:38640", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "special-mirror-table", gnu: "xdisp.c:39379", kind: Kind::Lisp(Init::CharTable(&CharTableInit { purpose: None, extras: &[], init: Init::Nil, ranges: &[] })) },
+    CVariable { name: "standard-translation-table-for-decode", gnu: "coding.c:12116", kind: Kind::Lisp(Init::Nil) },
+    CVariable { name: "standard-translation-table-for-encode", gnu: "coding.c:12121", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "symbols-with-pos-enabled", gnu: "data.c:4386", kind: Kind::Bool(false) },
     CVariable { name: "syntax-propertize--done", gnu: "syntax.c:3778", kind: Kind::Int(-1) },
     CVariable { name: "system-configuration", gnu: "emacs.c:3517", kind: Kind::Lisp(Init::Str(HOST_CONFIGURATION)) },
@@ -552,6 +554,8 @@ pub(crate) static C_VARIABLES: &[CVariable] = &[
     CVariable { name: "buffer-file-truename", gnu: "buffer.c:5446", kind: Kind::PerBuffer { default: Init::Nil, predicate: Some(Predicate::Stringp) } },
     CVariable { name: "buffer-read-only", gnu: "buffer.c:5458", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
     CVariable { name: "buffer-file-format", gnu: "buffer.c:5837", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
+    // Local only when set; permanent (buffer.c:4811 buffer_permanent_local_flags).
+    CVariable { name: "buffer-file-coding-system", gnu: "buffer.c:5314", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
     CVariable { name: "mark-active", gnu: "buffer.c:5795", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
     // Text edits record undo entries here (undo.c); t disables recording.
     CVariable { name: "buffer-undo-list", gnu: "buffer.c:5743", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
