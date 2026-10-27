@@ -1032,6 +1032,13 @@ pub(crate) enum SpecialKind {
     FileLocal = 1,
     Global = 2,
 }
+/// One recent_keys entry: an input character or event symbol, or the
+/// command it ran, which `recent-keys' shows as (nil . COMMAND).
+#[derive(Clone)]
+pub(crate) enum RecentKey { Char(i64), Event(String), Command(String) }
+/// lossage_limit's default.
+pub(crate) const RECENT_KEYS: usize = 300;
+
 /// timefns.c's local time zone after set-time-zone-rule: the process's
 /// TZ (the start), the system wall clock (nil or `wall'), GNU's utc_tz
 /// (t or 0), or a rule string.
@@ -1152,6 +1159,9 @@ pub struct Vm {
     tz_rule_dstoff: i64,
     /// The local time zone set-time-zone-rule installed.
     local_zone: LocalZone,
+    /// keyboard.c recent_keys: the last input events and the commands they
+    /// ran, as names (the heap may compact under the command loop).
+    recent_keys: std::collections::VecDeque<RecentKey>,
     conses: Vec<(Value, Value)>,
     objects: Vec<data::Object>,
     caches: Vec<Cache>,
@@ -1267,6 +1277,7 @@ impl Vm {
             mktime_offset: 0,
             tz_rule_dstoff: 0,
             local_zone: LocalZone::Process,
+            recent_keys: std::collections::VecDeque::new(),
             conses: vec![],
             objects: vec![],
             caches: vec![],

@@ -385,6 +385,17 @@ textprop.c Fprevious_single_char_property_change."
                 (unless (eq (get-char-property (1- position) prop object) initial)
                   (throw 'romacs--found position))))))))))
 
+;; buffer.c's `find-buffer'.
+(defun find-buffer (variable value)
+  "Return the buffer with buffer-local VARIABLE `equal' to VALUE.
+If there is no such live buffer, return nil.
+See also `find-buffer-visiting'."
+  (catch 'romacs--find-buffer
+    (dolist (buffer (buffer-list))
+      (when (equal value (buffer-local-value variable buffer))
+        (throw 'romacs--find-buffer buffer)))
+    nil))
+
 ;; buffer.c's `set-buffer-major-mode' and editfns.c's
 ;; `insert-buffer-substring', composed of the primitives their C calls.
 

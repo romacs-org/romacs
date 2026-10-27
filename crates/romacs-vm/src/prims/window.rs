@@ -335,3 +335,13 @@ fn redisplay(cx; optional _force: Value) {
     let macro_ = cx.intern("executing-kbd-macro");
     Ok(if cx.variable_value(macro_)?.is_some_and(|m| m != Value::NIL) { Value::NIL } else { Value::TRUE })
 }}
+
+defsubr! { name = "window-pixel-left", gnu = "window.c:1001", effect = Reads,
+fn window_pixel_left(cx; optional window: Value) {
+    cx.windows().window_pixel_edge(window, false)
+}}
+
+defsubr! { name = "window-pixel-top", gnu = "window.c:1009", effect = Reads,
+fn window_pixel_top(cx; optional window: Value) {
+    cx.windows().window_pixel_edge(window, true)
+}}

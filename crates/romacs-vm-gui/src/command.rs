@@ -27,10 +27,14 @@ impl Commands {
         self.pending.push(form);
         let sequence = format!("[{}]", self.pending.join(" "));
         let prefix = vm.eval_source(&format!("(keymapp (key-binding {sequence}))"))? != Fixed::NIL;
-        if prefix { return Ok(None); }
+        if prefix {
+            vm.record_recent_event(&event);
+            return Ok(None);
+        }
         let multi = self.pending.len() > 1;
         self.pending.clear();
         if !multi { return vm.command_event(event).map(Some); }
+        vm.record_recent_event(&event);
         // command_event currently consumes complete single events. A private
         // named transport event projects the already resolved full key sequence
         // into that existing command path, without retaining a heap index.

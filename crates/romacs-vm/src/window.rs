@@ -1400,6 +1400,13 @@ impl<'a> Windows<'a> {
     /// that is not a window system's, the column of the vertical bar a
     /// window left of another has; the height loses the mode line. VM2 has
     /// no fringes, scroll bars, dividers, header or tab lines.
+    /// window_pixel_left / window_pixel_top: the window's frame-relative
+    /// pixel edge.
+    pub(crate) fn window_pixel_edge(&mut self, window: Value, top: bool) -> Out {
+        let w = self.valid(window)?;
+        let x = self.get(w)?;
+        Value::integer(i64::from(if top { x.y } else { x.x })).map_err(internal)
+    }
     pub(crate) fn window_body_size(&mut self, window: Value, pixelwise: Value, width: bool) -> Out {
         let w = self.live(window)?;
         let (column, line) = (i64::from(self.vm.window_state.column), i64::from(self.vm.window_state.line));

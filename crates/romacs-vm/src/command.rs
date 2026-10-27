@@ -259,8 +259,14 @@ impl Vm {
                 Form::Vector(vec![event_form.clone()]),
             ],
         ))?;
+        // The GUI records the keys of a sequence it resolved itself.
+        if !matches!(&event_form, Form::Sym(name) if name == "romacs-gui-sequence") {
+            self.record_recent_key(match &event_form { Form::Int(c) => RecentKey::Char(*c), Form::Sym(name) => RecentKey::Event(name.clone()), _ => unreachable!("an event form") });
+        }
         let binding = self.eval_form_raw(&call("key-binding", vec![Form::Vector(vec![event_form])]))?;
         if binding == Value::NIL || self.resolve_keymap(binding).is_some() {
+            // An undefined key runs no command: GNU's pseudo-event (nil . nil).
+            if binding == Value::NIL { self.record_recent_key(RecentKey::Command("nil".into())); }
             self.eval_form_raw(&call("setq", vec![sym("prefix-arg"), sym("nil")]))?;
             let message = "Key is undefined".to_owned();
 
@@ -278,6 +284,7 @@ impl Vm {
             .get(binding.index(7)?.saturating_sub(1))
             .ok_or("symbol command required")?
             .clone();
+        self.record_recent_key(RecentKey::Command(command.clone()));
         let form = call(
             "progn",
             vec![
@@ -564,5 +571,38 @@ impl Vm {
         let result = self.buffer_primitive(p, 0, args.len());
         self.stack = saved;
         result
+    }
+}
+
+impl Vm {
+    /// record_char for a host that reads a key sequence's prefix keys itself.
+    pub fn record_recent_event(&mut self, event: &CommandEvent) {
+        self.record_recent_key(match event {
+            CommandEvent::Character(c) => RecentKey::Char(*c),
+            CommandEvent::Named(name) => RecentKey::Event(name.clone()),
+        });
+    }
+    /// record_char: keep the last RECENT_KEYS entries.
+    fn record_recent_key(&mut self, key: RecentKey) {
+        if self.recent_keys.len() == RECENT_KEYS { self.recent_keys.pop_front(); }
+        self.recent_keys.push_back(key);
+    }
+    /// Frecent_keys: the recorded input events, oldest first, and with
+    /// INCLUDE_CMDS the commands as (nil . COMMAND).
+    pub(crate) fn recent_keys_value(&mut self, include_commands: bool) -> Value {
+        let keys: Vec<RecentKey> = self.recent_keys.iter().cloned().collect();
+        let mut values = Vec::with_capacity(keys.len());
+        for key in keys {
+            match key {
+                RecentKey::Char(c) => values.push(Value::integer(c).expect("event fixnum")),
+                RecentKey::Event(name) => values.push(self.intern(&name)),
+                RecentKey::Command(name) if include_commands => {
+                    let command = if name == "nil" { Value::NIL } else { self.intern(&name) };
+                    values.push(self.keymap_cons(Value::NIL, command));
+                }
+                RecentKey::Command(_) => {}
+            }
+        }
+        self.allocate_object(data::Object::Vector(values))
     }
 }

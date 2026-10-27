@@ -7,8 +7,10 @@ fn bootstrapped(root: &Path) -> Vm {
 
 fn bootstrapped_with(root: &Path, bootstrap: &str) -> Vm {
     let mut vm = Vm::new();
-    // GNU batch, as the gnu-ert runner sets it before the chain loads.
+    // GNU batch, as the gnu-ert runner sets it before the chain loads:
+    // noninteractive, on its 80x25 terminal frame of 1x1 characters.
     vm.eval_source("(setq noninteractive t)").unwrap();
+    vm.set_frame_geometry(80, 25, 1, 1).unwrap();
     // GNU's installed load-path (gnu-tests/run.py load_path): the Lisp root,
     // its subdirectories in reverse name order with obsolete last, then rlisp.
     let lisp = root.join("gnu-lisp");
@@ -343,6 +345,20 @@ fn daily_driver_load_slice_matches_gnu() {
       (with-temp-buffer (insert "héllo") (setq buffer-file-name "/nonexistent/rt-x.txt") (secure-hash 'sha1 (current-buffer)))
       (with-temp-buffer (insert "héllo") (setq buffer-file-name "/nonexistent/rt-x.tzst") (secure-hash 'sha1 (current-buffer)))
       (condition-case e (secure-hash (make-symbol "sha256") "abc") (error e)))"###,
+        r###"(progn (defvar rt-fb nil)
+  (list (recent-keys) (recent-keys t)
+        (list (find-buffer 'major-mode 'rt-nonesuch-mode) (condition-case e (find-buffer 3 nil) (error e))
+              (with-temp-buffer (setq-local rt-fb (list 7)) (eq (find-buffer 'rt-fb (list 7)) (current-buffer)))
+              (eq (find-buffer 'rt-fb nil) (car (buffer-list))) (condition-case e (find-buffer 'rt-void 1) (error e)))
+        (list buffer-saved-size (default-value 'buffer-saved-size) (local-variable-if-set-p 'buffer-saved-size)
+              (with-temp-buffer (setq buffer-saved-size 5) (list buffer-saved-size (local-variable-p 'buffer-saved-size)))
+              (default-value 'buffer-saved-size) (condition-case e (setq buffer-saved-size 'x) (error e)))
+        (list (face-font 'default) (face-font 'bold) (face-font 'default nil ?a) (face-font 'bold t) (face-font 'italic t)
+              (face-font 'default t) (face-font "bold" t) (face-font "bold") (condition-case e (face-font "nosuch") (error e)) (condition-case e (face-font 'nosuch) (error e)) (condition-case e (face-font 'default 3) (error e)))
+        (list (window-pixel-top) (window-pixel-top (minibuffer-window)) (window-pixel-left)
+              (progn (split-window) (window-pixel-top (next-window)))
+              (progn (delete-other-windows) (split-window-right) (prog1 (window-pixel-left (next-window)) (delete-other-windows)))
+              (condition-case e (window-pixel-top 3) (error e)))))"###,
         r###"(list (secure-hash 'sha256 "héllo ✓") (md5 "héllo") (md5 "héllo" nil nil 'latin-1) (md5 "héllo" nil nil 'nosuch t)
       (condition-case e (md5 "héllo" nil nil 'nosuch) (error e))
       (with-temp-buffer (insert "héllo\nworld")

@@ -110,6 +110,30 @@ else the record's KEY, on a graphic display only."
   "Return the number of planes supported by DISPLAY."
   (romacs-display-get :planes))
 
+(defun face-font (face &optional frame _character)
+  "Return the font name of face FACE, or nil if it is unspecified.
+The font name is, by default, for ASCII characters.
+If the optional argument FRAME is given, report on face FACE in that frame.
+If FRAME is t, report on the defaults for face FACE (for new frames).
+  The font default for a face is either nil, or a list
+  of the form (bold), (italic) or (bold italic).
+If FRAME is omitted or nil, use the selected frame.
+xfaces.c Fface_font: Romacs's frame is a terminal frame, which realizes no
+font, so a frame's answer is nil once FACE is known."
+  ;; resolve_face_name: a string names the face of that symbol.
+  (when (stringp face) (setq face (intern face)))
+  (if (eq frame t)
+      (let ((result nil)
+            (weight (face-attribute face :weight t))
+            (slant (face-attribute face :slant t)))
+        (unless (memq weight '(unspecified normal)) (push 'bold result))
+        (unless (memq slant '(unspecified normal)) (push 'italic result))
+        result)
+    (unless (frame-live-p (or frame (selected-frame)))
+      (signal 'wrong-type-argument (list 'frame-live-p frame)))
+    (unless (facep face) (signal 'error (list "Invalid face" face)))
+    nil))
+
 (defun display-color-cells (&optional _display)
   "Return the number of color cells supported by DISPLAY."
   (romacs-display-get :color-cells))

@@ -569,6 +569,8 @@ pub(crate) static C_VARIABLES: &[CVariable] = &[
     CVariable { name: "buffer-undo-list", gnu: "buffer.c:5743", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
     // rename-buffer renames a non-visiting buffer's auto-save file.
     CVariable { name: "buffer-auto-save-file-name", gnu: "buffer.c:5452", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
+    // auto-save reads and resets it; files.el and gnosis read it.
+    CVariable { name: "buffer-saved-size", gnu: "buffer.c:5465", kind: Kind::PerBuffer { default: Init::Fixnum(0), predicate: Some(Predicate::Integerp) } },
     CVariable { name: "transient-mark-mode", gnu: "buffer.c:5875", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "mark-even-if-inactive", gnu: "callint.c:898", kind: Kind::Lisp(Init::True) },
     // Heap-valued C variables materialize lazily on first read.

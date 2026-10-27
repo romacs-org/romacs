@@ -190,3 +190,27 @@ fn fresh_interactive_prefix_is_nil_and_dynamically_special_before_keymaps() {
             "(let ((current-prefix-arg '(3))) (equal (call-interactively 'fresh-args) '(3 (3) nil)))"), "t", "dynamic earlier={earlier}");
     }
 }
+#[test]
+fn recent_keys_record_events_and_their_commands() {
+    let mut vm = Vm::new();
+    assert_eq!(text(&mut vm, "(list (recent-keys) (recent-keys t))"), "([] [])");
+    vm.command_event(CommandEvent::Character('a' as i64)).unwrap();
+    vm.command_event(CommandEvent::Named("unbound-test".into())).unwrap();
+    vm.command_event(CommandEvent::Named("right".into())).unwrap();
+    assert_eq!(
+        text(&mut vm, "(list (recent-keys) (recent-keys t))"),
+        "([97 unbound-test right] [97 (nil . self-insert-command) unbound-test (nil) right (nil . forward-char)])"
+    );
+    // keyboard.c keeps lossage_limit (300) entries, oldest dropped first.
+    for _ in 0..200 {
+        vm.command_event(CommandEvent::Character('b' as i64)).unwrap();
+    }
+    assert_eq!(text(&mut vm, "(list (length (recent-keys)) (length (recent-keys t)) (aref (recent-keys t) 0))"), "(150 300 98)");
+    // A host that resolves a prefix sequence records its keys; the transport
+    // event that runs the sequence's command is not an input key.
+    vm.record_recent_event(&CommandEvent::Character(24));
+    vm.record_recent_event(&CommandEvent::Character(6));
+    vm.eval_source("(define-key (current-global-map) [romacs-gui-sequence] 'ignore)").unwrap();
+    vm.command_event(CommandEvent::Named("romacs-gui-sequence".into())).unwrap();
+    assert_eq!(text(&mut vm, "(let ((k (recent-keys t))) (list (aref k (- (length k) 3)) (aref k (- (length k) 2)) (aref k (- (length k) 1))))"), "(24 6 (nil . ignore))");
+}

@@ -148,3 +148,10 @@ fn lookup_key_filtered(cx: &mut Leaf<'_>, result: Value, saved: &[Value]) -> Nex
     saved.push(result);
     lookup_key_step(cx, &saved)
 }
+
+// Frecent_keys over the events the command loop recorded; a batch session
+// reads no input, so it is [] as in GNU.
+defsubr! { name = "recent-keys", gnu = "keyboard.c:12213", effect = Reads,
+fn recent_keys(cx; optional include_cmds: Value) {
+    Ok(cx.recent_keys(include_cmds != Value::NIL))
+}}
