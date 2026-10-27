@@ -117,25 +117,75 @@ fn canonical_value(cx: &mut Leaf<'_>, name: Value, default: Value) -> std::resul
             multibyte = true;
         }
     }
-    let home = if nm.first() == Some(&b'~') { Some(home_directory()) } else { None };
-    if home.as_ref().is_some_and(|h| !h.is_ascii()) { multibyte = true; }
+    let home = if nm.first() == Some(&b'~') && matches!(nm.get(1), None | Some(b'/')) {
+        let home = home_directory(cx)?;
+        Some(home_bytes(cx, home, &mut multibyte)?)
+    } else { None };
     Ok(match canonical(nm, dir, home.as_deref()) {
         None => (name, true),
+        // GNU would make an ill-formed multibyte string here, from a
+        // multibyte HOME and a unibyte non-ASCII NAME.
+        Some(bytes) if multibyte && !well_formed(&bytes) => {
+            return Err(Fault::Error("VM2 expand-file-name ill-formed multibyte result is unsupported".into()));
+        }
         Some(bytes) => (cx.make_string(bytes, multibyte), false),
     })
 }
 
-/// GNU get_homedir: $HOME, else the passwd entry of $LOGNAME, $USER or the
-/// real user, else "".
-fn home_directory() -> Vec<u8> {
-    use std::os::unix::ffi::OsStringExt;
-    if let Some(home) = std::env::var_os("HOME") { return home.into_vec(); }
-    ["LOGNAME", "USER"].iter()
-        .filter_map(|v| std::env::var(v).ok())
-        .find_map(|user| crate::user_db::by_name(&user))
-        .or_else(|| crate::user_db::by_uid(crate::user_db::real_uid()))
+/// GNU get_homedir: HOME, else the passwd entry of LOGNAME, USER or the
+/// real user, else "". The variables come from `process-environment'.
+fn home_directory(cx: &mut Leaf<'_>) -> std::result::Result<Vec<u8>, Fault> {
+    if let Some(home) = super::environment::egetenv(cx, "HOME")? { return Ok(home); }
+    let mut account = None;
+    for variable in ["LOGNAME", "USER"] {
+        let user = super::environment::egetenv(cx, variable)?;
+        account = user.and_then(|u| crate::user_db::by_name(std::str::from_utf8(&u).ok()?));
+        if account.is_some() { break; }
+    }
+    Ok(account.or_else(|| crate::user_db::by_uid(crate::user_db::real_uid()))
         .and_then(|account| account.home)
-        .unwrap_or_default().into_bytes()
+        .unwrap_or_default().into_bytes())
+}
+
+/// fileio.c:1395: HOME's bytes as build_string makes them, decoded with
+/// DECODE_FILE for a multibyte result; a multibyte HOME makes the result
+/// multibyte.
+fn home_bytes(cx: &mut Leaf<'_>, home: Vec<u8>, multibyte: &mut bool) -> std::result::Result<Vec<u8>, Fault> {
+    let home_multibyte = crate::environment::multibyte(&home);
+    if *multibyte && !home_multibyte && !home.is_ascii() {
+        let unibyte = cx.make_string(home, false);
+        let decoded = decode_file(cx, unibyte)?;
+        return cx.string_bytes(decoded);
+    }
+    if home_multibyte { *multibyte = true; }
+    Ok(home)
+}
+
+/// GNU decode_file_name: NAME decoded with `file-name-coding-system', else
+/// `default-file-name-coding-system'. Undecoded bytes cannot join a
+/// multibyte result, so no coding system is refused.
+fn decode_file(cx: &mut Leaf<'_>, name: Value) -> std::result::Result<Value, Fault> {
+    let mut coding = var(cx, "file-name-coding-system")?;
+    if coding == Value::NIL { coding = var(cx, "default-file-name-coding-system")?; }
+    if coding == Value::NIL {
+        return Err(Fault::Error("VM2 expand-file-name undecoded non-ASCII HOME is unsupported".into()));
+    }
+    // convert_string_nocopy does not record the coding system.
+    let last = cx.intern("last-coding-system-used");
+    let recorded = cx.variable_value(last)?.unwrap_or(Value::NIL);
+    let decoded = cx.coding_convert_string(name, coding, Value::TRUE, Value::NIL, false)?;
+    cx.variable_set(last, recorded)?;
+    Ok(decoded)
+}
+
+fn well_formed(mut bytes: &[u8]) -> bool {
+    while let Some(&byte) = bytes.first() {
+        let width = if byte.is_ascii() { 1 } else {
+            match crate::lstring::decode_char(bytes) { Some((_, width)) => width, None => return false }
+        };
+        bytes = &bytes[width..];
+    }
+    true
 }
 
 /// GNU user_homedir: the absolute home of login NAME.

@@ -1060,6 +1060,21 @@ fn default_directory_and_expansion_match_gnu() {
         // `/:'-quoted names and directories go through file-name-non-special.
         r#"(list (file-name-quote default-directory) (file-name-unquote (file-name-quote default-directory)) (file-name-quoted-p (file-name-quote "a")) (executable-find "sh") (let ((default-directory (file-name-quote default-directory))) (list (expand-file-name "a") (expand-file-name "/:~/x") (file-exists-p "a") (file-directory-p "sub") (file-regular-p "sub/inner") (file-exists-p "absent") (executable-find "sh") (locate-file "inner" '("sub")))))"#,
         r#"(list (file-exists-p (concat "/:" default-directory "a")) (file-directory-p (concat "/:" default-directory "sub/")) (file-modes (concat "/:" default-directory "a")) (expand-file-name (concat "/:" default-directory "sub/../a")) (progn (delete-file (concat "/:" default-directory "sub/inner")) (file-exists-p "sub/inner")))"#,
+        // delete-directory-internal always takes the directory file name,
+        // so a directory-file-name handler maps a name without a slash too.
+        r#"(progn (make-directory "victim") (make-directory "mapped") (defalias 'rt-dfn (lambda (op &rest args) (if (eq op 'directory-file-name) (expand-file-name "mapped") (let ((inhibit-file-name-handlers '(rt-dfn)) (inhibit-file-name-operation op)) (apply op args))))) (list (let ((file-name-handler-alist '(("victim/?\\'" . rt-dfn)))) (delete-directory-internal "victim")) (make-directory "mapped") (let ((file-name-handler-alist '(("victim/?\\'" . rt-dfn)))) (delete-directory-internal "victim/")) (file-exists-p "victim") (file-exists-p "mapped")))"#,
+        r#"(progn (make-directory "victim") (defalias 'rt-dfn7 (lambda (op &rest args) (if (eq op 'directory-file-name) 7 (let ((inhibit-file-name-handlers '(rt-dfn7)) (inhibit-file-name-operation op)) (apply op args))))) (let ((file-name-handler-alist '(("victim\\'" . rt-dfn7)))) (condition-case e (delete-directory-internal "victim") (error e))))"#,
+        r#"(list (condition-case e (delete-file "a/") (error e)) (condition-case e (delete-file-internal "a/") (error e)) (file-exists-p "a"))"#,
+        // rename-file into a directory expands FILE's last component there.
+        r#"(let ((process-environment (cons (concat "HOME=" default-directory "home") process-environment))) (write-region "t" nil "./~") (rename-file "./~" "sub/") (list (file-exists-p "home") (file-exists-p "sub/~")))"#,
+        // HOME comes from process-environment; its bytes join the result as
+        // build_string and DECODE_FILE make them.
+        r#"(let ((process-environment (cons (string-to-unibyte "HOME=/rt\351h") process-environment))) (mapcar (lambda (r) (list r (multibyte-string-p r) (string-bytes r))) (list (expand-file-name (string-to-unibyte "~/x") (string-to-unibyte "/")) (expand-file-name (string-to-multibyte "~/x") (string-to-multibyte "/")) (expand-file-name "~/é" "/") (expand-file-name (string-to-unibyte "~") "/d/") (expand-file-name (string-to-unibyte "~root/x") (string-to-unibyte "/")))))"#,
+        r#"(let ((process-environment (cons "HOME=/rtéh" process-environment))) (mapcar (lambda (r) (list r (multibyte-string-p r))) (list (expand-file-name (string-to-unibyte "~/x") (string-to-unibyte "/")) (expand-file-name (string-to-multibyte "~/x") "/") (expand-file-name "~" "/"))))"#,
+        r#"(let ((process-environment (list "HOME" "LOGNAME=root"))) (list (expand-file-name "~") (expand-file-name "~/x")))"#,
+        // set-file-modes and set-file-times expand against the buffer's
+        // directory explicitly, which a handler sees.
+        r#"(progn (setq rt-log nil rt-dir default-directory) (defalias 'rt-rec (lambda (op &rest args) (setq rt-log (cons (cons op args) rt-log)) (if (eq op 'expand-file-name) (concat rt-dir "a") (let ((inhibit-file-name-handlers '(rt-rec)) (inhibit-file-name-operation op)) (apply op args))))) (let ((file-name-handler-alist '(("\\`rt-rel" . rt-rec)))) (list (with-temp-buffer (setq default-directory "rt-rel/") (list (set-file-modes "f" 384) (set-file-times "g" '(0 0)))) (reverse rt-log) (file-modes (concat rt-dir "a")) (time-convert (file-attribute-modification-time (file-attributes (concat rt-dir "a"))) 'integer))))"#,
     ];
     let binary = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
     let directory = format!("{}/", dir.display());
