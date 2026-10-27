@@ -443,6 +443,11 @@ impl Vm {
         if let Some(data::Object::Obarray(table)) = self.object_if(value) {
             return Ok(format!("#<obarray n={}>", table.len()));
         }
+        if let Some(data::Object::Process(process)) = self.object_if(value) {
+            // print.c PVEC_PROCESS: the name, inside #<process ...> when escaping.
+            let name = self.process_name_text(process);
+            return Ok(if quoted { format!("#<process {name}>") } else { name });
+        }
         if let Some(data::Object::CharTable(table)) = self.object_if(value) {
             return self.print_char_table_slots("#^", &table.print_slots(), quoted, options, depth);
         }
@@ -490,6 +495,12 @@ impl PrintOptions {
 }
 
 impl Vm {
+    /// A process's name, for printing.
+    pub(crate) fn process_name_text(&self, process: &crate::subprocess::Process) -> String {
+        self.str_view(process.get(crate::subprocess::Slot::Name))
+            .map(|view| String::from_utf8_lossy(view.bytes).into_owned())
+            .unwrap_or_default()
+    }
     /// data.c minmax_driver: markers become their positions, a later
     /// argument wins only when strictly better (ties keep the first, with
     /// its own type), and a NaN that does not win is returned at once.

@@ -394,3 +394,27 @@ fn daily_driver_load_slice_matches_gnu() {
     let _ = std::fs::remove_file(&scratch);
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
+
+// process.c wait_reading_process_output runs keyboard.c's timer_check: GNU's
+// timer.el timers fire inside accept-process-output and sleep-for, and
+// with-timeout can end a wait for a process that never answers.
+#[test]
+fn process_waits_run_timers_like_gnu() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut vm = bootstrapped_with(&root, "rlisp/romacs-loadup-bootstrap.el");
+    let source = r###"(prin1-to-string
+ (progn (setq default-directory (file-name-as-directory (getenv "TMPDIR")))
+ (list (let ((x 0)) (run-at-time 0.02 nil (lambda () (setq x 1))) (while (= x 0) (accept-process-output nil 0.01)) x)
+       (let ((n 0)) (let ((tm (run-at-time 0 0.01 (lambda () (setq n (1+ n)))))) (while (< n 3) (sleep-for 0.01)) (cancel-timer tm)) (list (>= n 3) timer-list))
+       (let ((p (make-process :name "never" :command (list "sleep" "10") :connection-type 'pipe :noquery t)))
+         (prog1 (with-timeout (0.05 'timed-out) (accept-process-output p) 'answered) (delete-process p)))
+       (let ((y nil)) (run-at-time 0 nil (lambda () (setq y (current-buffer)))) (with-temp-buffer (accept-process-output nil 0.02)) (bufferp y))
+       (let ((log nil)) (run-at-time 0 nil (lambda () (error "timer boom"))) (accept-process-output nil 0.02) timer-list))))"###;
+    let binary = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
+    let output = std::process::Command::new(binary).args(["-Q", "--batch", "--eval", &format!("(princ {source})")]).output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let expected = String::from_utf8(output.stdout).unwrap();
+    let printed = vm.eval_source(source).unwrap().display().unwrap();
+    let actual: String = serde_json::from_str(&printed).unwrap_or(printed);
+    assert_eq!(actual, expected);
+}

@@ -42,4 +42,11 @@
           (set-buffer previous)
           (goto-char (if (integerp previous-point) previous-point (marker-position previous-point))))
         (unless (integerp previous-point) (set-marker previous-point nil)))
-      (if allow (romacs--kill-buffer-finish buffer) nil))))
+      (if allow
+          (progn
+            ;; kill_buffer_processes (process.c), once the hooks allowed the
+            ;; kill; absent only in a VM without the process prelude.
+            (if (and (buffer-live-p buffer) (fboundp 'romacs--kill-buffer-processes))
+                (romacs--kill-buffer-processes buffer))
+            (romacs--kill-buffer-finish buffer))
+        nil))))

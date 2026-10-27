@@ -46,10 +46,10 @@ fn assert_heap_kind_inventory(source: &str) {
         .filter(|line| !line.is_empty())
         .map(|line| line.split(|c: char| !c.is_ascii_alphanumeric() && c != '_').next().unwrap())
         .collect();
-    // Native subtable slots and traversal cursors contain ordinary values;
-    // neither constructs positioned-symbol objects. The reader check above
+    // Native subtable slots, traversal cursors and process slots contain
+    // ordinary values; none constructs positioned-symbol objects. The reader check above
     // exercises the new public subtable representation.
-    assert_eq!(variants, ["SyntaxTable", "Float", "Bignum", "Window", "Frame", "Terminal", "WindowConfiguration", "Sqlite", "String", "RawString", "Vector", "BoolVector", "Record", "CharTable", "SubCharTable", "MapKeymapCursor", "Buffer", "Marker", "Overlay", "Bytes", "ByteBuffer", "HashTable", "Obarray"], "new heap kinds require re-auditing the no-positioned-symbol premise");
+    assert_eq!(variants, ["SyntaxTable", "Float", "Bignum", "Window", "Frame", "Terminal", "WindowConfiguration", "Sqlite", "Process", "String", "RawString", "Vector", "BoolVector", "Record", "CharTable", "SubCharTable", "MapKeymapCursor", "Buffer", "Marker", "Overlay", "Bytes", "ByteBuffer", "HashTable", "Obarray"], "new heap kinds require re-auditing the no-positioned-symbol premise");
 }
 
 #[test]
