@@ -107,7 +107,7 @@ impl Vm {
         {
             return Ok(None);
         }
-        let mut names = HashSet::new();
+        let mut names = NameSet::default();
         collect_symbols(form, &mut names);
         if names
             .iter()
@@ -184,7 +184,7 @@ fn valid_artifact(a: &Artifact) -> bool {
     if a.functions.is_empty() || a.entry >= a.functions.len() || a.caches > 1_000_000 {
         return false;
     }
-    let mut constants = HashSet::new();
+    let mut constants = HashSet::default();
     for (f, pc, _) in &a.constants {
         if *f >= a.functions.len()
             || *pc >= a.functions[*f].code.len()

@@ -476,7 +476,7 @@ impl Leaf<'_> {
     }
     fn coding_items(&self, mut list: Value) -> std::result::Result<Vec<Value>, Fault> {
         let original = list;
-        let mut seen = HashSet::new();
+        let mut seen = HashSet::default();
         let mut result = Vec::new();
         while let Some((car, cdr)) = self.pair(list) {
             if !seen.insert(list.0) {
@@ -498,7 +498,7 @@ impl Leaf<'_> {
         }
     }
     fn coding_plist_get(&self, mut plist: Value, prop: Value) -> std::result::Result<Value, Fault> {
-        let mut seen = HashSet::new();
+        let mut seen = HashSet::default();
         while let Some((key, rest)) = self.pair(plist) {
             if !seen.insert(plist.0) {
                 return Err(Fault::Circular(plist));
@@ -521,7 +521,7 @@ impl Leaf<'_> {
     ) -> std::result::Result<Value, Fault> {
         let mut tail = plist;
         let mut last = None;
-        let mut seen = HashSet::new();
+        let mut seen = HashSet::default();
         while let Some((key, rest)) = self.pair(tail) {
             if !seen.insert(tail.0) {
                 return Err(Fault::Circular(plist));
@@ -575,7 +575,7 @@ impl Leaf<'_> {
         let text = self.symbol_name(name)?;
         let mut tail = old;
         let mut found = false;
-        let mut seen = HashSet::new();
+        let mut seen = HashSet::default();
         while let Some((item, rest)) = self.pair(tail) {
             if !seen.insert(tail.0) {
                 return Err(Fault::Circular(old));
@@ -776,7 +776,7 @@ impl Leaf<'_> {
         self.coding_symbol(alias)?;
         let spec = self.coding_required(name)?;
         let mut aliases = self.vector_get(spec, num(1))?;
-        let mut seen = HashSet::new();
+        let mut seen = HashSet::default();
         loop {
             if !seen.insert(aliases.0) {
                 return Err(Fault::Circular(aliases));
@@ -1300,7 +1300,7 @@ impl Leaf<'_> {
                 }
                 let mut valid = [0; 256];
                 let mut tail = args[15];
-                let mut seen = HashSet::new();
+                let mut seen = HashSet::default();
                 while let Some((v, next)) = self.pair(tail) {
                     if !seen.insert(tail.0) {
                         return Err(Fault::Circular(args[15]));

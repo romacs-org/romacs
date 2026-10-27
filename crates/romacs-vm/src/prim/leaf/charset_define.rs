@@ -183,7 +183,7 @@ impl Leaf<'_> {
                 return Err(Fault::Wrong("sequencep", a[14]));
             }
             let mut tail = a[14];
-            let mut seen = HashSet::new();
+            let mut seen = HashSet::default();
             while tail != Value::NIL {
                 if !seen.insert(tail.0) { return Err(Fault::Circular(a[14])); }
                 tail = self.charset_pair(tail)?.1;

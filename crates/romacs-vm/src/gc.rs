@@ -206,7 +206,7 @@ impl Vm {
                 .sum::<usize>();
         // Native nodes may be retained by both tables and suspended cursors.
         // Keep this accounting separate from the moving arena object counts.
-        let mut native_nodes = HashSet::new();
+        let mut native_nodes = HashSet::default();
         s.live_bytes += self.objects.len() * std::mem::size_of::<data::Object>()
             + self
                 .objects
@@ -318,8 +318,8 @@ impl Vm {
             handler.visit_values(&mut |v| pending.push(*v));
         }
         self.backtrace.visit_values(&mut |v| pending.push(*v));
-        let mut local_live = HashSet::new();
-        let mut obarray_symbols_live = HashSet::new();
+        let mut local_live = HashSet::default();
+        let mut obarray_symbols_live = HashSet::default();
         for (slot, s) in self.slots.iter().enumerate() {
             if self.obarray_symbol_names.contains_key(&slot) { continue; }
             if let Some(Some(VariableRedirect::Alias(target))) = self.variable_redirects.get(slot) {
@@ -368,7 +368,7 @@ impl Vm {
             }
         }
         let mut marked = 0;
-        let mut native_nodes = HashSet::new();
+        let mut native_nodes = HashSet::default();
         // Weak hash tables reached by marking; their entries are not traced
         // until `weak_round` (the ephemeron fixpoint) decides which survive.
         let mut weak_tables = vec![];
@@ -772,7 +772,7 @@ mod tests {
         second.root = Arc::clone(&first.root);
         second.ascii = first.ascii.clone();
         let native_bytes = char_table::CharTableNode::storage_bytes(
-            &first.root, false, &mut HashSet::new(),
+            &first.root, false, &mut HashSet::default(),
         );
         vm.objects.push(data::Object::CharTable(Box::new(first)));
         vm.objects.push(data::Object::CharTable(Box::new(second)));
@@ -871,7 +871,7 @@ mod tests {
     #[test]
     fn statistics_measure_real_storage_and_exclude_private_slots() {
         fn rows(vm: &mut Vm) -> HashMap<String, Vec<i64>> {
-            let mut result = HashMap::new();
+            let mut result = HashMap::default();
             let mut list = vm.garbage_collect_statistics();
             while list != Value::NIL {
                 let (mut row, next) = vm.cons_pair(list).unwrap();

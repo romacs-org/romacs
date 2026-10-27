@@ -4,7 +4,7 @@ use super::*;
 
 fn proper_spine(cx: &Leaf<'_>, original: Value) -> std::result::Result<Vec<Value>, Fault> {
     let mut values = Vec::new();
-    let mut seen = HashSet::new();
+    let mut seen = HashSet::default();
     let mut tail = original;
     while let Some((car, cdr)) = cx.pair(tail) {
         if !seen.insert(tail.0) {

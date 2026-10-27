@@ -23,7 +23,7 @@ pub(super) struct Obarray {
 }
 impl Obarray {
     pub(super) fn new(bits: u32, initial: bool) -> Self {
-        Self { initial, buckets: vec![None; 1usize << bits], entries: HashMap::new(), count: 0 }
+        Self { initial, buckets: vec![None; 1usize << bits], entries: HashMap::default(), count: 0 }
     }
     pub(super) fn len(&self) -> usize { self.count }
     pub(super) fn storage_bytes(&self, capacity: bool) -> usize {

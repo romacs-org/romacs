@@ -124,7 +124,7 @@ mod tests {
             if *value == Value::TRUE { count += 1; }
         });
         assert_eq!(count, 16, "each physical slot is visited once, not each incoming edge");
-        let mut seen = HashSet::new();
+        let mut seen = HashSet::default();
         visit_char_table_node_values(&table.root, &mut seen, &mut |_| {});
         let mut revisits = 0;
         visit_char_table_node_values(&shared, &mut seen, &mut |_| { revisits += 1; });
@@ -415,7 +415,7 @@ impl CharTableNode {
 
     pub(super) fn checked_get(handle: &CharTableNodeHandle, index: usize) -> Result<Value> {
         let mut current = Arc::clone(handle);
-        let mut seen = HashSet::new();
+        let mut seen = HashSet::default();
         loop {
             if !seen.insert(char_table_node_id(&current)) { return Err("cyclic sub-char-table".into()); }
             let slot = {
@@ -570,7 +570,7 @@ pub(super) struct CharTable {
 // Lisp copy-sequence shares payload values, never native subdivision nodes.
 impl Clone for CharTable {
     fn clone(&self) -> Self {
-        let mut copies = HashMap::new();
+        let mut copies = HashMap::default();
         let root = CharTableNode::deep_copy(&self.root, &mut copies);
         let ascii = Self::ascii_from_root(&root);
         Self {
@@ -708,11 +708,11 @@ impl CharTable {
     /// Rewrite every character entry (not purpose, default, parent or
     /// extras), as map_char_table + set-char-table-range would.
     pub(crate) fn map_entries(&mut self, map: &mut impl FnMut(&mut Value)) {
-        visit_char_table_node_values(&self.root, &mut HashSet::new(), map);
+        visit_char_table_node_values(&self.root, &mut HashSet::default(), map);
         self.ascii = Self::ascii_from_root(&self.root);
     }
     pub fn visit_values(&mut self, visit: &mut impl FnMut(&mut Value)) {
-        self.visit_values_seen(&mut HashSet::new(), visit);
+        self.visit_values_seen(&mut HashSet::default(), visit);
     }
     pub(super) fn visit_values_seen(&mut self, seen: &mut HashSet<usize>, visit: &mut impl FnMut(&mut Value)) {
         visit(&mut self.purpose);
@@ -726,7 +726,7 @@ impl CharTable {
         visit_char_table_node_values(&self.root, seen, visit);
     }
     pub fn storage_bytes(&self, capacity: bool) -> usize {
-        self.storage_bytes_seen(capacity, &mut HashSet::new())
+        self.storage_bytes_seen(capacity, &mut HashSet::default())
     }
     pub(super) fn storage_bytes_seen(&self, capacity: bool, seen: &mut HashSet<usize>) -> usize {
         size_of::<Self>()

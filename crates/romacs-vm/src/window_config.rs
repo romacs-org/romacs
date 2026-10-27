@@ -224,7 +224,7 @@ impl Vm {
         // delete_all_child_windows: every window of the current tree is
         // deleted; a leaf remembers its buffer in case it is restored.
         let mut tree = vec![self.window_root(ROOT)];
-        let mut kept = HashMap::new();
+        let mut kept = HashMap::default();
         let mut at = 0;
         while at < tree.len() {
             let v = tree[at];

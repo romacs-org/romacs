@@ -158,8 +158,8 @@ impl Vm {
             let compiled = self.function(
                 items[0].list().unwrap(),
                 &items[1..],
-                &HashMap::new(),
-                &HashSet::new(),
+                &NameMap::default(),
+                &NameSet::default(),
             );
             self.macros = macros;
             let (function, _) = compiled.expect("valid built-in annotation function");

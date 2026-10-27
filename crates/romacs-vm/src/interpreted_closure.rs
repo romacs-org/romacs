@@ -325,9 +325,9 @@ impl Vm {
                     .map(|v| self.expansion_form(v, 0))
                     .collect::<Result<Vec<_>>>()?;
                 self.list_values(a[1])?;
-                let mut outer = HashMap::new();
-                let mut values = HashMap::new();
-                let mut specials = HashSet::new();
+                let mut outer = NameMap::default();
+                let mut values = NameMap::default();
+                let mut specials = NameSet::default();
                 for pair in self.list_values(a[2])? {
                     if pair.tag() != 3 {
                         if pair != Value::TRUE {

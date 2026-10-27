@@ -5,7 +5,6 @@ use crate::char_table::{
     CharTableNode, CharTableNodeHandle, CharTableSlot, visit_char_table_node_values,
 };
 use crate::prim::{Fault, Leaf};
-use std::collections::HashSet;
 #[cfg(test)]
 #[path = "map_keymap_gc_tests.rs"]
 mod gc_tests;

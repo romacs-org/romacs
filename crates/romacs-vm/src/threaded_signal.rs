@@ -20,7 +20,7 @@ impl SignalHandler {
 }
 
 fn member(vm: &Vm, wanted: Value, mut values: Value) -> bool {
-    let mut seen = HashSet::new();
+    let mut seen = HashSet::default();
     while let Ok((value, tail)) = vm.cons_pair(values) {
         if value == wanted { return true; }
         if !seen.insert(values.0) { break; }
@@ -31,7 +31,7 @@ fn member(vm: &Vm, wanted: Value, mut values: Value) -> bool {
 
 fn matches(vm: &Vm, conditions: Value, mut choices: Value) -> bool {
     if choices.tag() != 3 { return choices == Value::TRUE || member(vm, choices, conditions); }
-    let mut seen = HashSet::new();
+    let mut seen = HashSet::default();
     while let Ok((choice, tail)) = vm.cons_pair(choices) {
         if choice == Value::TRUE || member(vm, choice, conditions) { return true; }
         if !seen.insert(choices.0) { break; }

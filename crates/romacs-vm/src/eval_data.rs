@@ -78,7 +78,7 @@ impl Vm {
         // Iterative worklist also handles cyclic conses/vectors without keeping
         // a Rust recursive borrow or imposing a limit on long flat lists.
         let mut pending = vec![(a, b)];
-        let mut seen = HashSet::new();
+        let mut seen = HashSet::default();
         while let Some((a, b)) = pending.pop() {
             if a == b || !seen.insert((a.0, b.0)) {
                 continue;
@@ -337,7 +337,7 @@ impl Vm {
             }
             let mut parts = Vec::new();
             let mut tail = value;
-            let mut seen = HashSet::new();
+            let mut seen = HashSet::default();
             while tail.tag() == 3 {
                 if options.length.is_some_and(|n| parts.len() >= n) { parts.push("...".into()); return Ok(format!("({})", parts.join(" "))); }
                 if !seen.insert(tail.0) { return Err("circular list printing requires print-circle".into()); }

@@ -82,8 +82,8 @@ impl Vm {
         &mut self,
         args: &[Form],
         body: &[Form],
-        outer: &HashMap<Name, Binding>,
-        local_specials: &HashSet<String>,
+        outer: &NameMap<Name, Binding>,
+        local_specials: &NameSet<String>,
     ) -> Result<(usize, Vec<Name>)> {
         let previous = self.request_code.compiling;
         self.request_code.compiling = true;

@@ -588,7 +588,7 @@ impl Default for Forwarded {
             defaults: vec![],
             object_vars: vec![],
             buffer_vars: vec![],
-            by_name: HashMap::new(),
+            by_name: HashMap::default(),
         };
         for (index, var) in C_VARIABLES.iter().enumerate() {
             let fwd = match var.kind {

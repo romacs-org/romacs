@@ -1118,7 +1118,7 @@ mod leaf {
                 (value, false)
             };
             let mut target = definition;
-            let mut seen = HashSet::new();
+            let mut seen = HashSet::default();
             while !is_macro && target != Value::NIL && self.kind(target) == Kind::Symbol {
                 if target == v || !seen.insert(target.0) {
                     return Err(Fault::CyclicFunctionIndirection(v));
@@ -1402,7 +1402,7 @@ mod leaf {
                     return Err(Fault::Wrong("char-table-p", parent));
                 }
                 let mut next = parent;
-                let mut seen = HashSet::new();
+                let mut seen = HashSet::default();
                 while let Some(data::Object::CharTable(t)) = self.vm.object_if(next) {
                     if next == table || !seen.insert(next.0) { return Err(Fault::Error("Attempt to make a chartable be its own parent".into())); }
                     next = t.parent;

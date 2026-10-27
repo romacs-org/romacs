@@ -387,7 +387,7 @@ impl Vm {
         let current = self.regexp_current_syntax()?;
         self.regexp_syntax_table(current)?;
         // char_table_get follows parents, so a cycle must be refused here.
-        let mut seen = HashSet::new();
+        let mut seen = HashSet::default();
         let mut table = current;
         while let Some(Object::CharTable(t)) = self.object_if(table) {
             if !seen.insert(table.0) {

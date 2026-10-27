@@ -110,7 +110,7 @@ impl Vm {
         // Generated, uninterned slots are existing GC roots. They keep literal
         // identity stable while cold bodies remain undecoded, even if the
         // original variable/plist is changed before a body's first call.
-        let mut literal_slots = HashMap::new();
+        let mut literal_slots = HashMap::default();
         for (id, f) in self.functions.iter().enumerate() {
             // Keep stable image ordinals without serializing retired request IR.
             if !self.request_code.live[id] {
@@ -368,7 +368,7 @@ impl Vm {
     // Every reachable Lisp object is strand-owned; only encoded bytes stay
     // shared. One memo covers data roots and the generated cold-literal roots.
     fn restore_private_image_roots(&mut self) -> Result<()> {
-        let mut copies = HashMap::new();
+        let mut copies = HashMap::default();
         let mut pending = Vec::new();
         for slot in 0..self.slots.len() {
             let value = self.private_image_root(self.slots[slot].value, &mut copies, &mut pending)?;

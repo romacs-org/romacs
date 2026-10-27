@@ -99,7 +99,7 @@ impl Vm {
                 let map = Form::Generated(expand::generated_id());
                 let mut body = vec![];
                 let mut props = vec![];
-                let mut keys = HashSet::new();
+                let mut keys = NameSet::default();
                 for pair in rest[at..].chunks_exact(2) {
                     if !keys.insert(format!("{:?}", pair[0])) { return Err("duplicate key definition".into()); }
                     body.push(call("define-key", vec![map.clone(), call("kbd", vec![pair[0].clone()]), pair[1].clone()]));

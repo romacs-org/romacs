@@ -208,7 +208,7 @@ impl Vm {
         // Only Rust memory is allocated below: retained cells cannot move.
         let mut cells = Vec::new();
         let mut tail = list;
-        let mut seen = HashSet::new();
+        let mut seen = HashSet::default();
         while tail.tag() == 3 {
             if !seen.insert(tail.0) { return Err(Fault::Circular(list)); }
             let (value, next) = self.cons_pair(tail).map_err(Fault::Error)?;
@@ -474,7 +474,7 @@ impl Vm {
         let mut tail = reuse;
         let mut previous = None;
         let mut i = 0;
-        let mut seen = HashSet::new();
+        let mut seen = HashSet::default();
         while tail.tag() == 3 {
             if !seen.insert(tail.0) {
                 return Err(Fault::Text(

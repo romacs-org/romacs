@@ -477,7 +477,7 @@ impl Vm {
     }
     /// GNU `internal_equal` (plain `equal`): cycle-aware and depth-limited.
     pub(super) fn equal(&self, a: Value, b: Value) -> Hashed<bool> {
-        self.equal_at(a, b, 0, &mut HashMap::new())
+        self.equal_at(a, b, 0, &mut HashMap::default())
     }
     fn equal_at(
         &self,

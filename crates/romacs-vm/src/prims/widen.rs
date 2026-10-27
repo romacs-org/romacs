@@ -66,7 +66,7 @@ fn concat(cx; rest args) {
         }
         let values = if arg == Value::NIL { continue; }
         else if cx.pair(arg).is_some() {
-            let mut values = Vec::new(); let mut seen = HashSet::new(); let mut tail = arg;
+            let mut values = Vec::new(); let mut seen = HashSet::default(); let mut tail = arg;
             while let Some((car,cdr))=cx.pair(tail) {
                 if !seen.insert(tail.0) { return Err(Fault::Circular(arg)); }
                 values.push(car); tail=cdr;
@@ -234,11 +234,11 @@ fn get_load_suffixes(cx) {
     let exts = cx.variable_value(reps)?.ok_or(Fault::VoidVariable(reps))?;
     let mut out = Vec::new();
     let mut suffix_tail = suffixes;
-    let mut seen_suffixes = HashSet::new();
+    let mut seen_suffixes = HashSet::default();
     while let Some((suffix, next_suffix)) = cx.pair(suffix_tail) {
         if !seen_suffixes.insert(suffix_tail.0) { return Err(Fault::Circular(suffixes)); }
         let mut ext_tail = exts;
-        let mut seen_exts = HashSet::new();
+        let mut seen_exts = HashSet::default();
         while let Some((ext, next_ext)) = cx.pair(ext_tail) {
             if !seen_exts.insert(ext_tail.0) { return Err(Fault::Circular(exts)); }
             ext_tail = next_ext;
@@ -262,7 +262,7 @@ fn set_match_data(cx, list: Value; optional reseat: Value) {
 }}
 
 fn suffix_member(cx: &Leaf<'_>, needle: Value, list: Value) -> std::result::Result<bool, Fault> {
-    let mut seen = HashSet::new();
+    let mut seen = HashSet::default();
     let mut tail = list;
     while let Some((item, next)) = cx.pair(tail) {
         if !seen.insert(tail.0) { return Err(Fault::Circular(list)); }

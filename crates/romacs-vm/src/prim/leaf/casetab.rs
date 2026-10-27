@@ -229,7 +229,7 @@ impl Leaf<'_> {
         }
         let mut points = vec![0, CharTable::LEN];
         let mut at = table;
-        let mut seen = HashSet::new();
+        let mut seen = HashSet::default();
         while let Some(Object::CharTable(t)) = self.vm.object_if(at) {
             if !seen.insert(at.0) {
                 return Err(Fault::Error("cyclic char-table parent".into()));

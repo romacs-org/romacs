@@ -1465,7 +1465,7 @@ impl Vm {
         }
         let mut pairs = Vec::new();
         let mut tail = plist;
-        let mut seen = HashSet::new();
+        let mut seen = HashSet::default();
         while let Ok((key, rest)) = self.cons_pair(tail) {
             if !seen.insert(tail.0) {
                 return Err(Fault::Circular(plist));

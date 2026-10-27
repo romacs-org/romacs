@@ -17,7 +17,7 @@ impl Vm {
         environment: Value,
     ) -> Result<Option<Value>> {
         let mut tail = environment;
-        let mut seen = HashSet::new();
+        let mut seen = HashSet::default();
         while tail != Value::NIL {
             if !seen.insert(tail.0) {
                 return self.macroexpand_fault("circular-list", &[environment]);
@@ -90,7 +90,7 @@ impl Vm {
             };
             let mut symbol = definition;
             let mut entry = None;
-            let mut aliases = HashSet::new();
+            let mut aliases = HashSet::default();
             while definition.tag() == 7 || definition == Value::NIL || definition == Value::TRUE {
                 symbol = definition;
                 if !aliases.insert(symbol.0) {

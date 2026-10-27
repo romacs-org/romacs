@@ -56,7 +56,7 @@ impl Vm {
         }
         let mut bindings = Vec::new();
         if lexical.tag() == 3 {
-            let mut seen = HashSet::new();
+            let mut seen = HashSet::default();
             let mut tail = lexical;
             let limit = self.list_limit();
             let mut steps = 0usize;

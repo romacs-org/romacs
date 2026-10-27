@@ -83,7 +83,7 @@ fn modify_frame_parameters(cx, frame: Value, alist: Value) {
     // Fcdr split each element, then entries are stored in reverse order.
     cx.windows().check_live_frame(frame)?;
     let mut elements = Vec::new();
-    let mut seen = HashSet::new();
+    let mut seen = HashSet::default();
     let mut tail = alist;
     while let Some((element, rest)) = cx.pair(tail) {
         if !seen.insert(tail.0) { return Err(Fault::Circular(alist)); }

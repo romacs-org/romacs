@@ -162,7 +162,7 @@ impl Leaf<'_> {
             return Ok(None);
         }
         let mut value = original;
-        let mut seen = HashSet::new();
+        let mut seen = HashSet::default();
         while self.kind(value) == Kind::Symbol && value != Value::NIL {
             if !seen.insert(value.0) {
                 return Err(Fault::CyclicFunctionIndirection(original));

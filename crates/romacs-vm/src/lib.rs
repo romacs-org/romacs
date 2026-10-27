@@ -31,7 +31,13 @@ mod processors;
 pub use command::{CommandEvent, CommandOutcome, CommandSignal};
 pub use host_input::{HostEvent, HostFrame, HostInput};
 pub use terminal_host::{TerminalColor, TerminalHost, TerminalInputState, TerminalSnapshot, TerminalStyle, TerminalStyleRun};
-use std::collections::{HashMap, HashSet};
+// Maps keyed by slots and ids the VM allocates use FxHash. Maps keyed by
+// names, which Lisp, files and the network supply, use foldhash with a random
+// seed per map, so a precomputed set of colliding names cannot make their
+// lookups quadratic.
+use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
+type NameMap<K, V> = std::collections::HashMap<K, V, foldhash::fast::RandomState>;
+type NameSet<K> = std::collections::HashSet<K, foldhash::fast::RandomState>;
 use std::sync::Arc;
 mod code_image;
 mod gc;
@@ -871,8 +877,8 @@ struct LazyBody {
     args: Vec<Form>,
     names: Vec<Name>,
     cells: Vec<bool>,
-    local_specials: HashSet<String>,
-    pending_specials: HashSet<String>,
+    local_specials: NameSet<String>,
+    pending_specials: NameSet<String>,
     dynamic_scope: bool,
     /// A form whose expansion failed and was deferred to its reach (GNU
     /// expands each form when evaluation reaches it). Its own root is
@@ -900,9 +906,9 @@ impl Name {
 struct Builder {
     code: Vec<Op>,
     next: usize,
-    env: HashMap<Name, Binding>,
+    env: NameMap<Name, Binding>,
     sites: Vec<Vec<usize>>,
-    local_specials: HashSet<String>,
+    local_specials: NameSet<String>,
 }
 impl Builder {
     fn reg(&mut self) -> usize {
@@ -1067,12 +1073,12 @@ pub struct Vm {
     doc_file: Option<(std::path::PathBuf, std::time::SystemTime, std::sync::Arc<Vec<u8>>)>,
     terminal_host: Option<Box<dyn terminal_host::TerminalHost>>,
     terminal_bindings: Vec<terminal_host::TerminalBinding>,
-    pending_specials: HashSet<String>,
+    pending_specials: NameSet<String>,
     /// Names a one-argument top-level `(defvar NAME)` declared in the file
     /// being loaded: special for the rest of that file only (GNU Fdefvar,
     /// eval.c:990-996, consing onto the `internal-interpreter-environment'
     /// that readevalloop binds once per file). Saved and restored per load.
-    file_specials: HashSet<String>,
+    file_specials: NameSet<String>,
     /// Set by the loader for exactly one root compilation of a file's form,
     /// so that compilation (and nothing nested in it) starts from
     /// `file_specials`.
@@ -1084,7 +1090,7 @@ pub struct Vm {
     /// Consumed by the next `function` call: keep every capture register.
     keep_captures: bool,
     expanded_macros: Vec<(usize, u64)>,
-    expanded_symbols: HashSet<String>,
+    expanded_symbols: NameSet<String>,
     image: Option<std::sync::Arc<ImageRegion>>,
     buffer_slot: usize,
     multibyte_slot: usize,
@@ -1099,7 +1105,7 @@ pub struct Vm {
     gc_retained: usize,
     gc_threshold: usize,
     gc_floor: usize,
-    names: HashMap<String, usize>,
+    names: NameMap<String, usize>,
     symbol_names: Vec<String>,
     obarray_symbol_names: HashMap<usize, Value>,
     permanent_symbol_names: HashMap<u64, Value>,
@@ -1108,7 +1114,7 @@ pub struct Vm {
     generated_symbols: HashMap<GeneratedName, usize>,
     generated_slots: HashMap<usize, GeneratedName>,
     slots: Vec<Slot>,
-    specials: HashSet<String>,
+    specials: NameSet<String>,
     functions: Vec<Arc<Function>>,
     request_code: request_code::RequestCode,
     register_width: usize,
@@ -1173,7 +1179,7 @@ impl Vm {
             execution_fatal: false,
             loader: loader::Loader::default(),
             source_cache: source_cache::SourceCache::default(),
-            macros: HashSet::new(),
+            macros: HashSet::default(),
             expanding: vec![],
             compile_depth: 0,
             eval_depth: 0,
@@ -1186,19 +1192,19 @@ impl Vm {
             host_input: None,
             process_jobs: process_jobs::Jobs::default(),
             environment_snapshot: Some(environment::snapshot()),
-            trapped: HashSet::new(),
+            trapped: HashSet::default(),
             doc_file: None,
             terminal_host: None,
             terminal_bindings: Vec::new(),
             propagate_next: false,
-            pending_specials: HashSet::new(),
-            file_specials: HashSet::new(),
+            pending_specials: NameSet::default(),
+            file_specials: NameSet::default(),
             seed_file_specials: false,
             lazy_regime: false,
             defer_expansion_errors: false,
             keep_captures: false,
             expanded_macros: vec![],
-            expanded_symbols: HashSet::new(),
+            expanded_symbols: NameSet::default(),
             image: None,
             buffer_slot: 0,
             multibyte_slot: 0,
@@ -1206,22 +1212,22 @@ impl Vm {
             variable_redirects: Vec::new(),
             forwarded: forwarded::Forwarded::default(),
             fixnum_slots: [usize::MAX; 2],
-            local_binding_slots: HashSet::new(),
+            local_binding_slots: HashSet::default(),
             free_local_binding_slots: Vec::new(),
             gc_stats: HeapStats::default(),
             gc_retained: 0,
             gc_threshold: 16384,
             gc_floor: 16384,
-            names: HashMap::new(),
+            names: NameMap::default(),
             symbol_names: vec![],
-            obarray_symbol_names: HashMap::new(),
-            permanent_symbol_names: HashMap::new(),
+            obarray_symbol_names: HashMap::default(),
+            permanent_symbol_names: HashMap::default(),
             native_case_roots: std::array::from_fn(|_| std::sync::Weak::new()),
             obarray_free_slots: Vec::new(),
-            generated_symbols: HashMap::new(),
-            generated_slots: HashMap::new(),
+            generated_symbols: HashMap::default(),
+            generated_slots: HashMap::default(),
             slots: vec![],
-            specials: HashSet::new(),
+            specials: NameSet::default(),
             functions: vec![],
             request_code: request_code::RequestCode::default(),
             register_width: 1,
@@ -1229,7 +1235,7 @@ impl Vm {
             spare_programs: Vec::new(),
             closures: vec![],
             cells: vec![],
-            cell_pairs: HashMap::new(),
+            cell_pairs: HashMap::default(),
             conses: vec![],
             objects: vec![],
             caches: vec![],
@@ -1446,10 +1452,10 @@ impl Vm {
         let seed = if std::mem::take(&mut self.seed_file_specials) {
             self.file_specials.clone()
         } else {
-            HashSet::new()
+            NameSet::default()
         };
         let result = self
-            .function(&[], std::slice::from_ref(form), &HashMap::new(), &seed)
+            .function(&[], std::slice::from_ref(form), &NameMap::default(), &seed)
             .map(|(id, _)| id);
         self.compile_depth -= 1;
         if self.compile_depth == 0 {
@@ -1465,14 +1471,14 @@ impl Vm {
         &mut self,
         args: &[Form],
         body: &[Form],
-        outer: &HashMap<Name, Binding>,
-        local_specials: &HashSet<String>,
+        outer: &NameMap<Name, Binding>,
+        local_specials: &NameSet<String>,
     ) -> Result<(usize, Vec<Name>)> {
         let keep_captures = std::mem::take(&mut self.keep_captures);
         let mut b = Builder {
             code: vec![],
             next: 0,
-            env: HashMap::new(),
+            env: NameMap::default(),
             sites: vec![],
             local_specials: local_specials.clone(),
         };
@@ -1729,7 +1735,7 @@ impl Vm {
             Form::Sym(nil) if nil == "nil" => vec![],
             _ => return Err("invalid lazy body".into()),
         };
-        let outer: HashMap<Name, Binding> = lazy
+        let outer: NameMap<Name, Binding> = lazy
             .names
             .iter()
             .zip(&lazy.cells)
@@ -2696,7 +2702,7 @@ fn optimize(mut code: Vec<Op>, sites: &[Vec<usize>], regs: usize) -> Vec<Op> {
     loop {
         let mut reads = vec![0usize; regs];
         let mut writes = vec![0usize; regs];
-        let mut targets = HashSet::new();
+        let mut targets = HashSet::default();
         for &op in &code {
             let mut read = |r: usize| reads[r] += 1;
             match op {
