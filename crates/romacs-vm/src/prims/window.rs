@@ -121,11 +121,11 @@ fn run_window_scroll_functions(cx; optional window: Value) -> Step {
     // GNU passes the hook WINDOW as given, nil when omitted, not the
     // decoded window (window.c:3867).
     let (_, buffer, start) = cx.windows().scroll_functions_call(window)?;
-    // GNU binds the current buffer to WINDOW's and runs the hook only when
-    // `window-scroll-functions` is non-nil (window.c:3862); with it nil the
-    // buffer switch is unobservable, so VM2 makes no Lisp call at all.
+    // GNU switches to WINDOW's buffer, then runs the hook only when
+    // `window-scroll-functions` is non-nil there (window.c:3862), where it
+    // may be buffer-local; with it nil the switch is unobservable.
     let hook = cx.intern("window-scroll-functions");
-    if cx.variable_value(hook)?.is_none_or(|v| v == Value::NIL) {
+    if cx.buffer_local_read(hook, buffer)? == Value::NIL {
         return Ok(Step::Done(Value::NIL));
     }
     // (let ((old (current-buffer)))

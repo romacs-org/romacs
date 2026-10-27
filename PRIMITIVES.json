@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "8908cb8d99cb04db9bddece64657eb351b11e4196f47bb4db18ed5ec8897a7dc",
+  "source_fingerprint": "8c955e12f3dc4bddf876014d95e9822affa21b38109ae105b368852c031b8511",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 741,
-  "parsed_vm2_only": 741
+  "parsed_total": 745,
+  "parsed_vm2_only": 745
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -1862,6 +1862,26 @@
    "name": "isnan",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/floatfns.rs:29"
+  },
+  "json-insert": {
+   "name": "json-insert",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/json.rs:10"
+  },
+  "json-parse-buffer": {
+   "name": "json-parse-buffer",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/json.rs:25"
+  },
+  "json-parse-string": {
+   "name": "json-parse-string",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/json.rs:20"
+  },
+  "json-serialize": {
+   "name": "json-serialize",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/json.rs:4"
   },
   "kbd": {
    "name": "kbd",

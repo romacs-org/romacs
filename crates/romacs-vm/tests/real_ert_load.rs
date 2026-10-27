@@ -209,6 +209,8 @@ fn daily_driver_load_slice_matches_gnu() {
         (with-temp-buffer (insert "abc") (put-text-property 2 3 'read-only t) (set-buffer-modified-p nil) (list (condition-case e (translate-region-internal 2 2 tt) (error e)) (buffer-modified-p)))
         (with-temp-buffer (insert "abc") (put-text-property 1 4 'read-only t) (let ((inhibit-read-only t)) (translate-region-internal 2 2 tt)))
         (with-temp-buffer (insert "abc") (put-text-property 1 4 'read-only t) (setq buffer-read-only t) (set-buffer-modified-p nil) (list (condition-case e (translate-region-internal 2 2 tt) (error (car e))) (buffer-modified-p)))))"###,
+        // A buffer-local window-scroll-functions runs in its window's buffer.
+        r###"(let ((b (get-buffer-create "wsf-target")) (log nil)) (set-window-buffer (selected-window) b) (with-current-buffer b (add-hook 'window-scroll-functions (lambda (_w _s) (push (buffer-name) log)) nil t)) (with-temp-buffer (run-window-scroll-functions)) (list log (length (buffer-local-value 'window-scroll-functions b)) (default-value 'window-scroll-functions)))"###,
     ].iter().map(|s| s.to_string()).chain([recursive]).collect();
     let binary = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
     let mut failures = Vec::new();

@@ -1481,6 +1481,7 @@ mod leaf {
     mod point_predicates;
     mod subst_char;
     mod translate_region;
+    mod json;
     mod overlays;
     mod invisible;
     mod buffer_locals;

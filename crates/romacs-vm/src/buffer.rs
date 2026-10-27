@@ -755,9 +755,10 @@ impl Vm {
                 } else {
                     match self.object(v)? {
                         Object::Bytes(b) => out.extend_from_slice(b),
-                        // ASCII is byte-identical; non-ASCII requires an explicit encoder.
-                        Object::String(s) if s.as_str().is_ascii() => {
-                            out.extend_from_slice(s.as_str().as_bytes())
+                        // A unibyte string's bytes and ASCII text are copied as
+                        // they are; other text requires an explicit encoder.
+                        Object::String(s) | Object::RawString(s) if !s.is_multibyte() || s.bytes().is_ascii() => {
+                            out.extend_from_slice(s.bytes())
                         }
                         _ => return Err("bytes required; encode text explicitly".into()),
                     }

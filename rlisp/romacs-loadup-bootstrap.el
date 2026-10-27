@@ -2,9 +2,9 @@
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 
 ;;; Commentary:
-;; The files GNU's loadup.el preloads on GNU/Linux without a window system,
-;; as source, in loadup's order, then the steps of startup.el's
-;; `command-line' a batch session depends on.  Romacs's own display and
+;; The files GNU's loadup.el preloads on GNU/Linux, as source, in loadup's
+;; order (of its window-system block, fringe.el so far), then the steps of
+;; startup.el's `command-line' a batch session depends on.  Romacs's own display and
 ;; keymap layers load where GNU's C would already be in place.  Each Romacs
 ;; adaptation is commented where it happens.
 ;;
@@ -131,6 +131,9 @@
 (load "replace.el" nil t t)
 (load "emacs-lisp/tabulated-list.el" nil t t)
 (load "buff-menu.el" nil t t)
+;; loadup.el's window-system block: Romacs is a graphical machine, and
+;; pinned GNU, a graphical build, preloads fringe.el in batch too.
+(load "fringe.el" nil t t)
 (load "progmodes/elisp-mode.el" nil t t)
 (load "emacs-lisp/float-sup.el" nil t t)
 (load "vc/vc-hooks.el" nil t t)

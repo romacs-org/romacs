@@ -73,6 +73,9 @@ const HOST_CONFIGURATION: &str = if cfg!(target_arch = "x86_64") {
 /// variable (forwarded objects and integers cannot yet: VM2-CVAR1).
 pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "inhibit-x-resources", gnu: "emacs.c:3596", kind: Kind::Bool(false) },
+    // run-window-scroll-functions (window.c:3862) runs it through ordinary
+    // lookup; modes make it buffer-local, as hooks are. xdisp.c:38881 nil.
+    CVariable { name: "window-scroll-functions", gnu: "xdisp.c:38865", kind: Kind::Lisp(Init::Nil) },
     // mule-cmds.el's reset-language-environment reads it.
     CVariable { name: "default-process-coding-system", gnu: "coding.c:12133", kind: Kind::Lisp(Init::Nil) },
     // DEFVAR_KBOARD; VM2's single keyboard is the initial terminal's (VM2-WIN5).
@@ -243,6 +246,7 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "open-paren-in-column-0-is-defun-start", gnu: "syntax.c:3792", kind: Kind::Bool(true) },
     CVariable { name: "other-window-scroll-buffer", gnu: "window.c:9284", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "overflow-newline-into-fringe", gnu: "fringe.c:1770", kind: Kind::Lisp(Init::True) },
+    CVariable { name: "fringe-bitmaps", gnu: "fringe.c:1779", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "overlay-arrow-position", gnu: "xdisp.c:38705", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "overline-margin", gnu: "xdisp.c:39296", kind: Kind::Int(2) },
     CVariable { name: "overriding-terminal-local-map", gnu: "keyboard.c:14128", kind: Kind::Lisp(Init::Nil) },
@@ -468,8 +472,6 @@ pub(crate) static C_VARIABLES: &[CVariable] = &[
     CVariable { name: "window-combination-limit", gnu: "window.c:9512", kind: Kind::Lisp(Init::Symbol("window-size")) },
     CVariable { name: "window-combination-resize", gnu: "window.c:9491", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "window-resize-pixelwise", gnu: "window.c:9575", kind: Kind::Bool(false) },
-    // run-window-scroll-functions (window.c:3862) runs it; xdisp.c:38881 nil.
-    CVariable { name: "window-scroll-functions", gnu: "xdisp.c:38865", kind: Kind::Lisp(Init::Nil) },
     // Variable harness (R216 task 2): a DEFVAR_BOOL that subr.el reads.
     // get-load-suffixes (lread.c:961) reads both; it is reached through
     // GNU's Lisp locate-library (subr.el:3440) once lazy bodies replaced
@@ -523,6 +525,8 @@ pub(crate) static C_VARIABLES: &[CVariable] = &[
     CVariable { name: "selective-display-ellipses", gnu: "buffer.c:5487", kind: Kind::PerBuffer { default: Init::True, predicate: None } },
     CVariable { name: "indicate-empty-lines", gnu: "buffer.c:5612", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
     CVariable { name: "indicate-buffer-boundaries", gnu: "buffer.c:5619", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
+    CVariable { name: "fringe-indicator-alist", gnu: "buffer.c:5644", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
+    CVariable { name: "fringe-cursor-alist", gnu: "buffer.c:5663", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
     // GNU checks these two against `fraction' on set (VM2-CVAR-PRED1).
     CVariable { name: "scroll-up-aggressively", gnu: "buffer.c:5678", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
     CVariable { name: "scroll-down-aggressively", gnu: "buffer.c:5691", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
