@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "786bae5f4158894d3392e17f59e517fa3a2d6e391b2c4c9d96f25d18260321f1",
+  "source_fingerprint": "0a9faffd87b24673b05ab43628ffc38d0e8b8b052bce03ac3e5473207780deb8",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 803,
-  "parsed_vm2_only": 803
+  "parsed_total": 804,
+  "parsed_vm2_only": 804
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -3316,6 +3316,11 @@
    "name": "set-window-configuration",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/window_config.rs:20"
+  },
+  "set-window-dedicated-p": {
+   "name": "set-window-dedicated-p",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/window.rs:269"
   },
   "set-window-margins": {
    "name": "set-window-margins",

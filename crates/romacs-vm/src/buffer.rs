@@ -193,6 +193,8 @@ impl Vm {
                 self.set_marker_object(pt, point, replacement)?;
                 self.set_marker_object(start, Value::integer(1)?, replacement)?;
                 let w = self.window_mut(window)?;
+                // replace_buffer_in_windows_safely undedicates the window.
+                w.dedicated = Value::NIL;
                 w.buffer = replacement;
                 w.end_distance = 0;
                 w.end_valid = false;

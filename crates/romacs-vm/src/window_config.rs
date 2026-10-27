@@ -26,6 +26,8 @@ pub(crate) struct SavedWindow {
     right_margin: u32,
     vscroll_px: u32,
     combination_limit: Value,
+    /// GNU `p->dedicated`.
+    dedicated: Value,
     /// (PARAMETER . VALUE) for each parameter `window-persistent-parameters'
     /// makes persistent, VALUE nil where the window had none.
     parameters: Vec<(Value, Value)>,
@@ -49,7 +51,7 @@ impl WindowConfiguration {
         }
         for w in &mut self.windows {
             for v in [&mut w.window, &mut w.buffer, &mut w.start, &mut w.point, &mut w.parent,
-                      &mut w.normal_lines, &mut w.normal_cols, &mut w.combination_limit] {
+                      &mut w.normal_lines, &mut w.normal_cols, &mut w.combination_limit, &mut w.dedicated] {
                 f(v);
             }
             for v in &mut w.children {
@@ -124,6 +126,7 @@ impl Vm {
             right_margin: w.right_margin,
             vscroll_px: w.vscroll_px,
             combination_limit: w.combination_limit,
+            dedicated: w.dedicated,
             parameters,
         });
         for child in w.children {
@@ -269,6 +272,8 @@ impl Vm {
                 self.window_mut(p.window)?.buffer = Value::NIL;
                 continue;
             }
+            // window.c:7889: every leaf gets its saved dedication back.
+            self.window_mut(p.window)?.dedicated = p.dedicated;
             if (dont_set_miniwindow == Value::NIL || !mini) && self.config_buffer_live(p.buffer) {
                 let previous = kept.get(&p.window.0).copied().unwrap_or(Value::NIL);
                 self.config_show(p.window, p.buffer, p.start, p.point, previous)?;
@@ -287,6 +292,8 @@ impl Vm {
                 let other = self.create_named_buffer("*scratch*", false)?;
                 let one = Value::integer(1)?;
                 self.config_show(p.window, other, one, one, Value::NIL)?;
+                // Its buffer is gone: the window is no more dedicated.
+                self.window_mut(p.window)?.dedicated = Value::NIL;
             }
         }
         // Windows of the old tree that the configuration does not name stay

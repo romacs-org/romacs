@@ -240,6 +240,18 @@ fn set_window_next_buffers(cx, window: Value, next_buffers: Value) {
 defsubr! { name = "set-window-buffer", gnu = "window.c:4432", effect = Global,
 fn set_window_buffer(cx, window: Value, buffer_or_name: Value; optional keep_margins: Value) -> Step {
     let (window, buffer, changed) = cx.windows().set_window_buffer_check(window, buffer_or_name)?;
+    // A window strongly dedicated to its buffer keeps it; a weakly
+    // dedicated one stops being dedicated.
+    if changed {
+        if let Some(name) = cx.windows().strongly_dedicated(window)? {
+            let template = cx.string("Window is dedicated to `%s'");
+            let name = cx.string(&name);
+            let message = cx.format_message(template, &[name])?;
+            let data = cx.cons(message, Value::NIL);
+            return Err(Fault::Signal(cx.intern("error"), data));
+        }
+        cx.windows().set_window_dedicated_p(window, Value::NIL)?;
+    }
     let record = cx.intern("record-window-buffer");
     // Bootstrap regimes that have not loaded window.el have nothing to record.
     if changed && cx.fboundp(record) {
@@ -253,3 +265,8 @@ fn show_buffer(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
     Ok(Step::Call { f: run, args: vec![saved[0]], then: shown, saved: vec![] })
 }
 fn shown(_: &mut Leaf<'_>, _: Value, _: &[Value]) -> Next { Ok(Step::Done(Value::NIL)) }
+
+defsubr! { name = "set-window-dedicated-p", gnu = "window.c:2297", effect = Global,
+fn set_window_dedicated_p(cx, window: Value, flag: Value) {
+    cx.windows().set_window_dedicated_p(window, flag)
+}}

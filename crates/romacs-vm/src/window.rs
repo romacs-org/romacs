@@ -42,6 +42,9 @@ pub(super) struct Window {
     /// window.el's buffer history (`window-prev-buffers`).
     pub prev_buffers: Value,
     pub next_buffers: Value,
+    /// GNU `w->dedicated`: nil, t (strongly dedicated) or another value
+    /// (weakly dedicated), as set-window-dedicated-p left it.
+    pub dedicated: Value,
     /// GNU `w->new_total`, `w->new_normal`, `w->normal_lines` and
     /// `w->normal_cols` (window.h): Lisp objects, set by `make_window`
     /// (window.c:4599) to 0, 0, 1.0 and 1.0. `window_resize_apply`
@@ -86,6 +89,7 @@ impl Window {
             parameters: vec![],
             prev_buffers: Value::NIL,
             next_buffers: Value::NIL,
+            dedicated: Value::NIL,
             new_total: Value::NIL,
             new_normal: Value::NIL,
             normal_lines: Value::NIL,
@@ -111,6 +115,7 @@ impl Window {
             &mut self.normal_cols,
             &mut self.prev_buffers,
             &mut self.next_buffers,
+            &mut self.dedicated,
         ] {
             f(v);
         }
@@ -1345,10 +1350,15 @@ impl<'a> Windows<'a> {
         let w = self.live(window)?;
         Self::int(self.get(w)?.use_time as i64)
     }
-    /// VM2 has no `set-window-dedicated-p` yet, so no window is dedicated.
     pub(crate) fn window_dedicated_p(&mut self, window: Value) -> Out {
-        self.live(window)?;
-        Ok(Value::NIL)
+        let w = self.live(window)?;
+        Ok(self.get(w)?.dedicated)
+    }
+    /// Fset_window_dedicated_p: FLAG, stored on a live WINDOW.
+    pub(crate) fn set_window_dedicated_p(&mut self, window: Value, flag: Value) -> Out {
+        let w = self.live(window)?;
+        self.vm.window_mut(w).map_err(internal)?.dedicated = flag;
+        Ok(flag)
     }
     /// Decorations VM2 does not draw: header/tab lines, scroll bars and
     /// dividers are 0 pixels (window.c:1224-1269 on a live window).
@@ -1529,6 +1539,13 @@ impl<'a> Windows<'a> {
             return Err(Fault::Error("Attempt to display deleted buffer".into()));
         }
         Ok((v, buffer, self.get(v)?.buffer != buffer))
+    }
+    /// The name of the buffer WINDOW is strongly dedicated to, if it is.
+    pub(crate) fn strongly_dedicated(&mut self, window: Value) -> std::result::Result<Option<String>, Fault> {
+        let w = self.get(window)?;
+        if w.dedicated != Value::TRUE { return Ok(None); }
+        let buffer = w.buffer;
+        Ok(Some(self.vm.buffer_state(buffer).ok().and_then(|s| s.name.clone()).unwrap_or_default()))
     }
     /// set_window_buffer, after Fset_window_buffer's checks.
     pub(crate) fn set_window_buffer(&mut self, window: Value, buffer: Value, keep_margins: Value) -> Out {
