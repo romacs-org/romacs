@@ -1201,6 +1201,8 @@ impl Vm {
         self.conses.len() + self.cells.len() + self.closures.len() + self.objects.len()
     }
     pub fn new() -> Self {
+        // emacs_wd is taken when Emacs starts, not when first used.
+        let _ = environment::startup_directory();
         let mut vm = Self {
             charsets: charset::Registry::default(),
             standard_case_tables: [Value::NIL; 4],

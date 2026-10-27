@@ -52,8 +52,10 @@ impl Vm {
 
 /// GNU's emacs_wd, as glibc's get_current_dir_name gives it at startup:
 /// PWD when it names the same file as ".", so a directory reached through a
-/// symlink keeps its spelling, else getcwd. Captured once; VM2 never changes
-/// the process working directory. None when it cannot be determined.
+/// symlink keeps its spelling, else getcwd. Captured once, by the first
+/// `Vm::new` as the host starts; VM2 never changes the process working
+/// directory. None when it cannot be determined, or names an unreachable
+/// directory (a leading `(', emacs_get_current_dir_name).
 pub(crate) fn startup_directory() -> Option<&'static [u8]> {
     use std::os::unix::{ffi::OsStrExt, fs::MetadataExt};
     static DIRECTORY: std::sync::OnceLock<Option<Vec<u8>>> = std::sync::OnceLock::new();
@@ -66,5 +68,5 @@ pub(crate) fn startup_directory() -> Option<&'static [u8]> {
             return Some(pwd.as_bytes().to_vec());
         }
         std::env::current_dir().ok().map(|dir| dir.as_os_str().as_bytes().to_vec())
-    }).as_deref()
+    }).as_deref().filter(|dir| dir.first() != Some(&b'('))
 }
