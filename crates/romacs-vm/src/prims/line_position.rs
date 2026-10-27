@@ -16,6 +16,18 @@ fn line_number_at_pos(cx; optional position: Value, absolute: Value) {
     cx.line_number_at_pos(position, absolute)
 }}
 
+// The field-free scans line-beginning-position and line-end-position share
+// (editfns.c bol and eol).
+defsubr! { name = "pos-bol", gnu = "editfns.c:684", effect = Reads,
+fn pos_bol(cx; optional n: Value) {
+    cx.line_boundary_position(n, false)
+}}
+
+defsubr! { name = "pos-eol", gnu = "editfns.c:740", effect = Reads,
+fn pos_eol(cx; optional n: Value) {
+    cx.line_boundary_position(n, true)
+}}
+
 #[cfg(test)]
 mod tests {
     #[test]

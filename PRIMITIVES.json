@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "8e2af8b92b273f3fb46e933253a3a9fbc50c83316550aaf0e23ed277d024e757",
+  "source_fingerprint": "4e8688e8df7dccb42425c4ab926aa6641ba1e0b1b09062773bf5ab7df0c361ce",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 823,
-  "parsed_vm2_only": 823
+  "parsed_total": 827,
+  "parsed_vm2_only": 827
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -413,6 +413,11 @@
    "implementation": "vm2",
    "variant": "Primitive::Boundp",
    "registered_at": "crates/romacs-vm/src/lib.rs:588"
+  },
+  "buffer-base-buffer": {
+   "name": "buffer-base-buffer",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/buffer_state.rs:35"
   },
   "buffer-chars-modified-tick": {
    "name": "buffer-chars-modified-tick",
@@ -2118,6 +2123,11 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/line_position.rs:14"
   },
+  "line-number-display-width": {
+   "name": "line-number-display-width",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/indent.rs:103"
+  },
   "list": {
    "name": "list",
    "implementation": "vm2",
@@ -2782,6 +2792,16 @@
    "name": "point-min-marker",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/editor_mark.rs:15"
+  },
+  "pos-bol": {
+   "name": "pos-bol",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/line_position.rs:21"
+  },
+  "pos-eol": {
+   "name": "pos-eol",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/line_position.rs:26"
   },
   "position-bytes": {
    "name": "position-bytes",

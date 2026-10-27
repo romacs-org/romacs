@@ -8,14 +8,14 @@
   "provenance": {
     "generated_by": "romacs-introspect-live",
     "generated_on": "linux-x86_64",
-    "input_hash": "ab04ed45499e4c468e97265fa3f919392f6f2df2a29e628b1102884fdb1310e2",
+    "input_hash": "fc3ccad3a87516959cf4f284c509802d9be95cc6d6dbebaa46e7ea1426a46e73",
     "source_only_at_generation": [],
     "vm2_probe_panics": [],
-    "vm2_universe": 3746
+    "vm2_universe": 3755
   },
   "schema": 2,
   "vm2": {
-    "count": 831,
+    "count": 835,
     "entries": [
       "#:vm2-closure-document",
       "#:vm2-closure-metadata",
@@ -91,6 +91,7 @@
       "bool-vector-subsetp",
       "bool-vector-union",
       "boundp",
+      "buffer-base-buffer",
       "buffer-chars-modified-tick",
       "buffer-decode-utf8",
       "buffer-enable-undo",
@@ -419,6 +420,7 @@
       "line-beginning-position",
       "line-end-position",
       "line-number-at-pos",
+      "line-number-display-width",
       "list",
       "listp",
       "load",
@@ -543,6 +545,8 @@
       "point-max-marker",
       "point-min",
       "point-min-marker",
+      "pos-bol",
+      "pos-eol",
       "position-bytes",
       "preceding-char",
       "prefix-numeric-value",

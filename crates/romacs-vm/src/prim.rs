@@ -252,8 +252,13 @@ mod leaf {
         }
         /// A line boundary without moving point (GNU editfns.c).
         pub fn line_boundary_position(&mut self, count: Value, end: bool) -> super::Out {
-            let count = if count == Value::NIL { 1 } else {
-                count.integer_value().ok_or(Fault::Wrong("integerp", count))?
+            // CHECK_INTEGER: a bignum counts past either end of the buffer.
+            let count = if count == Value::NIL { 1 } else if let Some(n) = count.integer_value() { n } else {
+                match self.bigint_value(count) {
+                    Some(n) if n.sign() == num_bigint::Sign::Minus => Value::MIN_FIXNUM,
+                    Some(_) => Value::MAX_FIXNUM,
+                    None => return Err(Fault::Wrong("integerp", count)),
+                }
             };
             let index = self.vm.buffer_index().map_err(Fault::Error)?;
             let (chars, point, low, high) = match &self.vm.objects[index] {
@@ -267,6 +272,29 @@ mod leaf {
                 data::Object::ByteBuffer(b) => (b.bytes.iter().map(|&b| b as char).collect(), b.point.0, b.restriction.start.0, b.restriction.end.0),
                 _ => unreachable!(),
             };
+            if end {
+                // editfns.c eol: find_before_next_newline (PT, 0, N - (N <= 0)):
+                // the COUNTth newline from point, or the accessible end
+                // when there are fewer.
+                let count = count - i64::from(count <= 0);
+                let mut pos = point;
+                if count > 0 {
+                    for _ in 0..count {
+                        match (pos..high).find(|&at| chars[at] == '\n') {
+                            Some(at) => pos = at + 1,
+                            None => return Ok(Value::integer(high as i64 + 1).unwrap()),
+                        }
+                    }
+                    return Ok(Value::integer(pos as i64).unwrap());
+                }
+                for _ in count..0 {
+                    match (low..pos).rev().find(|&at| chars[at] == '\n') {
+                        Some(at) => pos = at,
+                        None => return Ok(Value::integer(low as i64 + 1).unwrap()),
+                    }
+                }
+                return Ok(Value::integer(pos as i64 + 1).unwrap());
+            }
             let mut pos = point;
             while pos > low && chars[pos-1] != '\n' { pos -= 1; }
             let lines = count.saturating_sub(1);
@@ -283,7 +311,6 @@ mod leaf {
                     while pos > low && chars[pos-1] != '\n' { pos -= 1; }
                 }
             }
-            if end { while pos < high && chars[pos] != '\n' { pos += 1; } }
             Ok(Value::integer(pos as i64 + 1).unwrap())
         }
         /// Point of the current buffer as a 1-based character position.

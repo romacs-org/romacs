@@ -97,3 +97,14 @@ fn split_tab_return(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
     cx.goto_char_position(saved[1].integer_value().unwrap())?;
     Ok(Step::Done(saved[0]))
 }
+
+// line_number_display_width: no width while `display-line-numbers' is nil;
+// otherwise GNU lays the window out, which VM2 cannot do synchronously.
+defsubr! { name = "line-number-display-width", gnu = "indent.c:2150", effect = Reads,
+fn line_number_display_width(cx; optional pixelwise: Value) {
+    let numbers = cx.intern("display-line-numbers");
+    if cx.variable_value(numbers)?.unwrap_or(Value::NIL) != Value::NIL {
+        return Err(Fault::Error("VM2 line-number-display-width with display-line-numbers needs synchronous layout, which is unsupported".into()));
+    }
+    Ok(if pixelwise == cx.intern("columns") { cx.float(0.0) } else { Value::integer(0).expect("fixnum") })
+}}
