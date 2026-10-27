@@ -589,6 +589,10 @@ pub(crate) static C_VARIABLES: &[CVariable] = &[
     CVariable { name: "yes-or-no-prompt", gnu: "fns.c:6874", kind: Kind::Lisp(Init::Str("(yes or no) ")) },
 ];
 
+/// C_SPECIALS that GNU leaves bound but not special: lread.c:5559 clears
+/// `declared_special' on `values', so a `let' of it is lexical.
+pub(crate) const NOT_SPECIAL: &[&str] = &["values"];
+
 /// The runtime storage GNU keeps in C globals and `buffer_defaults`.
 pub(crate) struct Forwarded {
     objects: Vec<Value>,
@@ -806,7 +810,9 @@ impl Vm {
             Kind::PerBuffer { .. } => unreachable!("C_SPECIALS holds no per-buffer variables"),
         };
         self.slots[slot].value = value;
-        self.specials.insert(name.to_owned());
+        if !NOT_SPECIAL.contains(&name) {
+            self.specials.insert(name.to_owned());
+        }
         // GNU's syms_of_* call Fmake_variable_buffer_local on these.
         if AUTOMATICALLY_LOCAL.contains(&name) {
             self.slots[slot].explicit_local = false;

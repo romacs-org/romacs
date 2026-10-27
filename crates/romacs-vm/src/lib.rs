@@ -1319,7 +1319,8 @@ impl Vm {
         vm.specials.extend(["process-environment".into(), "initial-environment".into(), "exec-path".into()]);
         // C specials are special before their symbols are first interned, so
         // already-read forms compile their bindings dynamically.
-        vm.specials.extend(forwarded::C_SPECIALS.iter().map(|v| v.name.to_owned()));
+        vm.specials.extend(forwarded::C_SPECIALS.iter().map(|v| v.name)
+            .filter(|name| !forwarded::NOT_SPECIAL.contains(name)).map(str::to_owned));
         vm.declare_special_raw("inhibit-eol-conversion", Value::NIL);
         vm.declare_special_raw("text-quoting-style", Value::NIL);
         vm.declare_special_raw("internal--text-quoting-flag", Value::TRUE);
