@@ -280,3 +280,50 @@ defsubr! { name = "window-body-height", gnu = "window.c:1165", effect = Reads,
 fn window_body_height(cx; optional window: Value, pixelwise: Value) {
     cx.windows().window_body_size(window, pixelwise, false)
 }}
+
+// Frame visibility (frame.c). VM2's one frame is always visible, as a
+// terminal frame is in GNU batch: visibility requests change nothing, and
+// making the sole frame invisible needs FORCE.
+defsubr! { name = "make-frame-visible", gnu = "frame.c:3505", effect = Global,
+fn make_frame_visible(cx; optional frame: Value) {
+    cx.windows().decode_live_frame(frame)
+}}
+
+defsubr! { name = "make-frame-invisible", gnu = "frame.c:3549", effect = Global,
+fn make_frame_invisible(cx; optional frame: Value, force: Value) {
+    cx.windows().decode_live_frame(frame)?;
+    if force == Value::NIL {
+        return Err(Fault::Error("Attempt to make invisible the sole visible or iconified frame".into()));
+    }
+    Ok(Value::NIL)
+}}
+
+defsubr! { name = "iconify-frame", gnu = "frame.c:3591", effect = Global,
+fn iconify_frame(cx; optional frame: Value) {
+    cx.windows().decode_live_frame(frame)?;
+    Ok(Value::NIL)
+}}
+
+defsubr! { name = "frame-visible-p", gnu = "frame.c:3633", effect = Reads,
+fn frame_visible_p(cx, frame: Value) {
+    if cx.windows().frame_live_p(frame) == Value::NIL { return Err(Fault::Wrong("frame-live-p", frame)); }
+    Ok(Value::TRUE)
+}}
+
+defsubr! { name = "visible-frame-list", gnu = "frame.c:3652", effect = Reads,
+fn visible_frame_list(cx) {
+    let frame = cx.windows().decode_live_frame(Value::NIL)?;
+    Ok(cx.cons(frame, Value::NIL))
+}}
+
+defsubr! { name = "raise-frame", gnu = "frame.c:3667", effect = Global,
+fn raise_frame(cx; optional frame: Value) {
+    cx.windows().decode_live_frame(frame)?;
+    Ok(Value::NIL)
+}}
+
+defsubr! { name = "lower-frame", gnu = "frame.c:3686", effect = Global,
+fn lower_frame(cx; optional frame: Value) {
+    cx.windows().decode_live_frame(frame)?;
+    Ok(Value::NIL)
+}}

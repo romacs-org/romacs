@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "a2a08d65a4583260c4ccdcce39c3bcd2c1330b1aed2b555e2acb21bad510853c",
+  "source_fingerprint": "b547b05f77d8150273eaff8e0742355dd8f60fedc232bf9339299a937763c030",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 829,
-  "parsed_vm2_only": 829
+  "parsed_total": 836,
+  "parsed_vm2_only": 836
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -1596,6 +1596,11 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/frame.rs:8"
   },
+  "frame-visible-p": {
+   "name": "frame-visible-p",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/window.rs:307"
+  },
   "framep": {
    "name": "framep",
    "implementation": "vm2",
@@ -1807,6 +1812,11 @@
    "implementation": "vm2",
    "variant": "Primitive::HashTableWeakness",
    "registered_at": "crates/romacs-vm/src/lib.rs:646"
+  },
+  "iconify-frame": {
+   "name": "iconify-frame",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/window.rs:301"
   },
   "identity": {
    "name": "identity",
@@ -2218,6 +2228,11 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/keymap.rs:129"
   },
+  "lower-frame": {
+   "name": "lower-frame",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/window.rs:325"
+  },
   "macroexpand": {
    "name": "macroexpand",
    "implementation": "vm2",
@@ -2253,6 +2268,16 @@
    "name": "make-directory-internal",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/filesave.rs:121"
+  },
+  "make-frame-invisible": {
+   "name": "make-frame-invisible",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/window.rs:292"
+  },
+  "make-frame-visible": {
+   "name": "make-frame-visible",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/window.rs:287"
   },
   "make-hash-table": {
    "name": "make-hash-table",
@@ -2918,6 +2943,11 @@
    "name": "quote",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/special_forms.rs:67"
+  },
+  "raise-frame": {
+   "name": "raise-frame",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/window.rs:319"
   },
   "random": {
    "name": "random",
@@ -4103,6 +4133,11 @@
    "name": "verify-visited-file-modtime",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/fileio.rs:65"
+  },
+  "visible-frame-list": {
+   "name": "visible-frame-list",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/window.rs:313"
   },
   "visited-file-modtime": {
    "name": "visited-file-modtime",

@@ -982,7 +982,11 @@ impl Vm {
             p,
             SelectedWindow | FrameSelectedWindow | MinibufferWindow | FrameRootWindow
         ) {
-            if p != SelectedWindow {
+            // frame-root-window and frame-selected-window take FRAME-OR-WINDOW:
+            // a valid window stands for its frame (window.c WINDOW_VALID_P).
+            let window = matches!(p, FrameSelectedWindow | FrameRootWindow)
+                && self.window(a).is_ok_and(|w| !w.dead);
+            if p != SelectedWindow && !window {
                 self.frame_arg(a)?;
             }
             return Ok(self.window_root(if p == MinibufferWindow {
@@ -1451,6 +1455,11 @@ impl<'a> Windows<'a> {
     }
     /// frame.c:327: VM2 returns the initial/termcap type t, but retains
     /// graphical character metrics (documented hybrid, VM2-WIN5).
+    /// decode_live_frame: the selected frame for nil, else FRAME if live.
+    pub(crate) fn decode_live_frame(&mut self, frame: Value) -> std::result::Result<Value, Fault> {
+        self.live_frame(frame)?;
+        Ok(if frame == Value::NIL { self.frame() } else { frame })
+    }
     pub(crate) fn frame_live_p(&mut self, object: Value) -> Value {
         if matches!(self.vm.object_if(object), Some(Object::Frame(f)) if f.live) { Value::TRUE } else { Value::NIL }
     }
