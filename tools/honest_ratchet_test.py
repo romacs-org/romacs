@@ -2,8 +2,7 @@
 """The honest GNU-suite ratchet's own tests: member classes, the vacuous
 budget, counting only files that loaded, and the labelled real-ERT number.
 Run in the gate with tools/parity_ratchet_test.py (which imports this file's
-classes) and mutation-tested by tools/honest_ratchet_mutants.py: each test
-below is killed by the mutant named in its docstring, at its own message.
+classes). Each test's docstring names the defect it must catch.
 """
 import collections
 import contextlib

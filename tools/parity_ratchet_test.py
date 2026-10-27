@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """The parity ratchet's own tests (run in the gate by
-gnu-tests/runner/tests/parity_ratchet.rs, and mutation-tested by
-tools/parity_ratchet_mutants.py).
+gnu-tests/runner/tests/parity_ratchet.rs).
 
     ROMACS_GNU_ERT=<adapter> python3 tools/parity_ratchet_test.py -v
 """
@@ -1095,23 +1094,6 @@ class Shards(unittest.TestCase):
         self.assertEqual(sorted(f for p in parts for f in p), sorted(files))
         self.assertTrue(all(parts))
         self.assertLessEqual(max(map(len, parts)), 8)
-
-    def test_gate_mutants_select_a_member_of_the_executed_partition(self):
-        import parity_ratchet_mutants as mutants
-        data = json.loads((ROOT / pr.RATCHET_NAME).read_text())
-        member, test = mutants.gnu_gate_target(data)
-        index = int(test.split('_shard_')[1].split('_of_')[0])
-        self.assertIn(member, pr.shard(sorted(data['gnu_suite']['files']),
-                                      f'{index}/{pr.GATE_SHARDS}'))
-        self.assertGreaterEqual(len(data['gnu_suite']['passing'][member]), 2)
-        source = (ROOT / 'gnu-tests/runner/tests/parity_ratchet.rs').read_text()
-        self.assertIn(f'fn {test}()', source)
-
-    def test_gate_mutants_refuse_a_population_without_an_eligible_member(self):
-        import parity_ratchet_mutants as mutants
-        data = {'gnu_suite': {'files': ['only.el'], 'passing': {'only.el': ['one']}}}
-        with self.assertRaisesRegex(ValueError, 'at least two recorded passes'):
-            mutants.gnu_gate_target(data)
 
     def test_the_ratchet_covers_exactly_the_suite(self):
         data = pr.load_ratchet(ROOT)

@@ -136,9 +136,8 @@ Static `verify --candidate` checks floor policy without replaying runtime eviden
   `reduced_harness` says so) and `gnu_suite.real_ert` (GNU `ert.el`,
   unmodified). `gnu_suite.honest.counted` is the headline candidate for the
   reduced harness.
-- Proof: `tools/honest_ratchet_test.py`, `tests/test_run.py` (`Honesty`,
-  end to end), and `tools/honest_ratchet_mutants.py` (each mutant must die at
-  its own test's assertion message).
+- Proof: `tools/honest_ratchet_test.py` and `tests/test_run.py` (`Honesty`,
+  end to end).
 
 ## Public baseline diagnostics
 

@@ -42,7 +42,8 @@ not enough: the isolated test environment must expose them through fontconfig.
 Set `ROMACS_GNU_GUI_FONTCONFIG` to a private fontconfig file listing the chosen
 font directories and a writable private cache directory; the desktop-font tests
 apply it as `FONTCONFIG_FILE` only to their GNU GUI subprocesses. The gate uses
-`scripts/gate-fonts.conf`. Other tests retain their normal font environment.
+`ROMACS_GATE_FONTCONFIG`, defaulting to `/etc/fonts/fonts.conf`. Other tests
+retain their normal font environment.
 Do not inherit personal font substitutions. Check both
 `fc-match 'Ubuntu Mono'` and `fc-match 'DejaVu Sans Mono'` with the chosen
 `FONTCONFIG_FILE`. The expected metrics use 96 DPI, set by the test's X resource
