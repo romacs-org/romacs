@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "fc6e2927f35224cd8e74c4203c6c626d7e047a59cf9906125ef1fec4ce03283f",
+  "source_fingerprint": "786bae5f4158894d3392e17f59e517fa3a2d6e391b2c4c9d96f25d18260321f1",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 801,
-  "parsed_vm2_only": 801
+  "parsed_total": 803,
+  "parsed_vm2_only": 803
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -504,6 +504,11 @@
    "name": "bufferp",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/buffer_lifecycle.rs:3"
+  },
+  "bury-buffer-internal": {
+   "name": "bury-buffer-internal",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/buffer_names.rs:110"
   },
   "byte-code-function-p": {
    "name": "byte-code-function-p",
@@ -2932,6 +2937,11 @@
    "name": "remove-variable-watcher",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/watchers.rs:47"
+  },
+  "rename-buffer": {
+   "name": "rename-buffer",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/buffer_names.rs:56"
   },
   "rename-file": {
    "name": "rename-file",

@@ -70,7 +70,7 @@ impl Random {
         u64::from(value >> 1)
     }
     /// get_random: FIXNUM_BITS random bits.
-    fn bits(&mut self) -> u64 {
+    pub(crate) fn bits(&mut self) -> u64 {
         let mut value = 0u64;
         for _ in 0..(FIXNUM_BITS + RAND_BITS - 1) / RAND_BITS {
             value = self.next() ^ (value << RAND_BITS) ^ (value >> (64 - RAND_BITS));

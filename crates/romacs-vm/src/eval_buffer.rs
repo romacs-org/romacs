@@ -74,7 +74,7 @@ impl Vm {
                     if p == SwitchToBuffer && name.is_empty() {
                         return Err("empty buffer name".into());
                     }
-                    if p == SwitchToBuffer || name == "*scratch*" {
+                    if p == SwitchToBuffer || (name == "*scratch*" && self.scratch_unmade()) {
                         self.create_named_buffer(&name, false)?
                     } else { self.named_buffer(&name).unwrap_or(Value::NIL) }
                 } else if matches!(

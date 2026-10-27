@@ -365,7 +365,7 @@ mod leaf {
             Value::reference(i, 3)
         }
         pub fn buffer_name_exists(&self, name: &str) -> bool {
-            name == "*scratch*" || self.vm.names.get(&format!("#:vm2-buffer:{name}"))
+            (name == "*scratch*" && self.vm.scratch_unmade()) || self.vm.names.get(&format!("#:vm2-buffer:{name}"))
                 .is_some_and(|&slot| {
                     self.vm.buffer_state(self.vm.slots[slot].value).ok()
                         .is_some_and(|state| state.live && state.name.as_deref() == Some(name))

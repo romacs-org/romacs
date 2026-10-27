@@ -47,23 +47,18 @@ impl Leaf<'_> {
             .filter(|v| *v != Value::UNBOUND)
             .unwrap_or(Value::NIL))
     }
+    /// buffer-list: the live buffers in the buffer list's order.
     pub fn lifecycle_list(&mut self) -> Value {
-        let mut entries: Vec<_> = self
-            .vm
-            .names
-            .iter()
-            .filter(|(name, slot)| {
-                name.starts_with("#:vm2-buffer:") && self.vm.slots[**slot].value != Value::UNBOUND
-            })
-            .map(|(_, slot)| *slot)
-            .collect();
-        entries.sort_unstable();
-        let mut list = Value::NIL;
-        for slot in entries.into_iter().rev() {
-            list = self.cons(self.vm.slots[slot].value, list);
-        }
-        list
+        let order: Vec<Value> = self.vm.buffer_order().into_iter()
+            .filter(|&b| self.vm.buffer_state(b).is_ok_and(|s| s.live)).collect();
+        order.into_iter().rev().fold(Value::NIL, |tail, b| self.cons(b, tail))
     }
+    pub(crate) fn rename_buffer_model(&mut self, buffer: Value, name: &str) -> std::result::Result<(), Fault> {
+        self.vm.rename_buffer_model(buffer, name).map_err(Fault::Error)
+    }
+    pub(crate) fn bury_buffer_model(&mut self, buffer: Value) { self.vm.bury_buffer_model(buffer); }
+    /// get_random: 62 random bits from the VM's generator.
+    pub(crate) fn random_bits(&mut self) -> u64 { self.vm.random.bits() }
     pub fn lifecycle_killable(&self, buffer: Value) -> bool {
         self.lifecycle_live_p(buffer)
             && !self

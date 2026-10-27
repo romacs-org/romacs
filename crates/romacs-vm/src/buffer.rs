@@ -105,7 +105,52 @@ impl Vm {
         // Fget_buffer_create: no undo for buffers whose names start with a space.
         let undo = if actual.starts_with(' ') { Value::TRUE } else { Value::NIL };
         self.set_undo_list_of(value.index(0)? - 1, undo);
+        let mut order = self.buffer_order();
+        order.push(value);
+        self.set_buffer_order(&order);
         Ok(value)
+    }
+    /// GNU's Vbuffer_alist order: creation order, with buried buffers moved
+    /// to the end; kept as a list in a traced hidden slot.
+    pub(crate) fn buffer_order(&mut self) -> Vec<Value> {
+        let slot = self.slot(BUFFER_ORDER);
+        let list = self.slots[slot].value;
+        if list == Value::UNBOUND { Vec::new() } else { self.list_values(list).unwrap_or_default() }
+    }
+    /// The buffer list's order without creating its slot.
+    pub(crate) fn buffer_order_snapshot(&self) -> Vec<Value> {
+        let Some(&slot) = self.names.get(BUFFER_ORDER) else { return Vec::new() };
+        let list = self.slots[slot].value;
+        if list == Value::UNBOUND { Vec::new() } else { self.list_values(list).unwrap_or_default() }
+    }
+    /// *scratch* exists from startup in GNU; VM2 makes it on first use, so
+    /// until it has been made once, its name counts as taken.
+    pub(crate) fn scratch_unmade(&self) -> bool {
+        !self.names.contains_key("#:vm2-buffer:*scratch*")
+    }
+    pub(crate) fn set_buffer_order(&mut self, buffers: &[Value]) {
+        let list = self.list_value(buffers);
+        let slot = self.slot(BUFFER_ORDER);
+        self.slots[slot].value = list;
+    }
+    /// Frename_buffer's renaming: BUFFER (live) is now NAME, keeping its
+    /// place in the buffer list.
+    pub(crate) fn rename_buffer_model(&mut self, buffer: Value, name: &str) -> Result<()> {
+        let old = self.buffer_state(buffer)?.name.clone().ok_or("buffer has no name")?;
+        let old_slot = self.slot(&format!("#:vm2-buffer:{old}"));
+        if self.slots[old_slot].value == buffer { self.slots[old_slot].value = Value::UNBOUND; }
+        let slot = self.slot(&format!("#:vm2-buffer:{name}"));
+        self.slots[slot].value = buffer;
+        self.buffer_state_mut(buffer)?.name = Some(name.to_owned());
+        self.display_state.version += 1;
+        Ok(())
+    }
+    /// Fbury_buffer_internal: BUFFER moves to the end of the buffer list.
+    pub(crate) fn bury_buffer_model(&mut self, buffer: Value) {
+        let mut order = self.buffer_order();
+        order.retain(|&b| b != buffer);
+        order.push(buffer);
+        self.set_buffer_order(&order);
     }
     pub(crate) fn kill_buffer_model(&mut self, value: Value) -> Result<()> {
         if !self.buffer_state(value)?.live || self.objects.iter().any(|object| {
@@ -116,6 +161,9 @@ impl Vm {
                 self.slots[*slot].value = Value::UNBOUND;
             }
         }
+        let mut order = self.buffer_order();
+        order.retain(|&b| b != value);
+        self.set_buffer_order(&order);
         let windows: Vec<Value> = self.objects.iter().enumerate().filter_map(|(i, object)| {
             match object {
                 Object::Window(w) if w.buffer == value => Some(Value::reference(i + 1, 0)),
@@ -123,10 +171,9 @@ impl Vm {
             }
         }).collect();
         if self.slots[self.buffer_slot].value == value || !windows.is_empty() {
-            let replacement = self.names.iter().filter_map(|(name, slot)| {
-                let candidate = self.slots[*slot].value;
-                if name.starts_with("#:vm2-buffer:")
-                    && candidate != value
+            // The first other live buffer in the buffer list, as other-buffer.
+            let replacement = order.iter().copied().find(|&candidate| {
+                candidate != value
                     && (windows.is_empty() || matches!(self.object_if(candidate), Some(Object::Buffer(_))))
                     && self.buffer_state(candidate).is_ok_and(|state| {
                         state.live && state.name.as_deref().is_some_and(|n| !n.starts_with(' '))
@@ -134,13 +181,7 @@ impl Vm {
                     && !self.objects.iter().any(|object| {
                         matches!(object, Object::Window(w) if w.mini && w.buffer == candidate)
                     })
-                {
-                    Some((*slot, candidate))
-                } else {
-                    None
-                }
-            }).min_by_key(|(slot, _)| *slot).map(|(_, candidate)| candidate)
-                .map(Ok).unwrap_or_else(|| self.create_named_buffer("*scratch*", true))?;
+            }).map(Ok).unwrap_or_else(|| self.create_named_buffer("*scratch*", true))?;
             let point = match self.object(replacement)? {
                 Object::Buffer(b) => b.char_of_byte(b.point)?.0,
                 Object::ByteBuffer(b) => b.point.0,
@@ -1255,6 +1296,9 @@ mod tests {
         assert_eq!(vm.heap_stats().reclaimed, 4);
     }
 }
+
+/// The hidden slot holding the buffer list's order.
+const BUFFER_ORDER: &str = "#:vm2-buffer-order";
 
 fn buffer_object(vm: &Vm, object: Value) -> bool {
     matches!(vm.object_if(object), Some(Object::Buffer(_) | Object::ByteBuffer(_)))

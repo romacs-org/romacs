@@ -546,6 +546,8 @@ pub(crate) static C_VARIABLES: &[CVariable] = &[
     CVariable { name: "mark-active", gnu: "buffer.c:5795", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
     // Text edits record undo entries here (undo.c); t disables recording.
     CVariable { name: "buffer-undo-list", gnu: "buffer.c:5743", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
+    // rename-buffer renames a non-visiting buffer's auto-save file.
+    CVariable { name: "buffer-auto-save-file-name", gnu: "buffer.c:5452", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
     CVariable { name: "transient-mark-mode", gnu: "buffer.c:5875", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "mark-even-if-inactive", gnu: "callint.c:898", kind: Kind::Lisp(Init::True) },
     // Heap-valued C variables materialize lazily on first read.
@@ -901,7 +903,7 @@ impl Vm {
     /// GNU `PER_BUFFER_VALUE_P (buf, idx)`.
     pub(super) fn per_buffer_always_local(&self, i: u16) -> bool {
         matches!(C_VARIABLES[self.forwarded.buffer_vars[i as usize]].name,
-            "buffer-invisibility-spec" | "buffer-file-name" | "buffer-file-truename" | "buffer-read-only" | "buffer-file-format" | "major-mode" | "mode-name" | "mark-active" | "buffer-undo-list")
+            "buffer-invisibility-spec" | "buffer-file-name" | "buffer-file-truename" | "buffer-read-only" | "buffer-file-format" | "major-mode" | "mode-name" | "mark-active" | "buffer-undo-list" | "buffer-auto-save-file-name")
     }
     pub(super) fn clear_forwarded_local(&mut self, buffer: usize, i: u16) {
         if !self.per_buffer_always_local(i) {
@@ -952,11 +954,8 @@ impl Vm {
     /// Callers are leaf primitives: no collection occurs while Values are held.
     pub(crate) fn file_visits(&self) -> Vec<(Value, String, Option<(u64, u64)>, Option<String>)> {
         let Some(Fwd::Buffer(i)) = self.forwarded.lookup("buffer-file-name") else { return Vec::new() };
-        let mut slots: Vec<_> = self.names.iter()
-            .filter(|(name, _)| name.starts_with("#:vm2-buffer:"))
-            .map(|(_, slot)| *slot).collect();
-        slots.sort_unstable();
-        let mut buffers: Vec<_> = slots.into_iter().map(|slot| self.slots[slot].value).collect();
+        // In the buffer list's order, as get-file-buffer walks Vbuffer_alist.
+        let mut buffers = self.buffer_order_snapshot();
         let current = self.slots[self.buffer_slot].value;
         if !buffers.contains(&current) { buffers.push(current); }
         buffers.into_iter().filter_map(|buffer| {

@@ -8,14 +8,14 @@
   "provenance": {
     "generated_by": "romacs-introspect-live",
     "generated_on": "linux-x86_64",
-    "input_hash": "ce2a5bb648498e9b8594dffe38705a41f3856488b31fffd671d837602ea1b70c",
+    "input_hash": "b6d9992eb169fe70fe2eaa612883a9fe29978ed96189c73a4e06911852c6c842",
     "source_only_at_generation": [],
     "vm2_probe_panics": [],
-    "vm2_universe": 3671
+    "vm2_universe": 3681
   },
   "schema": 2,
   "vm2": {
-    "count": 809,
+    "count": 811,
     "entries": [
       "#:vm2-closure-document",
       "#:vm2-closure-metadata",
@@ -108,6 +108,7 @@
       "buffer-substring",
       "buffer-substring-no-properties",
       "bufferp",
+      "bury-buffer-internal",
       "byte-code-function-p",
       "byte-to-position",
       "call-interactively",
@@ -571,6 +572,7 @@
       "remove-overlays",
       "remove-text-properties",
       "remove-variable-watcher",
+      "rename-buffer",
       "rename-file",
       "replace-match",
       "require",
