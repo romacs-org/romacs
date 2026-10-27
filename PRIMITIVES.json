@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "0a9faffd87b24673b05ab43628ffc38d0e8b8b052bce03ac3e5473207780deb8",
+  "source_fingerprint": "d36526a107d9887a4871471cc94b8fc17bbf968cc9d5db767691199b8bd38e0f",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 804,
-  "parsed_vm2_only": 804
+  "parsed_total": 806,
+  "parsed_vm2_only": 806
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -4004,6 +4004,16 @@
    "implementation": "vm2",
    "variant": "Primitive::Widen",
    "registered_at": "crates/romacs-vm/src/lib.rs:552"
+  },
+  "window-body-height": {
+   "name": "window-body-height",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/window.rs:279"
+  },
+  "window-body-width": {
+   "name": "window-body-width",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/window.rs:274"
   },
   "window-bottom-divider-width": {
    "name": "window-bottom-divider-width",

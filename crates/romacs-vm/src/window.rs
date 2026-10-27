@@ -1390,6 +1390,46 @@ impl<'a> Windows<'a> {
             && x.height > line;
         Self::int(if wants { i64::from(line) } else { 0 })
     }
+    /// window_body_width / window_body_height (window.c): WINDOW's text
+    /// area in canonical characters (PIXELWISE nil, or `remap' with no face
+    /// remapping) or pixels. The width loses the margins and, on a frame
+    /// that is not a window system's, the column of the vertical bar a
+    /// window left of another has; the height loses the mode line. VM2 has
+    /// no fringes, scroll bars, dividers, header or tab lines.
+    pub(crate) fn window_body_size(&mut self, window: Value, pixelwise: Value, width: bool) -> Out {
+        let w = self.live(window)?;
+        let (column, line) = (i64::from(self.vm.window_state.column), i64::from(self.vm.window_state.line));
+        let remap = pixelwise == self.vm.intern("remap");
+        if remap {
+            let slot = self.vm.slot("face-remapping-alist");
+            let alist = self.vm.variable_value(slot).map_err(internal)?;
+            if alist != Value::NIL && alist != Value::UNBOUND {
+                return Err(Fault::Error("VM2 window body sizes in remapped face characters are unsupported".into()));
+            }
+        }
+        let chars = pixelwise == Value::NIL || remap;
+        let size = if width {
+            let (right, margins, pixels) = {
+                let x = self.get(w)?;
+                (i64::from(x.x) + i64::from(x.width), i64::from(x.left_margin + x.right_margin) * column, i64::from(x.width))
+            };
+            let root = self.vm.window_root_peek(ROOT);
+            let rightmost = self.vm.window(root).map_or(true, |r| right >= i64::from(r.x) + i64::from(r.width));
+            let window_system = {
+                let slot = self.vm.slot("window-system");
+                let value = self.vm.slots[slot].value;
+                value != Value::NIL && value != Value::UNBOUND
+            };
+            let bar = if !window_system && !rightmost { column } else { 0 };
+            let px = pixels - bar - margins;
+            if chars { px / column } else { px }
+        } else {
+            let mode_line = self.window_mode_line_height(window)?.integer_value().unwrap_or(0);
+            let px = i64::from(self.get(w)?.height) - mode_line;
+            if chars { px / line } else { px }
+        };
+        Self::int(size.max(0))
+    }
     /// window.c:8639: (LEFT RIGHT OUTSIDE-MARGINS PERSISTENT). VM2 draws no
     /// fringes.
     pub(crate) fn window_fringes(&mut self, window: Value) -> Out {

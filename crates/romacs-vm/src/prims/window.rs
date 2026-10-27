@@ -270,3 +270,13 @@ defsubr! { name = "set-window-dedicated-p", gnu = "window.c:2297", effect = Glob
 fn set_window_dedicated_p(cx, window: Value, flag: Value) {
     cx.windows().set_window_dedicated_p(window, flag)
 }}
+
+defsubr! { name = "window-body-width", gnu = "window.c:1140", effect = Reads,
+fn window_body_width(cx; optional window: Value, pixelwise: Value) {
+    cx.windows().window_body_size(window, pixelwise, true)
+}}
+
+defsubr! { name = "window-body-height", gnu = "window.c:1165", effect = Reads,
+fn window_body_height(cx; optional window: Value, pixelwise: Value) {
+    cx.windows().window_body_size(window, pixelwise, false)
+}}
