@@ -125,3 +125,21 @@ defsubr! { name = "add-face-text-property", gnu = "textprop.c:1345", effect = Gl
 fn add_face_text_property(cx, start: Value, end: Value, face: Value; optional appendp: Value, object: Value) -> Step {
     property_change(cx, if appendp == Value::NIL { 4 } else { 5 }, start, end, face, object)
 }}
+
+defsubr! { name = "next-single-property-change", gnu = "textprop.c:1017", effect = Reads,
+fn next_single_property_change(cx, position: Value, prop: Value; optional object: Value, limit: Value) {
+    cx.next_single_property_change(position, prop, object, limit)
+}}
+
+defsubr! { name = "previous-property-change", gnu = "textprop.c:1066", effect = Reads,
+fn previous_property_change(cx, position: Value; optional object: Value, limit: Value) {
+    if limit == Value::TRUE {
+        return Err(Fault::Error("raw text-property interval boundaries (LIMIT t) are not implemented".into()));
+    }
+    cx.previous_property_change(position, None, object, limit)
+}}
+
+defsubr! { name = "previous-single-property-change", gnu = "textprop.c:1114", effect = Reads,
+fn previous_single_property_change(cx, position: Value, prop: Value; optional object: Value, limit: Value) {
+    cx.previous_property_change(position, Some(prop), object, limit)
+}}

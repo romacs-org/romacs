@@ -136,6 +136,12 @@ impl Leaf<'_> {
     pub(crate) fn add_text_properties(&mut self, start: Value, end: Value, properties: Value, object: Value) -> super::super::Out {
         self.vm.property_edit_now(&PropertyEdit::Add(properties), start, end, object)
     }
+    pub(crate) fn next_single_property_change(&mut self, position: Value, prop: Value, object: Value, limit: Value) -> super::super::Out {
+        self.vm.next_single_property_change_values(position, prop, object, limit)
+    }
+    pub(crate) fn previous_property_change(&mut self, position: Value, prop: Option<Value>, object: Value, limit: Value) -> super::super::Out {
+        self.vm.previous_property_change_values(position, prop, object, limit)
+    }
     pub(crate) fn next_property_change(
         &mut self,
         position: Value,

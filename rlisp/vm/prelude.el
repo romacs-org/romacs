@@ -331,4 +331,58 @@ END and LENGTH, the length of the text the change replaced, with
                          (setq done t))
                 (or done (setq after-change-functions nil)))))))))
 
+;; textprop.c's char-property motion, composed as its C composes the
+;; overlay and text-property primitives.
+
+(defun romacs--fixnum-coerce-marker (value)
+  "CHECK_FIXNUM_COERCE_MARKER: VALUE as a fixnum, a marker's position."
+  (cond ((markerp value)
+         (or (marker-position value) (error "Marker does not point anywhere")))
+        ((integerp value) value)
+        (t (signal 'wrong-type-argument (list 'integer-or-marker-p value)))))
+
+(defun next-char-property-change (position &optional limit)
+  "Return the position of next text property or overlay change.
+textprop.c Fnext_char_property_change: the nearer of the next overlay
+change and LIMIT bounds `next-property-change'."
+  (let ((temp (next-overlay-change position)))
+    (if limit
+        (let ((limit (romacs--fixnum-coerce-marker limit)))
+          (if (< limit temp) (setq temp limit))))
+    (next-property-change position nil temp)))
+
+(defun previous-char-property-change (position &optional limit)
+  "Return the position of previous text property or overlay change.
+textprop.c Fprevious_char_property_change."
+  (let ((temp (previous-overlay-change position)))
+    (if limit
+        (let ((limit (romacs--fixnum-coerce-marker limit)))
+          (if (> limit temp) (setq temp limit))))
+    (previous-property-change position nil temp)))
+
+(defun previous-single-char-property-change (position prop &optional object limit)
+  "Return the position of previous text property or overlay change for PROP.
+textprop.c Fprevious_single_char_property_change."
+  (if (stringp object)
+      (or (previous-single-property-change position prop object limit)
+          (if (null limit) 0
+            (if (integerp limit) limit
+              (signal 'wrong-type-argument (list 'fixnump limit)))))
+    (if (and object (not (bufferp object)))
+        (signal 'wrong-type-argument (list 'bufferp object)))
+    (save-current-buffer
+      (if object (set-buffer object))
+      (setq position (romacs--fixnum-coerce-marker position))
+      (setq limit (if limit (romacs--fixnum-coerce-marker limit) (point-min)))
+      (if (<= position limit)
+          (max limit (point-min))
+        (let ((initial (get-char-property (- position (if (>= position 0) 1 0)) prop object)))
+          (catch 'romacs--found
+            (while t
+              (setq position (previous-char-property-change position limit))
+              (if (<= position limit)
+                  (throw 'romacs--found limit)
+                (unless (eq (get-char-property (1- position) prop object) initial)
+                  (throw 'romacs--found position))))))))))
+
 ;;; prelude.el ends here

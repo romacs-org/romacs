@@ -1059,6 +1059,89 @@ impl Vm {
         Value::integer(bound).map_err(Fault::Error)
     }
 
+    /// The positions in OBJECT's accessible text, from its start, where its
+    /// text properties change: the starts of its property runs (GNU's
+    /// intervals, merged where their plists are equal).
+    fn property_run_starts(&self, object: Value) -> std::result::Result<Vec<i64>, crate::prim::Fault> {
+        use crate::prim::Fault;
+        let (bytes, start) = match self.object_if(object) {
+            Some(Object::Buffer(b)) => {
+                let r = b.accessible();
+                (r.clone(), b.char_of_byte(r.start).map_err(Fault::Error)?.0 as i64 + 1)
+            }
+            _ => {
+                let len = self.str_view(object).map_or(0, |s| s.bytes().len());
+                (ByteOffset(0)..ByteOffset(len), 0)
+            }
+        };
+        let mut starts = vec![start];
+        let mut at = bytes.start;
+        while at < bytes.end {
+            let next = self.property_next_text_boundary(object, at, bytes.end);
+            if next >= bytes.end { break; }
+            starts.push(self.property_query_scalar(object, next)?);
+            at = next;
+        }
+        Ok(starts)
+    }
+
+    /// textget: OBJECT's text property PROP at character POSITION (no
+    /// overlays), with category, aliases and default text properties.
+    fn property_textget(&self, object: Value, position: i64, prop: Value) -> std::result::Result<Value, crate::prim::Fault> {
+        let raw = self.annotation_raw(object, position as usize).map_err(crate::prim::Fault::Error)?;
+        self.annotation_resolve(&raw, prop).map_err(crate::prim::Fault::Error)
+    }
+
+    /// fix_position of a non-nil LIMIT.
+    fn property_limit(&self, limit: Value) -> std::result::Result<Option<i64>, crate::prim::Fault> {
+        if limit == Value::NIL { Ok(None) } else { Ok(Some(self.text_property_position(limit)?)) }
+    }
+
+    /// textprop.c Fnext_single_property_change: the next position after
+    /// POSITION where PROP's text-property value changes, before LIMIT and
+    /// the end of OBJECT; else LIMIT.
+    pub(crate) fn next_single_property_change_values(&mut self, position: Value, prop: Value, object: Value, limit: Value) -> crate::prim::Out {
+        use crate::prim::Fault;
+        let object = self.property_query_object(object)?;
+        let limit = self.property_limit(limit)?;
+        let (pos, _, end) = self.property_query_cursor(object, position, false)?;
+        let none = || limit.map_or(Ok(Value::NIL), |n| Value::integer(n).map_err(Fault::Error));
+        if pos >= end { return none(); }
+        let here = self.property_textget(object, pos, prop)?;
+        for b in self.property_run_starts(object)?.into_iter().filter(|&b| b > pos) {
+            if limit.is_some_and(|l| b >= l) { return none(); }
+            if self.property_textget(object, b, prop)? != here { return Value::integer(b).map_err(Fault::Error); }
+        }
+        none()
+    }
+
+    /// textprop.c Fprevious_single_property_change (PROP given) and
+    /// Fprevious_property_change (PROP None, any property): the previous
+    /// position before POSITION where the value changes, after LIMIT and the
+    /// start of OBJECT; else LIMIT.
+    pub(crate) fn previous_property_change_values(&mut self, position: Value, prop: Option<Value>, object: Value, limit: Value) -> crate::prim::Out {
+        use crate::prim::Fault;
+        let object = self.property_query_object(object)?;
+        let limit = self.property_limit(limit)?;
+        let (pos, _, _) = self.property_query_cursor(object, position, false)?;
+        let none = || limit.map_or(Ok(Value::NIL), |n| Value::integer(n).map_err(Fault::Error));
+        let starts = self.property_run_starts(object)?;
+        let start = starts[0];
+        let lower = limit.unwrap_or(start);
+        if pos <= start { return none(); }
+        // The run holding the character before POSITION, walked back over
+        // runs with the same value of PROP.
+        let run = |b: i64| *starts.iter().rev().find(|&&s| s < b).unwrap_or(&start);
+        let mut b = run(pos);
+        if let Some(prop) = prop {
+            let here = self.property_textget(object, pos - 1, prop)?;
+            while b > start && limit.is_none_or(|l| b > l) && self.property_textget(object, b - 1, prop)? == here {
+                b = run(b);
+            }
+        }
+        if b <= start || b <= lower { none() } else { Value::integer(b).map_err(Fault::Error) }
+    }
+
     fn property_query_object(
         &mut self,
         object: Value,

@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "d36526a107d9887a4871471cc94b8fc17bbf968cc9d5db767691199b8bd38e0f",
+  "source_fingerprint": "98c9e63edae041cbdd89ca36e6b6ff3e8f338465e2716fde5531bdad02d02ca0",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 806,
-  "parsed_vm2_only": 806
+  "parsed_total": 809,
+  "parsed_vm2_only": 809
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -2560,6 +2560,11 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/property_change.rs:9"
   },
+  "next-single-property-change": {
+   "name": "next-single-property-change",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/text_properties.rs:129"
+  },
   "next-window": {
    "name": "next-window",
    "implementation": "vm2",
@@ -2758,6 +2763,16 @@
    "name": "previous-overlay-change",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/overlays.rs:14"
+  },
+  "previous-property-change": {
+   "name": "previous-property-change",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/text_properties.rs:134"
+  },
+  "previous-single-property-change": {
+   "name": "previous-single-property-change",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/text_properties.rs:142"
   },
   "prin1": {
    "name": "prin1",
