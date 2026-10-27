@@ -626,7 +626,9 @@ impl Vm {
         }
         Ok(out)
     }
-    fn annotation_insert_inherit(&mut self, start: usize, n: usize) -> Result<Value> {
+    /// insert-and-inherit's storage: the arguments at point, inheriting the
+    /// sticky properties around it, before the markers there with BEFORE.
+    pub(crate) fn annotation_insert_inherit(&mut self, start: usize, n: usize, before: bool) -> Result<Value> {
         let index = self.buffer_index()?;
         let Object::Buffer(t) = &self.objects[index] else {
             return Err("text buffer required".into());
@@ -647,7 +649,7 @@ impl Vm {
             vec![]
         };
         let inherited = self.annotation_inherited(left, right, same_run)?;
-        self.buffer_primitive(Primitive::Insert, start, n)?;
+        self.buffer_primitive(if before { Primitive::InsertBeforeMarkers } else { Primitive::Insert }, start, n)?;
         let Object::Buffer(t) = &mut self.objects[index] else {
             unreachable!()
         };
@@ -936,7 +938,7 @@ impl Vm {
             return self.annotation_yank_primitive(p, start, n);
         }
         if p == InsertInherit {
-            return self.annotation_insert_inherit(start, n);
+            return self.annotation_insert_inherit(start, n, false);
         }
         if p == BufferSubstring {
             if n != 2 {

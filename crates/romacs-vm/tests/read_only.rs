@@ -20,8 +20,11 @@ fn readonly_text_and_bytes_keep_content_point_restriction_and_ticks() {
             "(delete-backward-char 1)",
         ] {
             let mut vm = Vm::new();
+            // Ferase_buffer widens before del_range refuses (buffer.c:2491),
+            // as pinned GNU does: its restriction is the whole buffer after.
+            let restriction = if edit == "(erase-buffer)" { "(save-restriction (widen) (list (buffer-string) (point) (point-min) (point-max)))" } else { "(list (buffer-string) (point) (point-min) (point-max))" };
             vm.eval_source(&format!(
-                "(set-buffer-multibyte {multibyte}) (insert \"abcde\") (narrow-to-region 2 5) (goto-char 3) (set-buffer-modified-p nil) (setq readonly-before (list (buffer-string) (point) (point-min) (point-max) (buffer-modified-tick) (buffer-chars-modified-tick)) buffer-read-only t last-command-event 120)"
+                "(set-buffer-multibyte {multibyte}) (insert \"abcde\") (narrow-to-region 2 5) (goto-char 3) (set-buffer-modified-p nil) (setq readonly-before (append {restriction} (list (buffer-modified-tick) (buffer-chars-modified-tick))) buffer-read-only t last-command-event 120)"
             )).unwrap();
             assert_eq!(printed(&mut vm, &format!(
                 "(condition-case e {edit} (buffer-read-only (eq (car (cdr e)) (current-buffer))))"

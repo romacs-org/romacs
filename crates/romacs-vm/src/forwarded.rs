@@ -546,6 +546,11 @@ pub(crate) static C_VARIABLES: &[CVariable] = &[
     CVariable { name: "left-margin", gnu: "buffer.c:5279", kind: Kind::PerBuffer { default: Init::Fixnum(0), predicate: Some(Predicate::Integerp) } },
     // Chain: cus-start.el (preloaded) signals for a missing built-in.
     CVariable { name: "abbrev-mode", gnu: "buffer.c:5265", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
+    // self-insert-command (rlisp/vm/prelude.el) reads both.
+    CVariable { name: "auto-fill-function", gnu: "buffer.c:5433", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
+    // simple.el's delete-backward-char and self-insert paths read it; GNU
+    // checks a non-nil value against its `choice' list (VM2-CVAR-PRED1).
+    CVariable { name: "overwrite-mode", gnu: "buffer.c:5492", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
     CVariable { name: "ctl-arrow", gnu: "buffer.c:5294", kind: Kind::PerBuffer { default: Init::True, predicate: None } },
     // char-width and string-width read it (indent.c buffer_display_table).
     CVariable { name: "buffer-display-table", gnu: "buffer.c:5502", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
@@ -574,9 +579,6 @@ pub(crate) static C_VARIABLES: &[CVariable] = &[
     // Local only when set; permanent (buffer.c:4811 buffer_permanent_local_flags).
     CVariable { name: "buffer-file-coding-system", gnu: "buffer.c:5314", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
     CVariable { name: "mark-active", gnu: "buffer.c:5795", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
-    // simple.el's delete-backward-char and self-insert paths read it; GNU
-    // checks a non-nil value against its `choice' list (VM2-CVAR-PRED1).
-    CVariable { name: "overwrite-mode", gnu: "buffer.c:5492", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
     // Text edits record undo entries here (undo.c); t disables recording.
     CVariable { name: "buffer-undo-list", gnu: "buffer.c:5743", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
     // rename-buffer renames a non-visiting buffer's auto-save file.
@@ -989,12 +991,19 @@ impl Vm {
     }
     /// BVAR (BUFFER, undo_list), and bset_undo_list.
     pub(crate) fn undo_list_of(&mut self, buffer: usize) -> Value {
-        let Some(Fwd::Buffer(i)) = self.forwarded.lookup("buffer-undo-list") else { unreachable!("declared") };
+        let i = self.undo_list_index();
         self.forwarded_buffer_value(buffer, i)
     }
     pub(crate) fn set_undo_list_of(&mut self, buffer: usize, value: Value) {
-        let Some(Fwd::Buffer(i)) = self.forwarded.lookup("buffer-undo-list") else { unreachable!("declared") };
+        let i = self.undo_list_index();
         if let Some(locals) = self.per_buffer_mut(buffer) { locals.set(i, value); }
+    }
+    fn undo_list_index(&mut self) -> u16 {
+        if self.undo_list_slot == u16::MAX {
+            let Some(Fwd::Buffer(i)) = self.forwarded.lookup("buffer-undo-list") else { unreachable!("declared") };
+            self.undo_list_slot = i;
+        }
+        self.undo_list_slot
     }
     pub(super) fn per_buffer_local_p(&self, buffer: usize, i: u16) -> bool {
         self.per_buffer_always_local(i) || self.per_buffer(buffer).and_then(|p| p.get(i)).is_some()
@@ -1257,6 +1266,9 @@ impl Vm {
         self.declare_special_raw("create-lockfiles", Value::TRUE);
         // GNU coding.c:12084-12088, before Lisp selects a locale coding.
         self.declare_special_raw("locale-coding-system", Value::NIL);
+        // cmds.c and undo.c, read by self-insert-command and record_point.
+        self.declare_special_raw("post-self-insert-hook", Value::NIL);
+        self.declare_special_raw("undo-inhibit-record-point", Value::NIL);
         for (name, _gnu) in FILEIO_SPECIALS {
             if !self.specials.contains(name) {
                 self.declare_special_raw(name, Value::NIL);

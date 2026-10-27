@@ -327,6 +327,9 @@ impl IntervalIndex {
             f(&mut self.nodes[i].value);
         }
     }
+    pub fn is_empty(&self) -> bool {
+        self.slots.is_empty()
+    }
     #[cfg(test)]
     pub fn len(&self) -> usize {
         self.slots.len()

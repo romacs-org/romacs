@@ -47,6 +47,7 @@ mod digest;
 mod posix_tz;
 mod tzfile;
 mod undo;
+mod insdel;
 mod gc;
 mod handle;
 pub use handle::{Arg, Fixed, Local, Rooted};
@@ -291,13 +292,10 @@ enum Primitive {
     GotoChar,
     CharAfter,
     DeleteRegion,
-    SelfInsertCommand,
     ForwardChar,
     BackwardChar,
     BeginningOfLine,
     EndOfLine,
-    DeleteChar,
-    DeleteBackwardChar,
     Substring,
     SearchForward,
     Narrow,
@@ -478,7 +476,6 @@ enum Primitive {
     Append,
     Prin1ToString,
     GetBuffer,
-    EraseBuffer,
     ForwardLine,
     SwitchToBuffer,
     EmacsLispMode,
@@ -532,21 +529,20 @@ const PRIMITIVES: &[(&str, Primitive)] = &[
     ("%", Primitive::Remainder),
     ("current-buffer", Primitive::CurrentBuffer),
     ("set-buffer", Primitive::SetBuffer),
-    ("insert", Primitive::Insert),
+    // The storage kernel under `insert' (prims/insdel.rs), which runs no hooks.
+    ("#:vm2-insert", Primitive::Insert),
     ("point", Primitive::Point),
     ("point-min", Primitive::PointMin),
     ("point-max", Primitive::PointMax),
     ("buffer-size", Primitive::BufferSize),
     ("goto-char", Primitive::GotoChar),
     ("char-after", Primitive::CharAfter),
-    ("delete-region", Primitive::DeleteRegion),
-    ("self-insert-command", Primitive::SelfInsertCommand),
+    // The storage kernel under `delete-region' (prims/insdel.rs), which runs no hooks.
+    ("#:vm2-delete-region", Primitive::DeleteRegion),
     ("forward-char", Primitive::ForwardChar),
     ("backward-char", Primitive::BackwardChar),
     ("beginning-of-line", Primitive::BeginningOfLine),
     ("end-of-line", Primitive::EndOfLine),
-    ("delete-char", Primitive::DeleteChar),
-    ("delete-backward-char", Primitive::DeleteBackwardChar),
     ("buffer-substring-no-properties", Primitive::Substring),
     ("search-forward", Primitive::SearchForward),
     ("narrow-to-region", Primitive::Narrow),
@@ -596,7 +592,8 @@ const PRIMITIVES: &[(&str, Primitive)] = &[
     ("text-properties-at", Primitive::RawPropertiesAt),
     ("get-char-property", Primitive::GetCharProperty),
     ("buffer-substring", Primitive::BufferSubstring),
-    ("insert-and-inherit", Primitive::InsertInherit),
+    // The storage kernel under `insert-and-inherit' (prims/insdel.rs), which runs no hooks.
+    ("#:vm2-insert-and-inherit", Primitive::InsertInherit),
     ("kill-new", Primitive::KillNew),
     ("current-kill", Primitive::CurrentKill),
     ("#:vm2-yank-part", Primitive::YankPart),
@@ -617,7 +614,8 @@ const PRIMITIVES: &[(&str, Primitive)] = &[
         "set-marker-insertion-type",
         Primitive::SetMarkerInsertionType,
     ),
-    ("insert-before-markers", Primitive::InsertBeforeMarkers),
+    // The storage kernel under `insert-before-markers' (prims/insdel.rs), which runs no hooks.
+    ("#:vm2-insert-before-markers", Primitive::InsertBeforeMarkers),
     ("make-overlay", Primitive::MakeOverlay),
     ("move-overlay", Primitive::MoveOverlay),
     ("delete-overlay", Primitive::DeleteOverlay),
@@ -739,7 +737,6 @@ const PRIMITIVES: &[(&str, Primitive)] = &[
     ("append", Primitive::Append),
     ("prin1-to-string", Primitive::Prin1ToString),
     ("get-buffer", Primitive::GetBuffer),
-    ("erase-buffer", Primitive::EraseBuffer),
     ("forward-line", Primitive::ForwardLine),
     ("switch-to-buffer", Primitive::SwitchToBuffer),
     ("emacs-lisp-mode", Primitive::EmacsLispMode),
@@ -1048,6 +1045,18 @@ pub(crate) enum LocalZone { Process, Wall, Utc, Rule(String) }
 pub struct Vm {
     charsets: charset::Registry,
     standard_case_tables: [Value; 4],
+    /// undo.c's point_before_last_command_or_undo and its buffer.
+    command_point: (i64, Value),
+    /// A storage kernel runs inside insdel's bracket, which checked read-only.
+    change_prepared: bool,
+    /// The storage kernels' argument stack, reused across changes
+    /// (`insdel::edit_kernel').
+    kernel_stack: Vec<Value>,
+    /// The slots insdel's bracket reads on every change, once resolved.
+    change_slots: Option<insdel::ChangeSlots>,
+    case_symbols_slot: usize,
+    /// buffer-undo-list's per-buffer index, once looked up.
+    undo_list_slot: u16,
     display_state: display::DisplayState,
     window_state: window::WindowState,
     world_version: u64,
@@ -1199,6 +1208,12 @@ impl Vm {
         let mut vm = Self {
             charsets: charset::Registry::default(),
             standard_case_tables: [Value::NIL; 4],
+            command_point: (0, Value::NIL),
+            change_prepared: false,
+            kernel_stack: Vec::new(),
+            change_slots: None,
+            case_symbols_slot: usize::MAX,
+            undo_list_slot: u16::MAX,
             display_state: display::DisplayState::new(),
             window_state: window::WindowState::default(),
             world_version: 1,
@@ -1372,6 +1387,7 @@ impl Vm {
         vm.declare_special_raw("completion-ignore-case", Value::NIL);
         vm.declare_special_raw("completion-regexp-list", Value::NIL);
         vm.declare_special_raw("case-symbols-as-words", Value::NIL);
+        vm.case_symbols_slot = vm.slot("case-symbols-as-words");
         // The automatic local table is initialized lazily by variable_binding_slot.
         vm.declare_special_raw("inhibit-changing-match-data", Value::NIL);
         vm.declare_special_raw("#:vm2-match-buffer", Value::NIL);
@@ -2501,7 +2517,7 @@ impl Vm {
         if matches!(p, ClosureMetadata | ClosureDocument | MakeInterpretedClosure) { return self.interpreted_closure_primitive(p, start, n); }
         if p == TempBuffer { return self.eval_buffer_primitive(p, start, n); }
         if matches!(p, DeepEqual | Min | Append | Prin1ToString) { return self.eval_data_primitive(p, start, n); }
-        if matches!(p, GetBuffer | EraseBuffer | ForwardLine | SwitchToBuffer | EmacsLispMode | MenuBarMode | ForceModeLineUpdate | LocateLibrary | Daemonp | DaemonInitialized) { return self.eval_buffer_primitive(p, start, n); }
+        if matches!(p, GetBuffer | ForwardLine | SwitchToBuffer | EmacsLispMode | MenuBarMode | ForceModeLineUpdate | LocateLibrary | Daemonp | DaemonInitialized) { return self.eval_buffer_primitive(p, start, n); }
         if (p as usize) >= SymbolValue as usize {
             return self.variable_primitive(p, start, n);
         }

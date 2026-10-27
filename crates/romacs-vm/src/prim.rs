@@ -1586,6 +1586,7 @@ mod leaf {
     mod text_properties;
     pub(crate) use text_properties::{PropertyBegin, Retry};
     mod undo;
+    mod insdel;
     mod sqlite;
     mod process;
     pub(crate) use process::CallOutput;

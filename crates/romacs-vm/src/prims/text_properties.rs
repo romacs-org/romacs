@@ -4,12 +4,14 @@ use crate::buffer::PropertyEdit;
 use crate::prim::leaf::{PropertyBegin, Retry};
 
 // Saved registers of a property change waiting on its hooks:
-//   [KIND, BEG, END, ARG, BUFFER, CHARS, PLIST, START, END-MARKER, POSITION, LENGTH]
+//   [KIND, BEG, END, ARG, BUFFER, CHARS, PLIST, START, END-MARKER, POSITION, LENGTH, INHIBITED]
 // KIND is 0 add, 1 set, 2 remove, 3 put, 4/5 face prepend/append, 6
 // remove-list; BEG and END the validated positions (markers the hooks move
 // do not move the edit); ARG the plist, the names to remove as a list, or
-// the face; the rest is GNU's retry state (Retry). The hooks run in Lisp (romacs--before-change and
-// romacs--after-change in rlisp/vm/prelude.el); these registers are traced.
+// the face; then GNU's retry state (Retry) and whether modification hooks
+// were inhibited. The hooks run in Lisp (romacs--before-change, which
+// returns the overlay hooks it met, and romacs--after-change in
+// rlisp/vm/insdel.el); these registers are traced.
 fn edit_of(cx: &mut Leaf<'_>, kind: Value, arg: Value) -> std::result::Result<PropertyEdit, Fault> {
     Ok(match kind.integer_value() {
         Some(0 | 3) => PropertyEdit::Add(arg),
@@ -37,27 +39,42 @@ fn property_change(cx: &mut Leaf<'_>, kind: i64, start: Value, end: Value, arg: 
     let put = matches!(kind.integer_value(), Some(3..=5));
     match cx.property_begin(&edit, start, end, object)? {
         PropertyBegin::Done(value) => Ok(Step::Done(if put { Value::NIL } else { value })),
-        PropertyBegin::Hooks { buffer, start: beg, end: stop, modification_hooks, retry } => {
-            let hooks = modification_hooks.into_iter().rev().fold(Value::NIL, |tail, h| cx.cons(h, tail));
+        PropertyBegin::Hooks { retry, .. } if super::insdel::half_missing(cx)? => {
+            // The Lisp half first; the change is then planned afresh.
+            for marker in [retry.start, retry.end] {
+                if marker != Value::NIL { cx.release_watch(marker)?; }
+            }
+            super::insdel::install_half(cx, replan, vec![kind, start, end, arg, object])
+        }
+        PropertyBegin::Hooks { buffer, start: beg, end: stop, prepared, retry } => {
+            let hooks = prepared.modification_hooks.iter().rev().fold(Value::NIL, |tail, &h| cx.cons(h, tail));
+            let undoable = if prepared.undoable { Value::TRUE } else { Value::NIL };
             let (b, e) = (Value::integer(beg).unwrap(), Value::integer(stop).unwrap());
             let chars = cx.bigint(retry.chars.into());
-            Ok(Step::Call { f: cx.intern("romacs--before-change"), args: vec![buffer, b, e, hooks], then: changed,
+            Ok(Step::Call { f: cx.intern("romacs--before-change"), args: vec![buffer, b, e, hooks, undoable], then: changed,
                 saved: vec![kind, b, e, arg, buffer, chars, retry.plist, retry.start, retry.end,
-                    Value::integer(retry.position).unwrap(), Value::integer(retry.length).unwrap()] })
+                    Value::integer(retry.position).unwrap(), Value::integer(retry.length).unwrap(),
+                    if prepared.inhibited { Value::TRUE } else { Value::NIL }] })
         }
     }
 }
 
-fn changed(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
+fn replan(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
+    property_change(cx, saved[0].integer_value().expect("kind"), saved[1], saved[2], saved[3], saved[4])
+}
+
+fn changed(cx: &mut Leaf<'_>, before: Value, saved: &[Value]) -> Next {
     let edit = edit_of(cx, saved[0], saved[3])?;
     let chars = cx.bigint_value(saved[5]).and_then(|n| u64::try_from(n).ok()).expect("chars register");
     let retry = Retry { chars, plist: saved[6], start: saved[7], end: saved[8],
         position: saved[9].integer_value().unwrap(), length: saved[10].integer_value().unwrap() };
     let watches = saved[0].integer_value() != Some(6);
-    let Some((beg, end)) = cx.property_finish(&edit, saved[1], saved[2], saved[4], retry, watches)? else {
+    let Some((beg, end)) = cx.property_finish(&edit, saved[1], saved[2], saved[4], retry, watches, saved[11] == Value::NIL)? else {
         return Ok(Step::Done(Value::NIL));
     };
-    let args = vec![saved[4], Value::integer(beg).unwrap(), Value::integer(end).unwrap(), Value::integer(end - beg).unwrap()];
+    let overlays = super::insdel::found_overlays(cx, before);
+    let args = vec![saved[4], Value::integer(beg).unwrap(), Value::integer(end).unwrap(), Value::integer(end - beg).unwrap(),
+        Value::NIL, Value::NIL, overlays];
     Ok(Step::Call { f: cx.intern("romacs--after-change"), args, then: finished, saved: vec![saved[0]] })
 }
 

@@ -1,12 +1,13 @@
 //! editfns.c Fsubst_char_in_region: same-width characters rewritten in
-//! place. VM2 records no undo entry and runs no change hooks for any text
-//! change yet (DIVERGENCES.md VM2-EDIT-HOOKS1), so neither happens here;
-//! the modification count and NOUNDO's save adjustment follow GNU.
+//! place inside modify_text's bracket (prims/subst_char.rs), each recorded
+//! as record_change does unless NOUNDO.
 use super::*;
 use crate::coordinates::{ByteOffset, CharOffset};
 
 impl Leaf<'_> {
-    pub fn subst_char_in_region(&mut self, start: Value, end: Value, from: Value, to: Value, noundo: Value) -> super::super::Out {
+    /// validate_region and the characters' checks, then the character
+    /// positions of START..END holding FROM, and END.
+    pub fn subst_char_hits(&mut self, start: Value, end: Value, from: Value, to: Value) -> std::result::Result<(Vec<i64>, i64), Fault> {
         let position = |leaf: &Self, v: Value| -> std::result::Result<i64, Fault> {
             match leaf.marker_position(v) {
                 Some(Some(n)) => Ok(n),
@@ -37,7 +38,7 @@ impl Leaf<'_> {
         if multibyte && crate::lstring::char_string(from_c, &mut [0; 5]) != crate::lstring::char_string(to_c, &mut [0; 5]) {
             return Err(Fault::Error("Characters in \u{2018}subst-char-in-region\u{2019} have different byte-lengths".into()));
         }
-        let (from_ch, to_ch) = (char::from_u32(from_c), char::from_u32(to_c));
+        let from_ch = char::from_u32(from_c);
         // Character positions holding FROM.
         let hits: Vec<usize> = match &self.vm.objects[index] {
             data::Object::Buffer(b) => {
@@ -50,33 +51,47 @@ impl Leaf<'_> {
             data::Object::ByteBuffer(b) => ((lo - 1) as usize..(hi - 1) as usize).filter(|&at| u32::from(b.bytes[at]) == from_c).collect(),
             _ => unreachable!(),
         };
-        let Some(&first) = hits.first() else { return Ok(Value::NIL); };
-        // prepare_to_modify_buffer: barf_if_buffer_read_only.
-        let (read_only, inhibit) = (self.intern("buffer-read-only"), self.intern("inhibit-read-only"));
-        if self.variable_value(read_only)?.is_some_and(|v| v != Value::NIL) && self.variable_value(inhibit)?.is_none_or(|v| v == Value::NIL) {
-            let buffer = self.vm.slots[self.vm.buffer_slot].value;
-            let data = self.cons(buffer, Value::NIL);
-            return Err(Fault::Signal(self.intern("buffer-read-only"), data));
+        Ok((hits.into_iter().map(|at| at as i64 + 1).collect(), hi))
+    }
+
+    /// modify_text's tail for a change of POS..END once its hooks ran: the
+    /// first-change entry (none with NOUNDO, which turns undo off) and the
+    /// modification count, which NOUNDO keeps from marking the buffer.
+    pub fn subst_char_modify(&mut self, pos: i64, end: i64, noundo: bool) -> std::result::Result<(), Fault> {
+        let index = self.vm.buffer_index().map_err(Fault::Error)?;
+        let buffer = self.current_buffer()?;
+        if !noundo && !self.vm.buffer_state(buffer).map_err(Fault::Error)?.modified() {
+            self.vm.record_first_change().map_err(Fault::Error)?;
         }
-        let changed = (hi - 1) as usize - first;
-        match &mut self.vm.objects[index] {
-            data::Object::Buffer(b) => {
-                let text = to_ch.map(String::from).unwrap_or_default();
-                for &at in &hits {
-                    let byte = b.byte_of_char(CharOffset(at)).map_err(Fault::Error)?;
+        let state = match &mut self.vm.objects[index] {
+            data::Object::Buffer(b) => &mut b.state,
+            data::Object::ByteBuffer(b) => &mut b.state,
+            _ => unreachable!(),
+        };
+        state.record_text_change((end - pos) as usize);
+        if noundo { keep_unmodified(&mut state.modification); }
+        Ok(())
+    }
+
+    /// The rewrite of each character at HITS to TO, recorded as a deletion
+    /// and an insertion (record_change) unless NOUNDO.
+    pub fn subst_char_write(&mut self, hits: &[i64], to: Value, noundo: bool) -> std::result::Result<(), Fault> {
+        let index = self.vm.buffer_index().map_err(Fault::Error)?;
+        let to_c = to.integer_value().expect("checked character") as u32;
+        let text = char::from_u32(to_c).map(String::from).unwrap_or_default();
+        for &at in hits {
+            if !noundo { self.vm.record_change(index, at).map_err(Fault::Error)?; }
+            match &mut self.vm.objects[index] {
+                data::Object::Buffer(b) => {
+                    let byte = b.byte_of_char(CharOffset((at - 1) as usize)).map_err(Fault::Error)?;
                     b.overwrite(byte..ByteOffset(byte.0 + text.len()), &text).map_err(Fault::Error)?;
                 }
-                b.state.record_text_change(changed);
-                if noundo != Value::NIL { keep_unmodified(&mut b.state.modification); }
+                data::Object::ByteBuffer(b) => b.bytes[(at - 1) as usize] = to_c as u8,
+                _ => unreachable!(),
             }
-            data::Object::ByteBuffer(b) => {
-                for &at in &hits { b.bytes[at] = to_c as u8; }
-                b.state.record_text_change(changed);
-                if noundo != Value::NIL { keep_unmodified(&mut b.state.modification); }
-            }
-            _ => unreachable!(),
         }
-        Ok(Value::NIL)
+        self.vm.display_state.version += 1;
+        Ok(())
     }
 }
 

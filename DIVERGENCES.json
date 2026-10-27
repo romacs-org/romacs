@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "43077fb1f00893da26955a3d83eee51df8fc800f5e134beb263488c0a0a6d561",
+  "input_hash": "d5ee5ee03e1460267687b2df06a1c9662693289231765115457e5ca7b3fffddc",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -136,9 +136,6 @@
   "buffer-chars-modified-tick": [
    97
   ],
-  "buffer-enable-undo": [
-   162
-  ],
   "buffer-file-coding-system": [
    96,
    255
@@ -243,6 +240,9 @@
   ],
   "color-values": [
    168
+  ],
+  "combine-after-change-calls": [
+   162
   ],
   "command-error-default-function": [
    141
@@ -652,9 +652,6 @@
   ],
   "find-file-noselect": [
    0
-  ],
-  "first-change-hook": [
-   162
   ],
   "float-output-format": [
    157
@@ -1264,6 +1261,9 @@
   "overriding-plist-environment": [
    230
   ],
+  "overwrite-mode": [
+   162
+  ],
   "parse-partial-sexp": [
    151
   ],
@@ -1574,7 +1574,8 @@
   ],
   "self-insert-command": [
    138,
-   139
+   139,
+   162
   ],
   "sequencep": [
    50
@@ -1844,6 +1845,7 @@
    165
   ],
   "translate-region-internal": [
+   162,
    165
   ],
   "treesit-available-p": [
@@ -4651,7 +4653,7 @@
    "planned": false,
    "mechanism": "Output destinations and callback timing",
    "gnu": "GNU `print.c:print_prepare`, `Fterpri` and `printchar` accept buffer/marker streams, preserve point, run modification hooks and output objects incrementally.",
-   "romacs": "Romacs emits to buffer streams, markers in multibyte buffers, rooted T2 callback functions/symbols and batch stdout. Buffer/marker output follows GNU point motion and restores the current buffer on errors; unibyte-buffer markers and uninhibited change hooks explicitly refuse. `terpri` with non-nil ENSURE refuses, including non-function streams (only the function refusal matches GNU). Rendering is snapshotted before callbacks, so callback mutation of remaining graph/print controls is not reflected. Quoted non-ASCII unibyte strings to callback/stdout streams refuse; `princ` raw strings retain their actual character codes. `write-char` matches GNU uint32 callback conversion, but unsupported stdout character codes refuse.",
+   "romacs": "Romacs emits to buffer streams, markers in multibyte buffers, rooted T2 callback functions/symbols and batch stdout. Buffer/marker output follows GNU point motion and restores the current buffer on errors; unibyte-buffer markers and uninhibited change hooks explicitly refuse; buffer output records its insertions in `buffer-undo-list` but calls no `undo-auto--undoable-change` (VM2-EDIT-HOOKS1). `terpri` with non-nil ENSURE refuses, including non-function streams (only the function refusal matches GNU). Rendering is snapshotted before callbacks, so callback mutation of remaining graph/print controls is not reflected. Quoted non-ASCII unibyte strings to callback/stdout streams refuse; `princ` raw strings retain their actual character codes. `write-char` matches GNU uint32 callback conversion, but unsupported stdout character codes refuse.",
    "why": "Buffer/marker comparisons are in `tests/printing_streams.rs`; change-hook, ENSURE and incremental callback mutation parity remain outside the supported boundary.",
    "symbols": [
     "prin1",
@@ -4759,15 +4761,17 @@
    "planned": false,
    "mechanism": "Change hooks and undo for buffer text primitives",
    "gnu": "`insdel.c` runs `before-change-functions`, `after-change-functions` and `first-change-hook` around each change and records it in `buffer-undo-list` (`undo.c`).",
-   "romacs": "The text-property setters (`put-text-property`, `add-text-properties`, `set-text-properties`, `remove-text-properties`, `remove-list-of-text-properties`) run GNU's hooks in GNU's order (characters' `modification-hooks`, `first-change-hook`, `before-change-functions`, `after-change-functions`, with `inhibit-modification-hooks` bound and a failing hook variable reset) and record their undo entries; `buffer-undo-list`, `buffer-enable-undo` and `undo-boundary` exist. Text insertion and deletion (`insert`, `delete-region`, `insert-char`, `indent-to`, `move-to-column` with FORCE, `subst-char-in-region`) still run no hooks and record no undo. Overlay modification hooks and `combine-after-change-calls` deferral refuse explicitly before anything changes. Property undo entries follow VM2's merged property runs: where GNU's interval tree keeps equal adjacent intervals apart it records more, finer entries that undo to the same text.",
-   "why": "Insertion and deletion are the next slice of the same machinery (the change state machine and undo recording are shared); until then packages that rely on their hooks (font-lock jit, electric modes, undo of typing) misbehave silently.",
+   "romacs": "Insertion (`insert`, `insert-and-inherit`, `insert-before-markers`, `insert-before-markers-and-inherit`, and through them `insert-char` in GNU's 4000-byte pieces, `indent-to`, `move-to-column` with FORCE and `insert-buffer-substring`), deletion (`delete-region`, `delete-and-extract-region`, `erase-buffer`, `delete-char`), `self-insert-command` (cmds.c's amalgamation, abbrev expansion, auto-fill and `post-self-insert-hook`), `subst-char-in-region` and the text-property setters share one bracket after insdel.c: buffer and text read-only refusals (an insertion's by stickiness), `undo-auto--undoable-change`, the characters' `modification-hooks`, `insert-behind-hooks` and `insert-in-front-hooks`, the overlays' hooks, file locking, `select-active-regions`, `first-change-hook`, and `before-change-functions` and `after-change-functions` with GNU's arguments, with `inhibit-modification-hooks` bound, a failing hook variable reset and `deactivate-mark` set. They record GNU's undo entries (merged insertions, deletions with marker adjustments, point and first-change entries, `record_change`), and each command first runs `undo-auto--add-boundary` and notes point as command_loop_1 does, so GNU's `undo` restores typed, deleted and killed text. No Lisp runs when no hook can run and undo is off or undo-auto is absent. Remaining: `combine-after-change-calls` deferral, and `overwrite-mode` self-insertion before the end of the buffer, refuse before anything changes; `translate-region-internal` and `insert-file-contents` run no change hooks and record no undo, and printing to a buffer records its insertions but refuses with hooks set and calls no `undo-auto--undoable-change`; undo lists are never truncated (no truncate_undo_list at collection); a unibyte buffer's change bounds and deletion start are not carried through the before hooks (it holds no markers); a deletion whose start the before hooks moved outside the accessible region signals `args-out-of-range` before anything changes, as GNU does when it records undo or returns the text, where GNU without undo deletes outside the restriction; hooks run by `subst-char-in-region` with NOUNDO see the buffer's own undo list and file name, which GNU binds off; `self-insert-command` rings no bell without `ding`. `replace-match` in buffers, `transpose-regions` and the region case commands do not exist yet.",
+   "why": "The bracket is native and calls its Lisp half (`rlisp/vm/insdel.el`) only when a hook can run; the remaining primitives join it as they are ported (their replace_range semantics first).",
    "symbols": [
     "before-change-functions",
     "after-change-functions",
-    "first-change-hook",
     "buffer-undo-list",
-    "buffer-enable-undo",
-    "subst-char-in-region"
+    "combine-after-change-calls",
+    "overwrite-mode",
+    "self-insert-command",
+    "subst-char-in-region",
+    "translate-region-internal"
    ],
    "symbols_derived": false
   },

@@ -317,6 +317,9 @@ impl Vm {
     }
     pub(super) fn ensure_buffer_writable(&mut self) -> Result<()> {
         self.buffer_index()?;
+        if self.change_prepared {
+            return Ok(());
+        }
         let read_only = self.slot("buffer-read-only");
         let inhibited = self.slot("inhibit-read-only");
         if self.variable_value(read_only)? != Value::NIL
@@ -1493,8 +1496,7 @@ impl Vm {
         self.slots[self.buffer_slot].value = buffer;
         let result = (|| -> std::result::Result<(), Fault> {
             if hooks {
-                let deactivate = self.slot("deactivate-mark");
-                self.slots[deactivate].value = Value::TRUE;
+                self.mark_deactivated()?;
             }
             if !self.buffer_state(buffer).map_err(Fault::Error)?.modified() {
                 self.record_first_change().map_err(Fault::Error)?;
@@ -1632,23 +1634,15 @@ impl Vm {
     /// verify_interval_modification's hooks: the distinct `modification-hooks'
     /// values of the characters in RANGE of BUFFER, in order.
     pub(crate) fn modification_hooks_in(&mut self, buffer: Value, range: std::ops::Range<ByteOffset>) -> std::result::Result<Vec<Value>, crate::prim::Fault> {
-        let properties = match self.object_if(buffer) {
-            Some(Object::Buffer(b)) => b.properties.clone(),
-            Some(Object::ByteBuffer(b)) => properties::Properties::from_map(&b.properties),
-            _ => return Ok(Vec::new()),
-        };
+        let runs = self.property_runs(buffer, range);
         let current = self.slots[self.buffer_slot].value;
         self.slots[self.buffer_slot].value = buffer;
         let mut hooks = Vec::new();
-        let mut at = range.start;
-        let result = (|| {
-            while at < range.end {
-                let value = self.text_property_at(&properties, at, "modification-hooks")?;
-                if value != Value::NIL && hooks.last() != Some(&value) { hooks.push(value); }
-                at = properties.next_change(at, range.end);
-            }
+        let result = runs.iter().try_for_each(|(_, plist)| {
+            let value = self.text_property_in(plist, "modification-hooks")?;
+            if value != Value::NIL && hooks.last() != Some(&value) { hooks.push(value); }
             Ok(())
-        })();
+        });
         self.slots[self.buffer_slot].value = current;
         result.map(|()| hooks)
     }
@@ -1807,7 +1801,7 @@ impl Vm {
         Ok(Some((range, properties)))
     }
 
-    fn text_property_variable(
+    pub(crate) fn text_property_variable(
         &mut self,
         name: &str,
     ) -> std::result::Result<Value, crate::prim::Fault> {
@@ -1822,7 +1816,7 @@ impl Vm {
         })
     }
 
-    fn text_property_find(
+    pub(crate) fn text_property_find(
         &self,
         list: Value,
         matches: impl Fn(Value) -> bool,
@@ -1864,18 +1858,20 @@ impl Vm {
             .map_err(Fault::Error)
     }
 
-    fn text_property_at(
+    /// textget over one character's properties PLIST (`char_properties'):
+    /// the property itself, else its category's, an alias's, or the default.
+    pub(crate) fn text_property_in(
         &mut self,
-        properties: &properties::Properties,
-        at: ByteOffset,
+        plist: &[(String, Value)],
         key: &str,
     ) -> std::result::Result<Value, crate::prim::Fault> {
         use crate::prim::Fault;
-        if let Some(value) = properties.get_property(at, key) {
+        let get = |name: &str| plist.iter().find(|(k, _)| k == name).map(|(_, v)| *v);
+        if let Some(value) = get(key) {
             return Ok(value);
         }
         let symbol = Value::reference(self.slot(key) + 1, 7);
-        if let Some(category) = properties.get_property(at, "category")
+        if let Some(category) = get("category")
             && (category == Value::NIL
                 || category == Value::TRUE
                 || (category.tag() == 7 && category != Value::UNBOUND))
@@ -1894,7 +1890,7 @@ impl Vm {
             while let Ok((alias, next)) = self.cons_pair(tail) {
                 // GNU aliases consult the direct plist, never the category.
                 if let Some(name) = self.text_property_name(alias)
-                    && let Some(value) = properties.get_property(at, name)
+                    && let Some(value) = get(name)
                     && value != Value::NIL
                 {
                     return Ok(value);
@@ -1909,7 +1905,46 @@ impl Vm {
         Ok(self.plist_lookup(defaults, symbol))
     }
 
-    fn text_property_signal(&mut self, name: &str, data: &[Value]) -> crate::prim::Fault {
+    /// The properties of BUFFER's character at AT, newest first.
+    pub(crate) fn char_properties(&self, buffer: Value, at: ByteOffset) -> Vec<(String, Value)> {
+        let own = |pairs: Vec<(&str, Value)>| pairs.into_iter().map(|(k, v)| (k.to_owned(), v)).collect();
+        match self.object_if(buffer) {
+            Some(Object::Buffer(b)) => own(b.properties.properties_at(at)),
+            Some(Object::ByteBuffer(b)) => own(properties::Properties::from_map(&b.properties).properties_at(at)),
+            _ => Vec::new(),
+        }
+    }
+
+    /// The property runs of BUFFER over RANGE: each run's start and its
+    /// characters' properties, read without copying the buffer's runs.
+    pub(crate) fn property_runs(&self, buffer: Value, range: std::ops::Range<ByteOffset>) -> Vec<(ByteOffset, Vec<(String, Value)>)> {
+        let runs = |properties: &properties::Properties| {
+            let mut runs = Vec::new();
+            let mut at = range.start;
+            while at < range.end {
+                runs.push((at, properties.properties_at(at).into_iter().map(|(k, v)| (k.to_owned(), v)).collect()));
+                at = properties.next_change(at, range.end);
+            }
+            runs
+        };
+        match self.object_if(buffer) {
+            Some(Object::Buffer(b)) => runs(&b.properties),
+            Some(Object::ByteBuffer(b)) => runs(&properties::Properties::from_map(&b.properties)),
+            _ => Vec::new(),
+        }
+    }
+
+    /// Whether BUFFER's text has an interval tree (verify_interval_modification
+    /// checks nothing without one).
+    pub(crate) fn buffer_has_intervals(&self, buffer: Value) -> bool {
+        match self.object_if(buffer) {
+            Some(Object::Buffer(b)) => b.properties.has_intervals(),
+            Some(Object::ByteBuffer(b)) => b.had_intervals || !b.properties.is_empty(),
+            _ => false,
+        }
+    }
+
+    pub(crate) fn text_property_signal(&mut self, name: &str, data: &[Value]) -> crate::prim::Fault {
         let symbol = Value::reference(self.slot(name) + 1, 7);
         crate::prim::Fault::Signal(symbol, self.list_value(data))
     }
@@ -1922,26 +1957,19 @@ impl Vm {
         object: Value,
         range: std::ops::Range<ByteOffset>,
     ) -> std::result::Result<(), crate::prim::Fault> {
-        use crate::prim::Fault;
-        let properties = match self.object(object).map_err(Fault::Error)? {
-            Object::Buffer(buffer) => buffer.properties.clone(),
-            Object::ByteBuffer(buffer) => properties::Properties::from_map(&buffer.properties),
-            _ => unreachable!(),
-        };
         let inhibit = self.text_property_variable("inhibit-read-only")?;
         let read_only =
             self.text_property_variable("buffer-read-only")? != Value::NIL && inhibit == Value::NIL;
-        if read_only
-            && self.text_property_at(&properties, range.start, "inhibit-read-only")? == Value::NIL
-        {
+        let runs = self.property_runs(object, range.clone());
+        let first = self.char_properties(object, range.start);
+        if read_only && self.text_property_in(&first, "inhibit-read-only")? == Value::NIL {
             return Err(self.text_property_signal("buffer-read-only", &[object]));
         }
         let selective = self.cons_pair(inhibit).is_ok();
         let ignore = inhibit != Value::NIL && !selective;
-        let mut at = range.start;
-        while at < range.end {
-            let value = self.text_property_at(&properties, at, "read-only")?;
-            let express = self.text_property_at(&properties, at, "inhibit-read-only")?
+        for (_, plist) in &runs {
+            let value = self.text_property_in(plist, "read-only")?;
+            let express = self.text_property_in(plist, "inhibit-read-only")?
                 != Value::NIL
                 || (value != Value::NIL
                     && selective
@@ -1959,7 +1987,6 @@ impl Vm {
             if read_only && !express {
                 return Err(self.text_property_signal("buffer-read-only", &[object]));
             }
-            at = properties.next_change(at, range.end);
         }
         Ok(())
     }

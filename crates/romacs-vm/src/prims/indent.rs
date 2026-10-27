@@ -16,10 +16,18 @@ fn insert_char(cx, character: Value; optional count: Value, inherit: Value) -> S
     if count <= 0 { return Ok(Step::Done(Value::NIL)); }
     let mut unit = [0; 5];
     let width = crate::lstring::char_string(c, &mut unit);
-    let bytes = unit[..width].repeat(count as usize);
-    let text = cx.make_string(bytes, true);
+    // GNU inserts from a 4000-byte buffer, each full one a change of its own.
+    let per_chunk = (4000 - 4000 % width) / width;
+    let total = count as usize;
+    let full = (total - 1) / per_chunk;
+    let mut args = Vec::with_capacity(full + 1);
+    if full > 0 {
+        let chunk = cx.make_string(unit[..width].repeat(per_chunk), true);
+        args.resize(full, chunk);
+    }
+    args.push(cx.make_string(unit[..width].repeat(total - full * per_chunk), true));
     let f = cx.intern(if inherit == Value::NIL { "insert" } else { "insert-and-inherit" });
-    Ok(Step::Call { f, args: vec![text], then: done, saved: vec![Value::NIL] })
+    Ok(Step::Call { f, args, then: done, saved: vec![Value::NIL] })
 }}
 
 defsubr! { name = "current-indentation", gnu = "indent.c:997", effect = Reads,
