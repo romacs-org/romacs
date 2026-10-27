@@ -149,7 +149,7 @@ not these storage APIs.
 
 ## Verification
 
-Run the crate's tests through the tier-0 loop (`scripts/tier0 romacs-mem`), or
+Run the crate's tests through `python3 scripts/dev-loop romacs-mem`, or
 directly:
 
 ```sh
@@ -185,12 +185,9 @@ The complete-collector benchmark is described below.
 ## Initialized small-object allocation benchmark
 
 `examples/small_alloc_bench.rs` times actual cons, 8/16/32-byte unibyte string,
-four-slot vector and symbol constructors at 100,000 and 1,000,000 objects.
-`scripts/small-alloc-bench --binary BIN --output OUT.json` runs seven alternating
-Rust/GNU samples per row; run it inside an admitted slot. GNU runs through light
-slots and byte-compiles its own `bench/small-alloc-gnu.el`. Optional `--baseline BIN`
-interleaves an exact-base executable too. Both warm up once and fully collect before
-timing; GC-enabled rows use 800,000 bytes / 10%, while no-GC rows assert zero cycles.
+four-slot vector and symbol constructors at 100,000 and 1,000,000 objects;
+`bench/small-alloc-gnu.el` is the byte-compiled GNU counterpart. Both warm up
+once and fully collect before timing; GC-enabled rows use 800,000 bytes / 10%, while no-GC rows assert zero cycles.
 Rust checks pacing every 1,000 discarded objects; GNU uses its bytecode safepoints.
 Symbols reuse a prebuilt name. Timings include constructor initialization, string
 backing storage and any spontaneous collections, but exclude startup and teardown.

@@ -3,15 +3,15 @@
 Run from the repository root:
 
 ```sh
-scripts/tier0 romacs-regex
-scripts/premerge-regex
-python3 scripts/premerge_regex_test.py
+python3 scripts/dev-loop romacs-regex --lib --test cache --test counters --test gnu_scenarios
+python3 scripts/dev-loop romacs-regex --profile gate --lib --test cache --test counters --test gnu_scenarios
+python3 scripts/dev-loop romacs-chars --profile gate
 ```
 
-The premerge command checks the effective release configuration for the library
-and `gnu_scenarios`, refusing debug assertions before running regex and character
-tests. Debug and release use the same assertions; only randomized repetition
-budgets differ. No test is intentionally skipped in the debug loop.
+The `gate` profile is release code generation without debug assertions, so it
+runs the full-strength budgets. Debug and release use the same assertions; only
+randomized repetition budgets differ. No test is intentionally skipped in the
+debug loop.
 
 The independent character-wise model uses 32 rounds in debug and 512 in release.
 Both profiles retain the 1,300,306-byte counter fixture, 502 planted hits and

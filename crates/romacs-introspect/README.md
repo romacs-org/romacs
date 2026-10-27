@@ -135,9 +135,6 @@ named, not silently dropped).
 * No dependency on any `romacs-*` crate (`tests/boundary.rs`). No runtime
   `Value` crosses in; `romacs-introspect-live` copies everything into owned
   strings and drops each runtime before returning.
-* Not in `scripts/crate-edges.toml`: that table forbids build scripts for its
-  layered crates, and this crate's spans must come from one. Its
-  evaluator-freedom is enforced by `tests/boundary.rs` instead.
 * VM2 declares no arity table, so VM2-only names report no arity rather than a
   guessed one. VM2 handler spans are the first match arm on the variant and are
   labelled heuristic.

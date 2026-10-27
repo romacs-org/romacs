@@ -127,7 +127,7 @@ def gnu_oracle_binary(_cache=[]):
 def fingerprint(root=ROOT):
     paths = subprocess.check_output(['git', 'ls-files', '-z'], cwd=root).decode().split('\0')
     selected = {p for p in paths if p and (p.startswith(('gnu-lisp/', 'rlisp/', 'crates/romacs-vm/', 'crates/romacs-face/', 'crates/romacs-layout-input/', 'crates/romacs-regex-engine/')) or p in ['Cargo.toml', 'Cargo.lock'])}
-    selected.update(['scripts/lisp-census.py', 'scripts/lisp-census-oracle.el', 'scripts/prove-lisp-census.py', 'scripts/regenerate-lisp-census.py', 'crates/romacs-vm/src/bin/romacs-vm-census.rs'])
+    selected.update(['scripts/lisp-census.py', 'scripts/lisp-census-oracle.el', 'crates/romacs-vm/src/bin/romacs-vm-census.rs'])
     # Include new files in lisp and the tool, not merely the tracked manifest.
     selected.update(str(p.relative_to(root)) for p in (root / 'gnu-lisp').rglob('*.el'))
     selected.update(str(p.relative_to(root)) for p in (root / 'crates/romacs-vm').rglob('*.rs'))
