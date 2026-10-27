@@ -17,6 +17,7 @@ pub(super) enum Object {
     Terminal(Box<frame::Terminal>),
     WindowConfiguration(Box<crate::window::WindowConfiguration>),
     Sqlite(Box<crate::sqlite::Handle>),
+    Process(Box<crate::subprocess::Process>),
     String(Box<LispString>),
     RawString(Box<LispString>),
     Vector(Vec<Value>),
@@ -706,6 +707,7 @@ impl Vm {
                             | Object::Terminal(_)
                             | Object::WindowConfiguration(_)
                             | Object::Sqlite(_)
+                            | Object::Process(_)
                         | Object::HashTable(_)
                         | Object::SyntaxTable(_) => Err("array required".into()),
                     };
@@ -753,6 +755,7 @@ impl Vm {
                         | Object::Terminal(_)
                         | Object::WindowConfiguration(_)
                             | Object::Sqlite(_)
+                            | Object::Process(_)
                         | Object::HashTable(_)
                     | Object::SyntaxTable(_) => {
                         return Err("array required".into());
@@ -802,6 +805,7 @@ impl Vm {
                             | Object::Terminal(_)
                             | Object::WindowConfiguration(_)
                             | Object::Sqlite(_)
+                            | Object::Process(_)
                         | Object::HashTable(_)
                         | Object::SyntaxTable(_)
                 ) {

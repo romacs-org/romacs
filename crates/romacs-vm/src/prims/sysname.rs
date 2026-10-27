@@ -25,10 +25,11 @@ fn emacs_pid(_cx) {
 }}
 
 // Fsleep_for: GNU waits in wait_reading_process_output, which also runs
-// timers and reads subprocess output. VM2 sleeps only when no timer is
-// pending; it has no subprocesses to read from.
+// timers and reads subprocess output. With the process prelude loaded that
+// wait is rlisp/vm/subprocess.el's; a VM without it sleeps only when no timer
+// is pending, since nothing else would run them.
 defsubr! { name = "sleep-for", gnu = "dispnew.c:6894", effect = Global,
-fn sleep_for(cx, seconds: Value; optional milliseconds: Value) {
+fn sleep_for(cx, seconds: Value; optional milliseconds: Value) -> Step {
     // extract_float: any integer or float.
     let mut duration = if let Some(n) = seconds.integer_value() { n as f64 }
         else if let Some(n) = cx.bigint_value(seconds) { if n.sign() == num_bigint::Sign::Minus { f64::NEG_INFINITY } else { f64::INFINITY } }
@@ -37,6 +38,11 @@ fn sleep_for(cx, seconds: Value; optional milliseconds: Value) {
         duration += milliseconds.integer_value().ok_or(Fault::Wrong("fixnump", milliseconds))? as f64 / 1000.0;
     }
     if duration > 0.0 {
+        let wait = cx.intern("romacs--wait-reading-process-output");
+        if cx.fboundp(wait) {
+            let end = cx.float(now() + duration.min(1e9));
+            return slept(cx, Value::NIL, &[wait, end]);
+        }
         for name in ["timer-list", "timer-idle-list"] {
             let symbol = cx.intern(name);
             if cx.variable_value(symbol)?.is_some_and(|timers| timers != Value::NIL) {
@@ -45,5 +51,23 @@ fn sleep_for(cx, seconds: Value; optional milliseconds: Value) {
         }
         std::thread::sleep(std::time::Duration::from_secs_f64(duration.min(1e9)));
     }
-    Ok(Value::NIL)
+    Ok(Step::Done(Value::NIL))
 }}
+
+/// The wait returns as soon as it reads output, so wait again until the
+/// end time saved after the wait function, as Fsleep_for loops.
+fn slept(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
+    let (wait, end) = (saved[0], saved[1]);
+    let remaining = cx.float_value(end)? - now();
+    if remaining <= 0.0 {
+        return Ok(Step::Done(Value::NIL));
+    }
+    let limit = cx.float(remaining);
+    let zero = Value::integer(0).expect("fixnum");
+    Ok(Step::Call { f: wait, args: vec![limit, Value::NIL, zero], then: slept, saved: saved.to_vec() })
+}
+
+/// current_timespec, as `float-time' reads it.
+fn now() -> f64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0.0, |d| d.as_secs_f64())
+}

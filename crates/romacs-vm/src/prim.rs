@@ -169,6 +169,7 @@ mod leaf {
         Terminal,
         WindowConfiguration,
         Sqlite,
+        Process,
         Invalid,
     }
 
@@ -1335,6 +1336,7 @@ mod leaf {
                     Some(data::Object::Terminal(_)) => Kind::Terminal,
                     Some(data::Object::WindowConfiguration(_)) => Kind::WindowConfiguration,
                     Some(data::Object::Sqlite(_)) => Kind::Sqlite,
+                    Some(data::Object::Process(_)) => Kind::Process,
                     None => Kind::Invalid,
                 },
                 _ => Kind::Invalid,
@@ -1551,11 +1553,13 @@ mod leaf {
     pub(crate) use text_properties::{PropertyBegin, Retry};
     mod undo;
     mod sqlite;
+    mod process;
+    pub(crate) use process::CallOutput;
     mod random;
     mod width;
     mod coding_safe;
 }
-pub(crate) use leaf::{Leaf, Kind, SyntaxOp, SyntaxOutcome};
+pub(crate) use leaf::{Leaf, Kind, SyntaxOp, SyntaxOutcome, CallOutput};
 
 /// Realize C-initialized coding variables before their first Lisp observation.
 /// Like the charset slot hook, this preserves allocation-free VM construction.
@@ -1873,7 +1877,8 @@ impl Vm {
     /// Evaluate the built-in T3 Lisp prelude (`prims/prelude.el`): callback
     /// loops written in Lisp over leaf cursors, so their state is registers.
     pub(crate) fn install_lisp_prelude_raw(&mut self) -> Result<Value> {
-        self.eval_source_raw(prims::PRELUDE)
+        self.eval_source_raw(prims::PRELUDE)?;
+        self.eval_source_raw(prims::PROCESS_PRELUDE)
     }
 }
 

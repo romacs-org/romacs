@@ -24,6 +24,7 @@ mod oclosure;
 mod host_input;
 mod terminal_host;
 mod process_jobs;
+mod subprocess;
 mod environment;
 mod watchers;
 mod user_db;
@@ -1077,6 +1078,8 @@ pub struct Vm {
     /// The embedder's keyboard while one is attached (host_input.rs).
     host_input: Option<Box<dyn host_input::HostInput>>,
     process_jobs: process_jobs::Jobs,
+    /// GNU process.c chan_process and friends: subprocess descriptors.
+    subprocesses: subprocess::Table,
     environment_snapshot: Option<Vec<Vec<u8>>>,
     /// SYMBOL_TRAPPED_WRITE base slots: variables with watchers (watchers.rs).
     trapped: HashSet<usize>,
@@ -1213,6 +1216,7 @@ impl Vm {
             propagated_eval_depth: None,
             host_input: None,
             process_jobs: process_jobs::Jobs::default(),
+            subprocesses: subprocess::Table::default(),
             environment_snapshot: Some(environment::snapshot()),
             trapped: HashSet::default(),
             doc_file: None,
@@ -2608,6 +2612,7 @@ impl Vm {
                             | data::Object::Terminal(_)
                             | data::Object::WindowConfiguration(_)
                             | data::Object::Sqlite(_)
+                            | data::Object::Process(_)
                             | data::Object::HashTable(_) => {
                                 return Err("sequence required".into());
                             }
@@ -2649,6 +2654,7 @@ impl Vm {
                 data::Object::Terminal(_) => Ok("#<terminal initial>".into()),
                 data::Object::WindowConfiguration(_) => Ok("#<window-configuration>".into()),
                 data::Object::Sqlite(h) => Ok(h.describe()),
+                data::Object::Process(p) => Ok(format!("#<process {}>", self.process_name_text(p))),
                 data::Object::Marker(_) => Ok("#<marker>".into()),
                 data::Object::Overlay(_) => Ok("#<overlay>".into()),
                 data::Object::ByteBuffer(_) => Ok("#<byte-buffer>".into()),
