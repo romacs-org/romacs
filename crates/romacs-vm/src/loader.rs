@@ -350,6 +350,9 @@ impl Vm {
             let mut at = 0;
             let mut ordinal = 0;
             let mut result = Value::NIL;
+            // The line of byte `counted`, kept as reading advances: counting
+            // from the start for each form made a file's load quadratic.
+            let (mut line, mut counted) = (1, 0);
             loop {
                 let read = self.read_internal_span(&source[at..]);
                 let Some((value, begin, used)) = read.map_err(|e| {
@@ -369,8 +372,10 @@ impl Vm {
                 let exact = std::str::from_utf8(&source[at + begin..at + used]).ok();
                 let form_source = String::from_utf8_lossy(&source[at + begin..at + used]);
                 let form = self.source_form(value, 0)?;
+                line += source[counted..at + begin].iter().filter(|b| **b == b'\n').count();
+                counted = at + begin;
                 let step = self.loader.steps.len();
-                self.loader.steps.push(serde_json::json!({"file":path,"ordinal":ordinal,"byte":at+begin,"line":source[..at+begin].iter().filter(|b|**b==b'\n').count()+1,"source":form_source,"status":"entered"}));
+                self.loader.steps.push(serde_json::json!({"file":path,"ordinal":ordinal,"byte":at+begin,"line":line,"source":form_source,"status":"entered"}));
                 let evaluated = self.eval_load_toplevel(&form, exact, lazy, 0);
                 match evaluated {
                     Ok(v) => {

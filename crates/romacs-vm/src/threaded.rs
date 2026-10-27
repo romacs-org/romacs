@@ -1228,7 +1228,7 @@ fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Va
     }
     let size = vm
         .register_width
-        .checked_mul(513)
+        .checked_mul(MIN_FRAMES)
         .and_then(|n| n.checked_add(4096))
         .ok_or("register storage overflow")?;
     vm.stack = std::mem::take(&mut program.registers);
@@ -1843,6 +1843,10 @@ fn depth_room_cold(e: &mut Engine<'_>, attempted: usize) -> bool {
     }
     fits
 }
+/// Activations the register storage holds before it first widens. Each is
+/// reserved at the widest function compiled so far, so a single wide
+/// function multiplies this; deeper calls widen on demand (`frame_room`).
+const MIN_FRAMES: usize = 17;
 /// Grow only on a cold storage boundary, rebasing all activation pointers.
 unsafe fn frame_room(e: &mut Engine<'_>, r: *mut Value) -> Option<*mut Value> {
     let needed = (e.frames.len() + 3).checked_mul(e.vm.register_width)?;
@@ -2022,6 +2026,7 @@ unsafe fn invoke(
         let Some(r) = frame_room(e, r) else { return fail(e, "register storage overflow"); };
         if entry.simple_arity == argc {
             let new = r.add(e.vm.functions.get_unchecked(e.function).regs.max(1));
+            let mark = call_mark(e, r, pc, target, start, argc);
             match argc {
                 0 => {}
                 1 => *new = *r.add(start),
@@ -2031,7 +2036,7 @@ unsafe fn invoke(
                 }
                 n => std::ptr::copy(r.add(start), new, n),
             }
-            return enter_frame(e, r, pc, new, function, None, target, start, argc);
+            return enter_frame_marked(e, r, pc, new, function, None, mark);
         }
         let closure = &e.vm.closures[target.payload() as usize];
         let f = e.vm.functions.get_unchecked(function);
@@ -2040,6 +2045,29 @@ unsafe fn invoke(
             return closure_arity_error(e, function, argc);
         }
         let new = r.add(e.vm.functions.get_unchecked(e.function).regs.max(1));
+        let dst = new.add(f.captures);
+        let positional = argc.min(f.arity);
+        // The arguments may lie where the new frame goes (`apply`'s spread
+        // window once storage has widened): read them all before writing
+        // the frame (the backtrace entry, then rest values, then the
+        // positional ones by memmove) and only then write the captures.
+        let mark = call_mark(e, r, pc, target, start, argc);
+        let f = e.vm.functions.get_unchecked(function);
+        let closure = &e.vm.closures[target.payload() as usize];
+        let rest = if f.rest {
+            let begin = e.rest.values.len();
+            for i in positional..argc {
+                e.rest.values.push(*r.add(start + i));
+            }
+            Some(OpaqueRest {
+                reg: f.captures + f.arity,
+                start: begin,
+                end: e.rest.values.len(),
+            })
+        } else {
+            None
+        };
+        std::ptr::copy(r.add(start), dst, positional);
         match closure.captures.len() {
             0 => {}
             1 => *new = closure.captures[0],
@@ -2049,35 +2077,13 @@ unsafe fn invoke(
             }
             n => std::ptr::copy_nonoverlapping(closure.captures.as_ptr(), new, n),
         }
-        let dst = new.add(f.captures);
-        let positional = argc.min(f.arity);
-        match positional {
-            0 => {}
-            1 => *dst = *r.add(start),
-            2 => {
-                *dst = *r.add(start);
-                *dst.add(1) = *r.add(start + 1);
-            }
-            n => std::ptr::copy(r.add(start), dst, n),
-        }
         for i in positional..f.arity {
             *dst.add(i) = Value::NIL;
         }
-        let rest = if f.rest {
-            let begin = e.rest.values.len();
-            for i in positional..argc {
-                e.rest.values.push(*r.add(start + i));
-            }
+        if f.rest {
             *dst.add(f.arity) = Value::NIL;
-            Some(OpaqueRest {
-                reg: f.captures + f.arity,
-                start: begin,
-                end: e.rest.values.len(),
-            })
-        } else {
-            None
-        };
-        enter_frame(e, r, pc, new, function, rest, target, start, argc)
+        }
+        enter_frame_marked(e, r, pc, new, function, rest, mark)
     }
 }
 #[cold]
@@ -2317,12 +2323,35 @@ unsafe fn enter_frame(
     argc: usize,
 ) -> Value {
     unsafe {
-        let mark = if let Some(mark) = e.native_mark.take() {
+        let mark = call_mark(e, r, pc, target, start, argc);
+        enter_frame_marked(e, r, pc, new, function, rest, mark)
+    }
+}
+/// The backtrace entry of the call about to enter: its arguments are read
+/// here, so a caller whose arguments may lie under the new frame (`apply`'s
+/// spread window) takes it before writing the frame.
+#[inline(always)]
+unsafe fn call_mark(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst, target: Value, start: usize, argc: usize) -> usize {
+    unsafe {
+        if let Some(mark) = e.native_mark.take() {
             e.vm.backtrace.resolve_pending(target);
             mark
         } else {
             trace_call(e, r, pc, target, start, argc)
-        };
+        }
+    }
+}
+#[inline(always)]
+unsafe fn enter_frame_marked(
+    e: &mut Engine<'_>,
+    r: *mut Value,
+    pc: *const Inst,
+    new: *mut Value,
+    function: usize,
+    rest: Option<OpaqueRest>,
+    mark: usize,
+) -> Value {
+    unsafe {
         e.call_marks.push(Some(e.apply_mark.take().unwrap_or(mark)));
         let base = rest.map_or(e.rest.values.len(), |rest| rest.start);
         e.rest.activations.push((base, rest));
@@ -2835,19 +2864,19 @@ unsafe fn t2_enter_closure(
             return closure_arity_error(e, function, argc);
         }
         let new = r.add(k_width(r));
-        std::ptr::copy_nonoverlapping(closure.captures.as_ptr(), new, closure.captures.len());
         let dst = new.add(f.captures);
         let positional = argc.min(f.arity);
-        std::ptr::copy(r.add(start), dst, positional);
-        for i in positional..f.arity {
-            *dst.add(i) = Value::NIL;
-        }
+        // As in the cached entry: read every argument, the backtrace's
+        // included, before writing the frame, which may overlap `apply`'s
+        // spread window after widening.
+        let mark = call_mark(e, r, pc, target, start, argc);
+        let f = &e.vm.functions[function];
+        let closure = &e.vm.closures[target.payload() as usize];
         let rest = if f.rest {
             let begin = e.rest.values.len();
             for i in positional..argc {
                 e.rest.values.push(*r.add(start + i));
             }
-            *dst.add(f.arity) = Value::NIL;
             Some(OpaqueRest {
                 reg: f.captures + f.arity,
                 start: begin,
@@ -2856,7 +2885,15 @@ unsafe fn t2_enter_closure(
         } else {
             None
         };
-        enter_frame(e, r, pc, new, function, rest, target, start, argc)
+        std::ptr::copy(r.add(start), dst, positional);
+        std::ptr::copy_nonoverlapping(closure.captures.as_ptr(), new, closure.captures.len());
+        for i in positional..f.arity {
+            *dst.add(i) = Value::NIL;
+        }
+        if f.rest {
+            *dst.add(f.arity) = Value::NIL;
+        }
+        enter_frame_marked(e, r, pc, new, function, rest, mark)
     }
 }
 // Resolve the ordinary primitive family once per call site. Each cached call
@@ -3069,7 +3106,7 @@ unsafe fn primitive(
 unsafe fn widen_registers(e: &mut Engine<'_>, r: *mut Value, width: usize) -> Option<*mut Value> {
     unsafe {
         let width = width.max(e.vm.register_width);
-        let frames = (e.frames.len() + 3).max(513).checked_next_power_of_two()?;
+        let frames = (e.frames.len() + 3).max(MIN_FRAMES).checked_next_power_of_two()?;
         let size = width.checked_mul(frames)?.checked_add(4096)?;
         let old_base = e.vm.stack.as_ptr();
         let current = r.offset_from(old_base) as usize;
@@ -3127,7 +3164,7 @@ unsafe fn force_lazy(e: &mut Engine<'_>, r: *mut Value, function: usize) -> Opti
         e.vm.end_nested_execution();
         e.code.resize_with(e.vm.functions.len(), Vec::new);
         let width = e.vm.register_width;
-        let Some(size) = width.checked_mul((e.frames.len() + 3).max(513)).and_then(|n| n.checked_add(4096)) else {
+        let Some(size) = width.checked_mul((e.frames.len() + 3).max(MIN_FRAMES)).and_then(|n| n.checked_add(4096)) else {
             fail(e, "register storage overflow");
             return None;
         };
@@ -3197,7 +3234,7 @@ unsafe fn autoload_then(e: &mut Engine<'_>, r: *mut Value, function: Value, fund
         e.vm.end_nested_execution();
         e.code.resize_with(e.vm.functions.len(), Vec::new);
         let width = e.vm.register_width;
-        let Some(size) = width.checked_mul((e.frames.len() + 3).max(513)).and_then(|n| n.checked_add(4096)) else {
+        let Some(size) = width.checked_mul((e.frames.len() + 3).max(MIN_FRAMES)).and_then(|n| n.checked_add(4096)) else {
             fail(e, "register storage overflow");
             return None;
         };
@@ -3267,7 +3304,7 @@ unsafe fn reentrant_load(
         e.vm.end_nested_execution();
         e.code.resize_with(e.vm.functions.len(), Vec::new);
         let width = e.vm.register_width;
-        let Some(size) = width.checked_mul((e.frames.len() + 3).max(513)).and_then(|n| n.checked_add(4096)) else {
+        let Some(size) = width.checked_mul((e.frames.len() + 3).max(MIN_FRAMES)).and_then(|n| n.checked_add(4096)) else {
             return fail(e, "register storage overflow");
         };
         if e.vm.stack.len() < size { e.vm.stack.resize(size, Value::NIL); }
