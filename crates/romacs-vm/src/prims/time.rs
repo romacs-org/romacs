@@ -409,7 +409,9 @@ impl ZoneRule {
     }
 }
 fn zone_rule(cx: &mut Leaf<'_>, value: Value) -> std::result::Result<ZoneRule, Fault> {
-    if value == Value::TRUE { return Ok(ZoneRule::Fixed(numeric_zone(0))); }
+    if value == Value::TRUE || (value == Value::NIL && matches!(cx.local_zone(), crate::LocalZone::Utc)) {
+        return Ok(ZoneRule::Fixed(numeric_zone(0)));
+    }
     if let Some(n) = value.integer_value() { return Ok(ZoneRule::Fixed(numeric_zone(n))); }
     if let Some((offset, tail)) = cx.pair(value) {
         if let (Some(n), Some((name, _))) = (offset.integer_value(), cx.pair(tail)) {
@@ -422,7 +424,13 @@ fn zone_rule(cx: &mut Leaf<'_>, value: Value) -> std::result::Result<ZoneRule, F
         return Err(zone_fault(cx, value));
     }
     let wall = cx.symbol_name(value).ok().as_deref() == Some("wall");
-    let rule = if value == Value::NIL { std::env::var("TZ").ok() }
+    let rule = if value == Value::NIL {
+        match cx.local_zone() {
+            crate::LocalZone::Process => std::env::var("TZ").ok(),
+            crate::LocalZone::Rule(rule) => Some(rule),
+            crate::LocalZone::Wall | crate::LocalZone::Utc => None,
+        }
+    }
         else if wall { None } else { Some(cx.string_text(value).map_err(|_| zone_fault(cx, value))?) };
     // tzset_internal: the empty string is UTC; a leading colon is ignored;
     // a readable zone file wins; with no file, nothing or the default file
@@ -778,7 +786,9 @@ fn encode_time(cx, time: Value; rest args) {
     let days = civil_days(year, month.rem_euclid(12) + 1, 1) + day - 1;
     let clamped = second.clamp(0, 59);
     let local = days.checked_mul(86400).and_then(|s| s.checked_add(hour * 3600 + minute * 60 + clamped)).ok_or_else(time_overflow)?;
-    let utc = zone == Value::TRUE || zone.integer_value() == Some(0);
+    // GNU's utc_tz: t, 0, or the local zone set-time-zone-rule made UTC.
+    let utc = zone == Value::TRUE || zone.integer_value() == Some(0)
+        || (zone == Value::NIL && matches!(cx.local_zone(), crate::LocalZone::Utc));
     let rule = zone_rule(cx, zone)?;
     // mktime_z runs timegm for UTC, which keeps its own offset guess.
     let mut offset = if utc { 0 } else { cx.mktime_offset() };
@@ -902,3 +912,42 @@ mod tests {
         }
     }
 }
+
+// Fset_time_zone_rule, tzlookup (ZONE, true): the rule local time uses
+// from now on. GNU sets the process's TZ, which getenv (reading
+// process-environment) does not see; VM2 keeps the rule in the VM.
+defsubr! { name = "set-time-zone-rule", gnu = "timefns.c:1962", effect = Global,
+fn set_time_zone_rule(cx, tz: Value) {
+    let wall = tz == Value::NIL || cx.symbol_name(tz).ok().as_deref() == Some("wall");
+    let zone = if wall {
+        crate::LocalZone::Wall
+    } else if tz == Value::TRUE || tz.integer_value() == Some(0) {
+        crate::LocalZone::Utc
+    } else if let Ok(text) = cx.string_text(tz) {
+        crate::LocalZone::Rule(text)
+    } else {
+        // tzbuf_format: "<NAME>[-]H:MM:SS", NAME the numeric offset of an
+        // integer or the abbreviation of an (OFFSET ABBR) list.
+        let (offset, name) = match (tz.integer_value(), cx.pair(tz)) {
+            (Some(n), _) => (n, None),
+            (None, Some((offset, tail))) => match (offset.integer_value(), cx.pair(tail)) {
+                (Some(n), Some((abbr, _))) => (n, Some(abbr)),
+                _ => return Err(zone_fault(cx, tz)),
+            },
+            _ => return Err(zone_fault(cx, tz)),
+        };
+        let name = match name {
+            None => numeric_zone(offset).name,
+            Some(abbr) => cx.string_text(abbr).map_err(|_| zone_fault(cx, tz))?,
+        };
+        let a = offset.unsigned_abs();
+        crate::LocalZone::Rule(format!("<{name}>{}{}:{:02}:{:02}", if offset < 0 { "" } else { "-" }, a / 3600, a / 60 % 60, a % 60))
+    };
+    // tzlookup validates the rule before installing it.
+    if let crate::LocalZone::Rule(rule) = &zone {
+        let probe = cx.string(rule);
+        zone_rule(cx, probe)?;
+    }
+    cx.set_local_zone(zone);
+    Ok(Value::NIL)
+}}

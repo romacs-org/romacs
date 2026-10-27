@@ -1031,6 +1031,12 @@ pub(crate) enum SpecialKind {
     FileLocal = 1,
     Global = 2,
 }
+/// timefns.c's local time zone after set-time-zone-rule: the process's
+/// TZ (the start), the system wall clock (nil or `wall'), GNU's utc_tz
+/// (t or 0), or a rule string.
+#[derive(Clone)]
+pub(crate) enum LocalZone { Process, Wall, Utc, Rule(String) }
+
 pub struct Vm {
     charsets: charset::Registry,
     standard_case_tables: [Value; 4],
@@ -1141,6 +1147,8 @@ pub struct Vm {
     mktime_offset: i64,
     /// glibc's rule_dstoff, which __tzfile_default lends a rule-less TZ.
     tz_rule_dstoff: i64,
+    /// The local time zone set-time-zone-rule installed.
+    local_zone: LocalZone,
     conses: Vec<(Value, Value)>,
     objects: Vec<data::Object>,
     caches: Vec<Cache>,
@@ -1254,6 +1262,7 @@ impl Vm {
             random: random::Random::from_entropy(),
             mktime_offset: 0,
             tz_rule_dstoff: 0,
+            local_zone: LocalZone::Process,
             conses: vec![],
             objects: vec![],
             caches: vec![],

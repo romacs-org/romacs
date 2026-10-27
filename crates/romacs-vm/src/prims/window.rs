@@ -327,3 +327,11 @@ fn lower_frame(cx; optional frame: Value) {
     cx.windows().decode_live_frame(frame)?;
     Ok(Value::NIL)
 }}
+
+// Fredisplay: nil while a keyboard macro runs, else t. VM2 cannot redraw
+// synchronously (VM2-REDISPLAY1); the host redraws after the command.
+defsubr! { name = "redisplay", gnu = "dispnew.c:7020", effect = Global,
+fn redisplay(cx; optional _force: Value) {
+    let macro_ = cx.intern("executing-kbd-macro");
+    Ok(if cx.variable_value(macro_)?.is_some_and(|m| m != Value::NIL) { Value::NIL } else { Value::TRUE })
+}}
