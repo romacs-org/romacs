@@ -8,14 +8,14 @@
   "provenance": {
     "generated_by": "romacs-introspect-live",
     "generated_on": "linux-x86_64",
-    "input_hash": "fc3ccad3a87516959cf4f284c509802d9be95cc6d6dbebaa46e7ea1426a46e73",
+    "input_hash": "9142d1b9ba15083b7eb06685f1da6db40f8ecb81e2c19c03444c72d5b795c0f0",
     "source_only_at_generation": [],
     "vm2_probe_panics": [],
-    "vm2_universe": 3755
+    "vm2_universe": 3763
   },
   "schema": 2,
   "vm2": {
-    "count": 835,
+    "count": 837,
     "entries": [
       "#:vm2-closure-document",
       "#:vm2-closure-metadata",
@@ -237,6 +237,7 @@
       "downcase",
       "elt",
       "emacs-lisp-mode",
+      "emacs-pid",
       "encode-char",
       "encode-coding-string",
       "encode-time",
@@ -686,6 +687,7 @@
       "skip-chars-forward",
       "skip-syntax-backward",
       "skip-syntax-forward",
+      "sleep-for",
       "sort",
       "special-variable-p",
       "split-window-internal",

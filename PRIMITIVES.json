@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "4e8688e8df7dccb42425c4ab926aa6641ba1e0b1b09062773bf5ab7df0c361ce",
+  "source_fingerprint": "a2a08d65a4583260c4ccdcce39c3bcd2c1330b1aed2b555e2acb21bad510853c",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 827,
-  "parsed_vm2_only": 827
+  "parsed_total": 829,
+  "parsed_vm2_only": 829
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -1177,6 +1177,11 @@
    "implementation": "vm2",
    "variant": "Primitive::EmacsLispMode",
    "registered_at": "crates/romacs-vm/src/lib.rs:744"
+  },
+  "emacs-pid": {
+   "name": "emacs-pid",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/sysname.rs:22"
   },
   "encode-char": {
    "name": "encode-char",
@@ -3530,6 +3535,11 @@
    "name": "skip-syntax-forward",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/skip_chars.rs:14"
+  },
+  "sleep-for": {
+   "name": "sleep-for",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/sysname.rs:30"
   },
   "sort": {
    "name": "sort",

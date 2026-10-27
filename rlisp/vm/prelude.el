@@ -385,6 +385,62 @@ textprop.c Fprevious_single_char_property_change."
                 (unless (eq (get-char-property (1- position) prop object) initial)
                   (throw 'romacs--found position))))))))))
 
+;; buffer.c's `set-buffer-major-mode' and editfns.c's
+;; `insert-buffer-substring', composed of the primitives their C calls.
+
+(defun set-buffer-major-mode (buffer)
+  "Set an appropriate major mode for BUFFER.
+For the *scratch* buffer, use `initial-major-mode', otherwise choose a mode
+according to the default value of `major-mode'.
+Use this function before selecting the buffer, since it may need to inspect
+the current buffer's major mode."
+  (unless (bufferp buffer) (signal 'wrong-type-argument (list 'bufferp buffer)))
+  (unless (buffer-live-p buffer) (error "Attempt to set major mode for a dead buffer"))
+  (let ((function (if (equal (buffer-name buffer) "*scratch*")
+                      (symbol-value 'initial-major-mode)
+                    (let ((default (default-value 'major-mode)))
+                      (if (and (null default) (null (get major-mode 'mode-class)))
+                          major-mode
+                        default)))))
+    (when function
+      (save-current-buffer
+        (set-buffer buffer)
+        (funcall function)))
+    nil))
+
+(defun insert-buffer-substring (buffer &optional start end)
+  "Insert before point a substring of the contents of BUFFER.
+BUFFER may be a buffer or a buffer name.
+Arguments START and END are character positions specifying the substring.
+They default to the values of (point-min) and (point-max) in BUFFER.
+
+Point and before-insertion markers move forward to end up after the
+inserted text.
+Any other markers at the point of insertion remain before the text.
+
+If the current buffer is multibyte and BUFFER is unibyte, or vice
+versa, strings are converted from unibyte to multibyte or vice versa
+using `string-make-multibyte' or `string-make-unibyte', which see."
+  (let ((buf (get-buffer buffer)))
+    (unless buf
+      (if (stringp buffer)
+          (error "No buffer named %s" buffer)
+        (error "Invalid buffer argument")))
+    (unless (buffer-live-p buf) (error "Selecting deleted buffer"))
+    (insert
+     (save-current-buffer
+       (set-buffer buf)
+       (let ((b (if start (romacs--fixnum-coerce-marker start) (point-min)))
+             (e (if end (romacs--fixnum-coerce-marker end) (point-max))))
+         (when (> b e) (setq b (prog1 e (setq e b))))
+         (unless (and (<= (point-min) b) (<= e (point-max)))
+           (signal 'args-out-of-range (list start end)))
+         ;; update_buffer_properties runs these before the text is read.
+         (when (and (boundp 'buffer-access-fontify-functions) buffer-access-fontify-functions)
+           (error "VM2 insert-buffer-substring with buffer-access-fontify-functions is unsupported"))
+         (buffer-substring b e))))
+    nil))
+
 ;; fns.c's `secure-hash' and `md5': extract_data_from_object chooses and
 ;; encodes the data, and `romacs--secure-hash' digests it.
 

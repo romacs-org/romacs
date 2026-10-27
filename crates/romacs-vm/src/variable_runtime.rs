@@ -387,6 +387,9 @@ impl Vm {
             MakeVariableBufferLocal => {
                 self.slots[slot].explicit_local = false;
                 if self.local_table(slot)?.is_none() {
+                    // data.c Fmake_variable_buffer_local: a plain void
+                    // variable's default becomes nil; a localized one keeps it.
+                    if self.slots[slot].value == Value::UNBOUND { self.slots[slot].value = Value::NIL; }
                     let table = self.allocate_object(data::Object::HashTable(Box::new(hash::HashTable::new_local_bindings())));
                     self.install_local_table(slot, table, false);
                 }

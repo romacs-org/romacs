@@ -386,6 +386,9 @@ pub(crate) enum Init {
     /// The runtime's etc/ directory: ROMACS_RUNTIME_ROOT/etc, else this
     /// checkout's (GNU's installation-relative data-directory).
     EtcDirectory,
+    /// init_cmdargs: the running executable's file name (true) or its
+    /// directory, with a final slash (false).
+    Invocation(bool),
     /// init_editfns: user-login-name, user-real-login-name or user-full-name.
     UserIdentity(&'static str),
     Cons(&'static Init, &'static Init),
@@ -561,6 +564,8 @@ pub(crate) static C_VARIABLES: &[CVariable] = &[
     CVariable { name: "user-login-name", gnu: "editfns.c:4865", kind: Kind::Lisp(Init::UserIdentity("user-login-name")) },
     CVariable { name: "user-real-login-name", gnu: "editfns.c:4869", kind: Kind::Lisp(Init::UserIdentity("user-real-login-name")) },
     CVariable { name: "data-directory", gnu: "callproc.c:2119", kind: Kind::Lisp(Init::EtcDirectory) },
+    CVariable { name: "invocation-name", gnu: "emacs.c:3556", kind: Kind::Lisp(Init::Invocation(true)) },
+    CVariable { name: "invocation-directory", gnu: "emacs.c:3560", kind: Kind::Lisp(Init::Invocation(false)) },
     CVariable { name: "doc-directory", gnu: "callproc.c:2123", kind: Kind::Lisp(Init::EtcDirectory) },
     CVariable { name: "internal-doc-file-name", gnu: "doc.c:691", kind: Kind::Lisp(Init::Str("DOC")) },
     CVariable { name: "eol-mnemonic-undecided", gnu: "coding.c:12106", kind: Kind::Lisp(Init::Str(":")) },
@@ -825,6 +830,15 @@ impl Vm {
                 let root = std::env::var_os("ROMACS_RUNTIME_ROOT").map(std::path::PathBuf::from)
                     .unwrap_or_else(|| std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."));
                 let text = format!("{}/", root.join("etc").display());
+                self.make_lisp_string(text.as_bytes().to_vec(), !text.is_ascii())
+            }
+            Init::Invocation(name) => {
+                let exe = std::env::current_exe().unwrap_or_default();
+                let text = if name {
+                    exe.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
+                } else {
+                    exe.parent().map(|d| format!("{}/", d.display())).unwrap_or_default()
+                };
                 self.make_lisp_string(text.as_bytes().to_vec(), !text.is_ascii())
             }
             Init::UserIdentity(name) => prim::prims::user_identity::initial_value(self, name),
