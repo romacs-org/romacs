@@ -177,6 +177,20 @@ impl Vm {
         self.annotated(v)?;
         Ok(v)
     }
+    /// MARKER's insertion type: Right advances it on insertion at its position.
+    pub(super) fn set_marker_bias(&mut self, x: Value, b: Bias) -> Result<()> {
+        let m = self.marker(x)?.clone();
+        if let Some(a) = m.anchor {
+            let tree = &mut self.annotated_mut(m.buffer)?.anchors;
+            let pos = tree.resolve(a).unwrap();
+            assert!(tree.set(a, pos, b));
+        }
+        let Object::Marker(m) = &mut self.objects[x.index(0)? - 1] else {
+            unreachable!()
+        };
+        m.bias = b;
+        Ok(())
+    }
     pub(super) fn marker_position_value(&self, v: Value) -> Result<Value> {
         let m = self.marker(v)?;
         match m.anchor {
@@ -615,17 +629,7 @@ impl Vm {
                 Value::NIL
             }),
             SetMarkerInsertionType => {
-                let m = self.marker(x)?.clone();
-                let b = bias(args[1]);
-                if let Some(a) = m.anchor {
-                    let tree = &mut self.annotated_mut(m.buffer)?.anchors;
-                    let pos = tree.resolve(a).unwrap();
-                    assert!(tree.set(a, pos, b));
-                }
-                let Object::Marker(m) = &mut self.objects[x.index(0)? - 1] else {
-                    unreachable!()
-                };
-                m.bias = b;
+                self.set_marker_bias(x, bias(args[1]))?;
                 Ok(args[1])
             }
             InsertBeforeMarkers => {

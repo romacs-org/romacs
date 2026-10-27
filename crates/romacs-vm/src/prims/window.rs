@@ -213,3 +213,43 @@ defsubr! { name = "frame-first-window", gnu = "window.c:390", effect = Reads,
 fn frame_first_window(cx; optional frame_or_window: Value) {
     cx.windows().frame_first_window(frame_or_window)
 }}
+
+defsubr! { name = "window-prev-buffers", gnu = "window.c:2322", effect = Reads,
+fn window_prev_buffers(cx; optional window: Value) {
+    cx.windows().window_buffers(window, false)
+}}
+
+defsubr! { name = "set-window-prev-buffers", gnu = "window.c:2339", effect = Global,
+fn set_window_prev_buffers(cx, window: Value, prev_buffers: Value) {
+    cx.windows().set_window_buffers(window, prev_buffers, false)
+}}
+
+defsubr! { name = "window-next-buffers", gnu = "window.c:2353", effect = Reads,
+fn window_next_buffers(cx; optional window: Value) {
+    cx.windows().window_buffers(window, true)
+}}
+
+defsubr! { name = "set-window-next-buffers", gnu = "window.c:2362", effect = Global,
+fn set_window_next_buffers(cx, window: Value, next_buffers: Value) {
+    cx.windows().set_window_buffers(window, next_buffers, true)
+}}
+
+// Fset_window_buffer: a window that gets another buffer first records the
+// old one (record-window-buffer, window.el); set_window_buffer then runs
+// window-scroll-functions in the new buffer.
+defsubr! { name = "set-window-buffer", gnu = "window.c:4432", effect = Global,
+fn set_window_buffer(cx, window: Value, buffer_or_name: Value; optional keep_margins: Value) -> Step {
+    let (window, buffer, changed) = cx.windows().set_window_buffer_check(window, buffer_or_name)?;
+    let record = cx.intern("record-window-buffer");
+    // Bootstrap regimes that have not loaded window.el have nothing to record.
+    if changed && cx.fboundp(record) {
+        return Ok(Step::Call { f: record, args: vec![window], then: show_buffer, saved: vec![window, buffer, keep_margins] });
+    }
+    show_buffer(cx, Value::NIL, &[window, buffer, keep_margins])
+}}
+fn show_buffer(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
+    cx.windows().set_window_buffer(saved[0], saved[1], saved[2])?;
+    let run = cx.intern("run-window-scroll-functions");
+    Ok(Step::Call { f: run, args: vec![saved[0]], then: shown, saved: vec![] })
+}
+fn shown(_: &mut Leaf<'_>, _: Value, _: &[Value]) -> Next { Ok(Step::Done(Value::NIL)) }

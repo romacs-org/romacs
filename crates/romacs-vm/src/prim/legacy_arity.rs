@@ -143,7 +143,7 @@ pub(super) fn arity(primitive: Primitive) -> (usize, Option<usize>) {
         Require | Prin1ToString | SwitchToBuffer | AutoloadDoLoad => (1, Some(3)),
         PutProperty | SplitWindowInternal => (4, Some(5)),
         GetProperty | Defalias | GetCharProperty | SetMarker | DefineError | Gethash
-        | ModifySyntaxEntry | SetWindowBuffer | SetWindowMargins | SetWindowStart
+        | ModifySyntaxEntry | SetWindowMargins | SetWindowStart
         | SetWindowNewPixel | LookupKey | ClosureDocument => (2, Some(3)),
         Load => (1, Some(5)),
         YankFinalize => (4, Some(4)),

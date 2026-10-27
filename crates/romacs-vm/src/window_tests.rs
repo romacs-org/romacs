@@ -218,11 +218,8 @@ fn g3a_margins_start_and_stale_end() {
             .unwrap_err()
             .contains("layout")
     );
-    assert!(
-        vm.eval_source_raw("(set-window-start nil 2 t)")
-            .unwrap_err()
-            .contains("NOFORCE")
-    );
+    // NOFORCE sets the start without forcing it on redisplay.
+    yes(&mut vm, "(and (= (set-window-start nil 2 t) 2) (= (window-start) 2))");
     assert_eq!(run(&mut vm, "(set-window-start nil nil)"), Value::NIL);
 }
 #[test]

@@ -274,7 +274,7 @@ impl Vm {
         use Primitive::*;
         if matches!(
             p,
-            SelectedWindow | WindowBuffer | SetWindowBuffer | WindowPoint | WindowStart
+            SelectedWindow | WindowBuffer | WindowPoint | WindowStart
         ) || (p as usize >= DeleteWindowInternal as usize
             && p as usize <= WindowTotalWidth as usize)
         {

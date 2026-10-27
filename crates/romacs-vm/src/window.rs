@@ -2,6 +2,9 @@
 use crate::{data::Object, *};
 #[path = "redisplay.rs"]
 mod redisplay;
+#[path = "window_config.rs"]
+mod config;
+pub(crate) use config::WindowConfiguration;
 const ROOT: &str = "#:vm2-root-window";
 const MINI: &str = "#:vm2-minibuffer-window";
 const SELECTED: &str = "#:vm2-selected-window";
@@ -35,6 +38,10 @@ pub(super) struct Window {
     /// Deferred scroll, applied after the frozen frame paints (D-ML1).
     pub pending_vscroll: Option<u32>,
     pub parameters: Vec<(Value, Value)>,
+    /// GNU `w->prev_buffers` and `w->next_buffers`: Lisp lists kept for
+    /// window.el's buffer history (`window-prev-buffers`).
+    pub prev_buffers: Value,
+    pub next_buffers: Value,
     /// GNU `w->new_total`, `w->new_normal`, `w->normal_lines` and
     /// `w->normal_cols` (window.h): Lisp objects, set by `make_window`
     /// (window.c:4599) to 0, 0, 1.0 and 1.0. `window_resize_apply`
@@ -77,6 +84,8 @@ impl Window {
             pending_vscroll: None,
             right_margin: 0,
             parameters: vec![],
+            prev_buffers: Value::NIL,
+            next_buffers: Value::NIL,
             new_total: Value::NIL,
             new_normal: Value::NIL,
             normal_lines: Value::NIL,
@@ -100,6 +109,8 @@ impl Window {
             &mut self.new_normal,
             &mut self.normal_lines,
             &mut self.normal_cols,
+            &mut self.prev_buffers,
+            &mut self.next_buffers,
         ] {
             f(v);
         }
@@ -283,6 +294,84 @@ impl Vm {
             return Err("buffer required".into());
         };
         b.point = b.byte_of_char(coordinates::CharOffset((pos - 1) as usize))?;
+        Ok(())
+    }
+    /// GNU window_discard_buffer_from_window (ALL false): BUFFER leaves
+    /// WINDOW's previous-buffers alist and next-buffers list, spliced out
+    /// destructively as GNU does.
+    pub(super) fn discard_buffer_from_window(&mut self, buffer: Value, window: Value) -> Result<()> {
+        let (prev, next) = (self.window(window)?.prev_buffers, self.window(window)?.next_buffers);
+        let prev = self.discard_buffer_from_list(buffer, prev, true)?;
+        let next = self.discard_buffer_from_list(buffer, next, false)?;
+        let w = self.window_mut(window)?;
+        w.prev_buffers = prev;
+        w.next_buffers = next;
+        Ok(())
+    }
+    /// LIST without the elements that are BUFFER (or, with ALIST, whose car is).
+    fn discard_buffer_from_list(&mut self, buffer: Value, list: Value, alist: bool) -> Result<Value> {
+        let (mut head, mut previous, mut tail) = (list, None::<Value>, list);
+        while let Ok((element, rest)) = self.cons_pair(tail) {
+            let key = if alist { self.cons_pair(element).map_or(Value::NIL, |(k, _)| k) } else { element };
+            if key == buffer {
+                match previous {
+                    None => head = rest,
+                    Some(cell) => {
+                        if Self::image_value(cell) {
+                            return Err("cannot mutate immutable image".into());
+                        }
+                        self.conses[cell.index(3)?].1 = rest;
+                    }
+                }
+            } else {
+                previous = Some(tail);
+            }
+            tail = rest;
+        }
+        Ok(head)
+    }
+    /// set_window_buffer: show live BUFFER in live window V (src/window.c).
+    pub(super) fn set_window_buffer_value(&mut self, v: Value, b: Value, keep: bool) -> Result<()> {
+        let buffer = self.display_buffer(b)?;
+        // GNU computes `samebuf` BEFORE assigning, then skips the
+        // whole marker/scroll reset when KEEP-MARGINS is set and the
+        // buffer is unchanged (src/window.c:4367, the
+        // `!(keep_margins_p && samebuf)` guard). Its comment
+        // explains why: resetting hscroll/vscroll breaks image-mode
+        // and doc-view-mode on every frame resize.
+        let samebuf = self.window(v)?.buffer == buffer;
+        if !(keep && samebuf) {
+            let (point, st) = (self.window(v)?.point, self.window(v)?.start);
+            // GNU takes the buffer's own point, `BUF_PT (b)`, not 1
+            // (src/window.c:4375). Resetting to 1 loses an
+            // unselected window's position: verified on live GNU
+            // 32.0.50, assigning a buffer whose point is 7 leaves
+            // window-point at 7 and selecting the window puts point
+            // at 7.
+            let pos = {
+                let Object::Buffer(buf) = self.object(buffer)? else {
+                    return Err("buffer required".into());
+                };
+                Value::integer((buf.char_of_byte(buf.point)?.0 + 1) as i64)?
+            };
+            self.set_marker_object(point, pos, buffer)?;
+            // GNU restores `b->last_window_start` here; VM2 keeps no
+            // per-buffer last window start, so it starts at 1. See
+            // DIVERGENCES.md VM2-WB1.
+            self.set_marker_object(st, Value::integer(1)?, buffer)?;
+        }
+        self.discard_buffer_from_window(buffer, v)?;
+        let w = self.window_mut(v)?;
+        w.buffer = buffer;
+        w.end_distance = 0;
+        w.end_valid = false;
+        // GNU resets margins when KEEP-MARGINS is nil
+        // (src/window.c:4397), independently of the guard above.
+        if !keep {
+            w.left_margin = 0;
+            w.right_margin = 0;
+        }
+        self.display_state.version += 1;
         Ok(())
     }
     /// GNU `select_window` (window.c:536): NORECORD nil bumps the use time
@@ -852,7 +941,7 @@ impl Vm {
         use Primitive::*;
         let valid = match p {
             SelectedWindow => n == 0,
-            SetWindowPoint | SetWindowBuffer => n >= 2 && n <= 3 && (p != SetWindowPoint || n == 2),
+            SetWindowPoint => n == 2,
             SetWindowStart | SetWindowMargins | SetWindowNewPixel => n >= 2 && n <= 3,
             SetWindowParameter => n == 3,
             SplitWindowInternal => n == 4 || n == 5,
@@ -926,7 +1015,6 @@ impl Vm {
                 | WindowEnd
                 | SetWindowMargins
                 | WindowMargins
-                | SetWindowBuffer
         );
         let dead_ok = matches!(
             p,
@@ -944,66 +1032,29 @@ impl Vm {
                 e,
             )?,
             WindowBuffer => self.window(v)?.buffer,
-            SetWindowBuffer => {
-                let buffer = self.display_buffer(b)?;
-                let keep = c != Value::NIL;
-                // GNU computes `samebuf` BEFORE assigning, then skips the
-                // whole marker/scroll reset when KEEP-MARGINS is set and the
-                // buffer is unchanged (src/window.c:4367, the
-                // `!(keep_margins_p && samebuf)` guard). Its comment
-                // explains why: resetting hscroll/vscroll breaks image-mode
-                // and doc-view-mode on every frame resize.
-                let samebuf = self.window(v)?.buffer == buffer;
-                if !(keep && samebuf) {
-                    let (point, st) = (self.window(v)?.point, self.window(v)?.start);
-                    // GNU takes the buffer's own point, `BUF_PT (b)`, not 1
-                    // (src/window.c:4375). Resetting to 1 loses an
-                    // unselected window's position: verified on live GNU
-                    // 32.0.50, assigning a buffer whose point is 7 leaves
-                    // window-point at 7 and selecting the window puts point
-                    // at 7.
-                    let pos = {
-                        let Object::Buffer(buf) = self.object(buffer)? else {
-                            return Err("buffer required".into());
-                        };
-                        Value::integer((buf.char_of_byte(buf.point)?.0 + 1) as i64)?
-                    };
-                    self.set_marker_object(point, pos, buffer)?;
-                    // GNU restores `b->last_window_start` here; VM2 keeps no
-                    // per-buffer last window start, so it starts at 1. See
-                    // DIVERGENCES.md VM2-WB1.
-                    self.set_marker_object(st, Value::integer(1)?, buffer)?;
-                }
-                let w = self.window_mut(v)?;
-                w.buffer = buffer;
-                w.end_distance = 0;
-                w.end_valid = false;
-                // GNU resets margins when KEEP-MARGINS is nil
-                // (src/window.c:4397), independently of the guard above.
-                if !keep {
-                    w.left_margin = 0;
-                    w.right_margin = 0;
-                }
-                Value::NIL
-            }
             WindowPoint => self.window_point_value(v)?,
             SetWindowPoint => {
                 if v == self.window_root(SELECTED) {
-                    self.set_buffer_point_for_window(v, b)?;
+                    // CHECK_FIXNUM_COERCE_MARKER replaces POS when the
+                    // window's buffer is not current, so that POS is returned.
+                    let coerced = self.window(v)?.buffer != self.slots[self.buffer_slot].value;
+                    let pos = if coerced && matches!(self.object_if(b), Some(Object::Marker(_))) { self.marker_position_value(b)? } else { b };
+                    self.set_buffer_point_for_window(v, pos)?;
+                    if coerced { pos } else { b }
                 } else {
                     self.set_marker_object(self.window(v)?.point, b, self.window(v)?.buffer)?;
+                    b
                 }
-                b
             }
             WindowStart => self.marker_position_value(self.window(v)?.start)?,
             SetWindowStart => {
-                if c != Value::NIL {
-                    return Err("VM2 NOFORCE redisplay selection is unsupported".into());
-                }
                 self.set_marker_object(self.window(v)?.start, b, self.window(v)?.buffer)?;
                 let w = self.window_mut(v)?;
                 w.end_valid = false;
-                w.force_start = true;
+                // NOFORCE lets redisplay move the start to keep point visible.
+                if c == Value::NIL {
+                    w.force_start = true;
+                }
                 b
             }
             WindowEnd => {
@@ -1152,7 +1203,6 @@ impl Vm {
             SelectWindow
                 | DeleteWindowInternal
                 | SplitWindowInternal
-                | SetWindowBuffer
                 | SetWindowPoint
                 | SetWindowStart
                 | SetWindowParameter
@@ -1459,6 +1509,44 @@ impl<'a> Windows<'a> {
         self.terminal(terminal).ok_or(Fault::Wrong("terminal-live-p", terminal))?;
         // GNU returns nil for output_initial. There is no TTY backend here.
         Ok(Value::NIL)
+    }
+    /// Fset_window_buffer's checks: WINDOW live and BUFFER-OR-NAME a live
+    /// buffer (Fget_buffer, then CHECK_BUFFER). Returns the window, the
+    /// buffer, and whether the window shows another buffer now.
+    pub(crate) fn set_window_buffer_check(&mut self, window: Value, buffer_or_name: Value) -> std::result::Result<(Value, Value, bool), Fault> {
+        let v = self.live(window)?;
+        let buffer = if matches!(self.vm.object_if(buffer_or_name), Some(Object::Buffer(_) | Object::ByteBuffer(_))) {
+            buffer_or_name
+        } else {
+            let view = self.vm.str_view(buffer_or_name).ok_or(Fault::Wrong("stringp", buffer_or_name))?;
+            let name = view.as_str().ok_or(Fault::NotUnicode(buffer_or_name))?.to_owned();
+            self.vm.named_buffer(&name).unwrap_or(Value::NIL)
+        };
+        if buffer == Value::NIL {
+            return Err(Fault::Wrong("bufferp", Value::NIL));
+        }
+        if !self.vm.buffer_state(buffer).is_ok_and(|s| s.live) {
+            return Err(Fault::Error("Attempt to display deleted buffer".into()));
+        }
+        Ok((v, buffer, self.get(v)?.buffer != buffer))
+    }
+    /// set_window_buffer, after Fset_window_buffer's checks.
+    pub(crate) fn set_window_buffer(&mut self, window: Value, buffer: Value, keep_margins: Value) -> Out {
+        self.vm.set_window_buffer_value(window, buffer, keep_margins != Value::NIL).map_err(internal)?;
+        Ok(Value::NIL)
+    }
+    /// GNU `window-prev-buffers` (NEXT false) / `window-next-buffers`.
+    pub(crate) fn window_buffers(&mut self, window: Value, next: bool) -> Out {
+        let v = self.live(window)?;
+        let w = self.get(v)?;
+        Ok(if next { w.next_buffers } else { w.prev_buffers })
+    }
+    /// GNU `set-window-prev-buffers` (NEXT false) / `set-window-next-buffers`.
+    pub(crate) fn set_window_buffers(&mut self, window: Value, buffers: Value, next: bool) -> Out {
+        let v = self.live(window)?;
+        let w = self.get_mut(v)?;
+        if next { w.next_buffers = buffers } else { w.prev_buffers = buffers }
+        Ok(buffers)
     }
     /// window.c Fframe_first_window: the top-left live window of FRAME-OR-WINDOW's frame.
     pub(crate) fn frame_first_window(&mut self, frame_or_window: Value) -> Out {

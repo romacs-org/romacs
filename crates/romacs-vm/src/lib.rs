@@ -407,7 +407,6 @@ enum Primitive {
     SelectedWindow,
     SelectedFrame,
     WindowBuffer,
-    SetWindowBuffer,
     WindowStart,
     WindowPoint,
     FramePixelWidth,
@@ -667,7 +666,6 @@ const PRIMITIVES: &[(&str, Primitive)] = &[
     ("selected-window", Primitive::SelectedWindow),
     ("selected-frame", Primitive::SelectedFrame),
     ("window-buffer", Primitive::WindowBuffer),
-    ("set-window-buffer", Primitive::SetWindowBuffer),
     ("window-start", Primitive::WindowStart),
     ("window-point", Primitive::WindowPoint),
     ("frame-pixel-width", Primitive::FramePixelWidth),
@@ -2575,6 +2573,7 @@ impl Vm {
                             | data::Object::Obarray(_)
                             | data::Object::Frame(_)
                             | data::Object::Terminal(_)
+                            | data::Object::WindowConfiguration(_)
                             | data::Object::HashTable(_) => {
                                 return Err("sequence required".into());
                             }
@@ -2614,6 +2613,7 @@ impl Vm {
                 data::Object::Window(w) => Ok(format!("#<window {}>", w.id)),
                 data::Object::Frame(_) => Ok("#<frame initial>".into()),
                 data::Object::Terminal(_) => Ok("#<terminal initial>".into()),
+                data::Object::WindowConfiguration(_) => Ok("#<window-configuration>".into()),
                 data::Object::Marker(_) => Ok("#<marker>".into()),
                 data::Object::Overlay(_) => Ok("#<overlay>".into()),
                 data::Object::ByteBuffer(_) => Ok("#<byte-buffer>".into()),

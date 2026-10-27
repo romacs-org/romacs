@@ -167,6 +167,7 @@ mod leaf {
         Window,
         Frame,
         Terminal,
+        WindowConfiguration,
         Invalid,
     }
 
@@ -1289,6 +1290,7 @@ mod leaf {
                     Some(data::Object::Window(_)) => Kind::Window,
                     Some(data::Object::Frame(_)) => Kind::Frame,
                     Some(data::Object::Terminal(_)) => Kind::Terminal,
+                    Some(data::Object::WindowConfiguration(_)) => Kind::WindowConfiguration,
                     None => Kind::Invalid,
                 },
                 _ => Kind::Invalid,
