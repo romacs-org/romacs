@@ -220,11 +220,9 @@ fn file_name_case_insensitive_p(cx, filename: Value) -> Step {
 
 // Deliberately differs from pinned GNU's Linux constant: observe existing
 // directory entries only. Never create a probe or infer from the OS name.
+// Like GNU, a directory that cannot tell defers to its ancestors.
 #[cfg(unix)]
 fn filesystem_case_insensitive(path: &std::path::Path) -> std::result::Result<bool, &'static str> {
-    use std::os::unix::ffi::{OsStrExt, OsStringExt};
-    use std::os::unix::fs::MetadataExt;
-    let identity = |m: &std::fs::Metadata| (m.dev(), m.ino());
     let mut directory = path;
     loop {
         match std::fs::metadata(directory) {
@@ -240,6 +238,24 @@ fn filesystem_case_insensitive(path: &std::path::Path) -> std::result::Result<bo
             Err(_) => return Err("cannot stat path"),
         }
     }
+    // fileio.c Ffile_name_case_insensitive_p: a directory that cannot say
+    // defers to its parent; the answer is still the nearest measurement.
+    loop {
+        match case_witness(directory) {
+            Err(NO_WITNESS) => directory = directory.parent().ok_or(NO_WITNESS)?,
+            result => return result,
+        }
+    }
+}
+
+const NO_WITNESS: &str = "no unambiguous ASCII case witness";
+
+/// Classify DIRECTORY's filesystem from one of its own entries.
+#[cfg(unix)]
+fn case_witness(directory: &std::path::Path) -> std::result::Result<bool, &'static str> {
+    use std::os::unix::ffi::{OsStrExt, OsStringExt};
+    use std::os::unix::fs::MetadataExt;
+    let identity = |m: &std::fs::Metadata| (m.dev(), m.ino());
     let directory_before = std::fs::metadata(directory).map_err(|_| "cannot stat directory")?;
     let entries = std::fs::read_dir(directory).map_err(|_| "cannot read directory")?;
     let mut names = std::collections::HashSet::new();
@@ -294,7 +310,7 @@ fn filesystem_case_insensitive(path: &std::path::Path) -> std::result::Result<bo
             return Ok(result);
         }
     }
-    Err("no unambiguous ASCII case witness")
+    Err(NO_WITNESS)
 }
 
 // An explicitly listed alternate spelling with the same inode is a hardlink,

@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "c5e6570e702c5fae0c61f83c3fbe3a51b34beb4dd193535a7052928d3551c529",
+  "input_hash": "cd9aa6c1736fc68b6684cac6c85c09edd8db5504a193bb96bf96ca5de0de3eb8",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -1958,7 +1958,7 @@
    "planned": false,
    "mechanism": "Actual filesystem sensitivity",
    "gnu": "Pinned GNU Linux returns nil by platform assumption; other platforms may query pathconf.",
-   "romacs": "Read-only ASCII alternate-name/inode/directory-entry measurement returns actual classification. Unknown classes, unreadable or changing directories, directories over 4096 entries and no unambiguous ASCII witness signal `error` with `VM2 filesystem case sensitivity unknown: REASON`. No probe files are created.",
+   "romacs": "Read-only ASCII alternate-name/inode/directory-entry measurement returns actual classification. A directory with no unambiguous ASCII witness defers to its nearest ancestor that has one, as GNU's walk up the tree does (`fileio.c:2710`); unknown classes, unreadable or changing directories, directories over 4096 entries, and no witness up to the root signal `error` with `VM2 filesystem case sensitivity unknown: REASON`. No probe files are created.",
    "why": "Owner explicitly requires actual measurement rather than platform constant. No real case-insensitive mount has been qualified. `crates/romacs-vm/evidence/savejourney/case-detection.md`.",
    "symbols": [
     "error"
