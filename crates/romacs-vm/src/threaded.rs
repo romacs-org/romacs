@@ -635,6 +635,25 @@ impl Program {
         }
     }
 }
+/// A suspended engine's lowered code and entry caches, visited in place by
+/// the collector while a nested call runs (`Vm::suspended_code`): copying
+/// them into the root list cost a pass over all code per `read' call.
+pub(super) struct SuspendedCode {
+    code: *mut Vec<Vec<Inst>>,
+    entries: *mut Vec<EntryCache>,
+}
+impl SuspendedCode {
+    /// SAFETY: the engine owning both vectors stays suspended, neither moved
+    /// nor touched, until this reference is popped.
+    pub(super) unsafe fn visit_values(&self, visit: &mut impl FnMut(&mut Value)) {
+        unsafe {
+            visit_code(&mut *self.code, visit);
+            for entry in &mut *self.entries {
+                visit(&mut entry.target);
+            }
+        }
+    }
+}
 fn visit_code(code: &mut [Vec<Inst>], visit: &mut impl FnMut(&mut Value)) {
     for inst in code.iter_mut().flatten() {
         visit(&mut inst.value);
@@ -1033,18 +1052,50 @@ pub(super) struct Engine<'a> {
 }
 impl Engine<'_> {
     fn visit_values(&mut self, visit: &mut impl FnMut(&mut Value)) {
-        self.rest.visit_values(visit);
-        if let Some(function) = &mut self.apply_function { visit(function); }
         visit_code(&mut self.code, visit);
         for entry in &mut self.entries {
             visit(&mut entry.target);
         }
+        self.visit_state_values(visit);
+    }
+    /// Every Value but the code and entry caches, which `suspend_code` hands
+    /// to the collector in place.
+    fn visit_state_values(&mut self, visit: &mut impl FnMut(&mut Value)) {
+        self.rest.visit_values(visit);
+        if let Some(function) = &mut self.apply_function { visit(function); }
         for control in &mut self.controls {
             control.visit_values(visit);
         }
         if let Some(exit) = &mut self.escape {
             exit.visit_values(visit);
         }
+    }
+    /// Root this engine's state across a nested call that may collect: its
+    /// code and entries by reference, the rest copied into `external_roots'.
+    /// Returns the root mark for `resume_code`.
+    /// The code reference is taken last, and from the two fields only: the
+    /// caller must reach the Vm through `self.vm` alone until `resume_code`,
+    /// which drops the reference before reborrowing the engine.
+    pub(super) fn suspend_code(&mut self) -> usize {
+        let roots = self.vm.external_roots.len();
+        let mut suspended = Vec::new();
+        self.visit_state_values(&mut |value| suspended.push(*value));
+        self.vm.external_roots.extend(suspended);
+        let code = SuspendedCode {
+            code: std::ptr::addr_of_mut!(self.code),
+            entries: std::ptr::addr_of_mut!(self.entries),
+        };
+        self.vm.suspended_code.push(code);
+        roots
+    }
+    /// Drop the code reference, then take back the forwarded state values.
+    pub(super) fn resume_code(&mut self, roots: usize) {
+        self.vm.suspended_code.pop();
+        let forwarded = self.vm.external_roots[roots..].to_vec();
+        let mut forwarded = forwarded.into_iter();
+        self.visit_state_values(&mut |value| *value = forwarded.next().unwrap());
+        debug_assert!(forwarded.next().is_none());
+        self.vm.external_roots.truncate(roots);
     }
 }
 #[cfg(test)]
@@ -1661,13 +1712,11 @@ unsafe fn poll_resume(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Val
 #[cold]
 #[inline(never)]
 fn poll_collect(e: &mut Engine<'_>) {
-    // Snapshot every active Value copy, then forward in place without moving
-    // instruction buffers: suspended PCs and entry pointers stay valid.
-    let mut roots = Vec::new();
-    e.visit_values(&mut |v| roots.push(*v));
-    e.vm.collect(&mut roots);
-    let mut forwarded = roots.into_iter();
-    e.visit_values(&mut |v| *v = forwarded.next().unwrap());
+    // Forward in place without moving instruction buffers: suspended PCs and
+    // entry pointers stay valid.
+    let roots = e.suspend_code();
+    e.vm.collect(&mut []);
+    e.resume_code(roots);
 }
 // Like GNU bytecode.c:638-646, only a plain, bound symbol takes the slot
 // read. Inspect the live set-only redirect on every entry: localization need
@@ -2482,11 +2531,9 @@ unsafe fn generated_step(
         let base = r.offset_from(e.vm.stack.as_ptr()) as usize;
         let reader = matches!(prim::name(target), Some("read" | "read-from-string"));
         let saved_depth = e.vm.eval_depth;
-        let roots = e.vm.external_roots.len();
+        let mut roots = e.vm.external_roots.len();
         if reader {
-            let mut suspended = Vec::new();
-            e.visit_values(&mut |value| suspended.push(*value));
-            e.vm.external_roots.extend(suspended);
+            roots = e.suspend_code();
             e.vm.eval_depth = e.depth_base + e.frames.len();
             e.vm.propagated_escape = None;
             e.vm.propagated_escape_hooked = false;
@@ -2497,11 +2544,7 @@ unsafe fn generated_step(
             return take_step(e, r, pc, step);
         }
         // Rewrite in place: suspended PCs and entry pointers must not move.
-        let forwarded = e.vm.external_roots[roots..].to_vec();
-        let mut forwarded = forwarded.into_iter();
-        e.visit_values(&mut |value| *value = forwarded.next().unwrap());
-        debug_assert!(forwarded.next().is_none());
-        e.vm.external_roots.truncate(roots);
+        e.resume_code(roots);
         e.vm.eval_depth = saved_depth;
         e.fatal_image_failure |= e.vm.execution_fatal;
         e.code.resize_with(e.vm.functions.len(), Vec::new);

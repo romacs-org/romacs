@@ -102,10 +102,7 @@ fn search(e: &mut Engine<'_>) -> bool {
 fn handler_callback(e: &mut Engine<'_>, function: Value, object: Value, group: usize) -> bool {
     let mask = e.vm.signal_handlers.len();
     e.vm.signal_handlers.push(SignalHandler::Mask(group));
-    let roots = e.vm.external_roots.len();
-    let mut suspended = Vec::new();
-    e.visit_values(&mut |value| suspended.push(*value));
-    e.vm.external_roots.extend(suspended);
+    let roots = e.suspend_code();
     let saved_depth = e.vm.eval_depth;
     e.vm.eval_depth = e.depth_base + e.frames.len();
     let token = e.vm.max_ensure_room(200);
@@ -113,11 +110,7 @@ fn handler_callback(e: &mut Engine<'_>, function: Value, object: Value, group: u
     let replacement = e.vm.propagated_escape.take();
     let hooked = std::mem::take(&mut e.vm.propagated_escape_hooked);
     let depth = e.vm.propagated_eval_depth.take();
-    let forwarded = e.vm.external_roots[roots..].to_vec();
-    let mut forwarded = forwarded.into_iter();
-    e.visit_values(&mut |value| *value = forwarded.next().unwrap());
-    debug_assert!(forwarded.next().is_none());
-    e.vm.external_roots.truncate(roots);
+    e.resume_code(roots);
     e.fatal_image_failure |= e.vm.execution_fatal;
     e.code.resize_with(e.vm.functions.len(), Vec::new);
     let r = e.regs;

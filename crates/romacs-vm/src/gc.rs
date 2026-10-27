@@ -313,6 +313,10 @@ impl Vm {
         let mut pending = roots.to_vec();
         pending.extend_from_slice(&self.stack);
         pending.extend_from_slice(&self.external_roots);
+        for code in &self.suspended_code {
+            // SAFETY: each entry's engine is suspended in a nested call.
+            unsafe { code.visit_values(&mut |v| pending.push(*v)) };
+        }
         pending.extend(self.permanent_symbol_names.values().copied());
         pending.extend(self.terminal_bindings.iter().map(|binding| binding.buffer));
         if let Some(escape) = &mut self.propagated_escape {
@@ -749,6 +753,10 @@ impl Vm {
         }
         for program in std::iter::once(&mut self.execution).chain(self.spare_programs.iter_mut()) {
             program.visit_values(&mut |v| rewrite(v));
+        }
+        for code in &self.suspended_code {
+            // SAFETY: as in the mark phase.
+            unsafe { code.visit_values(&mut |v| rewrite(v)) };
         }
         self.conditions.visit_values(&mut |v| rewrite(v));
         self.objects

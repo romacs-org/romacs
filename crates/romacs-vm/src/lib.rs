@@ -1167,6 +1167,8 @@ pub struct Vm {
     caches: Vec<Cache>,
     stack: Vec<Value>,
     external_roots: Vec<Value>,
+    /// Suspended engines' code and entry caches, traced and forwarded in place.
+    suspended_code: Vec<threaded::SuspendedCode>,
     /// Menu-item `:filter' results for the keymap walk in progress, as
     /// (menu item, result); set and cleared around one walk, which never
     /// collects.
@@ -1283,6 +1285,7 @@ impl Vm {
             caches: vec![],
             stack: vec![],
             external_roots: vec![],
+            suspended_code: vec![],
             keymap_filters: Vec::new(),
             keymap_pending_filter: None,
             dynamic: vec![],
