@@ -116,6 +116,7 @@ impl Text {
             point: self.point,
             restriction: self.restriction.clone(),
             saved_restrictions: Vec::new(),
+            saved_points: Vec::new(),
             properties: self
                 .properties
                 .to_map()
@@ -124,6 +125,7 @@ impl Text {
                 .collect(),
             had_intervals: self.properties.has_intervals(),
             per_buffer: Default::default(),
+            held: None,
         }
     }
     pub(crate) fn decode_binary(b: &crate::bytes::ByteBuffer) -> Result<Self> {

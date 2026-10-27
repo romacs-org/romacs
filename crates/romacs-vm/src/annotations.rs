@@ -950,6 +950,20 @@ impl Vm {
             let a = self.scalar_position(self.stack[start])?;
             let b = self.scalar_position(self.stack[start + 1])?;
             let index = self.buffer_index()?;
+            if let Object::ByteBuffer(bb) = &self.objects[index] {
+                // A unibyte buffer's substring is unibyte; its positions are bytes.
+                let at = |v: i64| usize::try_from(v).ok().and_then(|v| v.checked_sub(1)).ok_or("index out of range");
+                let (a, b) = (at(a)?, at(b)?);
+                let range = a.min(b)..a.max(b);
+                if range.start < bb.restriction.start.0 || range.end > bb.restriction.end.0 {
+                    return Err("index out of range".into());
+                }
+                if bb.properties.range(ByteOffset(range.start)..ByteOffset(range.end)).next().is_some() {
+                    return Err("VM2 buffer-substring of unibyte text with properties is unsupported".into());
+                }
+                let bytes = bb.bytes[range].to_vec();
+                return Ok(self.make_lisp_string(bytes, false));
+            }
             let Object::Buffer(t) = &self.objects[index] else {
                 return Err("text buffer required".into());
             };

@@ -84,6 +84,14 @@ fn save_restriction_save(cx) { cx.save_restriction_data() }}
 defsubr! { name = "romacs--restore-restriction", gnu = "editfns.c:3067", effect = Global,
 fn save_restriction_restore(cx, data: Value) { cx.restore_restriction_data(data)?; Ok(Value::NIL) }}
 
+// Internal: the save and restore halves of the save-excursion form
+// (save_excursion.rs).
+defsubr! { name = "romacs--save-excursion", gnu = "editfns.c:779", effect = Global,
+fn save_excursion_save(cx) { cx.save_excursion_data() }}
+
+defsubr! { name = "romacs--restore-excursion", gnu = "editfns.c:792", effect = Global,
+fn save_excursion_restore(cx, data: Value) { cx.restore_excursion_data(data) }}
+
 defsubr! { name = "setq", gnu = "eval.c:470", effect = Pure,
 fn special_setq(cx; rest _args) { called(cx, "setq") }}
 

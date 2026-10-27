@@ -52,11 +52,18 @@ pub(crate) struct ByteBuffer {
     /// no markers, so it keeps each saved BEGV and ZV itself and moves them as
     /// a left- and a right-biased marker (editfns.c save_restriction_save_1).
     pub(crate) saved_restrictions: Vec<(u32, Range<ByteOffset>)>,
+    /// Points saved by save-excursion, by id, each moved as GNU's
+    /// left-biased excursion marker would move (editfns.c save_excursion_save).
+    pub(crate) saved_points: Vec<(u32, ByteOffset)>,
     pub properties: BTreeMap<ByteOffset, BTreeMap<String, Value>>,
     /// GNU keeps a buffer's interval tree once it had a property.
     pub had_intervals: bool,
     /// GNU's per-buffer variable slots (`struct buffer`, forwarded.rs).
     pub per_buffer: crate::forwarded::PerBuffer,
+    /// The empty multibyte buffer, with its markers and overlays, while
+    /// insert-file-contents holds it unibyte to decide the coding
+    /// (fileio.c decide_coding_unwind); its anchors all stay at BEG.
+    pub(crate) held: Option<Box<crate::annotations::AnnotatedBuffer>>,
 }
 /// insdel.c adjust_markers_for_{insert,delete,replace}: where a marker at P
 /// lands when R is replaced by INSERTED bytes. RIGHT is its insertion type,
@@ -117,6 +124,9 @@ impl ByteBuffer {
         for (_, saved) in &mut self.saved_restrictions {
             *saved = moved(saved.start, &r, inserted.len(), false)..moved(saved.end, &r, inserted.len(), true);
         }
+        for (_, saved) in &mut self.saved_points {
+            *saved = moved(*saved, &r, inserted.len(), false);
+        }
         self.bytes
             .splice(r.start.0..r.end.0, inserted.iter().copied());
         if r.start != r.end || !inserted.is_empty() {
@@ -129,6 +139,7 @@ impl ByteBuffer {
         visit(&mut self.category_table);
         for root in &mut self.case_tables { visit(root); }
         self.per_buffer.visit_values(visit);
+        if let Some(held) = &mut self.held { held.visit_values(visit); }
         for props in self.properties.values_mut() {
             for v in props.values_mut() {
                 visit(v);

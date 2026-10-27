@@ -1,23 +1,20 @@
 //! GNU src/fileio.c `insert-file-contents' (fileio.c:4057) and `write-region'
 //! (fileio.c:5461): read a file into the current buffer, write buffer text or
-//! a string to a file. `insert-file-contents' is a T1 leaf: GNU calls Lisp
-//! from it only through file name handlers, `set-auto-coding-function',
-//! `format-decode', `after-insert-file-set-coding' and the change hooks, and
-//! VM2 REFUSES every one of those paths before it touches the buffer or the
-//! file (below), so no Lisp ever runs inside it. `write-region' is T2: its
-//! coding choice calls Lisp (prims/write_coding.rs); it refuses handlers and
-//! the annotation functions.
+//! a string to a file. Both are T2: GNU calls Lisp while choosing the coding
+//! system and, for `insert-file-contents', after inserting
+//! (`after-insert-file-set-coding', `format-decode',
+//! `after-insert-file-functions'). Here are the checks, the read and the
+//! write; prims/insert_coding.rs decides, decodes and inserts, and
+//! prims/write_coding.rs chooses the coding system written. Both refuse file
+//! name handlers; `write-region' refuses the annotation functions.
 //!
 //! Supported subset (DIVERGENCES.md VM2-FILEIO1 lists the rest):
 //!
-//! * Decoding: `coding-system-for-read' nil, `undecided', `utf-8' or
-//!   `utf-8-unix', and file bytes that are valid UTF-8. With nil/`undecided'
-//!   the bytes must also contain no CR, NUL or ESC, i.e. nothing GNU's
-//!   detector (coding.c `detect_coding') would decode as anything but UTF-8
-//!   or ASCII in a UTF-8 language environment; with `utf-8' no CR (GNU
-//!   would detect a DOS/Mac EOL). `last-coding-system-used' is the name GNU
-//!   reports for each of those cases (recorded live, tools/primh). Anything
-//!   else SIGNALS `(error "VM2 ...")' rather than decode differently.
+//! * Decoding: GNU's decision and coding.c's detection in its priority
+//!   order, through the native string decoder. Detection refuses where it
+//!   would need a detector VM2 lacks (ISO-2022 escapes, UTF-16 for 8-bit text
+//!   with NUL bytes, the charset, CCL and CJK categories), and text holding
+//!   raw bytes cannot enter a multibyte buffer.
 //! * Encoding: GNU's choose_write_coding_system, then the native string
 //!   encoder (`encode-coding-string''s coding types) over the region's text,
 //!   multibyte or unibyte.
@@ -25,6 +22,7 @@
 use super::*;
 use crate::prim::leaf::Kind;
 use crate::forwarded::VisitedModtime;
+use super::insert_coding;
 
 fn metadata_modtime(meta: &std::fs::Metadata) -> VisitedModtime {
     use std::os::unix::fs::MetadataExt;
@@ -319,23 +317,27 @@ fn barf_if_read_only(cx: &mut Leaf<'_>) -> std::result::Result<(), Fault> {
     Ok(())
 }
 
-/// How `insert-file-contents' decodes, chosen from `coding-system-for-read'.
-#[derive(Clone, Copy, PartialEq)]
-enum Read {
-    /// nil or `undecided': GNU detects.
-    Detect,
-    /// `utf-8': fixed charset, EOL detected.
-    Utf8,
-    /// `utf-8-unix': fixed charset and EOL.
-    Utf8Unix,
-}
-
+/// GNU Finsert_file_contents (fileio.c:4057) up to the coding decision:
+/// the read-only and visit checks, the handler refusal, the open (a
+/// visited missing file goes on to notfound with no bytes), the
+/// regular-file and change-hook refusals, the read of BEG..END and the lock
+/// checks. Every refusal precedes the first change to the buffer. GNU
+/// decides the coding system before reading when the buffer has text and
+/// after reading otherwise; insert_coding.rs follows both orders, so this
+/// reads first in either case and records where its
+/// `set-auto-coding-function' tail sample would start.
+///
+/// REPLACE stays refused: none of the daily-driver consumers pass it, and
+/// GNU's replacement keeps unchanged head and tail text and their markers,
+/// which needs its own transcription.
 defsubr! { name = "insert-file-contents", gnu = "fileio.c:4057", effect = Global,
 fn insert_file_contents(cx, filename: Value; optional visit: Value, beg: Value, end: Value,
-                        replace: Value) {
+                        replace: Value) -> Step {
     // fileio.c:4143: VM2 has no indirect buffers.
     barf_if_read_only(cx)?;
     let shape = cx.buffer_shape()?;
+    // fileio.c:4126 empty_undo_list_p.
+    let empty_undo = visit != Value::NIL && var(cx, "buffer-undo-list")? == Value::NIL && shape.empty;
     // fileio.c:4153-4155: CHECK_STRING inside Fexpand_file_name.
     let (path, orig) = expanded_name(cx, filename)?;
     refuse_handler(cx, orig, "insert-file-contents")?;
@@ -350,38 +352,27 @@ fn insert_file_contents(cx, filename: Value; optional visit: Value, beg: Value, 
     }
     let beg_offset = if beg != Value::NIL { file_offset(cx, beg)? } else { 0 };
     let end_offset = if end != Value::NIL { file_offset(cx, end)? } else { u64::MAX }.max(beg_offset);
-    let set_coding = cx.intern("after-insert-file-set-coding");
+    let read = |bytes, modtime, errno, tail| insert_coding::Read {
+        orig, args: [visit, beg, end, replace], bytes, modtime, errno, empty_undo,
+        had_text: !shape.empty, modifying: !visiting && end_offset > beg_offset, tail,
+    };
     let file = match open_for_reading(&path) {
         Ok(file) => file,
         Err(error) => {
             if !visiting {
                 return Err(file_errno(cx, "Opening input file", orig, &error));
             }
+            if replace != Value::NIL && !shape.empty {
+                return Err(refuse("insert-file-contents REPLACE"));
+            }
             // notfound (fileio.c:5016): visiting completes, then the error.
-            if var(cx, "coding-system-for-read")? != Value::NIL {
-                // fileio.c:4201-4206 stores it in buffer-file-coding-system,
-                // which VM2 does not model.
-                return Err(refuse("visiting a missing file with coding-system-for-read"));
-            }
-            if var(cx, "file-coding-system-alist")? != Value::NIL {
-                return Err(refuse("insert-file-contents with file-coding-system-alist"));
-            }
-            if cx.fboundp(set_coding) {
-                return Err(refuse("insert-file-contents with after-insert-file-set-coding defined"));
-            }
             let truename = var(cx, "buffer-file-truename")?;
             if truename != Value::NIL { refuse_handler(cx, truename, "unlock-file")?; }
             refuse_handler(cx, orig, "unlock-file")?;
-            cx.bset("buffer-file-name", orig)?;
-            cx.fileio_set_modtime(if matches!(error.raw_os_error(), Some(libc::ENOENT | libc::ENOTDIR)) {
+            let modtime = if matches!(error.raw_os_error(), Some(libc::ENOENT | libc::ENOTDIR)) {
                 VisitedModtime::Missing
-            } else { VisitedModtime::Unknown })?;
-            // GNU's notfound continuation establishes SAVE_MODIFF before signalling.
-            cx.set_buffer_modified(Value::NIL, true)?;
-            let lcsu = cx.intern("last-coding-system-used");
-            let undecided = cx.intern("undecided");
-            cx.variable_set(lcsu, undecided)?;
-            return Err(file_errno(cx, "Opening input file", orig, &error));
+            } else { VisitedModtime::Unknown };
+            return insert_coding::start(cx, read(None, modtime, error.raw_os_error().unwrap_or(libc::EIO), None));
         }
     };
     let meta = file.metadata().map_err(|e| file_errno(cx, "Input file status", orig, &e))?;
@@ -394,9 +385,6 @@ fn insert_file_contents(cx, filename: Value; optional visit: Value, beg: Value, 
     }
     if replace != Value::NIL {
         return Err(refuse("insert-file-contents REPLACE"));
-    }
-    if shape.unibyte {
-        return Err(refuse("insert-file-contents into a unibyte buffer"));
     }
     let inhibit = var(cx, "inhibit-read-only")?; if !visiting && end_offset > beg_offset { cx.fileio_check_insertion(inhibit)?; }
     if !visiting && end_offset > beg_offset && (var(cx, "before-change-functions")? != Value::NIL
@@ -411,62 +399,8 @@ fn insert_file_contents(cx, filename: Value; optional visit: Value, beg: Value, 
         file.take(end_offset - beg_offset).read_to_end(&mut bytes).map_err(|e| file_errno(cx, "Read error", orig, &e))?;
     }
     // Every refusal below precedes the first change to the buffer.
-    let csr = var(cx, "coding-system-for-read")?;
-    let read = if csr == Value::NIL || symbol_is(cx, csr, &["undecided"]) {
-        Read::Detect
-    } else if symbol_is(cx, csr, &["utf-8"]) {
-        Read::Utf8
-    } else if symbol_is(cx, csr, &["utf-8-unix"]) {
-        Read::Utf8Unix
-    } else {
-        return Err(refuse("coding-system-for-read other than nil, undecided, utf-8 and utf-8-unix"));
-    };
-    let Ok(text) = std::str::from_utf8(&bytes) else {
-        return Err(refuse("insert-file-contents of bytes that are not UTF-8"));
-    };
-    // Lisp the C would call after decoding (fileio.c:5174, 5189). With
-    // `format-decode' unbound GNU skips `after-insert-file-functions' too
-    // (they run inside the same `inserted > 0 && fboundp' block, :5243).
-    let format_decode = cx.intern("format-decode");
-    if cx.fboundp(set_coding) || (!text.is_empty() && cx.fboundp(format_decode)) {
-        return Err(refuse("insert-file-contents with format-decode or after-insert-file-set-coding defined"));
-    }
-    let ascii = text.is_ascii();
-    let lf = text.contains('\n');
-    let lcsu_name = match read {
-        Read::Detect => {
-            if text.contains(['\r', '\0', '\x1b']) {
-                return Err(refuse("insert-file-contents detection of CR, NUL or ESC bytes"));
-            }
-            // GNU detects `utf-8-with-signature' and drops the BOM.
-            if text.starts_with('\u{feff}') {
-                return Err(refuse("insert-file-contents detection of a UTF-8 signature (BOM)"));
-            }
-            if (!shape.empty || !text.is_empty()) && var(cx, "set-auto-coding-function")? != Value::NIL {
-                return Err(refuse("insert-file-contents with set-auto-coding-function"));
-            }
-            if var(cx, "file-coding-system-alist")? != Value::NIL {
-                return Err(refuse("insert-file-contents with file-coding-system-alist"));
-            }
-            match (ascii, lf) {
-                (true, false) => "undecided",
-                (true, true) => "undecided-unix",
-                (false, false) => "utf-8",
-                (false, true) => "utf-8-unix",
-            }
-        }
-        Read::Utf8 => {
-            if text.contains('\r') {
-                return Err(refuse("insert-file-contents EOL detection of CR bytes"));
-            }
-            if lf { "utf-8-unix" } else { "utf-8" }
-        }
-        Read::Utf8Unix => "utf-8-unix",
-    };
-    if !visiting && end_offset > beg_offset && (!text.is_empty() && var(cx, "after-change-functions")? != Value::NIL) {
-        return Err(refuse("insert-file-contents with change hooks")); }
     let truename = var(cx, "buffer-file-truename")?;
-    if !text.is_empty() && truename != Value::NIL
+    if !bytes.is_empty() && truename != Value::NIL
         && var(cx, "buffer-file-name")? != Value::NIL
         && { let state = cx.buffer_modification(Value::NIL)?; state.save_modiff >= state.modiff }
         && var(cx, "inhibit-modification-hooks")? == Value::NIL {
@@ -476,25 +410,94 @@ fn insert_file_contents(cx, filename: Value; optional visit: Value, beg: Value, 
         if truename != Value::NIL { refuse_handler(cx, truename, "unlock-file")?; }
         refuse_handler(cx, orig, "unlock-file")?;
     }
-    let inserted = cx.insert_before_point(text)?;
-    if inserted > 0 {
-        // fileio.c:5008 Fset (Qdeactivate_mark, Qt).
-        let deactivate = cx.intern("deactivate-mark");
-        cx.variable_set(deactivate, Value::TRUE)?;
-    }
-    if visiting {
-        // fileio.c:5148-5168: retain descriptor metadata and establish SAVE_MODIFF.
-        cx.bset("buffer-file-name", orig)?;
-        cx.fileio_set_modtime(metadata_modtime(&meta))?;
-        cx.set_buffer_modified(Value::NIL, true)?;
-    }
-    let lcsu = cx.intern("last-coding-system-used");
-    let coding = cx.intern(lcsu_name);
-    cx.variable_set(lcsu, coding)?;
-    let count = Value::integer(inserted as i64).map_err(Fault::Error)?;
-    let tail = cx.cons(count, Value::NIL);
-    Ok(cx.cons(orig, tail))
+    // fileio.c:4344-4373: when the first 4 KiB read stops short of END,
+    // set-auto-coding-function sees 1 KiB of head and the tail from 3 KiB
+    // before the end of the file (or of END), never overlapping that read;
+    // a file ending at exactly 4 KiB gives an empty tail.
+    let size = meta.len();
+    let tail = (bytes.len() >= 4 * 1024 && beg_offset + 4 * 1024 < end_offset).then(|| {
+        if size.saturating_sub(3 * 1024) <= beg_offset + 4 * 1024 { 4 * 1024 }
+        else { size.saturating_sub(3 * 1024).min(end_offset.saturating_sub(3 * 1024)).saturating_sub(beg_offset) }
+    });
+    insert_coding::start(cx, read(Some(bytes), metadata_modtime(&meta), 0, tail.map(|t| t as usize)))
 }}
+
+/// Open PATH for `insert-file-contents' with O_NONBLOCK, so a FIFO without a
+/// writer (or a device) opens at once and reaches the non-regular refusal
+/// instead of blocking in open(2); the flag does not affect the regular files
+/// that are read.
+fn open_for_reading(path: &str) -> std::io::Result<std::fs::File> {
+    use std::os::unix::fs::OpenOptionsExt as _;
+    std::fs::OpenOptions::new().read(true).custom_flags(libc::O_NONBLOCK).open(path)
+}
+
+// File name handler selection, shared by every primitive here: VM2 calls
+// no handler, so each operation first asks whether GNU would dispatch to
+// one and refuses if so (`refuse_handler'). The selection itself is GNU's,
+// including `inhibit-file-name-operation' and each handler's `operations'
+// property.
+
+// GNU Fmemq validates a dotted tail only when search reaches it.
+fn handler_member(cx: &Leaf<'_>, value: Value, list: Value) -> std::result::Result<bool, Fault> {
+    let mut tail = list;
+    let mut tortoise = list;
+    let mut steps = 0u64;
+    while let Some((head, rest)) = cx.pair(tail) {
+        if cx.eq(head, value) { return Ok(true); }
+        tail = rest;
+        if tail == tortoise { return Err(Fault::Circular(tail)); }
+        steps += 1;
+        if steps & 4095 == 0 && steps.is_power_of_two() { tortoise = tail; }
+    }
+    if tail != Value::NIL { return Err(Fault::Wrong("listp", list)); }
+    Ok(false)
+}
+
+/// GNU fileio.c:370: greatest match position wins, first entry wins ties.
+/// Matching does not change match data or honor case-fold-search.
+pub(super) fn find_file_name_handler(cx: &mut Leaf<'_>, filename: Value, operation: Value) -> Out {
+    if !stringp(cx, filename) { return Err(Fault::Wrong("stringp", filename)); }
+    let operations_key = cx.intern("operations");
+    let inhibited = if var(cx, "inhibit-file-name-operation")? == operation {
+        var(cx, "inhibit-file-name-handlers")?
+    } else { Value::NIL };
+    let mut chain = var(cx, "file-name-handler-alist")?;
+    let mut selected = Value::NIL;
+    let mut position = None;
+    let mut tortoise = chain;
+    let mut steps = 0u64;
+    while let Some((entry, tail)) = cx.pair(chain) {
+        chain = tail;
+        if chain == tortoise { return Err(refuse("cyclic file-name-handler-alist")); }
+        steps += 1;
+        if steps & 4095 == 0 && steps.is_power_of_two() { tortoise = chain; }
+        let Some((pattern, handler)) = cx.pair(entry) else { continue };
+        let mut operations = Value::NIL;
+        if handler == Value::NIL || handler == Value::TRUE || cx.kind(handler) == Kind::Symbol {
+            let mut plist = cx.symbol_plist(handler)?;
+            for _ in 0..=cx.list_limit() {
+                let Some((key, rest)) = cx.pair(plist) else { break };
+                let Some((value, rest)) = cx.pair(rest) else { break };
+                if key == operations_key { operations = value; break; }
+                plist = rest;
+            }
+        }
+        if !stringp(cx, pattern) { continue; }
+        let Some(at) = cx.file_name_match(pattern, filename)? else { continue };
+        if position.is_some_and(|old| at <= old) { continue; }
+        if operations != Value::NIL && !handler_member(cx, operation, operations)? { continue; }
+        if handler_member(cx, handler, inhibited)? { continue; }
+        selected = handler;
+        position = Some(at);
+    }
+    Ok(selected)
+}
+
+defsubr! { name = "find-file-name-handler", gnu = "fileio.c:370", effect = Global,
+fn find_file_name_handler_primitive(cx, filename: Value, operation: Value) {
+    find_file_name_handler(cx, filename, operation)
+}}
+
 /// GNU `fix_position' (editfns.c) for a region bound.
 fn position(cx: &Leaf<'_>, v: Value) -> std::result::Result<i64, Fault> {
     if let Some(n) = v.integer_value() {
@@ -558,17 +561,19 @@ fn write_region(cx, start: Value, end: Value, filename: Value; optional append: 
     let widen = start == Value::NIL;
     let (start, end) = if stringp(cx, start) { (start, end) } else { (fixnum(b)?, fixnum(e)?) };
     // fileio.c:5583 save_restriction_save holds from here through the coding
-    // choice and the write, across its Lisp calls and non-local exits:
-    // (save-restriction [(widen)] (romacs--write-region-body 'ARG...)).
-    let quote = cx.intern("quote");
-    let mut body = vec![cx.intern("romacs--write-region-body")];
-    for v in [start, end, name, append, visit, lock, mustbenew, visit_file] { body.push(cx.coding_list(&[quote, v])); }
-    let mut form = vec![cx.intern("save-restriction")];
-    if widen { let f = cx.intern("widen"); form.push(cx.coding_list(&[f])); }
-    form.push(cx.coding_list(&body));
-    let form = cx.coding_list(&form);
-    Ok(Step::Call { f: cx.intern("eval"), args: vec![form, Value::TRUE], then: written, saved: vec![] })
+    // choice and the write, across its Lisp calls and non-local exits. The
+    // arguments reach the body live, not quoted: `eval' copies constants.
+    let source = format!("(lambda (romacs--s romacs--e romacs--n romacs--a romacs--v romacs--l romacs--m romacs--f)
+                            (save-restriction {}
+                              (romacs--write-region-body romacs--s romacs--e romacs--n romacs--a
+                                                         romacs--v romacs--l romacs--m romacs--f)))",
+                         if widen { "(widen)" } else { "" });
+    let args = vec![start, end, name, append, visit, lock, mustbenew, visit_file];
+    insert_coding::closure_then(cx, &source, write_closure, args)
 }}
+fn write_closure(_: &mut Leaf<'_>, closure: Value, saved: &[Value]) -> Next {
+    Ok(Step::Call { f: closure, args: saved.to_vec(), then: written, saved: vec![] })
+}
 fn written(_: &mut Leaf<'_>, value: Value, _: &[Value]) -> Next { Ok(Step::Done(value)) }
 
 // Internal: write-region's tail inside its restriction extent, from the
@@ -768,74 +773,4 @@ fn refuse_locate_handler(cx: &mut Leaf<'_>, filename: Value, operation: &str) ->
         return Err(refuse("locate-file-internal matching file name handler"));
     }
     Ok(())
-}
-
-// GNU Fmemq validates a dotted tail only when search reaches it.
-fn handler_member(cx: &Leaf<'_>, value: Value, list: Value) -> std::result::Result<bool, Fault> {
-    let mut tail = list;
-    let mut tortoise = list;
-    let mut steps = 0u64;
-    while let Some((head, rest)) = cx.pair(tail) {
-        if cx.eq(head, value) { return Ok(true); }
-        tail = rest;
-        if tail == tortoise { return Err(Fault::Circular(tail)); }
-        steps += 1;
-        if steps & 4095 == 0 && steps.is_power_of_two() { tortoise = tail; }
-    }
-    if tail != Value::NIL { return Err(Fault::Wrong("listp", list)); }
-    Ok(false)
-}
-
-/// GNU fileio.c:370: greatest match position wins, first entry wins ties.
-/// Matching does not change match data or honor case-fold-search.
-pub(super) fn find_file_name_handler(cx: &mut Leaf<'_>, filename: Value, operation: Value) -> Out {
-    if !stringp(cx, filename) { return Err(Fault::Wrong("stringp", filename)); }
-    let operations_key = cx.intern("operations");
-    let inhibited = if var(cx, "inhibit-file-name-operation")? == operation {
-        var(cx, "inhibit-file-name-handlers")?
-    } else { Value::NIL };
-    let mut chain = var(cx, "file-name-handler-alist")?;
-    let mut selected = Value::NIL;
-    let mut position = None;
-    let mut tortoise = chain;
-    let mut steps = 0u64;
-    while let Some((entry, tail)) = cx.pair(chain) {
-        chain = tail;
-        if chain == tortoise { return Err(refuse("cyclic file-name-handler-alist")); }
-        steps += 1;
-        if steps & 4095 == 0 && steps.is_power_of_two() { tortoise = chain; }
-        let Some((pattern, handler)) = cx.pair(entry) else { continue };
-        let mut operations = Value::NIL;
-        if handler == Value::NIL || handler == Value::TRUE || cx.kind(handler) == Kind::Symbol {
-            let mut plist = cx.symbol_plist(handler)?;
-            for _ in 0..=cx.list_limit() {
-                let Some((key, rest)) = cx.pair(plist) else { break };
-                let Some((value, rest)) = cx.pair(rest) else { break };
-                if key == operations_key { operations = value; break; }
-                plist = rest;
-            }
-        }
-        if !stringp(cx, pattern) { continue; }
-        let Some(at) = cx.file_name_match(pattern, filename)? else { continue };
-        if position.is_some_and(|old| at <= old) { continue; }
-        if operations != Value::NIL && !handler_member(cx, operation, operations)? { continue; }
-        if handler_member(cx, handler, inhibited)? { continue; }
-        selected = handler;
-        position = Some(at);
-    }
-    Ok(selected)
-}
-
-defsubr! { name = "find-file-name-handler", gnu = "fileio.c:370", effect = Global,
-fn find_file_name_handler_primitive(cx, filename: Value, operation: Value) {
-    find_file_name_handler(cx, filename, operation)
-}}
-
-/// Open PATH for `insert-file-contents' with O_NONBLOCK, so a FIFO without a
-/// writer (or a device) opens at once and reaches the non-regular refusal
-/// instead of blocking in open(2); the flag does not affect the regular files
-/// that are read.
-fn open_for_reading(path: &str) -> std::io::Result<std::fs::File> {
-    use std::os::unix::fs::OpenOptionsExt as _;
-    std::fs::OpenOptions::new().read(true).custom_flags(libc::O_NONBLOCK).open(path)
 }

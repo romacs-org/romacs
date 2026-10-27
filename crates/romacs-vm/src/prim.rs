@@ -388,6 +388,12 @@ mod leaf {
         pub(crate) fn kill_buffer(&mut self, buffer: Value) -> std::result::Result<(), Fault> {
             self.vm.kill_buffer_model(buffer).map_err(Fault::Error)
         }
+        pub(crate) fn save_excursion_data(&mut self) -> std::result::Result<Value, Fault> {
+            self.vm.save_excursion_data().map_err(Fault::Error)
+        }
+        pub(crate) fn restore_excursion_data(&mut self, data: Value) -> std::result::Result<Value, Fault> {
+            self.vm.restore_excursion_data(data).map_err(Fault::Error)
+        }
         pub(crate) fn save_restriction_data(&mut self) -> std::result::Result<Value, Fault> {
             self.vm.save_restriction_data().map_err(Fault::Error)
         }

@@ -253,24 +253,149 @@ impl Leaf<'_> {
         Ok(false)
     }
 
-    /// Insert TEXT at point of the current multibyte buffer and leave point
+    /// Insert decoded text at point of the current buffer and leave point
     /// BEFORE it, as `insert-file-contents' does (it inserts into the gap at
-    /// PT and never moves PT). Markers follow their insertion type. Returns
-    /// the number of characters inserted.
-    pub fn insert_before_point(&mut self, text: &str) -> std::result::Result<usize, Fault> {
+    /// PT and never moves PT). BYTES are internal multibyte text when
+    /// MULTIBYTE, else octets; a multibyte buffer takes octets above 127 as
+    /// raw-byte characters, a unibyte buffer takes octets only. Markers follow
+    /// their insertion type. Returns the number of characters inserted.
+    pub fn insert_before_point(&mut self, bytes: &[u8], multibyte: bool) -> std::result::Result<usize, Fault> {
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
-        let data::Object::Buffer(t) = &mut self.vm.objects[index] else {
-            return Err(Fault::Error("VM2 insert-file-contents into a unibyte buffer is unsupported".into()));
+        let inserted = match &mut self.vm.objects[index] {
+            data::Object::Buffer(t) => {
+                let internal;
+                let bytes = if multibyte { bytes } else {
+                    internal = octets_to_multibyte(bytes);
+                    &internal
+                };
+                // VM2 buffer text is Unicode: no raw-byte characters.
+                if std::str::from_utf8(bytes).is_err() {
+                    return Err(fileio_refusal("insert-file-contents of raw bytes into a multibyte buffer"));
+                }
+                let at = t.point;
+                let before = t.len_chars();
+                t.replace(at..at, bytes).map_err(Fault::Error)?;
+                t.point = at;
+                t.len_chars() - before
+            }
+            data::Object::ByteBuffer(b) => {
+                if multibyte { return Err(Fault::Error("multibyte text for a unibyte buffer".into())); }
+                let at = b.point;
+                b.replace(at..at, bytes).map_err(Fault::Error)?;
+                b.point = at;
+                bytes.len()
+            }
+            _ => return Err(Fault::Error("buffer required".into())),
         };
-        let at = t.point;
-        let before = t.len_chars();
-        t.replace(at..at, text.as_bytes()).map_err(Fault::Error)?;
-        t.point = at;
-        let inserted = t.len_chars() - before;
         if inserted > 0 {
             self.vm.display_state.version += 1;
         }
         Ok(inserted)
+    }
+
+    /// The text properties of decoded STRING (the `charset' runs of a
+    /// charset decoder, coding.c produce_charset) onto the text just
+    /// inserted at point of the current multibyte buffer, byte for byte.
+    pub fn fileio_copy_string_properties(&mut self, string: Value) -> std::result::Result<(), Fault> {
+        let Some(data::Object::String(s) | data::Object::RawString(s)) = self.vm.object_if(string) else { return Ok(()) };
+        let map = s.properties.to_map();
+        if map.is_empty() { return Ok(()) }
+        let index = self.vm.buffer_index().map_err(Fault::Error)?;
+        let data::Object::Buffer(t) = &mut self.vm.objects[index] else { return Ok(()) };
+        let at = t.point.0;
+        // to_map gives each byte's properties; put them back as runs.
+        let mut runs: Vec<(usize, usize, &std::collections::BTreeMap<String, Value>)> = vec![];
+        for (offset, values) in &map {
+            match runs.last_mut() {
+                Some((_, end, run)) if *end == offset.0 && *run == values => *end += 1,
+                _ => runs.push((offset.0, offset.0 + 1, values)),
+            }
+        }
+        for (start, end, values) in runs {
+            for (key, value) in values {
+                t.properties.put(ByteOffset(at + start)..ByteOffset(at + end), key, *value);
+            }
+        }
+        Ok(())
+    }
+
+    /// GNU `bset_enable_multibyte_characters' on the current buffer while it
+    /// holds no text: only the representation changes. A unibyte buffer holds
+    /// no markers, so the empty multibyte buffer, whose markers and overlays
+    /// all stay at BEG, is held aside until the toggle back.
+    pub fn fileio_set_multibyte_flag(&mut self, multibyte: bool) -> std::result::Result<(), Fault> {
+        let index = self.vm.buffer_index().map_err(Fault::Error)?;
+        let replacement = match &self.vm.objects[index] {
+            data::Object::Buffer(t) if !multibyte => {
+                if t.len_bytes() != 0 {
+                    return Err(fileio_refusal("insert-file-contents unibyte toggle of a buffer with text"));
+                }
+                let mut b = t.binary();
+                b.state = t.state.clone();
+                b.per_buffer = t.per_buffer.clone();
+                b.case_tables = t.case_tables;
+                b.held = Some(t.clone());
+                data::Object::ByteBuffer(Box::new(b))
+            }
+            data::Object::ByteBuffer(b) if multibyte => {
+                if !b.bytes.is_empty() || !b.saved_restrictions.is_empty() || !b.saved_points.is_empty() {
+                    return Err(fileio_refusal("insert-file-contents multibyte toggle of a buffer with text, saved restrictions or excursions"));
+                }
+                let mut a: crate::annotations::AnnotatedBuffer = match &b.held {
+                    Some(held) => (**held).clone(),
+                    None => crate::text::Text::decode_binary(b).map_err(Fault::Error)?.into(),
+                };
+                a.state = b.state.clone();
+                a.per_buffer = b.per_buffer.clone();
+                a.case_tables = b.case_tables;
+                a.syntax_table = b.syntax_table;
+                a.category_table = b.category_table;
+                data::Object::Buffer(Box::new(a))
+            }
+            _ => return Ok(()),
+        };
+        self.vm.objects[index] = replacement;
+        Ok(())
+    }
+
+    /// GNU insert_from_gap_1 into the empty current unibyte buffer: BYTES
+    /// become its text with point at BEG, recording neither a modification
+    /// nor undo (decide_coding_unwind takes them back).
+    pub fn fileio_fill_raw(&mut self, bytes: &[u8]) -> std::result::Result<(), Fault> {
+        let index = self.vm.buffer_index().map_err(Fault::Error)?;
+        let data::Object::ByteBuffer(b) = &mut self.vm.objects[index] else {
+            return Err(Fault::Error("unibyte buffer required".into()));
+        };
+        debug_assert!(b.bytes.is_empty());
+        b.bytes = bytes.to_vec();
+        b.point = ByteOffset(0);
+        b.restriction = ByteOffset(0)..ByteOffset(bytes.len());
+        Ok(())
+    }
+
+    /// decide_coding_unwind's text half: move every byte of the current
+    /// buffer back out (markers and point return to BEG, properties go)
+    /// without recording a modification, and return them. A buffer Lisp made
+    /// multibyte gives back its internal bytes, as GNU's gap does.
+    pub fn fileio_take_raw(&mut self) -> std::result::Result<Vec<u8>, Fault> {
+        let index = self.vm.buffer_index().map_err(Fault::Error)?;
+        match &mut self.vm.objects[index] {
+            data::Object::ByteBuffer(b) => {
+                let (state, bytes) = (b.state.clone(), b.bytes.clone());
+                b.restriction = ByteOffset(0)..ByteOffset(bytes.len());
+                b.replace(ByteOffset(0)..ByteOffset(bytes.len()), &[]).map_err(Fault::Error)?;
+                b.state = state;
+                Ok(bytes)
+            }
+            data::Object::Buffer(t) => {
+                let (state, bytes) = (t.state.clone(), t.bytes().to_vec());
+                t.widen();
+                t.replace(ByteOffset(0)..ByteOffset(bytes.len()), &[]).map_err(Fault::Error)?;
+                t.state = state;
+                Ok(bytes)
+            }
+            _ => Err(Fault::Error("buffer required".into())),
+        }
     }
 
     /// The bytes of characters FROM..TO (1-based, FROM <= TO, already
@@ -299,4 +424,21 @@ impl Leaf<'_> {
     pub fn bset(&mut self, name: &str, value: Value) -> std::result::Result<(), Fault> {
         self.vm.bset_current(name, value)
     }
+}
+
+fn fileio_refusal(what: &str) -> Fault {
+    Fault::Error(format!("VM2 {what} is unsupported"))
+}
+
+/// Octets as multibyte internal text: those above 127 become raw-byte
+/// characters (GNU str_to_multibyte).
+fn octets_to_multibyte(bytes: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(bytes.len());
+    for &byte in bytes {
+        if byte < 128 { out.push(byte); continue; }
+        let mut encoded = [0; 5];
+        let width = crate::lstring::char_string(crate::lstring::BYTE8_OFFSET + u32::from(byte), &mut encoded);
+        out.extend_from_slice(&encoded[..width]);
+    }
+    out
 }

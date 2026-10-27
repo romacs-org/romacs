@@ -241,8 +241,8 @@ impl Vm {
         self.objects[index] = match &self.objects[index] {
             Object::ByteBuffer(_) => Object::ByteBuffer(Box::new(bytes::ByteBuffer {
                 state, bytes: vec![], syntax_table: Value::NIL, category_table: Value::NIL, case_tables: [Value::NIL; 4],
-                point: ByteOffset(0), restriction: ByteOffset(0)..ByteOffset(0), saved_restrictions: Vec::new(),
-                properties: Default::default(), had_intervals: false, per_buffer: retained,
+                point: ByteOffset(0), restriction: ByteOffset(0)..ByteOffset(0), saved_restrictions: Vec::new(), saved_points: Vec::new(),
+                properties: Default::default(), had_intervals: false, per_buffer: retained, held: None,
             })),
             _ => {
                 let mut empty: crate::annotations::AnnotatedBuffer = Text::new(b"")?.into();
@@ -745,6 +745,13 @@ impl Vm {
                 if !b.saved_restrictions.is_empty() {
                     return Err("cannot decode buffer with a saved restriction".into());
                 }
+                if !b.saved_points.is_empty() {
+                    return Err("cannot decode buffer with a saved excursion".into());
+                }
+                // VM2-IFC-HELD1: its markers are held for insert-file-contents.
+                if b.held.is_some() {
+                    return Err("cannot decode buffer while insert-file-contents decides its coding".into());
+                }
                 {
                 let mut a: crate::annotations::AnnotatedBuffer = Text::decode_binary(b)?.into();
                 a.state = b.state.clone();
@@ -999,10 +1006,11 @@ mod tests {
             bytes: vec![0xce, 0xbb],
             point: ByteOffset(1),
             restriction: ByteOffset(0)..ByteOffset(2),
-            saved_restrictions: Vec::new(),
+            saved_restrictions: Vec::new(), saved_points: Vec::new(),
             properties: Default::default(),
             had_intervals: false,
             per_buffer: Default::default(),
+            held: None,
         };
         b.properties
             .entry(ByteOffset(1))
