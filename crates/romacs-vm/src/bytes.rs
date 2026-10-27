@@ -8,10 +8,13 @@ pub(crate) struct BufferState {
     pub(crate) live: bool,
     pub(crate) inhibit_buffer_hooks: bool,
     pub(crate) modification: crate::modification::Modification,
+    /// syntax.c's find_start_* cache, tagged with `Vm::defun_start_epoch`
+    /// when this buffer wrote it: GNU keeps one cache for the last buffer.
+    pub(crate) defun_start: Option<(u64, crate::syntax_scan::DefunStart)>,
 }
 impl Default for BufferState {
     fn default() -> Self {
-        Self { name: None, live: true, inhibit_buffer_hooks: false, modification: Default::default() }
+        Self { name: None, live: true, inhibit_buffer_hooks: false, modification: Default::default(), defun_start: None }
     }
 }
 impl BufferState {

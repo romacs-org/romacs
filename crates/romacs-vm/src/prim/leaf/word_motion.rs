@@ -144,61 +144,6 @@ impl Leaf<'_> {
     }
 }
 
-impl Leaf<'_> {
-    /// Character CHARPOS of the current buffer and its byte offset.
-    fn char_at(&self, index: usize, charpos: usize) -> std::result::Result<(u32, usize), Fault> {
-        match &self.vm.objects[index] {
-            data::Object::Buffer(b) => {
-                let code = b.character_of_char(CharOffset(charpos)).map_err(Fault::Error)?.map_or(0, u32::from);
-                Ok((code, b.byte_of_char(CharOffset(charpos)).map_err(Fault::Error)?.0))
-            }
-            data::Object::ByteBuffer(b) => Ok((u32::from(b.bytes[charpos]), charpos)),
-            _ => Err(Fault::Error("buffer required".into())),
-        }
-    }
-    fn raw_syntax(&mut self, index: usize, charpos: usize) -> std::result::Result<i64, Fault> {
-        let (c, byte) = self.char_at(index, charpos)?;
-        self.vm.syntax_raw_at(c, byte)
-    }
-    /// syntax.c char_quoted: CHARPOS follows an odd run of escape and
-    /// character-quote characters.
-    fn char_quoted(&mut self, index: usize, beg: usize, mut charpos: usize) -> std::result::Result<bool, Fault> {
-        let mut quoted = false;
-        while charpos > beg {
-            charpos -= 1;
-            if !matches!(self.raw_syntax(index, charpos)? & 0xff, 9 | 10) { break; }
-            quoted = !quoted;
-        }
-        Ok(quoted)
-    }
-    /// syntax.c Fbackward_prefix_chars: back over expression-prefix
-    /// characters and those with the `p' flag, stopping at a quoted one.
-    pub fn backward_prefix_chars(&mut self) -> super::super::Out {
-        let index = self.vm.buffer_index().map_err(Fault::Error)?;
-        let (beg, point) = match &self.vm.objects[index] {
-            data::Object::Buffer(b) => (b.char_of_byte(b.accessible().start).map_err(Fault::Error)?.0, b.char_of_byte(b.point).map_err(Fault::Error)?.0),
-            data::Object::ByteBuffer(b) => (b.restriction.start.0, b.point.0),
-            _ => return Err(Fault::Error("buffer required".into())),
-        };
-        if point <= beg { return Ok(Value::NIL); }
-        let (mut opoint, mut pos) = (point, point - 1);
-        while !self.char_quoted(index, beg, pos)? && {
-            let raw = self.raw_syntax(index, pos)?;
-            raw & 0xff == 6 || (raw >> 20) & 1 == 1
-        } {
-            opoint = pos;
-            if pos <= beg { break; }
-            pos -= 1;
-        }
-        match &mut self.vm.objects[index] {
-            data::Object::Buffer(b) => b.point = b.byte_of_char(CharOffset(opoint)).map_err(Fault::Error)?,
-            data::Object::ByteBuffer(b) => b.point = ByteOffset(opoint),
-            _ => unreachable!("buffer_index validates"),
-        }
-        Ok(Value::NIL)
-    }
-}
-
 /// syntax.c syntax_spec_code: a designator's class, 255 for none.
 fn syntax_spec_code(c: u8) -> usize {
     match c {

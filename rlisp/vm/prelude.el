@@ -486,4 +486,14 @@ If NOERROR is non-nil, silently assume the `raw-text' coding if the
 guesswork fails."
   (romacs--secure-hash 'md5 (romacs--hash-data object start end coding-system noerror)))
 
+;; GNU safe_calln (eval.c): a signal from FUNCTION is muted, logged to
+;; *Messages* only (add_to_log), and the call returns nil.  syntax.c calls
+;; `internal--syntax-propertize' this way in the middle of a scan.
+(defun romacs--safe-call (function &rest args)
+  (let ((inhibit-redisplay t))
+    (condition-case err (apply function args)
+      (t (let ((inhibit-message t))
+           (message "%s" (format "Error muted by safe_call: %S signaled %S" (cons function args) err)))
+         nil))))
+
 ;;; prelude.el ends here
