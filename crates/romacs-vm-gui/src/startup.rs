@@ -417,7 +417,7 @@ fn initialize_editing_from_sources(vm: &mut Vm, root: Option<&std::path::Path>) 
             "kill-new", "current-kill", "backward-word", "kill-word", "backward-kill-word",
         ][..]),
     ] {
-        let spans = crate::loadup::form_spans(source)?;
+        let spans = gnu_form_spans(source)?;
         for name in names {
             if !matches!(*name, "kill-new" | "current-kill")
                 && vm.eval_source(&format!("(fboundp '{name})"))? != romacs_vm::Fixed::NIL { continue; }
@@ -434,18 +434,59 @@ fn initialize_editing_from_sources(vm: &mut Vm, root: Option<&std::path::Path>) 
     Ok(())
 }
 
+/// `form_spans` of an embedded GNU source, scanned once per thread: editing
+/// and coding take forms from the same large files (subr.el, files.el).
+fn gnu_form_spans(source: &'static str) -> Result<std::rc::Rc<Vec<(usize, usize, usize)>>, String> {
+    type Scans = std::collections::HashMap<usize, std::rc::Rc<Vec<(usize, usize, usize)>>>;
+    thread_local! { static SCANS: std::cell::RefCell<Scans> = Default::default(); }
+    let key = source.as_ptr() as usize;
+    if let Some(spans) = SCANS.with(|scans| scans.borrow().get(&key).cloned()) { return Ok(spans); }
+    let spans = std::rc::Rc::new(crate::loadup::form_spans(source)?);
+    SCANS.with(|scans| scans.borrow_mut().insert(key, spans.clone()));
+    Ok(spans)
+}
+
 /// The workspace's file coding: without loadup only coding.c's built-in
 /// systems exist, so a visit of UTF-8 text would find nothing. Evaluate,
 /// verbatim from the pinned mirror, mule.el's `define-coding-system' and
 /// visit bookkeeping and mule-conf.el's fundamental, Latin-1 and UTF-8
-/// definitions; then romacs-coding.el sets the state GNU's locale startup
-/// reaches. Each head names exactly one top-level form.
+/// definitions. Visiting and saving then choose codings as GNU does:
+/// mule.el's `set-auto-coding' (BOM signatures, `coding:' cookies and
+/// `auto-coding-functions') is `set-auto-coding-function', and mule-cmds.el's
+/// `select-safe-coding-system' is `select-safe-coding-system-function', with
+/// the byte-run.el, subr.el, files.el and mule-util.el helpers they call. Finally
+/// romacs-coding.el sets the state GNU's locale startup reaches. Each head
+/// names exactly one top-level form.
 fn initialize_coding(vm: &mut Vm, root: Option<&std::path::Path>) -> Result<(), String> {
     for (source, heads) in [
+        (include_str!("../../../gnu-lisp/emacs-lisp/byte-run.el"), &[
+            "(defalias 'function-put", "(defalias 'byte-run--set-speed",
+            "(defmacro eval-and-compile", "(defmacro defsubst",
+        ][..]),
+        (include_str!("../../../gnu-lisp/subr.el"), &[
+            "(defun caar", "(defmacro ignore-errors", "(defsubst string-match-p", "(defun ensure-list",
+        ][..]),
+        (include_str!("../../../gnu-lisp/files.el"), &[
+            "(defvar find-file-literally", "(put 'find-file-literally",
+            "(defvar inhibit-local-variables-regexps", "(defvar inhibit-local-variables-suffixes",
+            "(defvar inhibit-local-variables-ignore-case", "(defun inhibit-local-variables-p",
+            "(defvar file-name-version-regexp", "(defun file-name-sans-versions",
+            "(defvar file-auto-mode-skip", "(defun set-auto-mode-1",
+        ][..]),
+        (include_str!("../../../gnu-lisp/international/mule-util.el"), &["(defmacro with-coding-priority"][..]),
         (include_str!("../../../gnu-lisp/international/mule.el"), &[
             "(defun define-coding-system", "(defun coding-system-type",
+            "(defun coding-system-category", "(defun coding-system-get", "(defun coding-system-equal",
             "(defvar-local buffer-file-coding-system-explicit",
+            "(defcustom auto-coding-alist", "(defcustom auto-coding-regexp-alist",
+            "(defun auto-coding-regexp-alist-lookup", "(defvar auto-coding-file-name",
+            "(defcustom auto-coding-functions", "(defvar set-auto-coding-for-load",
+            "(defun auto-coding-alist-lookup",
+            "(put 'enable-character-translation 'permanent-local",
+            "(put 'enable-character-translation 'safe-local-variable",
+            "(defun find-auto-coding", "(defun set-auto-coding", "(setq set-auto-coding-function",
             "(defun after-insert-file-set-coding", "(defun find-new-buffer-file-coding-system",
+            "(defun sgml-xml-auto-coding-function", "(defun sgml-html-meta-auto-coding-function",
         ][..]),
         (include_str!("../../../gnu-lisp/international/mule-conf.el"), &[
             "(define-coding-system-alias 'binary", "(define-coding-system-alias 'unix",
@@ -461,8 +502,17 @@ fn initialize_coding(vm: &mut Vm, root: Option<&std::path::Path>) -> Result<(), 
             "(aset latin-extra-code-table ?\\223", "(aset latin-extra-code-table ?\\224",
             "(aset latin-extra-code-table ?\\225", "(aset latin-extra-code-table ?\\226",
         ][..]),
+        (include_str!("../../../gnu-lisp/international/mule-cmds.el"), &[
+            "(defun coding-system-change-eol-conversion", "(defun coding-system-change-text-conversion",
+            "(defvar sort-coding-systems-predicate", "(defun sort-coding-systems",
+            "(defun find-coding-systems-region", "(defvar last-coding-system-specified",
+            "(defvar select-safe-coding-system-accept-default-p",
+            "(defun select-safe-coding-system", "(setq select-safe-coding-system-function",
+            "(defvar language-info-alist", "(defun get-language-info",
+            "(defcustom current-language-environment",
+        ][..]),
     ] {
-        let spans = crate::loadup::form_spans(source)?;
+        let spans = gnu_form_spans(source)?;
         for head in heads {
             let forms: Vec<_> = spans.iter().map(|&(start, end, _)| &source[start..end])
                 .filter(|form| form.strip_prefix(head).is_some_and(|tail| tail.starts_with(char::is_whitespace)))

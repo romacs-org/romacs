@@ -169,13 +169,19 @@ pub(super) fn start(cx: &mut Leaf<'_>, read: Read) -> Next {
 }
 
 /// The name `set-auto-coding-function' receives: ENCODE_FILE (filename),
-/// which is the name itself unless it holds non-ASCII multibyte text.
+/// coding.c encode_file_name_1. A multibyte name is encoded by
+/// `file-name-coding-system', else `default-file-name-coding-system'
+/// (convert_string_nocopy: `last-coding-system-used' is left as it was).
 fn encoded_name(cx: &mut Leaf<'_>, name: Value) -> std::result::Result<Value, Fault> {
-    let view = cx.string_view(name)?;
-    if view.is_multibyte() && !view.bytes().is_ascii() {
-        return Err(refuse("insert-file-contents of a non-ASCII file name with set-auto-coding-function"));
-    }
-    Ok(name)
+    if !cx.string_view(name)?.is_multibyte() { return Ok(name); }
+    let mut coding = var(cx, "file-name-coding-system")?;
+    if coding == Value::NIL { coding = var(cx, "default-file-name-coding-system")?; }
+    if coding == Value::NIL { return Ok(name); }
+    let last = cx.intern("last-coding-system-used");
+    let recorded = cx.variable_value(last)?.unwrap_or(Value::NIL);
+    let encoded = cx.coding_convert_string(name, coding, Value::TRUE, Value::NIL, true)?;
+    cx.variable_set(last, recorded)?;
+    Ok(encoded)
 }
 
 /// Evaluate the `lambda' form SOURCE into a closure, then (in THEN) call
@@ -201,7 +207,6 @@ fn auto_coding_work(cx: &mut Leaf<'_>, r: Vec<Value>) -> Next {
         }
         None => bytes,
     };
-    encoded_name(cx, r[ORIG])?;
     let mut r = r;
     r[DATA] = cx.make_string(sample, false);
     closure_then(cx, "(lambda (romacs--name romacs--n romacs--directory romacs--sample)
@@ -219,7 +224,8 @@ fn auto_closure(cx: &mut Leaf<'_>, closure: Value, saved: &[Value]) -> Next {
     r[DATA] = Value::NIL;
     let n = fixnum(cx.string_view(sample)?.bytes().len() as i64)?;
     let directory = var(cx, "default-directory")?;
-    let args = vec![r[ORIG], n, directory, sample];
+    let name = encoded_name(cx, r[ORIG])?;
+    let args = vec![name, n, directory, sample];
     Ok(Step::Call { f: closure, args, then: auto_answered, saved: r })
 }
 
@@ -266,9 +272,10 @@ fn decide_empty(cx: &mut Leaf<'_>, mut r: Vec<Value>) -> Next {
         at(&mut r, Stage::Check);
         return advance(cx, r);
     }
-    // The name the function would see is checked before the buffer changes.
+    // The name the function sees, encoded before the buffer changes.
+    r[DATA] = r[ORIG];
     if r[INSERTED] != fixnum(0)? && var(cx, "set-auto-coding-function")? != Value::NIL {
-        encoded_name(cx, r[ORIG])?;
+        r[DATA] = encoded_name(cx, r[ORIG])?;
     }
     closure_then(cx, "(lambda (romacs--name romacs--n romacs--orig romacs--visit romacs--beg romacs--end romacs--buffer romacs--data)
                         (unwind-protect
@@ -285,6 +292,7 @@ fn decide_empty(cx: &mut Leaf<'_>, mut r: Vec<Value>) -> Next {
 /// bytes as unibyte text with undo off, then the protected call.
 fn decide_closure(cx: &mut Leaf<'_>, closure: Value, saved: &[Value]) -> Next {
     let mut r = saved.to_vec();
+    let name = r[DATA];
     let buffer = cx.current_buffer()?;
     let multibyte = if cx.buffer_shape()?.unibyte { Value::NIL } else { Value::TRUE };
     let undo = var(cx, "buffer-undo-list")?;
@@ -294,7 +302,7 @@ fn decide_closure(cx: &mut Leaf<'_>, closure: Value, saved: &[Value]) -> Next {
     cx.fileio_set_multibyte_flag(false)?;
     cx.bset("buffer-undo-list", Value::TRUE)?;
     cx.fileio_fill_raw(&bytes)?;
-    let args = vec![r[ORIG], r[INSERTED], r[ORIG], r[VISIT], r[BEG], r[END], buffer, r[DATA]];
+    let args = vec![name, r[INSERTED], r[ORIG], r[VISIT], r[BEG], r[END], buffer, r[DATA]];
     Ok(Step::Call { f: closure, args, then: empty_decided, saved: r })
 }
 

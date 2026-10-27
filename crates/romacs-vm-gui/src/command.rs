@@ -213,57 +213,116 @@ mod tests {
         assert_eq!(std::fs::read(&file).unwrap(), "* Heading λ!\nλ body\n".as_bytes());
         let _ = std::fs::remove_dir_all(&dir);
     }
-    /// The same journey over UTF-8, CRLF and Latin-1 files (with and without
-    /// a coding cookie): the decoded text, `last-coding-system-used' and
+    /// Pinned GNU's `prin1' of EXPRESSION's value as a list of characters,
+    /// evaluated with `-Q --batch' in DIR under a private HOME and UTF-8 locale.
+    fn gnu_value(dir: &std::path::Path, home: &std::path::Path, expression: &str) -> String {
+        let oracle = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
+        let output = std::process::Command::new(&oracle).current_dir(dir)
+            .env("HOME", home).env("LANG", "C.UTF-8").env_remove("LC_ALL")
+            .args(["-Q", "--batch", "--eval", &format!("(prin1 (append (prin1-to-string {expression}) nil))")])
+            .output().unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        String::from_utf8(output.stdout).unwrap()
+    }
+    /// Type TEXT through the real key path, at the start of the first line
+    /// or at its end, then C-x C-s; each command's outcome in order.
+    fn type_and_save(vm: &mut Vm, at_start: bool, text: &str) -> Vec<CommandOutcome> {
+        let motion: &[i64] = if at_start { &[1] } else { &[1, 5] };
+        let keys = motion.iter().copied().chain(text.chars().map(|c| i64::from(u32::from(c)))).chain([24, 19]);
+        let mut commands = Commands::default();
+        let mut outcomes = Vec::new();
+        for key in keys {
+            vm.eval_source("(set-buffer (window-buffer (selected-window)))").unwrap();
+            outcomes.extend(commands.dispatch(vm, CommandEvent::Character(key)).unwrap());
+        }
+        outcomes
+    }
+    /// The same journey over UTF-8, CRLF, ASCII and Latin-1 files (with and
+    /// without a coding cookie, agreeing with the bytes or not) and a UTF-8
+    /// file with a BOM: the decoded text, `last-coding-system-used' and
     /// `buffer-file-coding-system' after the visit and after C-x C-s, and the
     /// bytes on disk are what pinned GNU's find-file-noselect, insert and
-    /// save-buffer give for a copy of the same file.
+    /// save-buffer give for a copy of the same file. Typing λ into the
+    /// Latin-1 file saves it as UTF-8 (`select-safe-coding-system'), and an X
+    /// typed before the BOM's text stays after the signature.
     #[test]
     fn coding_journey_visits_edits_and_saves_as_pinned_gnu() {
         let dir = std::env::temp_dir().join(format!("romacs-gui-coding-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        let (ours, gnu) = (dir.join("romacs"), dir.join("gnu"));
-        for d in [&ours, &gnu, &dir.join("home")] { std::fs::create_dir_all(d).unwrap(); }
-        let files: [(&str, &[u8]); 4] = [
-            ("utf8.txt", "* Heading\nλ body\n".as_bytes()),
-            ("crlf.txt", "* Heading\r\nλ body\r\n".as_bytes()),
-            ("cookie.txt", b"-*- coding: latin-1 -*-\ncaf\xe9\n"),
+        let (ours, gnu, home) = (dir.join("romacs"), dir.join("gnu"), dir.join("home"));
+        for d in [&ours, &gnu, &home] { std::fs::create_dir_all(d).unwrap(); }
+        let files: [(&str, &[u8], bool, &str); 8] = [
+            ("utf8.txt", "* Heading\nλ body\n".as_bytes(), false, " é!"),
+            ("crlf.txt", "* Heading\r\nλ body\r\n".as_bytes(), false, " é!"),
+            ("ascii.txt", b"hi\n", false, " é!"),
+            ("cookie.txt", b"-*- coding: latin-1 -*-\ncaf\xe9\n", false, " é!"),
+            ("cookie-utf8.txt", b"-*- coding: latin-1 -*-\ncaf\xc3\xa9\n", false, " é!"),
             // 0x93 and 0x94 are C1 bytes mule-conf.el's latin-extra-code-table admits.
-            ("latin.txt", b"caf\xe9 \x93q\x94\n"),
+            ("latin.txt", b"caf\xe9 \x93q\x94\n", false, " é!"),
+            ("lambda.txt", b"caf\xe9\n", false, "λ"),
+            ("bom.txt", b"\xef\xbb\xbfcaf\xc3\xa9\n", true, "X"),
         ];
-        let oracle = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
         let mut vm = Vm::new();
         vm.set_collection_floor(1);
         vm.set_frame_geometry(1600, 1000, 20, 10).unwrap();
         crate::startup::initialize(&mut vm).unwrap();
         let state = "(with-current-buffer (window-buffer (selected-window)) (list (buffer-string) last-coding-system-used buffer-file-coding-system))";
-        for (name, bytes) in files {
+        for (name, bytes, at_start, text) in files {
             std::fs::write(ours.join(name), bytes).unwrap();
             std::fs::write(gnu.join(name), bytes).unwrap();
             let path = |d: &std::path::Path| serde_json::to_string(d.join(name).to_str().unwrap()).unwrap();
-            let expression = format!(
-                "(with-current-buffer (find-file-noselect {}) (let ((visited (list (buffer-string) last-coding-system-used buffer-file-coding-system))) (goto-char (point-min)) (end-of-line) (insert \" é!\") (save-buffer) (list visited (cdr (list (buffer-string) last-coding-system-used buffer-file-coding-system)))))",
-                path(&gnu));
-            let output = std::process::Command::new(&oracle).current_dir(&gnu)
-                .env("HOME", dir.join("home")).env("LANG", "C.UTF-8").env_remove("LC_ALL")
-                .args(["-Q", "--batch", "--eval", &format!("(prin1 (append (prin1-to-string {expression}) nil))")])
-                .output().unwrap();
-            assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
-            let expected = String::from_utf8(output.stdout).unwrap();
+            let motion = if at_start { "" } else { "(end-of-line)" };
+            let expected = gnu_value(&gnu, &home, &format!(
+                "(with-current-buffer (find-file-noselect {}) (let ((visited (list (buffer-string) last-coding-system-used buffer-file-coding-system))) (goto-char (point-min)) {motion} (insert {text:?}) (save-buffer) (list visited (cdr (list (buffer-string) last-coding-system-used buffer-file-coding-system)))))",
+                path(&gnu)));
             vm.eval_source(&format!("(romacs-gui-visit-file {} {name:?})", path(&ours))).unwrap();
             let visited = vm.eval_source(&format!("(prin1-to-string {state})")).unwrap().display().unwrap();
-            let mut keys = Commands::default();
-            for key in [1, 5, 32, 0xe9, 33, 24, 19] {   // C-a C-e " é!" C-x C-s
-                vm.eval_source("(set-buffer (window-buffer (selected-window)))").unwrap();
-                if let Some(out) = keys.dispatch(&mut vm, CommandEvent::Character(key)).unwrap() {
-                    assert!(!out.bell && out.signal.is_none(), "{name}: {out:?}");
-                }
+            for out in type_and_save(&mut vm, at_start, text) {
+                assert!(!out.bell && out.signal.is_none(), "{name}: {out:?}");
             }
             let saved = vm.eval_source(&format!("(prin1-to-string (cdr {state}))")).unwrap().display().unwrap();
             let actual = vm.eval_source(&format!("(append (format \"(%s %s)\" {visited} {saved}) nil)")).unwrap().display().unwrap();
             assert_eq!(actual, expected, "{name}");
             assert_eq!(std::fs::read(ours.join(name)).unwrap(), std::fs::read(gnu.join(name)).unwrap(), "{name} bytes");
         }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+    /// Where no default coding system encodes the text (λ typed under a
+    /// latin-1 cookie) pinned GNU asks through
+    /// `select-safe-coding-system-interactively'. The workspace refuses
+    /// instead: C-x C-s signals `romacs-unsafe-coding' with the unsafe
+    /// defaults and safe systems GNU would offer (those the workspace
+    /// defines), the file keeps its bytes and the buffer stays modified.
+    #[test]
+    fn coding_save_refuses_where_pinned_gnu_would_ask() {
+        let dir = std::env::temp_dir().join(format!("romacs-gui-unsafe-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let (ours, gnu, home) = (dir.join("romacs"), dir.join("gnu"), dir.join("home"));
+        for d in [&ours, &gnu, &home] { std::fs::create_dir_all(d).unwrap(); }
+        let (name, bytes) = ("cookie.txt", b"-*- coding: latin-1 -*-\ncaf\xe9\n");
+        std::fs::write(ours.join(name), bytes).unwrap();
+        std::fs::write(gnu.join(name), bytes).unwrap();
+        let path = |d: &std::path::Path| serde_json::to_string(d.join(name).to_str().unwrap()).unwrap();
+        let asked = gnu_value(&gnu, &home, &format!(
+            "(with-current-buffer (find-file-noselect {}) (goto-char (point-min)) (end-of-line) (insert \"λ\") (defalias 'select-safe-coding-system-interactively (lambda (_from _to codings unsafe &rest _) (throw 'asked (list unsafe codings)))) (list (catch 'asked (save-buffer) 'saved) (buffer-modified-p)))",
+            path(&gnu)));
+        let mut vm = Vm::new();
+        vm.set_collection_floor(1);
+        vm.set_frame_geometry(1600, 1000, 20, 10).unwrap();
+        crate::startup::initialize(&mut vm).unwrap();
+        vm.eval_source(&format!("(romacs-gui-visit-file {} {name:?})", path(&ours))).unwrap();
+        let outcomes = type_and_save(&mut vm, false, "λ");
+        let (save, typed) = outcomes.split_last().unwrap();
+        assert!(typed.iter().all(|out| !out.bell && out.signal.is_none()), "{typed:?}");
+        let signal = save.signal.as_ref().expect("C-x C-s refuses");
+        assert_eq!(save.command.as_deref(), Some("romacs-gui-save-buffer"));
+        let expected = vm.eval_source(&format!(
+            "(let* ((gnu (car (read-from-string (apply #'string '{asked})))) (asked (car gnu))) (list (list 'romacs-unsafe-coding (car asked) (delq nil (mapcar (lambda (c) (and (coding-system-p c) c)) (car (cdr asked))))) (car (cdr gnu))))")).unwrap().display().unwrap();
+        let actual = vm.eval_source(&format!(
+            "(list (cons '{} '{}) (with-current-buffer (window-buffer (selected-window)) (buffer-modified-p)))", signal.condition, signal.data)).unwrap().display().unwrap();
+        assert_eq!(actual, expected);
+        assert_eq!(std::fs::read(ours.join(name)).unwrap(), bytes, "the refused save leaves the file");
+        assert_eq!(std::fs::read(gnu.join(name)).unwrap(), bytes, "GNU asked before writing");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

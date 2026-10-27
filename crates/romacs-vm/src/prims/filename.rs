@@ -26,7 +26,7 @@ fn directory_error(cx: &mut Leaf<'_>, operation: &str, path: &str, error: std::i
 }
 
 /// File names decode as UTF-8 only; other file-name codings are refused.
-fn utf8_file_names(cx: &mut Leaf<'_>, operation: &str) -> std::result::Result<(), Fault> {
+pub(super) fn utf8_file_names(cx: &mut Leaf<'_>, operation: &str) -> std::result::Result<(), Fault> {
     for variable in ["file-name-coding-system", "default-file-name-coding-system"] {
         let symbol = cx.intern(variable);
         let coding = cx.variable_value(symbol)?.unwrap_or(Value::NIL);
