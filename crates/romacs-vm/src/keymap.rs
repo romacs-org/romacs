@@ -47,6 +47,13 @@ impl Vm {
             let map = self.sparse_keymap(Value::NIL);
             self.declare_special_raw(name, map);
         }
+        // keyboard.c init_kboard: the terminal's input-decode-map starts
+        // empty and its local-function-key-map inherits function-key-map.
+        let decode = self.sparse_keymap(Value::NIL);
+        self.declare_special_raw("input-decode-map", decode);
+        let head = self.keymap_symbol("keymap");
+        let local = self.keymap_cons(head, self.slots[self.names["function-key-map"]].value);
+        self.declare_special_raw("local-function-key-map", local);
         for (name, alias, event) in [("esc-map", "ESC-prefix", 27), ("ctl-x-map", "Control-X-prefix", 24)] {
             let map = self.slots[self.names[name]].value;
             let slot = self.slot(alias);

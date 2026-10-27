@@ -62,6 +62,11 @@ const CASES: &[&str] = &[
     r#"(let (got) (global-set-key "r" (lambda () (interactive)
     (setq got (list (read-event) executing-kbd-macro-index (read-char) (this-command-keys) last-input-event))))
   (execute-kbd-macro "rxyz") (list got (with-current-buffer "*scratch*" (buffer-string))))"#,
+    // A read with SECONDS takes the macro's event but leaves it out of the key record.
+    r#"(let (got) (global-set-key "r" (lambda () (interactive)
+    (setq got (list (read-event nil nil 0) (this-command-keys) (read-char nil nil 0) (this-command-keys)
+                    (read-char-exclusive nil nil 1) (this-command-keys-vector) last-input-event))))
+  (execute-kbd-macro "rxyz") (list got (with-current-buffer "*scratch*" (buffer-string))))"#,
     r#"(let (got) (global-set-key "c" (lambda () (interactive)
     (setq got (condition-case e (read-char) (error (list e unread-command-events))))))
   (list (condition-case e (execute-kbd-macro [?c f1]) (error e)) (prog1 got (setq unread-command-events nil))))"#,
@@ -131,6 +136,25 @@ const CASES: &[&str] = &[
     r#"(let (got) (global-set-key [return] (lambda () (interactive)
     (setq got (list this-command-keys-shift-translated (this-command-keys-vector)))))
   (execute-kbd-macro [S-return]) got)"#,
+    // A pending translation prefix in any of the three maps keeps the key
+    // sequence open: C-x @ c is function-key-map's control prefix, whose
+    // function reads the next event. A prefix the macro ends inside is
+    // dropped; an unbound prefix with no translation left is discarded and
+    // reading goes on from the next key (C-x @ then C-x y).
+    r#"(let (got) (global-set-key "\C-a" (lambda () (interactive) (push (list 'ca (this-command-keys-vector) (this-single-command-keys)) got)))
+  (global-set-key (kbd "C-x y") (lambda () (interactive) (push (list 'xy (this-command-keys-vector)) got)))
+  (list (execute-kbd-macro (kbd "C-x @ c a b")) (execute-kbd-macro (kbd "C-x @ C-x y"))
+        (condition-case e (execute-kbd-macro (kbd "a C-x @")) (error e))
+        (nreverse got) (with-current-buffer "*scratch*" (buffer-string))))"#,
+    r#"(let ((key-translation-map (make-sparse-keymap)))
+  (define-key key-translation-map (kbd "C-c q z") "Z")
+  (list (execute-kbd-macro (kbd "a C-c q z b")) (execute-kbd-macro (kbd "C-c q y c"))
+        (condition-case e (execute-kbd-macro (kbd "d C-c q")) (error e)) (with-current-buffer "*scratch*" (buffer-string))))"#,
+    r#"(let ((input-decode-map (make-sparse-keymap)) got)
+  (define-key input-decode-map (kbd "C-c q z") [f7]) (define-key input-decode-map (kbd "q z") [f7])
+  (global-set-key [f7] (lambda () (interactive) (push (list 'f7 (this-command-keys-vector)) got)))
+  (list (execute-kbd-macro (kbd "a C-c q z b q z")) (condition-case e (execute-kbd-macro (kbd "c C-c q")) (error e))
+        got (with-current-buffer "*scratch*" (buffer-string))))"#,
     r#"(list (progn (set--this-command-keys "\370abc") (this-command-keys-vector))
   (progn (set--this-command-keys "") (this-command-keys-vector)) (condition-case e (set--this-command-keys 1) (error e)))"#,
     // The minibuffer reads its input from the macro.
