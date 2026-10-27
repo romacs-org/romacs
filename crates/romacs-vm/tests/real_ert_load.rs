@@ -277,6 +277,27 @@ fn insert_file_contents_refuses_unsupported_decoding_intact() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+// Where GNU would build a composition glyph string, a static or an
+// automatic one in a displayed buffer, find-composition-internal refuses
+// (VM2-COMPOSE1) instead of answering nil.
+#[test]
+fn find_composition_refuses_compositions_it_cannot_build() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut vm = bootstrapped_with(&root, "rlisp/romacs-loadup-bootstrap.el");
+    for (form, kind) in [
+        ("(find-composition-internal 0 1 \"e\\u0301x\" nil)", "with automatic composition"),
+        ("(progn (set-window-buffer nil (get-buffer-create \"rt-c\")) (set-buffer \"rt-c\") (insert \"e\\u0301x\") (find-composition-internal 1 nil nil nil))", "with automatic composition"),
+        ("(let ((s (copy-sequence \"abc\"))) (put-text-property 0 2 'composition '(2 . ?X) s) (with-temp-buffer (find-composition-internal 0 nil s nil)))", "on a static composition"),
+        ("(let ((s (copy-sequence \"abc\"))) (put-text-property 1 2 'composition '(1 . ?X) s) (with-temp-buffer (insert \"xxxx\") (find-composition-internal 0 3 s nil)))", "on a static composition"),
+        // The property is found below a narrowing, searching back to LIMIT.
+        ("(with-temp-buffer (insert \"abc\") (put-text-property 1 2 'composition '(1 . ?X)) (narrow-to-region 2 4) (find-composition-internal 2 1 nil nil))", "on a static composition"),
+        ("(with-temp-buffer (insert \"abc\") (put-text-property 1 2 'composition '(1 . ?X)) (narrow-to-region 2 4) (find-composition-internal 3 1 nil nil))", "on a static composition"),
+    ] {
+        let actual = vm.eval_source(&format!("(condition-case e {form} (error (cadr e)))")).unwrap().display().unwrap();
+        assert_eq!(actual, format!("\"VM2 find-composition-internal {kind} is unsupported\""), "{form}");
+    }
+}
+
 #[test]
 fn write_region_refuses_unsupported_conversion_before_opening() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
@@ -546,6 +567,16 @@ fn daily_driver_load_slice_matches_gnu() {
                                               (setq inner (eq (minibuffer-selected-window) b)) (throw 'exit nil))))))
         (condition-case e (read-from-minibuffer "outer") (error e)) (delete-window b) (list inner result (minibuffer-selected-window)))
       (condition-case e (set-window-combination-limit nil t) (error e)))"###,
+        r###"(progn (require 'subr-x)
+  (prin1-to-string
+   (mapcar (lambda (f) (condition-case e (funcall f) (error e)))
+           (list (lambda () (string-glyph-split "short")) (lambda () (find-composition-internal 0 1 "abc" nil))
+                 (lambda () (with-temp-buffer (find-composition-internal 0 1 "e\u0301x" nil))) (lambda () (with-temp-buffer (string-glyph-split "e\u0301x👍🏽")))
+                 (lambda () (with-temp-buffer (insert "e\u0301x") (find-composition-internal 1 nil nil nil)))
+                 (lambda () (find-composition-internal 5 nil "abc" nil)) (lambda () (find-composition-internal -1 nil "abc" nil))
+                 (lambda () (find-composition-internal "x" nil "abc" nil)) (lambda () (find-composition-internal 0 nil 3 nil))
+                 (lambda () (find-composition-internal 0 "y" "abc" nil)) (lambda () (with-temp-buffer (find-composition-internal 5 nil nil nil)))
+                 (lambda () (find-composition-internal (make-marker) nil "abc" nil)) (lambda () (find-composition-internal 0 2 "abc" t))))))"###,
         r###"(list (secure-hash 'sha256 "héllo ✓") (md5 "héllo") (md5 "héllo" nil nil 'latin-1) (md5 "héllo" nil nil 'nosuch t)
       (condition-case e (md5 "héllo" nil nil 'nosuch) (error e))
       (with-temp-buffer (insert "héllo\nworld")

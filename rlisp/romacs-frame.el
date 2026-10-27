@@ -232,5 +232,57 @@ face specs for the new background mode."
 	      (unless (memq face locally-modified-faces)
 		(face-spec-recalc face frame)))))))))
 
+;; composite.c's `find-composition-internal'. VM2 builds no composition
+;; glyph strings: where GNU would find a static composition, or an automatic
+;; one could form (the current buffer shows in a window and a character near
+;; POS has a `composition-function-table' entry), it refuses
+;; (VM2-COMPOSE1). Everywhere else GNU's answer is nil.
+
+(defun romacs--composition-position (pos)
+  "GNU fix_position: a marker's position or an integer, else an error."
+  (cond ((markerp pos)
+         (or (marker-position pos) (error "Marker does not point anywhere")))
+        ((integerp pos) pos)
+        (t (signal 'wrong-type-argument (list 'integer-or-marker-p pos)))))
+
+(defun find-composition-internal (pos limit string detail-p)
+  "Internal use only.
+
+Return information about composition at or nearest to position POS.
+See `find-composition' for more details."
+  (ignore detail-p)
+  (let* ((from (romacs--composition-position pos))
+         (to (if limit (min (romacs--composition-position limit) (point-max)) -1)))
+    (if string
+        (progn
+          (unless (stringp string) (signal 'wrong-type-argument (list 'stringp string)))
+          (unless (<= 0 from (length string)) (signal 'args-out-of-range (list string pos))))
+      (unless (<= (point-min) from (point-max))
+        (signal 'args-out-of-range (list (current-buffer) pos))))
+    ;; find_composition probes the property outside any narrowing.
+    (when (save-restriction
+            (unless string (widen))
+            (or (get-text-property from 'composition string)
+                (and (>= to 0) (> to from)
+                     (/= (next-single-property-change from 'composition string to) to))
+                (and (>= to 0) (< to from)
+                     (or (and (> from (if string 0 (point-min)))
+                              (get-text-property (1- from) 'composition string))
+                         (/= (previous-single-property-change from 'composition string to) to)))))
+      (error "VM2 find-composition-internal on a static composition is unsupported"))
+    (when (and (if string (multibyte-string-p string) enable-multibyte-characters)
+               auto-composition-mode
+               (get-buffer-window (current-buffer)))
+      (let* ((limit (if (< to 0) from to))
+             (head (if string 0 (save-excursion (goto-char from) (pos-bol))))
+             (tail (if string (length string) (point-max)))
+             (end (min tail (if (<= limit from) (+ from 1 3) (+ limit 3))))
+             (i head))
+        (while (< i end)
+          (when (aref composition-function-table (if string (aref string i) (char-after i)))
+            (error "VM2 find-composition-internal with automatic composition is unsupported"))
+          (setq i (1+ i)))))
+    nil))
+
 (provide 'romacs-frame)
 ;;; romacs-frame.el ends here
