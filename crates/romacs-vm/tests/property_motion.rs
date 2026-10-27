@@ -1,7 +1,8 @@
 //! Property motion against pinned GNU (textprop.c): next-single-,
 //! previous-single- and previous-property-change over strings and buffers,
 //! with limits, markers, narrowing and `category', and the char-property
-//! versions that compose them with overlay changes.
+//! versions that compose them with overlay changes; and marker positions in
+//! get-text-property and text-properties-at, as button.el's button-get passes them.
 use romacs_vm::Vm;
 
 /// One expression per line.
@@ -12,6 +13,7 @@ const CASES: &str = r###"
 (progn (put 'romacs-pm-cat 'p 7) (let ((s (concat "a" (propertize "b" 'category 'romacs-pm-cat) (propertize "c" 'p 7) "d"))) (list (next-single-property-change 0 'p s) (next-single-property-change 1 'p s) (previous-single-property-change 4 'p s) (previous-single-property-change 3 'p s) (previous-property-change 3 s))))
 (with-temp-buffer (insert "abcdefghij") (put-text-property 3 4 'p 1) (let ((o (make-overlay 6 8))) (overlay-put o 'p 2) (list (mapcar (lambda (i) (list (next-char-property-change i) (previous-char-property-change i) (previous-single-char-property-change i 'p))) '(1 2 3 4 5 6 7 8 9 10 11)) (next-char-property-change 1 2) (next-char-property-change 1 (copy-marker 20)) (previous-char-property-change 11 9) (previous-char-property-change 11 (copy-marker -5)) (previous-single-char-property-change 11 'p nil 9) (previous-single-char-property-change 11 'p nil (copy-marker 7)) (previous-single-char-property-change 3 'p nil 5) (previous-single-char-property-change (copy-marker 9) 'p (current-buffer)) (progn (narrow-to-region 4 9) (list (previous-single-char-property-change 9 'p) (previous-single-char-property-change 9 'p nil 2) (previous-char-property-change 9) (next-char-property-change 4))))))
 (let ((s (concat "ab" (propertize "cd" 'p 1) "e")) (b (get-buffer-create " romacs-pm"))) (with-current-buffer b (erase-buffer) (insert "xyz") (put-text-property 2 3 'p 1)) (list (previous-single-char-property-change 5 'p s) (previous-single-char-property-change 3 'p s) (previous-single-char-property-change 2 'p s) (previous-single-char-property-change 2 'p s 1) (condition-case e (previous-single-char-property-change 2 'p s 'x) (error e)) (previous-single-char-property-change 4 'p b) (previous-single-char-property-change 3 'p b) (condition-case e (previous-single-char-property-change 3 'p 'x) (error e)) (condition-case e (previous-single-char-property-change 'x 'p) (error e)) (condition-case e (next-char-property-change 1 'x) (error e)) (condition-case e (previous-char-property-change 1 'x) (error e)) (eq (current-buffer) b)))
+(with-temp-buffer (insert "x Go") (put-text-property 3 5 'q 3) (put-text-property 1 2 'r 1) (let ((s (propertize "xy" 'q 2)) (m (copy-marker 4 t))) (list (get-text-property (copy-marker 3) 'q) (text-properties-at (copy-marker 1)) (get-text-property (copy-marker 1) 'q s) (get-text-property m 'q (marker-buffer m)) (text-properties-at m) (get-text-property (point-marker) 'q))))
 "###;
 
 #[test]

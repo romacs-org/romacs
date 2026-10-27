@@ -1002,8 +1002,9 @@ impl Vm {
         } else {
             object
         };
+        // validate_interval_range: CHECK_FIXNUM_COERCE_MARKER.
         let at =
-            usize::try_from(self.stack[start].as_integer()?).map_err(|_| "index out of range")?;
+            usize::try_from(self.scalar_position(self.stack[start])?).map_err(|_| "index out of range")?;
         let raw = self.annotation_raw(object, at)?;
         if raw_query {
             let mut values = vec![];
