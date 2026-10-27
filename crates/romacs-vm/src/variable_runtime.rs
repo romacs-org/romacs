@@ -250,7 +250,7 @@ impl Vm {
         let slot = self.indirect_variable(slot);
         // Built-in automatic locals stay heap-free until first lookup, as
         // required by cold VM/code-image construction.
-        if (slot == self.truncate_lines_slot || self.names.get("case-symbols-as-words") == Some(&slot)) && self.local_table(slot)?.is_none() {
+        if (slot == self.truncate_lines_slot || slot == self.case_symbols_slot) && self.local_table(slot)?.is_none() {
             let table = self.allocate_object(data::Object::HashTable(Box::new(hash::HashTable::new_local_bindings())));
             self.install_local_table(slot, table, false);
         }

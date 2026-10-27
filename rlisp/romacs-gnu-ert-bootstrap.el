@@ -64,6 +64,9 @@
 (load "international/mule.el" nil t t)
 (load "international/mule-conf.el" nil t t)
 (load "international/mule-cmds.el" nil t t)
+;; simple.el's undo-auto--undoable-change runs on every undoable change and
+;; sets its boundary timer with run-at-time, as GNU's loadup provides it.
+(load "emacs-lisp/timer.el" nil t t)
 
 (provide 'romacs-gnu-ert-bootstrap)
 ;;; romacs-gnu-ert-bootstrap.el ends here

@@ -386,7 +386,7 @@ impl Vm {
         }
         Ok(())
     }
-    fn overlay_property(&self, v: Value, key: Value) -> Result<Value> {
+    pub(crate) fn overlay_property(&self, v: Value, key: Value) -> Result<Value> {
         Ok(self
             .overlay(v)?
             .properties

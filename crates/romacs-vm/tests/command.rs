@@ -123,6 +123,9 @@ fn unicode_default_lookup_and_event_diversity_do_not_retain_a_binding_per_event(
         let mut vm = Vm::new();
         vm.set_collection_floor(1);
         vm.eval_source("(make-sparse-keymap)").unwrap();
+        // Each typed character is undoable, and GNU keeps its undo entries
+        // too: this measures only what the key lookup retains.
+        vm.eval_source("(setq buffer-undo-list t)").unwrap();
         assert_eq!(text(&mut vm, "(key-binding [955])"), "self-insert-command");
         for c in 1000..1000 + n {
             vm.command_event(CommandEvent::Character(c)).unwrap();

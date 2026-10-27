@@ -192,7 +192,13 @@ error, a function is called (minibuffer-quit-recursive-edit throws one)."
             minibuffer-default outer-default romacs--minibuf-level outer-level
             romacs--minibuf-selected-window outer-selected)
       (set-buffer buffer)
-      (erase-buffer)
+      ;; minibuf.c:1186: past the read-only prompt, with no hooks, and
+      ;; leaving deactivate-mark alone.
+      (let ((inhibit-read-only t)
+            (inhibit-modification-hooks t)
+            (old-deactivate-mark deactivate-mark))
+        (erase-buffer)
+        (setq deactivate-mark old-deactivate-mark))
       (set-window-buffer mini mini-buffer)
       (when (window-live-p calling-window)
         (select-window calling-window))

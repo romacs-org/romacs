@@ -799,6 +799,62 @@ fn daily_driver_load_slice_matches_gnu() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
+// insdel.c and undo.c's records under GNU's own undo (simple.el): typed,
+// deleted and killed text undoes to GNU's states, and the command loop's
+// boundaries and amalgamation give GNU's buffer-undo-list.
+#[test]
+fn edit_undo_matches_gnu() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut vm = bootstrapped_with(&root, "rlisp/romacs-loadup-bootstrap.el");
+    let expressions = [
+        r###"(with-temp-buffer (buffer-enable-undo) (insert "hello") (undo-boundary) (insert " world") (undo-boundary) (goto-char 3) (delete-char 2) (undo-boundary) (put-text-property 1 3 'face 'bold) (undo-boundary) (let ((states (list (buffer-string))) (last-command nil)) (undo) (setq states (cons (buffer-string) states)) (let ((last-command 'undo)) (undo) (setq states (cons (buffer-string) states)) (undo) (setq states (cons (buffer-string) states)) (undo) (setq states (cons (buffer-string) states))) (list (nreverse states) (point) (buffer-modified-p))))"###,
+        r###"(with-temp-buffer (buffer-enable-undo) (insert "abcdef") (undo-boundary) (let ((m (copy-marker 3)) (n (copy-marker 4 t))) (delete-region 2 5) (undo-boundary) (primitive-undo 1 (cdr buffer-undo-list)) (list (buffer-string) (marker-position m) (marker-position n) (point))))"###,
+        r###"(with-temp-buffer (buffer-enable-undo) (insert "one two") (undo-boundary) (erase-buffer) (undo-boundary) (insert-before-markers "Z") (undo-boundary) (let ((last-command nil)) (undo) (let ((last-command 'undo)) (undo)) (list (buffer-string) (point))))"###,
+        r###"(with-temp-buffer (buffer-enable-undo) (insert "aXbXc") (undo-boundary) (subst-char-in-region 1 6 ?X ?Y) (list (buffer-string) buffer-undo-list (progn (undo-boundary) (primitive-undo 1 (cdr buffer-undo-list)) (buffer-string))))"###,
+        r###"(with-temp-buffer (buffer-enable-undo) (let ((log nil)) (add-hook 'after-change-functions (lambda (b e l) (push (list b e l) log)) nil t) (insert "abc") (undo-boundary) (delete-region 1 3) (undo-boundary) (primitive-undo 1 (cdr buffer-undo-list)) (list (buffer-string) (nreverse log) buffer-undo-list)))"###,
+        r###"(with-temp-buffer (buffer-enable-undo) (dotimes (i 5) (insert "x")) (indent-to 12) (move-to-column 3 t) (insert "\t") (move-to-column 10 t) (undo-boundary) (list (buffer-string) buffer-undo-list (progn (primitive-undo 1 (cdr buffer-undo-list)) (buffer-string))))"###,
+        r###"(with-temp-buffer (buffer-enable-undo) (let ((log nil)) (add-hook 'before-change-functions (lambda (b e) (push (list 'before b e) log)) nil t) (insert "abc") (kill-region 1 3) (yank) (list (buffer-string) (car kill-ring) (nreverse log) buffer-undo-list)))"###,
+        r###"(with-temp-buffer (buffer-enable-undo) (insert "ab") (setq buffer-undo-list t) (insert "cd") (list buffer-undo-list (progn (buffer-enable-undo) (insert "e") buffer-undo-list)))"###,
+    ];
+    let binary = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
+    let gnu = |source: &str| {
+        let output = std::process::Command::new(&binary).args(["-Q", "--batch", "--eval", source]).output().unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        String::from_utf8(output.stdout).unwrap()
+    };
+    let text = |codes: &str| codes.trim_matches(|c| c == '(' || c == ')').split_whitespace()
+        .filter_map(|n| n.parse::<u32>().ok().and_then(char::from_u32)).collect::<String>();
+    let mut failures = Vec::new();
+    for expression in expressions {
+        let source = format!("(string-to-list (prin1-to-string (condition-case err {expression} (error (list 'signal err)))))");
+        let expected = gnu(&format!("(prin1 {source})"));
+        let actual = vm.eval_source(&source).unwrap().display().unwrap();
+        if actual != expected {
+            failures.push(format!("{expression}\n  GNU    {}\n  Romacs {}", text(&expected), text(&actual)));
+        }
+    }
+    // Typing in the command loop: GNU's keys as one keyboard macro, each
+    // command's state taken by post-command-hook (command_loop_1 also runs
+    // it once on entry, hence the last nine); Romacs's keys through its
+    // command boundary. The states print at the end, as the undo entries
+    // they share keep growing.
+    let state = "(setq rt-states (cons (list (buffer-string) (point) buffer-undo-list) rt-states))";
+    let keys: [i64; 9] = [97, 98, 99, 127, 100, 2, 101, 67108911, 67108911];
+    let script = format!("(progn (switch-to-buffer (get-buffer-create \"typing\")) (buffer-enable-undo) (defvar rt-states nil) (add-hook 'post-command-hook (lambda () {state})) (execute-kbd-macro (kbd \"a b c DEL d C-b e C-/ C-/\")) (prin1 (string-to-list (prin1-to-string (last (nreverse rt-states) 9)))))");
+    let expected = gnu(&script);
+    vm.eval_source("(progn (switch-to-buffer (get-buffer-create \"typing\")) (buffer-enable-undo) (defvar rt-states nil))").unwrap();
+    for code in keys {
+        let outcome = vm.command_event(romacs_vm::CommandEvent::Character(code)).unwrap();
+        assert!(outcome.signal.is_none(), "{code}: {:?}", outcome.signal);
+        vm.eval_source(state).unwrap();
+    }
+    let actual = vm.eval_source("(string-to-list (prin1-to-string (nreverse rt-states)))").unwrap().display().unwrap();
+    if actual != expected {
+        failures.push(format!("typing\n  GNU    {}\n  Romacs {}", text(&expected), text(&actual)));
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
 // process.c wait_reading_process_output runs keyboard.c's timer_check: GNU's
 // timer.el timers fire inside accept-process-output and sleep-for, and
 // with-timeout can end a wait for a process that never answers.

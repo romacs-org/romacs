@@ -343,6 +343,7 @@ impl Vm {
         // cell (forwarded.rs). Per-buffer values are traced with their buffer.
         self.forwarded.visit_values(&mut |v| pending.push(*v));
         pending.extend_from_slice(&self.standard_case_tables);
+        pending.push(self.command_point.1);
         self.charsets.trace(&mut pending);
         for &(slot, old, buffer, _) in &self.dynamic {
             // Both saved and active values stay roots even if Lisp switches
@@ -683,6 +684,7 @@ impl Vm {
         }
         self.forwarded.visit_values(&mut |v| rewrite(v));
         for v in &mut self.standard_case_tables { rewrite(v); }
+        rewrite(&mut self.command_point.1);
         self.charsets.rewrite(&rewrite);
         for (_, v, buffer, _) in &mut self.dynamic {
             rewrite(v);

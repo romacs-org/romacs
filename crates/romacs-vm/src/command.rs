@@ -285,6 +285,13 @@ impl Vm {
             .ok_or("symbol command required")?
             .clone();
         self.record_recent_key(RecentKey::Command(command.clone()));
+        // command_loop_1: the previous command's undo boundaries, then the
+        // point record_point compares against.
+        self.eval_form_raw(&call("if", vec![
+            call("fboundp", vec![quote(sym("undo-auto--add-boundary"))]),
+            call("undo-auto--add-boundary", vec![]),
+        ]))?;
+        self.note_command_point()?;
         let form = call(
             "progn",
             vec![
@@ -413,7 +420,6 @@ impl Vm {
     ) -> std::result::Result<Value, CommandFault> {
         use Primitive::*;
         let valid = match p {
-            SelfInsertCommand | DeleteChar | DeleteBackwardChar => (1..=2).contains(&n),
             ForwardChar | BackwardChar | BeginningOfLine | EndOfLine => n <= 1,
             ThisCommandKeys => n == 0,
             _ => false,
@@ -435,48 +441,6 @@ impl Vm {
         } else {
             self.stack[start].as_integer()?
         };
-        if p == SelfInsertCommand {
-            let event = if n == 2 && self.stack[start + 1] != Value::NIL {
-                let value = self.stack[start + 1];
-                let slot = self.slot("last-command-event");
-                self.slots[slot].value = value;
-                value
-            } else {
-                let slot = self.slot("last-command-event");
-                self.slots[slot].value
-            };
-            if count < 0 {
-                return Err(CommandFault::Internal(format!(
-                    "Negative repetition argument {count}"
-                )));
-            }
-            let Some(c) = event
-                .integer_value()
-                .and_then(|c| u32::try_from(c).ok())
-                .and_then(char::from_u32)
-            else {
-                return Ok(Value::NIL);
-            };
-            let size = (count as usize)
-                .checked_mul(c.len_utf8())
-                .ok_or("insertion too large".to_owned())?;
-            let mut inserted = String::new();
-            inserted
-                .try_reserve(size)
-                .map_err(|_| "insertion too large".to_owned())?;
-            for _ in 0..count {
-                inserted.push(c);
-            }
-            let value = self.allocate_object(Object::String(Box::new(data::LispString::new(
-                &inserted,
-            ))));
-            return self
-                .command_buffer_call(Insert, &[value])
-                .map_err(Into::into);
-        }
-        if n == 2 && self.stack[start + 1] != Value::NIL {
-            return Err(CommandFault::Internal("killflag is not supported".into()));
-        }
         let index = self.buffer_index()?;
         let (chars, point, low, high) = match &self.objects[index] {
             Object::Buffer(b) => {
@@ -498,7 +462,7 @@ impl Vm {
             ),
             _ => unreachable!(),
         };
-        let delta = if matches!(p, BackwardChar | DeleteBackwardChar) {
+        let delta = if p == BackwardChar {
             -count
         } else {
             count
@@ -547,19 +511,9 @@ impl Vm {
             None
         };
         let dest = target.clamp(low as i64, high as i64);
-        if matches!(p, DeleteChar | DeleteBackwardChar) {
-            if let Some(s) = boundary {
-                return Err(CommandFault::Boundary(s));
-            }
-            self.command_buffer_call(
-                DeleteRegion,
-                &[Value::integer(point as i64 + 1)?, Value::integer(dest + 1)?],
-            )?;
-        } else {
-            self.command_buffer_call(GotoChar, &[Value::integer(dest + 1)?])?;
-            if let Some(s) = boundary {
-                return Err(CommandFault::Boundary(s));
-            }
+        self.command_buffer_call(GotoChar, &[Value::integer(dest + 1)?])?;
+        if let Some(s) = boundary {
+            return Err(CommandFault::Boundary(s));
         }
         Ok(Value::NIL)
     }

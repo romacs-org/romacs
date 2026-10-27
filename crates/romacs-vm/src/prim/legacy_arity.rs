@@ -127,7 +127,7 @@ pub(super) fn arity(primitive: Primitive) -> (usize, Option<usize>) {
         CurrentBuffer | Point | PointMin | PointMax | BufferSize | ThisCommandKeys | Widen
         | BufferString | EncodeBufferUtf8 | DecodeBufferUtf8 | CacheStats | CacheClear
         | CacheEntries | MakeMarker | SyntaxTable | StandardSyntaxTable | SelectedWindow
-        | SelectedFrame | CurrentGlobalMap | EraseBuffer | EmacsLispMode | Daemonp
+        | SelectedFrame | CurrentGlobalMap | EmacsLispMode | Daemonp
         | DaemonInitialized | ReadHostEvent => (0, Some(0)),
         CharAfter | ForwardChar | BackwardChar | BeginningOfLine | EndOfLine | CopySyntaxTable
         | WindowBuffer | WindowStart | WindowPoint | FramePixelWidth | FramePixelHeight
@@ -137,7 +137,7 @@ pub(super) fn arity(primitive: Primitive) -> (usize, Option<usize>) {
         | MakeSparseKeymap | ForwardLine | MenuBarMode | ForceModeLineUpdate | TempBuffer => {
             (0, Some(1))
         }
-        SelfInsertCommand | DeleteChar | DeleteBackwardChar | Eval | Provide | Featurep
+        Eval | Provide | Featurep
         | ExpandFileName | RawPropertiesAt | KillNew | CurrentKill | CopyMarker | LookingAt
         | MatchString | SelectWindow | Macroexpand | Signal => (1, Some(2)),
         Require | Prin1ToString | SwitchToBuffer | AutoloadDoLoad => (1, Some(3)),

@@ -1490,7 +1490,6 @@ fn lower(vm: &Vm, op: Op) -> Inst {
                     (Primitive::Equal, 2) => equal,
                     (Primitive::Cons, 2) => cons,
                     (Primitive::Remainder, 2) => remainder,
-                    (Primitive::Insert, 1) => insert_string,
                     (Primitive::Aref, 2) | (Primitive::Length, 1) => sequence_read,
                     (Primitive::CharAfter, 0 | 1)
                     | (
@@ -1503,6 +1502,9 @@ fn lower(vm: &Vm, op: Op) -> Inst {
                     | (Primitive::GotoChar, 1) => buffer_read,
                     _ => direct,
                 };
+            } else if e == 1 && prim::generated(target).is_some_and(|d| d.name == "insert") {
+                i.value = target;
+                i.handler = insert_string;
             }
         }
         _ => {}
@@ -2910,13 +2912,12 @@ fn primitive_target(p: Primitive) -> PrimitiveCall {
     use Primitive::*;
     match p {
         ClosureMetadata | ClosureDocument | MakeInterpretedClosure => Vm::interpreted_closure_primitive,
-        SelfInsertCommand | ForwardChar | BackwardChar | BeginningOfLine | EndOfLine
-        | DeleteChar | DeleteBackwardChar | ThisCommandKeys => {
+        ForwardChar | BackwardChar | BeginningOfLine | EndOfLine | ThisCommandKeys => {
             Vm::command_primitive
         }
         TempBuffer => Vm::eval_buffer_primitive,
         DeepEqual | Min | Append | Prin1ToString => Vm::eval_data_primitive,
-        GetBuffer | EraseBuffer | ForwardLine | SwitchToBuffer | EmacsLispMode | MenuBarMode
+        GetBuffer | ForwardLine | SwitchToBuffer | EmacsLispMode | MenuBarMode
         | ForceModeLineUpdate | LocateLibrary | Daemonp | DaemonInitialized => {
             Vm::eval_buffer_primitive
         }
@@ -2976,7 +2977,7 @@ fn primitive_value(
     // allocations below: `list_value` only pushes, and collection is request
     // driven, which is the same sequencing `condition_call` and `hash_call` rely
     // on.
-    if (Primitive::SelfInsertCommand as usize..=Primitive::ThisCommandKeys as usize)
+    if (Primitive::ForwardChar as usize..=Primitive::ThisCommandKeys as usize)
         .contains(&(p as usize))
     {
         let mut signal = None;
@@ -3419,9 +3420,10 @@ unsafe fn insert_string(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> V
         if a.max(b) >= e.vm.objects.len() {
             return direct(e, r, pc);
         }
-        if e.vm.ensure_buffer_writable().is_err() {
+        // Only an insertion that runs no Lisp skips the general bracket.
+        let Some(quiet) = e.vm.quiet_insertion() else {
             return direct(e, r, pc);
-        }
+        };
         let (source, target) = if a < b {
             let (x, y) = e.vm.objects.split_at_mut(b);
             (&x[a], &mut y[0])
@@ -3432,8 +3434,12 @@ unsafe fn insert_string(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> V
         let (data::Object::String(chars), data::Object::Buffer(text)) = (source, target) else {
             return direct(e, r, pc);
         };
+        let length = chars.len();
         if !chars.properties.is_empty() || !text.append_utf8(chars.as_str()) {
             return direct(e, r, pc);
+        }
+        if e.vm.quiet_inserted(quiet, length).is_err() {
+            return fail(e, "an insertion's undo record or deactivate-mark failed");
         }
         e.vm.display_state.version += 1;
         *r.add(i.a) = Value::NIL;

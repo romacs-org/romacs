@@ -273,6 +273,21 @@ impl AnchorTree {
         }
         find(self, self.root, 0, (pos, bias == Bias::Right), &predicate)
     }
+    /// Whether any anchor lies at a position in A..=B.
+    pub fn any_between(&self, a: u32, b: u32) -> bool {
+        fn any(t: &AnchorTree, i: u32, offset: u32, a: u32, b: u32) -> bool {
+            if i == NIL {
+                return false;
+            }
+            let n = t.n[i as usize];
+            let pos = n.pos.wrapping_add(offset);
+            let child = offset.wrapping_add(n.lazy);
+            (a..=b).contains(&pos)
+                || (pos >= a && any(t, n.l, child, a, b))
+                || (pos <= b && any(t, n.r, child, a, b))
+        }
+        any(self, self.root, 0, a, b)
+    }
     #[inline]
     pub fn bias(&self, h: Anchor) -> Option<Bias> {
         self.valid(h).then(|| {
