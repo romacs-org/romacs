@@ -756,7 +756,7 @@ fn signal_hook(e: &mut Engine<'_>, condition: Value, data: Value, failed_depth: 
     e.vm.gc_threshold = threshold;
     e.vm.stack = stack;
     e.vm.external_roots = external;
-    e.vm.execution = Program::default();
+    e.vm.end_nested_execution();
     e.code.resize_with(e.vm.functions.len(), Vec::new);
     // Rebase from the suspended allocation, which may now need a larger
     // width because compiling the hook introduced a wider function.
@@ -1134,8 +1134,19 @@ impl Vm {
         stack.copy_from_slice(&self.external_roots[roots..stack_end]);
         self.stack = stack;
         self.external_roots.truncate(roots);
-        self.execution = Program::default();
+        self.end_nested_execution();
         result
+    }
+
+    /// After a nested engine run: its lowered code goes (the suspended engine
+    /// owns the program), but its register storage, all NIL again, is kept
+    /// for the next nested run instead of being reallocated and refilled.
+    pub(super) fn end_nested_execution(&mut self) {
+        let registers = std::mem::take(&mut self.execution.registers);
+        self.execution = Program::default();
+        if !registers.is_empty() {
+            self.spare_registers.push(registers);
+        }
     }
 
     pub(crate) fn pending_eval_escape(&self) -> Option<(Value, Value)> {
@@ -1207,6 +1218,9 @@ fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Va
         .and_then(|n| n.checked_add(4096))
         .ok_or("register storage overflow")?;
     vm.stack = std::mem::take(&mut program.registers);
+    if vm.stack.is_empty() {
+        vm.stack = vm.spare_registers.pop().unwrap_or_default();
+    }
     vm.stack.resize(size, Value::NIL);
     vm.stack[..args.len()].copy_from_slice(args);
     let regs = vm.stack.as_mut_ptr();
@@ -3090,7 +3104,7 @@ unsafe fn force_lazy(e: &mut Engine<'_>, r: *mut Value, function: usize) -> Opti
         e.vm.gc_threshold = threshold;
         e.vm.stack = stack;
         e.vm.external_roots = external;
-        e.vm.execution = Program::default();
+        e.vm.end_nested_execution();
         e.code.resize_with(e.vm.functions.len(), Vec::new);
         let width = e.vm.register_width;
         let Some(size) = width.checked_mul((e.frames.len() + 3).max(513)).and_then(|n| n.checked_add(4096)) else {
@@ -3160,7 +3174,7 @@ unsafe fn autoload_then(e: &mut Engine<'_>, r: *mut Value, function: Value, fund
         e.vm.gc_threshold = threshold;
         e.vm.stack = stack;
         e.vm.external_roots = external;
-        e.vm.execution = Program::default();
+        e.vm.end_nested_execution();
         e.code.resize_with(e.vm.functions.len(), Vec::new);
         let width = e.vm.register_width;
         let Some(size) = width.checked_mul((e.frames.len() + 3).max(513)).and_then(|n| n.checked_add(4096)) else {
@@ -3230,7 +3244,7 @@ unsafe fn reentrant_load(
         e.vm.gc_threshold = threshold;
         e.vm.stack = stack;
         e.vm.external_roots = external;
-        e.vm.execution = Program::default();
+        e.vm.end_nested_execution();
         e.code.resize_with(e.vm.functions.len(), Vec::new);
         let width = e.vm.register_width;
         let Some(size) = width.checked_mul((e.frames.len() + 3).max(513)).and_then(|n| n.checked_add(4096)) else {
