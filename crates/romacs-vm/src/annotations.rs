@@ -663,16 +663,11 @@ impl Vm {
             return Ok("t");
         }
         let slot = value.index(7)?.checked_sub(1).ok_or("symbol required")?;
-        self.names
-            .iter()
-            .find(|(_, v)| {
-                #[cfg(test)]
-                self.variable_read_probes
-                    .set(self.variable_read_probes.get() + 1);
-                **v == slot
-            })
-            .map(|(k, _)| k.as_str())
-            .ok_or("symbol required".into())
+        #[cfg(test)]
+        self.variable_read_probes.set(self.variable_read_probes.get() + 1);
+        // Only an interned symbol names a property: its name maps back to it.
+        let name = self.symbol_names.get(slot).ok_or("symbol required")?;
+        if self.names.get(name) == Some(&slot) { Ok(name.as_str()) } else { Err("symbol required".into()) }
     }
     fn annotation_variable(&self, name: &str) -> Value {
         self.names

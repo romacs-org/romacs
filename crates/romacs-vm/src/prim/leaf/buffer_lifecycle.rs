@@ -16,8 +16,7 @@ impl Leaf<'_> {
             else if self.string_view(buffer).is_ok() { self.lifecycle_get(buffer)? }
             else { return Err(Fault::Wrong("bufferp", buffer)); };
         self.vm.ensure_windows().map_err(Fault::Error)?;
-        let mini = self.vm.objects.iter().any(|object|
-            matches!(object, Object::Window(w) if w.mini && w.buffer == buffer));
+        let mini = self.vm.minibuffer_window_buffer() == Some(buffer);
         let active = self.vm.names.get("romacs--minibuf-level")
             .is_some_and(|&slot| self.vm.slots[slot].value.integer_value().is_some_and(|n| n > 0));
         Ok(if mini && (live == Value::NIL || active) { Value::TRUE } else { Value::NIL })

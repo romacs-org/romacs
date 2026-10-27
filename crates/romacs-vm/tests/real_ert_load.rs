@@ -567,6 +567,12 @@ fn daily_driver_load_slice_matches_gnu() {
                                               (setq inner (eq (minibuffer-selected-window) b)) (throw 'exit nil))))))
         (condition-case e (read-from-minibuffer "outer") (error e)) (delete-window b) (list inner result (minibuffer-selected-window)))
       (condition-case e (set-window-combination-limit nil t) (error e)))"###,
+        r###"(prin1-to-string
+ (list (minibufferp) (minibufferp (window-buffer (minibuffer-window))) (minibufferp (window-buffer (minibuffer-window)) t) (minibufferp " *Minibuf-0*")
+       (condition-case e (minibufferp 3) (error e)) (condition-case e (minibufferp "nosuch") (error e))
+       (let ((executing-kbd-macro t) (minibuffer-setup-hook (list (lambda () (setq rt-mbp (list (minibufferp) (minibufferp nil t))) (throw 'exit nil)))))
+         (defvar rt-mbp nil) (condition-case e (read-from-minibuffer "x") (error e)) rt-mbp)
+       (let ((s (copy-sequence "ab"))) (put-text-property 0 1 'face 'bold s) (get-text-property 0 'face s))))"###,
         r###"(progn (defvar rt-tl 0)
   (prin1-to-string
    (with-temp-buffer

@@ -191,6 +191,10 @@ impl Vm {
         Ok(false)
     }
 
+    /// The buffer the frame's minibuffer window shows (VM2 has one frame).
+    pub(crate) fn minibuffer_window_buffer(&self) -> Option<Value> {
+        self.window(self.window_root_peek(MINI)).ok().map(|w| w.buffer)
+    }
     /// The root/selected/minibuffer window, read without interning: the
     /// slot exists once `ensure_windows` has run.
     fn window_root_peek(&self, name: &str) -> Value {
