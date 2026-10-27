@@ -208,3 +208,8 @@ defsubr! { name = "active-minibuffer-window", gnu = "minibuf.c:215", effect = Re
 fn active_minibuffer_window(cx) {
     cx.windows().active_minibuffer_window()
 }}
+
+defsubr! { name = "frame-first-window", gnu = "window.c:390", effect = Reads,
+fn frame_first_window(cx; optional frame_or_window: Value) {
+    cx.windows().frame_first_window(frame_or_window)
+}}

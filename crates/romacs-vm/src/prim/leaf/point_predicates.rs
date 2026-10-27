@@ -95,3 +95,47 @@ impl Leaf<'_> {
         Ok((point == beginning, point == end, previous_newline, next_newline))
     }
 }
+
+impl Leaf<'_> {
+    /// fns.c Fline_number_at_pos: one more than the newlines from the
+    /// accessible start (the buffer start when ABSOLUTE) to POSITION.
+    pub fn line_number_at_pos(&mut self, position: Value, absolute: Value) -> std::result::Result<Value, Fault> {
+        // display_count_lines: with `selective-display' t, a CR ends a line too.
+        let name = self.intern("selective-display");
+        let selective = self.variable_value(name)?.is_some_and(|v| v != Value::NIL && v.integer_value().is_none());
+        let index = self.vm.buffer_index().map_err(Fault::Error)?;
+        let size = match &self.vm.objects[index] {
+            data::Object::Buffer(b) => b.len_chars(),
+            data::Object::ByteBuffer(b) => b.bytes.len(),
+            _ => unreachable!("buffer_index validates"),
+        } as i64;
+        let mut pos = match self.marker_position(position) {
+            Some(Some(n)) => n,
+            Some(None) => return Err(Fault::Error("Marker does not point anywhere".into())),
+            None if position == Value::NIL => self.point()?,
+            None => {
+                let pos = position.integer_value().ok_or(Fault::Wrong("fixnump", position))?;
+                if pos < 1 || pos > size + 1 {
+                    return Err(Fault::Range3(position, Value::integer(1).unwrap(), Value::integer(size + 1).map_err(Fault::Error)?));
+                }
+                pos
+            }
+        };
+        let (text, low, high): (&[u8], i64, i64) = match &self.vm.objects[index] {
+            data::Object::Buffer(b) => {
+                let r = b.accessible();
+                (b.bytes(), b.char_of_byte(r.start).map_err(Fault::Error)?.0 as i64 + 1, b.char_of_byte(r.end).map_err(Fault::Error)?.0 as i64 + 1)
+            }
+            data::Object::ByteBuffer(b) => (&b.bytes, b.restriction.start.0 as i64 + 1, b.restriction.end.0 as i64 + 1),
+            _ => unreachable!("buffer_index validates"),
+        };
+        let start = if absolute == Value::NIL { pos = pos.clamp(low, high); low } else { 1 };
+        let byte = |c: i64| match &self.vm.objects[index] {
+            data::Object::Buffer(b) => b.byte_of_char(CharOffset((c - 1) as usize)).map(|b| b.0).map_err(Fault::Error),
+            _ => Ok((c - 1) as usize),
+        };
+        let (from, to) = (byte(start)?, byte(pos.max(start))?);
+        let lines = text[from..to].iter().filter(|&&c| c == b'\n' || (selective && c == b'\r')).count() as i64 + 1;
+        Value::integer(lines).map_err(Fault::Error)
+    }
+}

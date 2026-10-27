@@ -896,6 +896,32 @@ impl Vm {
         value: Value,
         object: Value,
     ) -> crate::prim::Out {
+        self.text_property_scan(start, end, property, value, object, false)
+    }
+
+    /// textprop.c Ftext_property_any.
+    pub(crate) fn text_property_any_values(
+        &mut self,
+        start: Value,
+        end: Value,
+        property: Value,
+        value: Value,
+        object: Value,
+    ) -> crate::prim::Out {
+        self.text_property_scan(start, end, property, value, object, true)
+    }
+
+    /// The first position from START to END whose PROPERTY is (EQUAL) or is
+    /// not (otherwise) `eq' to VALUE.
+    fn text_property_scan(
+        &mut self,
+        start: Value,
+        end: Value,
+        property: Value,
+        value: Value,
+        object: Value,
+        equal: bool,
+    ) -> crate::prim::Out {
         use crate::prim::Fault;
         let object = self.property_query_object(object)?;
         // CHECK_STRING_OR_BUFFER comes first in validate_interval_range.
@@ -926,12 +952,13 @@ impl Vm {
             Some(Object::ByteBuffer(b)) => !b.properties.is_empty(),
             _ => false,
         };
+        // Every position's PROPERTY is then nil.
         if low == high || !intervals {
-            return Ok(if value == Value::NIL { Value::NIL } else { Value::integer(from).map_err(Fault::Error)? });
+            return Ok(if (value == Value::NIL) != equal { Value::NIL } else { Value::integer(from).map_err(Fault::Error)? });
         }
         for at in from..to {
             let raw = self.annotation_raw(object, at as usize).map_err(Fault::Error)?;
-            if self.annotation_resolve(&raw, property).map_err(Fault::Error)? != value {
+            if (self.annotation_resolve(&raw, property).map_err(Fault::Error)? == value) == equal {
                 return Value::integer(at).map_err(Fault::Error);
             }
         }

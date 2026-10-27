@@ -11,6 +11,11 @@ fn line_end_position(cx; optional n: Value) {
     cx.line_boundary_position(n, true)
 }}
 
+defsubr! { name = "line-number-at-pos", gnu = "fns.c:6688", effect = Reads,
+fn line_number_at_pos(cx; optional position: Value, absolute: Value) {
+    cx.line_number_at_pos(position, absolute)
+}}
+
 #[cfg(test)]
 mod tests {
     #[test]

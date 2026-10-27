@@ -8,14 +8,14 @@
   "provenance": {
     "generated_by": "romacs-introspect-live",
     "generated_on": "linux-x86_64",
-    "input_hash": "ecb8522dc165c633531cd82402ad9fc700d63d97f2332c51cac511e358252906",
+    "input_hash": "8aa407e3091058613f41492651eba7af05531abc828dba7bfb583f5e7c3e5a18",
     "source_only_at_generation": [],
     "vm2_probe_panics": [],
-    "vm2_universe": 3517
+    "vm2_universe": 3527
   },
   "schema": 2,
   "vm2": {
-    "count": 753,
+    "count": 757,
     "entries": [
       "#:vm2-closure-document",
       "#:vm2-closure-metadata",
@@ -284,6 +284,7 @@
       "frame-bottom-divider-width",
       "frame-char-height",
       "frame-char-width",
+      "frame-first-window",
       "frame-initial-p",
       "frame-list",
       "frame-live-p",
@@ -309,6 +310,7 @@
       "get",
       "get-buffer",
       "get-buffer-create",
+      "get-buffer-process",
       "get-buffer-window",
       "get-char-property",
       "get-file-buffer",
@@ -394,6 +396,7 @@
       "libxml-available-p",
       "line-beginning-position",
       "line-end-position",
+      "line-number-at-pos",
       "list",
       "listp",
       "load",
@@ -684,6 +687,7 @@
       "terpri",
       "test-completion",
       "text-properties-at",
+      "text-property-any",
       "text-property-not-all",
       "text-quoting-style",
       "this-command-keys",

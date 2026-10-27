@@ -1460,6 +1460,23 @@ impl<'a> Windows<'a> {
         // GNU returns nil for output_initial. There is no TTY backend here.
         Ok(Value::NIL)
     }
+    /// window.c Fframe_first_window: the top-left live window of FRAME-OR-WINDOW's frame.
+    pub(crate) fn frame_first_window(&mut self, frame_or_window: Value) -> Out {
+        self.vm.ensure_windows().map_err(internal)?;
+        let frame = if frame_or_window == Value::NIL {
+            self.frame()
+        } else if self.window_valid_p(frame_or_window) != Value::NIL {
+            self.get(frame_or_window)?.frame
+        } else {
+            self.live_frame(frame_or_window)?;
+            frame_or_window
+        };
+        let mut window = self.vm.frame(frame).map_err(internal)?.root;
+        while let Some(&child) = self.get(window)?.children.first() {
+            window = child;
+        }
+        Ok(window)
+    }
     pub(crate) fn window_list(&mut self, frame: Value, minibuf: Value, window: Value) -> Out {
         self.vm.ensure_windows().map_err(internal)?;
         let window = if window == Value::NIL {

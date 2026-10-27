@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "c02a4e8bb2550a78484d4e39aaec3ba92356c4a0c5e5e1a2ca4b1f9f314d10e3",
+  "source_fingerprint": "4ab757f55fe84abd387b5736a7d1754635d7af2c199f6fd53f61857d7b1bfe68",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 745,
-  "parsed_vm2_only": 745
+  "parsed_total": 749,
+  "parsed_vm2_only": 749
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -1432,6 +1432,11 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/window.rs:192"
   },
+  "frame-first-window": {
+   "name": "frame-first-window",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/window.rs:212"
+  },
   "frame-initial-p": {
    "name": "frame-initial-p",
    "implementation": "vm2",
@@ -1563,6 +1568,11 @@
    "name": "get-buffer-create",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/buffer_lifecycle.rs:11"
+  },
+  "get-buffer-process": {
+   "name": "get-buffer-process",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/process.rs:5"
   },
   "get-buffer-window": {
    "name": "get-buffer-window",
@@ -1992,6 +2002,11 @@
    "name": "line-end-position",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/line_position.rs:9"
+  },
+  "line-number-at-pos": {
+   "name": "line-number-at-pos",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/line_position.rs:14"
   },
   "list": {
    "name": "list",
@@ -3535,6 +3550,11 @@
    "implementation": "vm2",
    "variant": "Primitive::RawPropertiesAt",
    "registered_at": "crates/romacs-vm/src/lib.rs:585"
+  },
+  "text-property-any": {
+   "name": "text-property-any",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/property_change.rs:19"
   },
   "text-property-not-all": {
    "name": "text-property-not-all",

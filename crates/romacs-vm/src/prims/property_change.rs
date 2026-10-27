@@ -15,3 +15,8 @@ defsubr! { name = "text-property-not-all", gnu = "textprop.c:1857", effect = Rea
 fn text_property_not_all(cx, start: Value, end: Value, property: Value, value: Value; optional object: Value) {
     cx.text_property_not_all(start, end, property, value, object)
 }}
+
+defsubr! { name = "text-property-any", gnu = "textprop.c:1821", effect = Reads,
+fn text_property_any(cx, start: Value, end: Value, property: Value, value: Value; optional object: Value) {
+    cx.text_property_any(start, end, property, value, object)
+}}
