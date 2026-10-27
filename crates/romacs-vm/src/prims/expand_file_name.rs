@@ -136,7 +136,8 @@ fn canonical_value(cx: &mut Leaf<'_>, name: Value, default: Value) -> std::resul
 /// real user, else "". The variables come from `process-environment' and
 /// are read as C strings, ending at a NUL. A home that is not absolute,
 /// an empty HOME included, is taken relative to the working directory
-/// Emacs started in (emacs_wd), as splice_dir_file joins them.
+/// Emacs started in (emacs_wd, environment::startup_directory), as
+/// splice_dir_file joins them.
 fn home_directory(cx: &mut Leaf<'_>) -> std::result::Result<Vec<u8>, Fault> {
     let c_string = |mut bytes: Vec<u8>| { if let Some(nul) = bytes.iter().position(|&b| b == 0) { bytes.truncate(nul) } bytes };
     let home = match super::environment::egetenv(cx, "HOME")? {
@@ -157,8 +158,8 @@ fn home_directory(cx: &mut Leaf<'_>) -> std::result::Result<Vec<u8>, Fault> {
     if home.first() == Some(&b'/') {
         return Ok(home);
     }
-    let wd = std::env::current_dir().map_err(|_| Fault::Error("$HOME is relative to unknown directory".into()))?;
-    let mut spliced = std::os::unix::ffi::OsStrExt::as_bytes(wd.as_os_str()).to_vec();
+    let wd = crate::environment::startup_directory().ok_or_else(|| Fault::Error("$HOME is relative to unknown directory".into()))?;
+    let mut spliced = wd.to_vec();
     if spliced.last().is_some_and(|&b| b != b'/') { spliced.push(b'/'); }
     spliced.extend_from_slice(&home);
     Ok(spliced)

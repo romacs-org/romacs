@@ -998,15 +998,15 @@ impl Vm {
         {
             return self.forwarded_buffer_value(buffer, i);
         }
-        match std::env::current_dir() {
-            Ok(dir) => {
-                use std::os::unix::ffi::OsStrExt;
-                let mut bytes = dir.as_os_str().as_bytes().to_vec();
+        // init_buffer starts from emacs_wd, a symlinked PWD's spelling kept.
+        match crate::environment::startup_directory() {
+            Some(dir) => {
+                let mut bytes = dir.to_vec();
                 if bytes.last() != Some(&b'/') { bytes.push(b'/'); }
                 let decoded = !bytes.is_ascii() && std::str::from_utf8(&bytes).is_ok();
                 self.make_lisp_string(bytes, decoded)
             }
-            Err(_) => Value::NIL,
+            None => Value::NIL,
         }
     }
     /// bset_directory (BUFFER, DIRECTORY).
