@@ -322,6 +322,12 @@ fn main() {
         emit(json!({"event": "setup", "ok": false, "phase": "batch-mode", "error": error}));
         std::process::exit(3);
     }
+    // GNU batch runs on its initial terminal frame: 80 columns by 25 lines
+    // of 1x1 characters (DIVERGENCES.md VM2-WIN5).
+    if let Err(error) = vm.set_frame_geometry(80, 25, 1, 1) {
+        emit(json!({"event": "setup", "ok": false, "phase": "batch-geometry", "error": error.to_string()}));
+        std::process::exit(3);
+    }
     if let Err(e) = vm.set_load_path(&args.load_path) {
         emit(json!({"event": "setup", "ok": false, "phase": "load-path", "error": e}));
         std::process::exit(3);
