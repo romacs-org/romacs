@@ -219,3 +219,53 @@ fn dropped_vm_children_are_reaped() {
         }
     }
 }
+
+fn reaper_threads() -> usize {
+    std::fs::read_dir("/proc/self/task").unwrap().flatten()
+        .filter(|task| std::fs::read_to_string(task.path().join("comm")).is_ok_and(|comm| comm == "romacs-reaper\n"))
+        .count()
+}
+
+// Children that outlive their VM's hangup share the host's one reaper
+// thread, however many there are, and are each reaped once they exit.
+#[test]
+fn dropped_vm_children_share_one_reaper() {
+    let base = scratch("reaper");
+    std::fs::create_dir_all(&base).unwrap();
+    let fifo = base.join("release");
+    let path = std::ffi::CString::new(fifo.to_str().unwrap()).unwrap();
+    assert_eq!(unsafe { libc::mkfifo(path.as_ptr(), 0o600) }, 0);
+    // Held open for writing, so each child's open of the FIFO returns.
+    let release = std::fs::OpenOptions::new().read(true).write(true).open(&fifo).unwrap();
+    let mut vm = bootstrapped();
+    let script = format!("trap '' HUP; echo ready; read x < {}", fifo.display());
+    let pids = vm.eval_source(&format!(r#"(progn (setq default-directory "/") (let* ((out "")
+            (ps (mapcar (lambda (_) (make-process :name "hup" :command (list "sh" "-c" {script:?}) :connection-type 'pipe :noquery t
+                                                  :filter (lambda (_p s) (setq out (concat out s)))))
+                        (number-sequence 1 8))))
+       (while (< (length out) (* 8 (length "ready\n"))) (accept-process-output nil 1))
+       (mapcar #'process-id ps)))"#))
+        .and_then(|v| v.display()).unwrap();
+    let pids: Vec<u32> = pids.trim_matches(|c| c == '(' || c == ')').split_whitespace().map(|n| n.parse().unwrap()).collect();
+    assert_eq!(pids.len(), 8);
+    drop(vm);
+    for pid in &pids {
+        let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).unwrap();
+        assert!(!stat.contains(") Z "), "child {pid} did not survive the hangup: {stat}");
+    }
+    assert_eq!(reaper_threads(), 1);
+    use std::io::Write;
+    (&release).write_all(&b"\n".repeat(pids.len())).unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    for pid in &pids {
+        let entry = format!("/proc/{pid}");
+        while Path::new(&entry).exists() {
+            assert!(std::time::Instant::now() < deadline, "child {pid} was not reaped: {}",
+                    std::fs::read_to_string(format!("{entry}/stat")).unwrap_or_default());
+            std::thread::yield_now();
+        }
+    }
+    assert_eq!(reaper_threads(), 1);
+    drop(release);
+    std::fs::remove_dir_all(&base).unwrap();
+}

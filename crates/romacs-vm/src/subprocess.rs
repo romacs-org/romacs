@@ -5,7 +5,7 @@
 use crate::Value;
 use std::collections::BTreeMap;
 use std::io;
-use std::os::fd::{FromRawFd, OwnedFd, RawFd};
+use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 
 /// Lisp-visible slots of GNU's `struct Lisp_Process`, traced by the collector.
 #[derive(Clone, Copy)]
@@ -157,34 +157,126 @@ impl Table {
 impl Drop for Table {
     /// shut_down_emacs's kill_buffer_processes (Qnil): SIGHUP to the group of
     /// each child not yet reaped (unreaped, so its pid is not reused). The
-    /// host outlives the VM, so these and the deleted children are then
-    /// reaped where GNU leaves them to init.
+    /// host outlives the VM, so these and the deleted children then pass to
+    /// the host's reaper where GNU leaves them to init.
     fn drop(&mut self) {
-        let mut children = std::mem::take(&mut self.deleted);
-        for channel in self.channels.values() {
-            if channel.pidfd.is_some() && channel.pid > 0 {
-                unsafe { libc::kill(-channel.pid, libc::SIGHUP) };
-                // One reaper per pid: a second wait could reap a reused pid.
-                if !children.iter().any(|&(pid, _)| pid == channel.pid) {
-                    children.push((channel.pid, None));
-                }
-            }
-        }
-        children.into_iter().for_each(reap_detached);
+        let deleted = std::mem::take(&mut self.deleted).into_iter().map(|(pid, file)| Orphan { pid, pidfd: pidfd_open(pid), file });
+        let live = self.channels.values_mut().filter(|c| c.pidfd.is_some() && c.pid > 0).map(|c| {
+            unsafe { libc::kill(-c.pid, libc::SIGHUP) };
+            Orphan { pid: c.pid, pidfd: c.pidfd.take(), file: None }
+        });
+        let orphans: Vec<Orphan> = deleted.chain(live).collect();
+        REAPER.adopt(orphans, spawn_reaper);
     }
 }
 
-/// Reap PID, then unlink FILE, on a thread of its own: no child's lifetime
-/// delays another's reaping, and none blocks the VM's owner.
-fn reap_detached((pid, file): (i32, Option<std::path::PathBuf>)) {
-    let reap = move || {
-        let _ = wait_blocking(pid);
-        if let Some(file) = file {
-            let _ = std::fs::remove_file(file);
+/// A child no VM owns any more: its pid, a pidfd readable once it exits, and
+/// a file to unlink once it is reaped.
+struct Orphan {
+    pid: i32,
+    pidfd: Option<OwnedFd>,
+    file: Option<std::path::PathBuf>,
+}
+
+/// The host's one reaper thread, shared by every VM. An orphan's pid stays
+/// registered here, its only owner, until it is waited for exactly once:
+/// unreaped, the pid cannot be reused, and no second waiter exists to reap a
+/// reused one.
+#[derive(Default)]
+struct Reaper {
+    state: std::sync::Mutex<Reaping>,
+}
+
+#[derive(Default)]
+struct Reaping {
+    orphans: Vec<Orphan>,
+    /// The running thread's eventfd, None until a start succeeds.
+    wake: Option<OwnedFd>,
+}
+
+static REAPER: Reaper = Reaper { state: std::sync::Mutex::new(Reaping { orphans: Vec::new(), wake: None }) };
+
+/// Starts the reaper's thread: production's [`spawn_reaper`], or a test's.
+type Start = fn(Box<dyn FnOnce() + Send>) -> io::Result<()>;
+
+fn spawn_reaper(run: Box<dyn FnOnce() + Send>) -> io::Result<()> {
+    std::thread::Builder::new().name("romacs-reaper".into()).stack_size(64 * 1024).spawn(run).map(drop)
+}
+
+impl Reaper {
+    fn lock(&self) -> std::sync::MutexGuard<'_, Reaping> {
+        self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Register ORPHANS and wake the thread, or start it. A start that fails
+    /// keeps every orphan registered; the next handoff, a VM's drop or a
+    /// process creation, tries again.
+    fn adopt(&'static self, orphans: Vec<Orphan>, start: Start) {
+        let mut state = self.lock();
+        let fresh = !orphans.is_empty();
+        for orphan in orphans {
+            match state.orphans.iter_mut().find(|o| o.pid == orphan.pid) {
+                Some(known) => known.file = known.file.take().or(orphan.file),
+                None => state.orphans.push(orphan),
+            }
+        }
+        if let Some(wake) = &state.wake {
+            if !fresh {
+                return;
+            }
+            let one = 1u64;
+            unsafe { libc::write(wake.as_raw_fd(), (&one as *const u64).cast(), 8) };
+        } else if !state.orphans.is_empty() {
+            state.wake = self.start(start).ok();
+        }
+    }
+
+    fn start(&'static self, start: Start) -> io::Result<OwnedFd> {
+        let fd = unsafe { libc::eventfd(0, libc::EFD_CLOEXEC | libc::EFD_NONBLOCK) };
+        if fd < 0 {
+            return Err(last_error());
+        }
+        let wake = unsafe { OwnedFd::from_raw_fd(fd) };
+        start(Box::new(move || self.run(fd)))?;
+        Ok(wake)
+    }
+
+    /// Poll the orphans' pidfds and WAKE, then reap whichever ended. Only
+    /// this thread removes orphans, so the polled descriptors stay open. An
+    /// orphan without a pidfd is checked every 100ms.
+    fn run(&self, wake: RawFd) {
+        let watch = |fd: RawFd| libc::pollfd { fd, events: libc::POLLIN, revents: 0 };
+        loop {
+            let (mut fds, timeout) = {
+                let state = self.lock();
+                let fds: Vec<_> = std::iter::once(wake).chain(state.orphans.iter().filter_map(|o| o.pidfd.as_ref().map(|fd| fd.as_raw_fd()))).map(watch).collect();
+                (fds, if state.orphans.iter().any(|o| o.pidfd.is_none()) { 100 } else { -1 })
+            };
+            unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as libc::nfds_t, timeout) };
+            let mut count = 0u64;
+            unsafe { libc::read(wake, (&mut count as *mut u64).cast(), 8) };
+            self.lock().orphans.retain(|o| !reap(o));
+        }
+    }
+}
+
+/// Wait for ORPHAN without blocking, then unlink its file: true once it is
+/// no longer this host's child to wait for.
+fn reap(orphan: &Orphan) -> bool {
+    let mut status = 0;
+    let r = loop {
+        let r = unsafe { libc::waitpid(orphan.pid, &mut status, libc::WNOHANG) };
+        if r >= 0 || last_error().kind() != io::ErrorKind::Interrupted {
+            break r;
         }
     };
-    // A host that cannot start a thread keeps the zombie, as before.
-    let _ = std::thread::Builder::new().name("romacs-reaper".into()).stack_size(64 * 1024).spawn(reap);
+    if r == 0 {
+        return false;
+    }
+    if let Some(file) = &orphan.file {
+        let _ = std::fs::remove_file(file);
+    }
+    true
 }
 
 pub(crate) fn last_error() -> io::Error {
@@ -288,6 +380,8 @@ pub(crate) struct Spawn<'a> {
 pub(crate) fn spawn(spec: &Spawn<'_>) -> io::Result<i32> {
     use std::os::unix::ffi::OsStrExt;
     use std::os::unix::process::CommandExt;
+    // A process creation retries a reaper that failed to start.
+    REAPER.adopt(Vec::new(), spawn_reaper);
     let os = |b: &[u8]| std::ffi::OsStr::from_bytes(b).to_os_string();
     let mut command = std::process::Command::new(os(&spec.argv[0]));
     command.args(spec.argv[1..].iter().map(|a| os(a)));
@@ -510,3 +604,50 @@ pub(crate) fn signal_number(name: &str) -> Option<i32> {
     })
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The child's /proc state letter, or None once no such process exists.
+    fn state(pid: i32) -> Option<char> {
+        let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+        stat.rsplit_once(") ").and_then(|(_, rest)| rest.chars().next())
+    }
+
+    fn poll_until(what: &str, mut done: impl FnMut() -> bool) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while !done() {
+            assert!(std::time::Instant::now() < deadline, "timed out waiting for {what}");
+            std::thread::yield_now();
+        }
+    }
+
+    fn refuse(_: Box<dyn FnOnce() + Send>) -> io::Result<()> {
+        Err(io::Error::from_raw_os_error(libc::EAGAIN))
+    }
+
+    // A refused thread start keeps the orphan registered, once, unreaped;
+    // the next handoff starts the thread, which reaps it and unlinks its file.
+    #[test]
+    fn reaper_keeps_orphans_until_a_later_start() {
+        let reaper: &'static Reaper = Box::leak(Box::default());
+        let dir = std::env::temp_dir().join(format!("romacs-reaper-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("orphan");
+        std::fs::write(&file, "").unwrap();
+        let pid = std::process::Command::new("true").spawn().unwrap().id() as i32;
+        reaper.adopt(vec![Orphan { pid, pidfd: pidfd_open(pid), file: None }], refuse);
+        reaper.adopt(vec![Orphan { pid, pidfd: pidfd_open(pid), file: Some(file.clone()) }], refuse);
+        assert!(reaper.lock().wake.is_none());
+        assert_eq!(reaper.lock().orphans.iter().map(|o| o.pid).collect::<Vec<_>>(), [pid]);
+        poll_until("the orphan to exit", || state(pid) == Some('Z'));
+        assert!(file.exists());
+        reaper.adopt(Vec::new(), spawn_reaper);
+        assert!(reaper.lock().wake.is_some());
+        poll_until("the orphan to be reaped", || reaper.lock().orphans.is_empty());
+        assert_eq!(unsafe { libc::waitpid(pid, std::ptr::null_mut(), libc::WNOHANG) }, -1);
+        assert_eq!(last_error().raw_os_error(), Some(libc::ECHILD));
+        assert!(!file.exists());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+}
