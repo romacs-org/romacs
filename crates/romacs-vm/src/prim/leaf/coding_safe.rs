@@ -8,7 +8,7 @@ impl Leaf<'_> {
     /// get_translation_table (ATTRS, true): the coding system's encode
     /// table, with symbols read through their `translation-table'
     /// property, then the standard one; nil when translation is off.
-    fn coding_encode_translation(&mut self, attrs: Value) -> std::result::Result<Vec<Value>, Fault> {
+    pub(crate) fn coding_encode_translation(&mut self, attrs: Value) -> std::result::Result<Vec<Value>, Fault> {
         let enabled = self.intern("enable-character-translation");
         if self.variable_value(enabled)?.unwrap_or(Value::NIL) == Value::NIL { return Ok(Vec::new()); }
         let standard = self.intern("standard-translation-table-for-encode");

@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "77166ab84911a2be562300cd6ec27ee72d6d163c5245624333e79f18682ed6b7",
+  "source_fingerprint": "1f812d9ad605323e91da1a4f647054b26adcfb5571be99dbd9b04c239065c051",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 837,
-  "parsed_vm2_only": 837
+  "parsed_total": 838,
+  "parsed_vm2_only": 838
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -1420,7 +1420,7 @@
   "find-file-name-handler": {
    "name": "find-file-name-handler",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:797"
+   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:829"
   },
   "find-operation-coding-system": {
    "name": "find-operation-coding-system",
@@ -2179,7 +2179,7 @@
   "locate-file-internal": {
    "name": "locate-file-internal",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:656"
+   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:688"
   },
   "locate-library": {
    "name": "locate-library",
@@ -3174,6 +3174,11 @@
    "name": "romacs--term-send",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/terminal.rs:8"
+  },
+  "romacs--write-region-body": {
+   "name": "romacs--write-region-body",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:576"
   },
   "romacs-find-buffer-visiting": {
    "name": "romacs-find-buffer-visiting",

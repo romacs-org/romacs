@@ -64,11 +64,10 @@ impl Vm {
 }
 
 impl Vm {
-    /// GNU editfns.c save_restriction_save/restore: the accessible bounds
-    /// as a left-biased start and right-biased end marker, plus whether the
-    /// buffer was narrowed at all. Cleanup restores that buffer's
-    /// restriction (or widens it) without changing the current buffer, and
-    /// detaches the markers.
+    /// GNU editfns.c save_restriction_save/restore: an unnarrowed buffer is
+    /// saved as itself and restored by widening it if it is live; a
+    /// restriction as a left-biased start and right-biased end marker,
+    /// restored and detached. Cleanup does not change the current buffer.
     pub(super) fn save_restriction(&mut self, b: &mut Builder, body: &[Form]) -> Result<usize> {
         use Primitive::*;
         let min = Self::excursion_call(b, PointMin, &[]);
@@ -79,35 +78,54 @@ impl Vm {
         b.emit(Op::Const(one, Value::integer(1)?));
         let at_beg = Self::excursion_call(b, Eq, &[min, one]);
         let at_end = Self::excursion_call(b, Eq, &[max, z]);
-        let t = b.reg();
+        let saved = Self::excursion_call(b, CurrentBuffer, &[]);
+        let (start, end, t) = (b.reg(), b.reg(), b.reg());
+        b.emit(Op::Const(start, Value::NIL));
+        b.emit(Op::Const(end, Value::NIL));
         b.emit(Op::Const(t, Value::TRUE));
-        let start = Self::excursion_call(b, CopyMarker, &[min]);
-        let end = Self::excursion_call(b, CopyMarker, &[max, t]);
+        let narrowed_beg = b.emit(Op::Unless(at_beg, 0));
+        let narrowed_end = b.emit(Op::Unless(at_end, 0));
+        let whole = b.emit(Op::Jump(0));
+        let narrowed = b.code.len();
+        b.code[narrowed_beg] = Op::Unless(at_beg, narrowed);
+        b.code[narrowed_end] = Op::Unless(at_end, narrowed);
+        let marker = Self::excursion_call(b, CopyMarker, &[min]);
+        b.emit(Op::Move(start, marker));
+        let marker = Self::excursion_call(b, CopyMarker, &[max, t]);
+        b.emit(Op::Move(end, marker));
+        b.code[whole] = Op::Jump(b.code.len());
         let dest = b.reg();
         let protect = b.emit(Op::Protect(dest, 0, 0));
         let result = self.progn(b, body)?;
         b.emit(Op::LeaveProtect(result));
         let cleanup = b.code.len();
+        let current = Self::excursion_call(b, CurrentBuffer, &[]);
+        let unnarrowed = b.emit(Op::Unless(start, 0));
         let buffer = Self::excursion_call(b, MarkerBuffer, &[start]);
         let dead = b.emit(Op::Unless(buffer, 0));
-        let current = Self::excursion_call(b, CurrentBuffer, &[]);
         Self::excursion_call(b, SetBuffer, &[buffer]);
-        let narrowed_beg = b.emit(Op::Unless(at_beg, 0));
-        let narrowed_end = b.emit(Op::Unless(at_end, 0));
-        Self::excursion_call(b, Widen, &[]);
-        let restored = b.emit(Op::Jump(0));
-        let narrow = b.code.len();
-        b.code[narrowed_beg] = Op::Unless(at_beg, narrow);
-        b.code[narrowed_end] = Op::Unless(at_end, narrow);
         let from = Self::excursion_call(b, MarkerPosition, &[start]);
         let to = Self::excursion_call(b, MarkerPosition, &[end]);
         Self::excursion_call(b, Narrow, &[from, to]);
-        b.code[restored] = Op::Jump(b.code.len());
         Self::excursion_call(b, SetBuffer, &[current]);
         let nil = b.reg();
         b.emit(Op::Const(nil, Value::NIL));
         Self::excursion_call(b, SetMarker, &[start, nil]);
         Self::excursion_call(b, SetMarker, &[end, nil]);
+        let restored = b.emit(Op::Jump(0));
+        b.code[unnarrowed] = Op::Unless(start, b.code.len());
+        let live_p = b.reg();
+        b.emit(Op::Const(live_p, crate::prim::subr_named("buffer-live-p").expect("buffer-live-p subr")));
+        let arg = b.reg();
+        b.emit(Op::Move(arg, saved));
+        let live = b.reg();
+        b.emit(Op::Call(live, live_p, arg, 1));
+        let killed = b.emit(Op::Unless(live, 0));
+        Self::excursion_call(b, SetBuffer, &[saved]);
+        Self::excursion_call(b, Widen, &[]);
+        Self::excursion_call(b, SetBuffer, &[current]);
+        b.code[killed] = Op::Unless(live, b.code.len());
+        b.code[restored] = Op::Jump(b.code.len());
         b.code[dead] = Op::Unless(buffer, b.code.len());
         b.emit(Op::ResumeExit);
         b.code[protect] = Op::Protect(dest, cleanup, b.code.len());

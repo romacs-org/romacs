@@ -25,12 +25,11 @@ pub(super) const VAL: usize = 8;
 pub(super) const FLAGS: usize = 9;
 pub(super) const REGISTERS: usize = 10;
 
-// FLAGS: GNU's two locals, whether a Lisp call must see the buffer widened
-// (a nil START widens inside save_restriction, fileio.c:5593), and the stage.
+// FLAGS: GNU's two locals and the stage. write-region runs this inside its
+// save-restriction extent (fileio.rs), widened for a nil START.
 const FORCE_RAW_TEXT: i64 = 1;
 const USING_DEFAULT: i64 = 2;
-pub(super) const WIDEN: i64 = 4;
-const STAGE: i64 = 8;
+const STAGE: i64 = 4;
 
 /// Where the walk resumes.
 #[derive(Clone, Copy)]
@@ -56,7 +55,7 @@ fn at(r: &mut [Value], stage: Stage) {
     r[FLAGS] = Value::integer(rest + stage as i64 * STAGE).unwrap();
 }
 
-/// Start the choice for registers R (FLAGS holds only WIDEN).
+/// Start the choice for registers R (FLAGS zero).
 pub(super) fn choose(cx: &mut Leaf<'_>, mut r: Vec<Value>) -> Next {
     debug_assert_eq!(r.len(), REGISTERS);
     let csw = var(cx, "coding-system-for-write")?;
@@ -68,7 +67,7 @@ pub(super) fn choose(cx: &mut Leaf<'_>, mut r: Vec<Value>) -> Next {
                 // Confirm that VAL can surely encode the current region.
                 let t_val = cx.coding_list(&[Value::TRUE, csw]);
                 let args = vec![r[START], r[END], t_val, Value::NIL, r[FILENAME]];
-                return call(cx, f, args, answered, r);
+                return Ok(Step::Call { f, args, then: answered, saved: r });
             }
         }
         return advance(cx, r);
@@ -95,7 +94,7 @@ pub(super) fn choose(cx: &mut Leaf<'_>, mut r: Vec<Value>) -> Next {
         Ok(pair) => { r[VAL] = pair; advance(cx, r) }
         Err(function) => {
             let list = cx.coding_list(&args);
-            call(cx, function, vec![list], operation_answered, r)
+            Ok(Step::Call { f: function, args: vec![list], then: operation_answered, saved: r })
         }
     }
 }
@@ -146,7 +145,7 @@ fn advance(cx: &mut Leaf<'_>, mut r: Vec<Value>) -> Next {
                     if let Some(f) = select_function(cx)? {
                         at(&mut r, Stage::Selected);
                         let args = vec![r[START], r[END], r[VAL], Value::NIL, r[FILENAME]];
-                        return call(cx, f, args, answered, r);
+                        return Ok(Step::Call { f, args, then: answered, saved: r });
                     }
                 }
             }
@@ -189,24 +188,6 @@ fn select_function(cx: &mut Leaf<'_>) -> std::result::Result<Option<Value>, Faul
     let f = var(cx, "select-safe-coding-system-function")?;
     if cx.kind(f) != Kind::Symbol { return Err(Fault::Wrong("symbolp", f)); }
     Ok((f != Value::NIL && cx.fboundp(f)).then_some(f))
-}
-
-/// Call F with ARGS, then THEN. With WIDEN set the call runs as
-/// `(save-restriction (widen) (funcall 'F 'ARG...))', the extent of GNU's
-/// Fwiden at that point.
-fn call(cx: &mut Leaf<'_>, f: Value, args: Vec<Value>, then: crate::prim::Then, r: Vec<Value>) -> Next {
-    if flags(&r) & WIDEN == 0 {
-        return Ok(Step::Call { f, args, then, saved: r });
-    }
-    let quote = cx.intern("quote");
-    let mut form = vec![cx.intern("funcall")];
-    for v in std::iter::once(f).chain(args) { form.push(cx.coding_list(&[quote, v])); }
-    let funcall = cx.coding_list(&form);
-    let widen = cx.intern("widen");
-    let widen = cx.coding_list(&[widen]);
-    let save = cx.intern("save-restriction");
-    let form = cx.coding_list(&[save, widen, funcall]);
-    Ok(Step::Call { f: cx.intern("eval"), args: vec![form, Value::TRUE], then, saved: r })
 }
 
 /// Realize NAME's define form (Fcheck_coding_system), then rerun the stage.

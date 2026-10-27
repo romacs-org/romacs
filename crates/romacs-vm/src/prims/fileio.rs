@@ -509,7 +509,6 @@ fn position(cx: &Leaf<'_>, v: Value) -> std::result::Result<i64, Fault> {
 defsubr! { name = "write-region", gnu = "fileio.c:5461", effect = Global,
 fn write_region(cx, start: Value, end: Value, filename: Value; optional append: Value,
                 visit: Value, lockname: Value, mustbenew: Value) -> Step {
-    use super::write_coding as w;
     // fileio.c:5539-5540 validate_region (editfns.c:2504).
     let shape = cx.buffer_shape()?;
     let mut region = None;
@@ -555,21 +554,53 @@ fn write_region(cx, start: Value, end: Value, filename: Value; optional append: 
     }
     // A nil START widens (fileio.c:5593) and then means BEGV..ZV.
     let (b, e) = match region { Some(r) => r, None => (1, shape.z) };
-    let narrowed = start == Value::NIL && (shape.begv != 1 || shape.zv != shape.z);
     let fixnum = |n: i64| Value::integer(n).map_err(Fault::Error);
+    let widen = start == Value::NIL;
     let (start, end) = if stringp(cx, start) { (start, end) } else { (fixnum(b)?, fixnum(e)?) };
+    // fileio.c:5583 save_restriction_save holds from here through the coding
+    // choice and the write, across its Lisp calls and non-local exits:
+    // (save-restriction [(widen)] (romacs--write-region-body 'ARG...)).
+    let quote = cx.intern("quote");
+    let mut body = vec![cx.intern("romacs--write-region-body")];
+    for v in [start, end, name, append, visit, lock, mustbenew, visit_file] { body.push(cx.coding_list(&[quote, v])); }
+    let mut form = vec![cx.intern("save-restriction")];
+    if widen { let f = cx.intern("widen"); form.push(cx.coding_list(&[f])); }
+    form.push(cx.coding_list(&body));
+    let form = cx.coding_list(&form);
+    Ok(Step::Call { f: cx.intern("eval"), args: vec![form, Value::TRUE], then: written, saved: vec![] })
+}}
+fn written(_: &mut Leaf<'_>, value: Value, _: &[Value]) -> Next { Ok(Step::Done(value)) }
+
+// Internal: write-region's tail inside its restriction extent, from the
+// coding choice on. Its arguments are write-region's, resolved as above.
+defsubr! { name = "romacs--write-region-body", gnu = "fileio.c:5617", effect = Global,
+fn write_region_body(cx, start: Value, end: Value, filename: Value, append: Value, visit: Value,
+                     lockname: Value, mustbenew: Value, visit_file: Value) -> Step {
+    use super::write_coding as w;
+    if !stringp(cx, start) {
+        for v in [start, end] { if v.integer_value().is_none() { return Err(Fault::Wrong("fixnump", v)); } }
+    }
     let mut r = vec![Value::NIL; w::REGISTERS];
-    r[w::START] = start;
-    r[w::END] = end;
-    r[w::FILENAME] = name;
-    r[w::APPEND] = append;
-    r[w::VISIT] = visit;
-    r[w::LOCKNAME] = lock;
-    r[w::MUSTBENEW] = mustbenew;
-    r[w::VISIT_FILE] = visit_file;
-    r[w::FLAGS] = Value::integer(if narrowed { w::WIDEN } else { 0 }).unwrap();
+    r[..w::VAL].copy_from_slice(&[start, end, filename, append, visit, lockname, mustbenew, visit_file]);
+    r[w::FLAGS] = Value::integer(0).unwrap();
     w::choose(cx, r)
 }}
+
+/// e_write encodes through encode_coding_object (coding.c:8336), which runs
+/// CODING's pre-write conversion and translation tables even on the ASCII
+/// text `encode-coding-string' passes through unchanged. Neither is
+/// implemented: refuse before the file is opened.
+fn refuse_write_conversion(cx: &mut Leaf<'_>, coding: Value) -> std::result::Result<(), Fault> {
+    let spec = cx.coding_spec(coding)?;
+    let attrs = cx.vector_get(spec, Value::integer(0).unwrap())?;
+    if cx.vector_get(attrs, Value::integer(10).unwrap())? != Value::NIL {
+        return Err(refuse("write-region with a pre-write-conversion coding system"));
+    }
+    if !cx.coding_encode_translation(attrs)?.is_empty() {
+        return Err(refuse("write-region with an encoding translation table"));
+    }
+    Ok(())
+}
 
 /// The rest of write_region once the coding system R[VAL] is chosen
 /// (fileio.c:5623 onwards): encode, open, write, sync and visit.
@@ -592,6 +623,7 @@ pub(super) fn write_chosen(cx: &mut Leaf<'_>, r: &[Value]) -> Next {
         let bytes = cx.buffer_text_bytes(b, e)?;
         cx.make_string(bytes, !shape.unibyte)
     };
+    refuse_write_conversion(cx, coding)?;
     let encoded = cx.coding_convert_string(text, coding, Value::TRUE, Value::NIL, true)?;
     let bytes = cx.string_view(encoded)?.bytes().to_vec();
     cx.variable_set(lcsu, coding)?;
