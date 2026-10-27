@@ -112,6 +112,8 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "coding-system-require-warning", gnu: "coding.c:12166", kind: Kind::Bool(false) },
     CVariable { name: "combine-after-change-calls", gnu: "insdel.c:2571", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "command-debug-status", gnu: "callint.c:892", kind: Kind::Lisp(Init::Nil) },
+    // minibuffer.el's minibuffer-error-initialize makes it buffer-local.
+    CVariable { name: "command-error-function", gnu: "keyboard.c:14322", kind: Kind::Lisp(Init::Symbol("command-error-default-function")) },
     CVariable { name: "comment-end-can-be-escaped", gnu: "syntax.c:3816", kind: Kind::Bool(false) },
     CVariable { name: "comment-use-syntax-ppss", gnu: "syntax.c:3751", kind: Kind::Lisp(Init::True) },
     CVariable { name: "compose-chars-after-function", gnu: "composite.c:2223", kind: Kind::Lisp(Init::Symbol("compose-chars-after")) },
@@ -261,7 +263,9 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "pgtk-lost-selection-functions", gnu: "pgtkselect.c:1919", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "pgtk-use-im-context-on-new-connection", gnu: "pgtkim.c:306", kind: Kind::Lisp(Init::True) },
     CVariable { name: "polling-period", gnu: "keyboard.c:13892", kind: Kind::Lisp(Init::Float(2.0)) },
+    CVariable { name: "post-command-hook", gnu: "keyboard.c:14061", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "post-select-region-hook", gnu: "keyboard.c:14469", kind: Kind::Lisp(Init::Nil) },
+    CVariable { name: "pre-command-hook", gnu: "keyboard.c:14045", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "printable-chars", gnu: "character.c:1131", kind: Kind::Lisp(Init::CharTable(&CharTableInit { purpose: None, extras: &[], init: Init::Nil, ranges: &[(32, 126, Init::True), (160, 0x3fff7f, Init::True)] })) },
     CVariable { name: "process-adaptive-read-buffering", gnu: "process.c:8948", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "process-coding-system-alist", gnu: "coding.c:12051", kind: Kind::Lisp(Init::Nil) },
@@ -456,7 +460,6 @@ pub(crate) static C_VARIABLES: &[CVariable] = &[
     CVariable { name: "buffer-invisibility-spec", gnu: "buffer.c:5849", kind: Kind::PerBuffer { default: Init::True, predicate: None } },
     CVariable { name: "overlay-arrow-variable-list", gnu: "xdisp.c:38716", kind: Kind::Lisp(Init::List(&[Init::Symbol("overlay-arrow-position")])) },
     CVariable { name: "frame-internal-parameters", gnu: "frame.c:7764", kind: Kind::Lisp(Init::List(&[Init::Symbol("undeleted"), Init::Symbol("cloned-from"), Init::Symbol("frame-id"), Init::Symbol("name"), Init::Symbol("parent-id"), Init::Symbol("window-id")])) },
-    CVariable { name: "command-error-function", gnu: "keyboard.c:14322", kind: Kind::Lisp(Init::Symbol("command-error-default-function")) },
     CVariable { name: "minor-mode-map-alist", gnu: "keymap.c:3366", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "max-lisp-eval-depth", gnu: "eval.c:4424", kind: Kind::Int(1600) },
     CVariable { name: "lisp-eval-depth-reserve", gnu: "eval.c:4434", kind: Kind::Int(200) },
@@ -518,6 +521,12 @@ pub(crate) static C_VARIABLES: &[CVariable] = &[
     // appends `face minibuffer-prompt' from Lisp).
     CVariable { name: "unread-command-events", gnu: "keyboard.c:13776", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "executing-kbd-macro", gnu: "macros.c:435", kind: Kind::Lisp(Init::Nil) },
+    // The command loop's Lisp half (rlisp/vm/keyboard.el) advances it per
+    // event read from the macro (keyboard.c read_char).
+    CVariable { name: "executing-kbd-macro-index", gnu: "macros.c:439", kind: Kind::Int(0) },
+    // Counted by the same Lisp half; repeat.el compares num-input-keys.
+    CVariable { name: "num-input-keys", gnu: "keyboard.c:13920", kind: Kind::Int(0) },
+    CVariable { name: "num-nonmacro-input-events", gnu: "keyboard.c:13926", kind: Kind::Int(0) },
     CVariable { name: "inhibit-interaction", gnu: "minibuf.c:2708", kind: Kind::Bool(false) },
     CVariable { name: "minibuffer-allow-text-properties", gnu: "minibuf.c:2684", kind: Kind::Bool(false) },
     CVariable { name: "minibuffer-prompt-properties", gnu: "minibuf.c:2693", kind: Kind::Lisp(Init::List(&[Init::Symbol("read-only"), Init::True])) },
@@ -565,6 +574,9 @@ pub(crate) static C_VARIABLES: &[CVariable] = &[
     // Local only when set; permanent (buffer.c:4811 buffer_permanent_local_flags).
     CVariable { name: "buffer-file-coding-system", gnu: "buffer.c:5314", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
     CVariable { name: "mark-active", gnu: "buffer.c:5795", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
+    // simple.el's delete-backward-char and self-insert paths read it; GNU
+    // checks a non-nil value against its `choice' list (VM2-CVAR-PRED1).
+    CVariable { name: "overwrite-mode", gnu: "buffer.c:5492", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
     // Text edits record undo entries here (undo.c); t disables recording.
     CVariable { name: "buffer-undo-list", gnu: "buffer.c:5743", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
     // rename-buffer renames a non-visiting buffer's auto-save file.
@@ -588,6 +600,10 @@ pub(crate) static C_VARIABLES: &[CVariable] = &[
     CVariable { name: "overlay-arrow-string", gnu: "xdisp.c:38711", kind: Kind::Lisp(Init::Str("=>")) },
     CVariable { name: "yes-or-no-prompt", gnu: "fns.c:6874", kind: Kind::Lisp(Init::Str("(yes or no) ")) },
 ];
+
+/// C_SPECIALS that GNU leaves bound but not special: lread.c:5559 clears
+/// `declared_special' on `values', so a `let' of it is lexical.
+pub(crate) const NOT_SPECIAL: &[&str] = &["values"];
 
 /// The runtime storage GNU keeps in C globals and `buffer_defaults`.
 pub(crate) struct Forwarded {
@@ -806,7 +822,9 @@ impl Vm {
             Kind::PerBuffer { .. } => unreachable!("C_SPECIALS holds no per-buffer variables"),
         };
         self.slots[slot].value = value;
-        self.specials.insert(name.to_owned());
+        if !NOT_SPECIAL.contains(&name) {
+            self.specials.insert(name.to_owned());
+        }
         // GNU's syms_of_* call Fmake_variable_buffer_local on these.
         if AUTOMATICALLY_LOCAL.contains(&name) {
             self.slots[slot].explicit_local = false;

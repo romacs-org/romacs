@@ -1,5 +1,6 @@
 //! GNU src/minibuf.c `read-from-minibuffer' (minibuf.c:1309) and `read-string'
-//! (minibuf.c:1420): the two prompt primitives, nothing else from minibuf.c.
+//! (minibuf.c:1420), the queries over the active minibuffers that GNU's
+//! minibuffer.el makes, and fns.c `yes-or-no-p', which prompts through them.
 //!
 //! Tier: T2 (PRIMITIVE-DOCTRINE section 3). GNU's `read_minibuf' runs a
 //! recursive command loop, i.e. it calls Lisp once per key, so the loop is Lisp
@@ -11,22 +12,21 @@
 //! continuation's traced registers (`saved'), never in Rust locals, so a
 //! collection inside a command typed at the prompt forwards them.
 //!
-//! The Lisp half is installed on first use, by one `Step::Call' of `eval', like
-//! keymap.rs `ensure_keymaps': a bare `Vm::new()' stays bare.
+//! The Lisp half is installed on first use with keyboard.c's (prims/keyboard.rs
+//! `install'), by one `Step::Call' of `eval': a bare `Vm::new()' stays bare.
 //!
 //! Supported subset (DIVERGENCES.md VM2-MINIBUF1 lists what is not):
 //! PROMPT, INITIAL-CONTENTS (string or (STRING . POSITION)), KEYMAP, READ,
 //! HIST (variable set to nil when unbound; history recorded only through
 //! GNU's own `add-to-history' when that is fbound), DEFAULT-VALUE (string,
 //! list, or other, exactly as GNU uses it), INHERIT-INPUT-METHOD (accepted;
-//! VM2 has no input methods). Input comes from `unread-command-events' while
-//! `executing-kbd-macro' is non-nil, GNU's batch prompt regime
-//! (ert-x.el `ert-simulate-keys'); otherwise VM2 behaves as batch GNU with an
-//! empty stdin (minibuf.c:659): `(end-of-file "Error reading from stdin")'.
+//! VM2 has no input methods). While `executing-kbd-macro' is non-nil the
+//! command loop (prims/keyboard.rs) reads `unread-command-events' and then the
+//! macro, GNU's batch prompt regime (`execute-kbd-macro', ert-x.el
+//! `ert-simulate-keys'); with a host keyboard it reads that; otherwise VM2
+//! behaves as batch GNU with an empty stdin (minibuf.c:659):
+//! `(end-of-file "Error reading from stdin")'.
 use super::*;
-
-/// The Lisp half, evaluated once per VM on first use.
-const LISP_HALF: &str = include_str!("../../../../rlisp/vm/minibuf.el");
 
 defsubr! { name = "read-from-minibuffer", gnu = "minibuf.c:1309", effect = Global,
 fn read_from_minibuffer(cx, prompt: Value; optional initial_contents: Value, keymap: Value,
@@ -91,34 +91,24 @@ fn prepare(cx: &mut Leaf<'_>, args: [Value; 6], minibuffer: bool) -> Next {
         }
     };
     let pos = Value::integer(pos).map_err(|_| Fault::Wrong("fixnump", Value::NIL))?;
+    // The Lisp half (minibuf.el, with keyboard.c's command loop) is installed
+    // on first use; then the arguments are checked again, unchanged.
+    if !super::keyboard::is_installed(cx)? {
+        let flag = if minibuffer { Value::TRUE } else { Value::NIL };
+        return super::keyboard::install(cx, keyboard_ready, [args.to_vec(), vec![flag]].concat());
+    }
     let helper = cx.intern("romacs--read-minibuf");
     let call = [prompt, keymap, initial, pos, histvar, default];
     let saved = vec![read, default, call[0], call[1], call[2], call[3], call[4], call[5]];
-    if cx.symbol_function(helper)? == Value::NIL {
-        let source = cx.string(LISP_HALF);
-        let form = cx.read_from_string(source, Value::NIL, Value::NIL)?;
-        let (form, _) = cx.pair(form).expect("read-from-string returns (OBJECT . POSITION)");
-        let eval = cx.intern("eval");
-        let mut saved = saved;
-        saved.push(if minibuffer { Value::TRUE } else { Value::NIL });
-        return Ok(Step::Call { f: eval, args: vec![form, Value::TRUE], then: installed, saved });
-    }
     Ok(Step::Call { f: helper, args: call.to_vec(), then: tail(minibuffer), saved })
 }
 
-/// After the one-time install, enter the Lisp half with the saved arguments.
-fn installed(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
-    let &[read, default, prompt, keymap, initial, pos, histvar, def, caller] = saved else {
-        unreachable!("minibuf install saves nine registers")
+/// After the keyboard half's install, prepare again from the raw arguments.
+fn keyboard_ready(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
+    let &[prompt, initial, keymap, read, hist, default, caller] = saved else {
+        unreachable!("keyboard install saves seven registers")
     };
-    let then = tail(caller != Value::NIL);
-    let helper = cx.intern("romacs--read-minibuf");
-    Ok(Step::Call {
-        f: helper,
-        args: vec![prompt, keymap, initial, pos, histvar, def],
-        then,
-        saved: vec![read, default, prompt, keymap, initial, pos, histvar, def],
-    })
+    prepare(cx, [prompt, initial, keymap, read, hist, default], caller != Value::NIL)
 }
 
 fn tail(minibuffer: bool) -> Then {
@@ -174,3 +164,32 @@ fn string_to_object(cx: &mut Leaf<'_>, mut val: Value, default: Value) -> Out {
 fn fixnum(v: Value) -> std::result::Result<i64, Fault> {
     v.integer_value().ok_or(Fault::Wrong("fixnump", v))
 }
+
+use super::keyboard::{enter, DONE};
+
+defsubr! { name = "innermost-minibuffer-p", gnu = "minibuf.c:424", effect = Global,
+fn innermost_minibuffer_p(cx; optional buffer: Value) -> Step {
+    enter(cx, "romacs--innermost-minibuffer-p", vec![buffer], DONE)
+}}
+
+defsubr! { name = "minibuffer-innermost-command-loop-p", gnu = "minibuf.c:438", effect = Global,
+fn minibuffer_innermost_command_loop_p(cx; optional buffer: Value) -> Step {
+    enter(cx, "romacs--minibuffer-innermost-command-loop-p", vec![buffer], DONE)
+}}
+
+defsubr! { name = "minibuffer-prompt", gnu = "minibuf.c:2248", effect = Global,
+fn minibuffer_prompt(cx) -> Step { enter(cx, "romacs--minibuffer-prompt", vec![], DONE) }}
+
+defsubr! { name = "minibuffer-prompt-end", gnu = "minibuf.c:505", effect = Global,
+fn minibuffer_prompt_end(cx) -> Step { enter(cx, "romacs--minibuffer-prompt-end", vec![], DONE) }}
+
+defsubr! { name = "minibuffer-contents", gnu = "minibuf.c:527", effect = Global,
+fn minibuffer_contents(cx) -> Step { enter(cx, "romacs--minibuffer-contents", vec![Value::TRUE], DONE) }}
+
+defsubr! { name = "minibuffer-contents-no-properties", gnu = "minibuf.c:537", effect = Global,
+fn minibuffer_contents_no_properties(cx) -> Step {
+    enter(cx, "romacs--minibuffer-contents", vec![Value::NIL], DONE)
+}}
+
+defsubr! { name = "yes-or-no-p", gnu = "fns.c:3612", effect = Global,
+fn yes_or_no_p(cx, prompt: Value) -> Step { enter(cx, "romacs--yes-or-no-p", vec![prompt], DONE) }}

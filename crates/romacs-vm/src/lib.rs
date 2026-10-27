@@ -298,7 +298,6 @@ enum Primitive {
     EndOfLine,
     DeleteChar,
     DeleteBackwardChar,
-    ThisCommandKeys,
     Substring,
     SearchForward,
     Narrow,
@@ -548,7 +547,6 @@ const PRIMITIVES: &[(&str, Primitive)] = &[
     ("end-of-line", Primitive::EndOfLine),
     ("delete-char", Primitive::DeleteChar),
     ("delete-backward-char", Primitive::DeleteBackwardChar),
-    ("this-command-keys", Primitive::ThisCommandKeys),
     ("buffer-substring-no-properties", Primitive::Substring),
     ("search-forward", Primitive::SearchForward),
     ("narrow-to-region", Primitive::Narrow),
@@ -1324,7 +1322,8 @@ impl Vm {
         vm.specials.extend(["process-environment".into(), "initial-environment".into(), "exec-path".into()]);
         // C specials are special before their symbols are first interned, so
         // already-read forms compile their bindings dynamically.
-        vm.specials.extend(forwarded::C_SPECIALS.iter().map(|v| v.name.to_owned()));
+        vm.specials.extend(forwarded::C_SPECIALS.iter().map(|v| v.name)
+            .filter(|name| !forwarded::NOT_SPECIAL.contains(name)).map(str::to_owned));
         vm.declare_special_raw("inhibit-eol-conversion", Value::NIL);
         vm.declare_special_raw("text-quoting-style", Value::NIL);
         vm.declare_special_raw("internal--text-quoting-flag", Value::TRUE);
@@ -1351,6 +1350,11 @@ impl Vm {
             "current-prefix-arg",
             "last-command-event",
             "command-history",
+            // keyboard.c this_command_keys, this_single_command_key_start
+            // and raw_keybuf (prims/keyboard.rs, rlisp/vm/keyboard.el).
+            "romacs--command-keys",
+            "romacs--single-command-key-start",
+            "romacs--raw-command-keys",
             // minibuf.c / buffer.c DEFVARs read by call-interactively's
             // add-to-history fallback and `*' code. GNU's buffer-read-only
             // is per-buffer; VM2's is one global (DIVERGENCES VM2-CALLINT1).
