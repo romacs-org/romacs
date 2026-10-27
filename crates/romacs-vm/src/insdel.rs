@@ -314,18 +314,58 @@ impl Vm {
             return Ok(Vec::new());
         }
         // Earlier hooks may have shrunk the buffer below the change's
-        // original bounds. GNU's scan only meets overlays intersecting them,
-        // and every overlay ends at or before Z: a START past Z meets none,
-        // and an END past Z meets the same overlays as Z.
+        // original bounds; GNU still selects with those bounds.
         let z = match self.object_if(buffer) {
             Some(Object::Buffer(b)) => b.len_chars() as i64 + 1,
             _ => return Ok(Vec::new()),
         };
-        if start > z {
-            return Ok(Vec::new());
+        if start > z || end > z {
+            return self.overlay_change_hooks_beyond(buffer, start, end);
         }
-        let (start, end) = (self.change_byte(buffer, start)?, self.change_byte(buffer, end.min(z))?);
+        let (start, end) = (self.change_byte(buffer, start)?, self.change_byte(buffer, end)?);
         self.overlay_change_hooks(buffer, start, end)
+    }
+
+    /// report_overlay_modification for bounds past Z, in character
+    /// positions: ITREE_FOREACH's selection over BEGIN..END (widened by one
+    /// for an insertion; an empty overlay is met at its position) and the
+    /// three hook tests, all with the original bounds and insertion flag.
+    fn overlay_change_hooks_beyond(&mut self, buffer: Value, begin: i64, end: i64) -> Faulty<Vec<(Value, Value)>> {
+        let Some(Object::Buffer(b)) = self.object_if(buffer) else { return Ok(Vec::new()) };
+        let whole = ByteOffset(0)..ByteOffset(b.len_bytes());
+        let mut spans = Vec::new();
+        self.visit_overlays_in(buffer, whole, |overlay, span| spans.push((span.start, span.end, overlay))).map_err(Fault::Error)?;
+        let Some(Object::Buffer(b)) = self.object_if(buffer) else { return Ok(Vec::new()) };
+        let mut found = Vec::new();
+        for (s, e, overlay) in spans {
+            let s = b.char_of_byte(s).map_err(Fault::Error)?.0 as i64 + 1;
+            let e = b.char_of_byte(e).map_err(Fault::Error)?.0 as i64 + 1;
+            found.push((s, e, overlay));
+        }
+        found.sort_by_key(|&(s, _, _)| s);
+        let insertion = begin == end;
+        let (low, high) = if insertion { (begin - 1, end + 1) } else { (begin, end) };
+        let names = [self.intern("insert-in-front-hooks"), self.intern("insert-behind-hooks"), self.intern("modification-hooks")];
+        let mut hooks = Vec::new();
+        for (s, e, overlay) in found {
+            if !((low < e && s < high) || (s == e && low == s)) {
+                continue;
+            }
+            let get = |vm: &Self, name: Value| vm.overlay_property(overlay, name).unwrap_or(Value::NIL);
+            if insertion && (begin == s || end == s) {
+                let prop = get(self, names[0]);
+                if prop != Value::NIL { hooks.push((prop, overlay)); }
+            }
+            if insertion && (begin == e || end == e) {
+                let prop = get(self, names[1]);
+                if prop != Value::NIL { hooks.push((prop, overlay)); }
+            }
+            if end > s && begin < e {
+                let prop = get(self, names[2]);
+                if prop != Value::NIL { hooks.push((prop, overlay)); }
+            }
+        }
+        Ok(hooks)
     }
 
     /// report_overlay_modification's scan before a change of START..END:
