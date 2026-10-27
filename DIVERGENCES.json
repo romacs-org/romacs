@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "7d4f210223b901f2ffa48418e7cb2c174f56c197ce9fef530462454157feead6",
+  "input_hash": "4749ad8b0d5b4216adfe2ae75165930f29a75f75a74b6af12308f7a0e78ae370",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -5977,10 +5977,10 @@
    "section": "Detail",
    "observable": false,
    "planned": false,
-   "mechanism": "Load-history merging and after-load execution remain incomplete",
-   "gnu": "GNU's C maintains both while it loads: `load` specbinds `current-load-list` to `(FILE)` (`loadhist_initialize`, `src/lread.c:1031-1035`), `build_load_history` (`src/lread.c:2054-2114`) moves it into `load-history` and sets it to `t`, and `load` then calls `do-after-load-evaluation` (`src/lread.c:1539-1540`), which runs the `after-load-alist` entries whose regexp matches the file; `LOADHIST_ATTACH` (`src/lisp.h:4735-4739`) conses onto `current-load-list` from `defvar` (`src/eval.c:913`), `defalias` (`src/data.c:979`), `defvaralias` (`src/eval.c:721`), `provide` and `require` (`src/fns.c:3759`, `src/fns.c:3824`); `provide` funcalls the functions of `(assq FEATURE after-load-alist)` (`src/fns.c:3762-3764`). Harness rows `defvar/036` and `defvar/038`: after `(defvar current-load-list 99)` GNU's `current-load-list` is a new cons, so `(eq current-load-list old)` is nil",
-   "romacs": "Romacs forwards `after-load-alist`, `current-load-list`, `load-history` and `eval-buffer-list` with their native C initial value nil. `load` binds `current-load-list` to `(FILE)` for the file, as `loadhist_initialize` does, so `macroexp-file-name` names the file being loaded (`tests/load_list.rs`). Variable declarations can attach entries to it, but `defalias` and `defvar` do not, `load` does not merge it into `load-history`, and neither `load` nor `provide` runs the after-load callbacks. Backtraces therefore retain genuine function/argument frames without source-file cross-references from load history. `eval-buffer` and `eval-region` remain unsupported, so `eval-buffer-list` stays nil. The two rows above remain pinned VALUE",
-   "why": "**Package-observable** for code that relies on `provide` or `load` running forms registered with `eval-after-load` / `with-eval-after-load` for a feature or file not yet loaded, or that inspects `current-load-list` or `load-history`. Maintaining them is load-history work, not part of declaring the variables",
+   "mechanism": "Load-history contents",
+   "gnu": "GNU's C maintains both while it loads: `load` specbinds `current-load-list` to `(FILE)` (`loadhist_initialize`, `src/lread.c:1031-1035`), `build_load_history` (`src/lread.c:2054-2114`) moves it into `load-history`, and `load` then calls `do-after-load-evaluation` (`src/lread.c:1539-1540`); `LOADHIST_ATTACH` (`src/lisp.h:4735-4739`) conses onto `current-load-list` from `defvar` (`src/eval.c:913`), `defalias` (`src/data.c:979`), `defvaralias` (`src/eval.c:721`), `provide` and `require` (`src/fns.c:3759`, `src/fns.c:3824`). Harness rows `defvar/036` and `defvar/038`: after `(defvar current-load-list 99)` GNU's `current-load-list` is a new cons, so `(eq current-load-list old)` is nil",
+   "romacs": "Romacs binds `current-load-list` to `(FILE)` for each load, with FILE the name the file was found by (expanded, not resolved through symlinks, as GNU's `hist_file_name`), replaces the file's `load-history` entry with it when the load completes, then calls `do-after-load-evaluation`; `provide` funcalls its `after-load-alist` entry (`tests/real_ert_load.rs`). Variable declarations can attach entries, but `defalias`, `defvar`, `provide` and `require` do not, so an entry usually holds only FILE. Backtraces therefore lack source-file cross-references from load history. `eval-buffer` and `eval-region` remain unsupported, so `eval-buffer-list` stays nil. The two rows above remain pinned VALUE",
+   "why": "**Package-observable** for code that inspects `current-load-list` or what `load-history` records about definitions (`symbol-file`, `unload-feature`, `find-function` by load history)",
    "symbols": [
     "after-load-alist",
     "current-load-list",

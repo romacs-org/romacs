@@ -568,6 +568,38 @@ fn daily_driver_load_slice_matches_gnu() {
         (condition-case e (read-from-minibuffer "outer") (error e)) (delete-window b) (list inner result (minibuffer-selected-window)))
       (condition-case e (set-window-combination-limit nil t) (error e)))"###,
         r###"(prin1-to-string
+ (list (progn (defvar rt-eal nil) (with-eval-after-load "thingatpt" (setq rt-eal 'file)) (load "thingatpt" nil t) rt-eal)
+       (progn (with-eval-after-load 'rtfeat (setq rt-eal 'provided)) (provide 'rtfeat) rt-eal)
+       (let ((seen nil)) (add-hook 'after-load-functions (lambda (f) (push (file-name-sans-extension (file-name-nondirectory f)) seen)))
+         (load "thingatpt" nil t) (remove-hook 'after-load-functions (car after-load-functions)) seen)
+       (let ((n 0)) (with-eval-after-load 'rtfeat2 (setq n (1+ n))) (provide 'rtfeat2) (provide 'rtfeat2) n)
+       (condition-case e (provide 3) (error e)) (condition-case e (provide 'x 3) (error e))
+       (subr-arity (symbol-function 'provide)) (provide 'rt2 '(a b)) (get 'rt2 'subfeatures) (featurep 'rt2 'a)
+       (let ((after-load-alist '((rtbad . 3)))) (condition-case e (provide 'rtbad) (error (car e))))
+       ;; Hooks match the name the file was found by, through a symlinked
+       ;; directory; the file is in load-history when they run; a collection
+       ;; inside a hook leaves the load intact.
+       (let* ((d (file-name-as-directory (progn (or (boundp 'default-directory) (setq default-directory temporary-file-directory)) (make-temp-file "rtal" t)))) (real (concat d "real/")) (alias (concat d "alias")) (log nil))
+         (make-directory real) (call-process "ln" nil nil nil "-s" "real" alias)
+         (write-region "(setq rt-al-x 1)\n" nil (concat real "pkg.el")) (write-region "(list 41 42 43)\n" nil (concat real "res.el"))
+         (prog1 (list (progn (with-eval-after-load "alias/pkg" (push 'alias log)) (with-eval-after-load "real/pkg" (push 'real log)) (load (concat alias "/pkg.el") nil t t) log)
+                      (let ((n 0)) (with-eval-after-load "real/pkg" (setq n (1+ n)) (with-eval-after-load "real/pkg" (setq n (+ n 10)))) (load (concat real "pkg.el") nil t t) n)
+                      (equal (car (assoc (concat real "pkg.el") load-history)) (concat real "pkg.el"))
+                      (progn (with-eval-after-load "real/res" (garbage-collect)) (load (concat real "res.el") nil t t))
+                      (string-suffix-p "alias/pkg.el" (progn (load (concat alias "/pkg.el") nil t t) (caar load-history))))
+           (delete-directory d t)))
+       ;; `..' after a symlinked directory is resolved lexically, as the
+       ;; file is named; a file stays in progress while its hooks reload it.
+       (let* ((d (file-name-as-directory (make-temp-file "rtal" t))) (outer (concat d "outer/")))
+         (make-directory (concat outer "real") t) (call-process "ln" nil nil nil "-s" "outer/real" (concat d "alias"))
+         (write-region "(setq rt-which 'top)\n" nil (concat d "target.el")) (write-region "(setq rt-which 'outer)\n" nil (concat outer "target.el"))
+         (write-region "(setq rt-rec-n (1+ rt-rec-n))\n" nil (concat d "rtrec.el")) (defvar rt-which nil) (defvar rt-rec-n 0)
+         (prog1 (list (progn (load (concat d "alias/../target.el") nil t t) rt-which)
+                      (progn (with-eval-after-load "rtrec" (when (< rt-rec-n 7) (load (concat d "rtrec.el") nil t t)))
+                             (list (condition-case e (load (concat d "rtrec.el") nil t t) (error (car e))) rt-rec-n
+                                   (length (seq-filter (lambda (e) (equal (car e) (concat d "rtrec.el"))) load-history)))))
+           (delete-directory d t)))))"###,
+        r###"(prin1-to-string
  (list (minibufferp) (minibufferp (window-buffer (minibuffer-window))) (minibufferp (window-buffer (minibuffer-window)) t) (minibufferp " *Minibuf-0*")
        (condition-case e (minibufferp 3) (error e)) (condition-case e (minibufferp "nosuch") (error e))
        (let ((executing-kbd-macro t) (minibuffer-setup-hook (list (lambda () (setq rt-mbp (list (minibufferp) (minibufferp nil t))) (throw 'exit nil)))))

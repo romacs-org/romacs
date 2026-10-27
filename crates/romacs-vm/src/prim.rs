@@ -878,6 +878,9 @@ mod leaf {
             self.vm.dynamic[binding].1 = value;
             Ok(true)
         }
+        pub fn provide_feature(&mut self, feature: Value, subfeatures: Value) -> std::result::Result<(), Fault> {
+            self.vm.provide_feature(feature, subfeatures)
+        }
         /// The value saved by the oldest local let of V in BUFFER, if any.
         pub fn local_toplevel_cell(&mut self, v: Value, buffer: Value) -> std::result::Result<Option<Value>, Fault> {
             if v == Value::NIL || v == Value::TRUE { return Ok(None); }

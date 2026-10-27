@@ -119,6 +119,9 @@ fn expansion_objects_survive_a_moving_collection_and_are_reclaimed() {
     assert_eq!(shown(&mut vm, "eo-check"), "(t 65536 113 65536)");
     let drop = source_file("drop.el", "(defalias 'eo-keep nil)\n(setq eo-check nil)\n");
     vm.load_file(&drop).unwrap();
+    // `load-history' keeps each loaded file's entry, as GNU's does; it is
+    // not the object under test, so drop it before comparing heaps.
+    vm.eval_source("(setq load-history nil)").unwrap();
     let dead = settled(&mut vm);
     eprintln!("dead {dead:?}");
     assert_eq!(dead, base, "an unreachable expansion object must be reclaimed exactly: base {base:?}, held {held:?}");

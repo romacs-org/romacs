@@ -574,7 +574,9 @@ const PRIMITIVES: &[(&str, Primitive)] = &[
     ("load", Primitive::Load),
     ("require", Primitive::Require),
     ("eval", Primitive::Eval),
-    ("provide", Primitive::Provide),
+    // `provide' is a T2 defsubr (prims/provide.rs) so it can run load hooks;
+    // the row stays because legacy primitive references are table ordinals.
+    ("#:vm2-provide", Primitive::Provide),
     ("featurep", Primitive::Featurep),
     ("message", Primitive::Message),
     ("list", Primitive::List),

@@ -161,6 +161,9 @@ fn lazily_held_body_survives_moving_collection_and_is_reclaimed_after_expansion(
     );
     assert_eq!(shown(&mut eager, "(lz-probe 41)"), "42");
     assert_eq!(shown(&mut lazy, "(lz-probe 41)"), "42", "body must survive the moving collection");
+    // `load-history' keeps each loaded file's entry, as GNU's does; it is
+    // not the object under test, so drop it before comparing heaps.
+    for vm in [&mut eager, &mut lazy] { vm.eval_source("(setq load-history nil)").unwrap(); }
     let (eager_after, eager_after_bytes) = settled(&mut eager);
     let (lazy_after, lazy_after_bytes) = settled(&mut lazy);
     eprintln!("after first call: eager {eager_after} / {eager_after_bytes}; lazy {lazy_after} / {lazy_after_bytes}");
@@ -189,6 +192,9 @@ fn never_called_lazy_body_is_reclaimed_with_its_function() {
         "held lazily: base {base_objects}/{base_bytes}, held {held_objects}/{held_bytes}"
     );
     vm.eval_source("(progn (defalias 'lz-probe nil) (defalias 'lz-ignore nil))").unwrap();
+    // `load-history' keeps each loaded file's entry, as GNU's does; it is
+    // not the object under test, so drop it before comparing heaps.
+    vm.eval_source("(setq load-history nil)").unwrap();
     let (dead_objects, dead_bytes) = settled(&mut vm);
     eprintln!("base {base_objects}/{base_bytes} held {held_objects}/{held_bytes} dead {dead_objects}/{dead_bytes}");
     assert_eq!((dead_objects, dead_bytes), (base_objects, base_bytes), "an unreachable lazy body must be reclaimed");

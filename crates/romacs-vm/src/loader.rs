@@ -61,6 +61,27 @@ impl Vm {
     pub fn load_report(&self) -> serde_json::Value {
         serde_json::json!({"completed_files":self.loader.completed_files,"completed_forms":self.loader.completed_forms,"steps":self.loader.steps})
     }
+    /// fns.c Fprovide up to its load hooks: record FEATURE (always noting it
+    /// for the autoload queue) and SUBFEATURES.
+    pub(crate) fn provide_feature(&mut self, feature: Value, subfeature: Value) -> std::result::Result<(), prim::Fault> {
+        self.symbol_plist(feature).map_err(|_| prim::Fault::Wrong("symbolp", feature))?;
+        if subfeature != Value::NIL && subfeature.tag() != 3 {
+            return Err(prim::Fault::Wrong("listp", subfeature));
+        }
+        let present = self.feature_present(feature).map_err(prim::Fault::Error)?;
+        self.autoload_note_provide();
+        if !present {
+            let slot = self.slot("features");
+            let old = self.slots[slot].value;
+            self.conses.push((feature, old));
+            self.slots[slot].value = Value::reference(self.conses.len() - 1, 3);
+        }
+        if subfeature != Value::NIL {
+            let key = self.intern("subfeatures");
+            self.put_symbol_property(feature, key, subfeature).map_err(prim::Fault::Error)?;
+        }
+        Ok(())
+    }
     fn feature_present(&self, feature: Value) -> Result<bool> {
         if !matches!(feature.tag(), 7) && feature != Value::NIL && feature != Value::TRUE {
             return Err("symbol required".into());
@@ -293,7 +314,12 @@ impl Vm {
         if path.extension().is_some_and(|s| s == "elc") {
             return Err("compiled .elc input is not supported".into());
         }
-        let path = std::fs::canonicalize(path)
+        // GNU names the file as openp found it, expanded but not resolved
+        // through symlinks (hist_file_name, lread.c:1452): that name is
+        // `load-file-name', its `load-history' entry and the after-load
+        // argument. The canonical path detects recursion and reads.
+        let named = expanded_path(path)?;
+        let path = std::fs::canonicalize(&named)
             .map_err(|e| format!("file missing: {}: {e}", path.display()))?;
         if self.loader.active.len() >= 128 {
             return Err(format!("recursive source load: {}", path.display()));
@@ -319,7 +345,7 @@ impl Vm {
         let old_file = self.slots[file_slot].value;
         let old_progress = self.slots[progress_slot].value;
         self.slots[file_slot].value =
-            self.literal(&Form::String(path.to_string_lossy().into_owned()))?;
+            self.literal(&Form::String(named.clone()))?;
         self.slots[progress_slot].value = Value::TRUE;
         // Root both old scoped values across nested executor collections.
         let mark = self.dynamic.len();
@@ -408,6 +434,7 @@ impl Vm {
                 at += used;
             }
             self.loader.completed_files += 1;
+            self.build_load_history(history_slot)?;
             Ok(result)
         })();
         self.lazy_regime = saved_regime;
@@ -415,10 +442,59 @@ impl Vm {
         self.file_specials = saved_file_specials;
         self.expanded_macros = saved_expanded_macros;
         self.expanded_symbols = saved_expanded_symbols;
-        self.loader.active.pop();
         self.unbind(self.dynamic.len() - mark);
+        // lread.c:1538: run the eval-after-load forms for this file, with
+        // the last form's value rooted across them. The file stays among the
+        // loads in progress until they finish, as GNU's unwind keeps it.
+        let result = result.and_then(|result| {
+            let hook_slot = self.slot("do-after-load-evaluation");
+            let hook = self.slots[hook_slot].function;
+            if hook == Value::UNBOUND || hook == Value::NIL {
+                return Ok(result);
+            }
+            let call = Form::List(vec![Form::Sym("do-after-load-evaluation".into()), Form::String(named)]);
+            let rooted = handle::FormObject::new(self, result);
+            self.eval_load_toplevel(&call, None, false, 0)?;
+            rooted.value(self)
+        });
+        self.loader.active.pop();
         result
     }
+    /// lread.c build_load_history for an entire file: the file's entry,
+    /// `current-load-list' in definition order, replaces any older entry
+    /// for the same name at the front of `load-history'.
+    fn build_load_history(&mut self, history_slot: usize) -> Result<()> {
+        let current = self.variable_value(history_slot)?;
+        let mut entry = self.list_values(current)?;
+        entry.reverse();
+        let Some(&file) = entry.first() else { return Ok(()) };
+        let name = self.source_string(file).ok().map(str::to_owned);
+        let slot = self.slot("load-history");
+        let mut kept = vec![];
+        let history = self.variable_value(slot)?;
+        for old in self.list_values(history)? {
+            let same = matches!(self.cons_pair(old), Ok((head, _)) if name.is_some() && self.source_string(head).ok() == name.as_deref());
+            if !same { kept.push(old); }
+        }
+        let entry = self.list_value(&entry);
+        kept.insert(0, entry);
+        let history = self.list_value(&kept);
+        self.set_variable_value(slot, history)
+    }
+}
+/// An absolute file name with `.' and `..' resolved lexically, as
+/// expand-file-name would leave openp's result.
+fn expanded_path(path: &Path) -> Result<String> {
+    let absolute = std::path::absolute(path).map_err(|e| format!("file missing: {}: {e}", path.display()))?;
+    let mut parts: Vec<std::path::Component> = vec![];
+    for part in absolute.components() {
+        match part {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => { if parts.len() > 1 { parts.pop(); } }
+            other => parts.push(other),
+        }
+    }
+    Ok(parts.iter().collect::<std::path::PathBuf>().to_string_lossy().into_owned())
 }
 /// Source text as GNU internal multibyte bytes.
 fn decode_source(bytes: &[u8]) -> Result<Vec<u8>> {
