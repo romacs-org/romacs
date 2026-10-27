@@ -1512,6 +1512,7 @@ mod leaf {
     mod undo;
     mod sqlite;
     mod random;
+    mod width;
 }
 pub(crate) use leaf::{Leaf, Kind};
 

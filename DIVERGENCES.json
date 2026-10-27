@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "9a88eda33c546fe2dd9a9393d993bad46ebe5d70ad51ef7b51fd4a831eddb9fb",
+  "input_hash": "2100d9fb7a6b1121a72918fef1cf071c63651642ded2dcb12518d3d95457f8c3",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",

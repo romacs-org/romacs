@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "98c9e63edae041cbdd89ca36e6b6ff3e8f338465e2716fde5531bdad02d02ca0",
+  "source_fingerprint": "1473fb6d68bac5b76016d3d58ccca0050b2395b2382ab97ba23383354038018a",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 809,
-  "parsed_vm2_only": 809
+  "parsed_total": 812,
+  "parsed_vm2_only": 812
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -654,6 +654,11 @@
    "name": "char-to-string",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/str.rs:56"
+  },
+  "char-width": {
+   "name": "char-width",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/width.rs:6"
   },
   "characterp": {
    "name": "characterp",
@@ -3093,12 +3098,17 @@
   "run-hook-with-args-until-failure": {
    "name": "run-hook-with-args-until-failure",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/eval_hooks.rs:160"
+   "registered_at": "crates/romacs-vm/src/prims/eval_hooks.rs:167"
   },
   "run-hook-with-args-until-success": {
    "name": "run-hook-with-args-until-success",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/eval_hooks.rs:165"
+   "registered_at": "crates/romacs-vm/src/prims/eval_hooks.rs:172"
+  },
+  "run-hook-wrapped": {
+   "name": "run-hook-wrapped",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/eval_hooks.rs:177"
   },
   "run-hooks": {
    "name": "run-hooks",
@@ -3657,6 +3667,11 @@
    "implementation": "vm2",
    "variant": "Primitive::StringToBytes",
    "registered_at": "crates/romacs-vm/src/lib.rs:561"
+  },
+  "string-width": {
+   "name": "string-width",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/width.rs:12"
   },
   "stringp": {
    "name": "stringp",

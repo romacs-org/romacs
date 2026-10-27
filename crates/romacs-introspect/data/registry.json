@@ -8,14 +8,14 @@
   "provenance": {
     "generated_by": "romacs-introspect-live",
     "generated_on": "linux-x86_64",
-    "input_hash": "4b1b75f1f52c22fe8674aa7a7f252d793b91d7c97808ffd0baef0cc0385f10d0",
+    "input_hash": "a7273f24dd8eeceaf4f1b1a15c365e4c971b4bb83062a81bb34c85372d9d8498",
     "source_only_at_generation": [],
     "vm2_probe_panics": [],
-    "vm2_universe": 3694
+    "vm2_universe": 3702
   },
   "schema": 2,
   "vm2": {
-    "count": 817,
+    "count": 820,
     "entries": [
       "#:vm2-closure-document",
       "#:vm2-closure-metadata",
@@ -137,6 +137,7 @@
       "char-table-range",
       "char-table-subtype",
       "char-to-string",
+      "char-width",
       "characterp",
       "charset-after",
       "charset-plist",
@@ -603,6 +604,7 @@
       "run-hook-with-args",
       "run-hook-with-args-until-failure",
       "run-hook-with-args-until-success",
+      "run-hook-wrapped",
       "run-hooks",
       "run-window-scroll-functions",
       "safe-length",
@@ -710,6 +712,7 @@
       "string-to-number",
       "string-to-syntax",
       "string-to-unibyte",
+      "string-width",
       "stringp",
       "subr-arity",
       "subr-name",

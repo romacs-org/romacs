@@ -521,6 +521,8 @@ pub(crate) static C_VARIABLES: &[CVariable] = &[
     // Chain: cus-start.el (preloaded) signals for a missing built-in.
     CVariable { name: "abbrev-mode", gnu: "buffer.c:5265", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
     CVariable { name: "ctl-arrow", gnu: "buffer.c:5294", kind: Kind::PerBuffer { default: Init::True, predicate: None } },
+    // char-width and string-width read it (indent.c buffer_display_table).
+    CVariable { name: "buffer-display-table", gnu: "buffer.c:5502", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
     CVariable { name: "bidi-paragraph-direction", gnu: "buffer.c:5383", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
     CVariable { name: "word-wrap", gnu: "buffer.c:5408", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
     CVariable { name: "selective-display-ellipses", gnu: "buffer.c:5487", kind: Kind::PerBuffer { default: Init::True, predicate: None } },

@@ -36,15 +36,15 @@ fn run_hook_with_args(cx, hook: Value; rest args) -> Step {
 /// run_hook_with_args's FUNCALL: funcall_nil runs every function;
 /// until-failure (funcall_not) stops at nil; until-success stops at non-nil.
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Mode { All, UntilFailure, UntilSuccess }
+enum Mode { All, UntilFailure, UntilSuccess, Wrapped }
 impl Mode {
     fn from(register: Value) -> Mode {
-        match register.integer_value() { Some(1) => Mode::UntilFailure, Some(2) => Mode::UntilSuccess, _ => Mode::All }
+        match register.integer_value() { Some(1) => Mode::UntilFailure, Some(2) => Mode::UntilSuccess, Some(3) => Mode::Wrapped, _ => Mode::All }
     }
     fn stop(self, result: Value) -> Option<Value> {
         match self {
             Mode::UntilFailure if result == Value::NIL => Some(Value::NIL),
-            Mode::UntilSuccess if result != Value::NIL => Some(result),
+            Mode::UntilSuccess | Mode::Wrapped if result != Value::NIL => Some(result),
             _ => None,
         }
     }
@@ -145,7 +145,9 @@ fn ran_global(cx: &mut Leaf<'_>, result: Value, saved: &[Value]) -> Next {
 }
 
 // Every hook function gets the same ARGS (GNU reuses the args array; only
-// args[0], the function slot, changes between calls).
+// args[0], the function slot, changes between calls). In `run-hook-wrapped'
+// ARGS starts with WRAP-FUNCTION, which is called with the hook function
+// and the rest (run_hook_wrapped_funcall's swap).
 fn call_then(f: Value, then: crate::prim::Then, args: &[Value], head: &[Value], hooks: &[Value], mode: Mode) -> Next {
     let mut saved = Vec::with_capacity(1 + args.len() + head.len() + hooks.len());
     saved.push(Value::integer(mode as i64).expect("hook mode register"));
@@ -153,6 +155,11 @@ fn call_then(f: Value, then: crate::prim::Then, args: &[Value], head: &[Value], 
     saved.extend_from_slice(args);
     saved.extend_from_slice(head);
     saved.extend_from_slice(hooks);
+    if mode == Mode::Wrapped {
+        let (&wrap, rest) = args.split_first().expect("run-hook-wrapped's WRAP-FUNCTION");
+        let args = std::iter::once(f).chain(rest.iter().copied()).collect();
+        return Ok(Step::Call { f: wrap, args, then, saved });
+    }
     Ok(Step::Call { f, args: args.to_vec(), then, saved })
 }
 
@@ -165,4 +172,10 @@ fn run_hook_with_args_until_failure(cx, hook: Value; rest args) -> Step {
 defsubr! { name = "run-hook-with-args-until-success", gnu = "eval.c:2927", effect = Global,
 fn run_hook_with_args_until_success(cx, hook: Value; rest args) -> Step {
     next_hook(cx, args, std::slice::from_ref(&hook), Mode::UntilSuccess)
+}}
+
+defsubr! { name = "run-hook-wrapped", gnu = "eval.c:2981", effect = Global,
+fn run_hook_wrapped(cx, hook: Value, wrap_function: Value; rest args) -> Step {
+    let args: Vec<Value> = std::iter::once(wrap_function).chain(args.iter().copied()).collect();
+    next_hook(cx, &args, std::slice::from_ref(&hook), Mode::Wrapped)
 }}

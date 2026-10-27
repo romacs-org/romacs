@@ -1087,7 +1087,7 @@ impl Vm {
 
     /// textget: OBJECT's text property PROP at character POSITION (no
     /// overlays), with category, aliases and default text properties.
-    fn property_textget(&self, object: Value, position: i64, prop: Value) -> std::result::Result<Value, crate::prim::Fault> {
+    pub(crate) fn property_textget(&self, object: Value, position: i64, prop: Value) -> std::result::Result<Value, crate::prim::Fault> {
         let raw = self.annotation_raw(object, position as usize).map_err(crate::prim::Fault::Error)?;
         self.annotation_resolve(&raw, prop).map_err(crate::prim::Fault::Error)
     }

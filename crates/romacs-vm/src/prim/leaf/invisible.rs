@@ -3,7 +3,7 @@ use super::*;
 
 impl Leaf<'_> {
     /// SANE_TAB_WIDTH of the current buffer.
-    fn tab_width(&mut self) -> std::result::Result<usize, Fault> {
+    pub(crate) fn tab_width(&mut self) -> std::result::Result<usize, Fault> {
         let variable = self.intern("tab-width");
         Ok(self.variable_value(variable)?.and_then(|v| v.integer_value())
             .filter(|n| (1..=1000).contains(n)).unwrap_or(8) as usize)
