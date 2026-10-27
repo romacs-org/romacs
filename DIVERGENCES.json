@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "b2ddcb536dc31148a4197f0c786340cd61b1bdde453e31cdf59a237ad501edc1",
+  "input_hash": "204c32d50eedddb097fe0943a71d4e8ef6f5f4998ace1701ccb1291b1a4bf38e",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -4877,7 +4877,7 @@
    "planned": false,
    "mechanism": "Hybrid frame device type and character metrics",
    "gnu": "Pinned GNU `src/frame.c:327-338` delegates live-frame type to framep (`:287-321`): t denotes an initial/termcap frame. Terminal frame-char-height and frame-char-width are always 1 (`:4358-4372`, `:4376-4391`), unlike graphical font metrics",
-   "romacs": "VM2's one live frame returns t but character dimensions are backend font pixels, initially height 20 and width 10; set_frame_geometry updates them (e.g. 24 and 8). This is NOT GNU terminal consistency. Joint characterization: `tests/window_prims.rs::vm2_win5_frame_type_and_character_metrics_are_a_documented_hybrid`; pin `frame-live-p/0014` (VALUE) measures all three together",
+   "romacs": "VM2's one live frame returns t but character dimensions are backend font pixels, initially height 20 and width 10; set_frame_geometry updates them (e.g. 24 and 8). The batch ERT runner (`romacs-gnu-ert`) sets GNU batch's terminal geometry, 80 columns by 25 lines of 1x1 characters, so package and GNU suites see GNU's frame and window sizes. This is NOT GNU terminal consistency. Joint characterization: `tests/window_prims.rs::vm2_win5_frame_type_and_character_metrics_are_a_documented_hybrid`; pin `frame-live-p/0014` (VALUE) measures all three together",
    "why": "**Package-observable:** code taking t to mean character-only terminal units receives non-unit pixel/character conversions. Relative geometry probes alone cannot establish device-model parity; the joint probe records an explicit mismatch",
    "symbols": [
     "frame-live-p",
@@ -5861,7 +5861,7 @@
    "planned": false,
    "mechanism": "Load-history merging and after-load execution remain incomplete",
    "gnu": "GNU's C maintains both while it loads: `load` specbinds `current-load-list` to `(FILE)` (`loadhist_initialize`, `src/lread.c:1031-1035`), `build_load_history` (`src/lread.c:2054-2114`) moves it into `load-history` and sets it to `t`, and `load` then calls `do-after-load-evaluation` (`src/lread.c:1539-1540`), which runs the `after-load-alist` entries whose regexp matches the file; `LOADHIST_ATTACH` (`src/lisp.h:4735-4739`) conses onto `current-load-list` from `defvar` (`src/eval.c:913`), `defalias` (`src/data.c:979`), `defvaralias` (`src/eval.c:721`), `provide` and `require` (`src/fns.c:3759`, `src/fns.c:3824`); `provide` funcalls the functions of `(assq FEATURE after-load-alist)` (`src/fns.c:3762-3764`). Harness rows `defvar/036` and `defvar/038`: after `(defvar current-load-list 99)` GNU's `current-load-list` is a new cons, so `(eq current-load-list old)` is nil",
-   "romacs": "Romacs forwards `after-load-alist`, `current-load-list`, `load-history` and `eval-buffer-list` with their native C initial value nil. Variable declarations can attach entries to `current-load-list`, but `load` does not scope that list per file or merge it into `load-history`, and neither `load` nor `provide` runs the after-load callbacks. Backtraces therefore retain genuine function/argument frames without source-file cross-references from load history. `eval-buffer` and `eval-region` remain unsupported, so `eval-buffer-list` stays nil. The two rows above remain pinned VALUE",
+   "romacs": "Romacs forwards `after-load-alist`, `current-load-list`, `load-history` and `eval-buffer-list` with their native C initial value nil. `load` binds `current-load-list` to `(FILE)` for the file, as `loadhist_initialize` does, so `macroexp-file-name` names the file being loaded (`tests/load_list.rs`). Variable declarations can attach entries to it, but `defalias` and `defvar` do not, `load` does not merge it into `load-history`, and neither `load` nor `provide` runs the after-load callbacks. Backtraces therefore retain genuine function/argument frames without source-file cross-references from load history. `eval-buffer` and `eval-region` remain unsupported, so `eval-buffer-list` stays nil. The two rows above remain pinned VALUE",
    "why": "**Package-observable** for code that relies on `provide` or `load` running forms registered with `eval-after-load` / `with-eval-after-load` for a feature or file not yet loaded, or that inspects `current-load-list` or `load-history`. Maintaining them is load-history work, not part of declaring the variables",
    "symbols": [
     "after-load-alist",

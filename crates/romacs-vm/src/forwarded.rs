@@ -491,8 +491,9 @@ pub(crate) static C_VARIABLES: &[CVariable] = &[
     // Census (warm): pcase.el form 12 (line 173) reads after-load-alist and
     // form 52 (line 1190) binds current-load-list. Both are nil in C. GNU's
     // C maintains them while it runs (load specbinds current-load-list,
-    // LOADHIST_ATTACH conses onto it, provide runs after-load-alist); VM2
-    // does neither (DIVERGENCES.md VM2-LOADHIST1).
+    // LOADHIST_ATTACH conses onto it, provide runs after-load-alist); VM2's
+    // loader binds it to (FILE) but attaches no definitions and runs no
+    // after-load callbacks (DIVERGENCES.md VM2-LOADHIST1).
     CVariable { name: "after-load-alist", gnu: "lread.c:5637", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "current-load-list", gnu: "lread.c:5693", kind: Kind::Lisp(Init::Nil) },
     // Backtrace collection/printing reads these native defaults. Source-history
@@ -1111,10 +1112,17 @@ impl Vm {
     /// entry is a no-op either way.
     pub(super) fn bind_forwarded(&mut self, slot: usize, fwd: Fwd, value: Value) -> std::result::Result<(), Fault> {
         let old = self.forwarded_value(fwd).map_err(Fault::Error)?;
-        let buffer = self.current_buffer_object()?;
         let owner = self.slots[self.buffer_slot].value;
         let localized = self.localized_boolean(slot).is_some();
-        let let_default = localized || matches!(fwd, Fwd::Buffer(i) if !self.per_buffer_local_p(buffer, i));
+        // Only a per-buffer variable needs the current buffer; binding any
+        // other forwarded variable must not create the initial one.
+        let let_default = localized || match fwd {
+            Fwd::Buffer(i) => {
+                let buffer = self.current_buffer_object()?;
+                !self.per_buffer_local_p(buffer, i)
+            }
+            _ => false,
+        };
         let value = if localized { if value == Value::NIL { Value::NIL } else { Value::TRUE } } else { value };
         if let_default {
             self.set_forwarded_default(slot, fwd, value, SetFlag::Bind)?;

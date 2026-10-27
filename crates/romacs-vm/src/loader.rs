@@ -327,6 +327,16 @@ impl Vm {
         self.dynamic.push((file_slot, old_file, self.slots[self.buffer_slot].value, false));
         self.backtrace.bind(self.dynamic.len(), Value::reference(progress_slot + 1, 7));
         self.dynamic.push((progress_slot, old_progress, self.slots[self.buffer_slot].value, false));
+        // loadhist_initialize (lread.c:1031): `load' binds current-load-list
+        // to (FILE), so LOADHIST_ATTACH conses this file's definitions before
+        // its name and macroexp-file-name finds the file being loaded.
+        let history_slot = self.slot("current-load-list");
+        let file = self.slots[file_slot].value;
+        let history = self.list_value(&[file]);
+        if let Err(error) = self.bind_variable(history_slot, history) {
+            self.unbind(self.dynamic.len() - mark);
+            return Err(error);
+        }
         self.loader.active.push(path.clone());
         // GNU readevalloop (src/lread.c:2183-2188) decides ONCE per load:
         // forms are eagerly macroexpanded only if `internal-macroexpand-for-
