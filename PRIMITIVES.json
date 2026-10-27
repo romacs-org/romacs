@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "5195e65aa44163533597cf406c855a6fee246bd92eae9e83b183d8575e7f2e08",
+  "source_fingerprint": "a43960ad7c6f6c74ee18e59aa2775ae6b15cc684b4c5dfeef79df757e594261f",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -308,7 +308,7 @@
   "backward-prefix-chars": {
    "name": "backward-prefix-chars",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/syntax_scan.rs:45"
+   "registered_at": "crates/romacs-vm/src/prims/syntax_scan.rs:48"
   },
   "bare-symbol": {
    "name": "bare-symbol",
@@ -628,7 +628,7 @@
   "char-syntax": {
    "name": "char-syntax",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/syntax_scan.rs:9"
+   "registered_at": "crates/romacs-vm/src/prims/syntax_scan.rs:12"
   },
   "char-table-extra-slot": {
    "name": "char-table-extra-slot",
@@ -1464,7 +1464,7 @@
   "forward-comment": {
    "name": "forward-comment",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/syntax_scan.rs:25"
+   "registered_at": "crates/romacs-vm/src/prims/syntax_scan.rs:28"
   },
   "forward-line": {
    "name": "forward-line",
@@ -2430,7 +2430,7 @@
   "matching-paren": {
    "name": "matching-paren",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/syntax_scan.rs:22"
+   "registered_at": "crates/romacs-vm/src/prims/syntax_scan.rs:25"
   },
   "max": {
    "name": "max",
@@ -2707,7 +2707,7 @@
   "parse-partial-sexp": {
    "name": "parse-partial-sexp",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/syntax_scan.rs:48"
+   "registered_at": "crates/romacs-vm/src/prims/syntax_scan.rs:51"
   },
   "plist-get": {
    "name": "plist-get",
@@ -3143,12 +3143,12 @@
   "scan-lists": {
    "name": "scan-lists",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/syntax_scan.rs:35"
+   "registered_at": "crates/romacs-vm/src/prims/syntax_scan.rs:38"
   },
   "scan-sexps": {
    "name": "scan-sexps",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/syntax_scan.rs:40"
+   "registered_at": "crates/romacs-vm/src/prims/syntax_scan.rs:43"
   },
   "search-backward": {
    "name": "search-backward",
@@ -3775,7 +3775,7 @@
   "syntax-class-to-char": {
    "name": "syntax-class-to-char",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/syntax_scan.rs:12"
+   "registered_at": "crates/romacs-vm/src/prims/syntax_scan.rs:15"
   },
   "syntax-table": {
    "name": "syntax-table",

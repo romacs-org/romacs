@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "bd53b97d407f071d3c7a498342cb9ea462600a64c025965506affecde165848d",
+  "input_hash": "dd48a791a30ae834b4f629dc51c8ffab226de69b5c491db95dfca00d50d47353",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -4348,8 +4348,8 @@
    "planned": false,
    "mechanism": "syntax.c scanning engine",
    "gnu": "`src/syntax.c` `forw_comment`, `back_comment`, `Fforward_comment`, `scan_lists`, `scan_sexps_forward` read each character's syntax through gl_state, whose interval bookkeeping can lag the scan position in rare backward-then-forward property cases; `parse_sexp_propertize` and `find_defun_start` call Lisp mid-scan",
-   "romacs": "`crates/romacs-vm/src/syntax_scan.rs` transcribes the scans with every comment style, nesting, fence, escape and prefix flag, and looks syntax up at the exact position (GNU's intent). Where GNU calls `internal--syntax-propertize` or `syntax-ppss`, the T2 primitive stops, performs the call, and reruns the deterministic scan, so calls, arguments, order, GNU's three error checks and the find_start cache match. Each run reads the buffer's flat text, so a scan after an edit first flattens the buffer, and N propertize calls cost N scan prefixes. A signal muted in `internal--syntax-propertize` is logged with GNU's `Error muted by safe_call` text through `message` under `inhibit-message`, which VM2 does not yet record in `*Messages*`",
-   "why": "**Semantics match pinned GNU on `tests/syntax_scan.rs` (51 cases, two find_defun_start regimes) and 99/100 GNU `test/src/syntax-tests.el` bodies under the full loadup bootstrap when its resource file is inserted directly (Romacs `find-file` cannot yet read it; the 100th needs `byte-compile`).** Cost is linear in buffer size per call, not gap-buffer local.",
+   "romacs": "`crates/romacs-vm/src/syntax_scan.rs` transcribes the scans with every comment style, nesting, fence, escape and prefix flag, and looks syntax up at the exact position (GNU's intent). Where GNU calls `internal--syntax-propertize` or `syntax-ppss`, the T2 primitive stops, performs the call, and reruns the deterministic scan from the first run's start, coerced positions, initial parse state and variables, replaying the syntax the stopped run read, so calls, arguments, order, results, GNU's three error checks and the find_start cache match. The scan's variables (`parse-sexp-ignore-comments`, `comment-end-can-be-escaped`, `open-paren-in-column-0-is-defun-start`, `comment-use-syntax-ppss`, `parse-sexp-lookup-properties`) are read when it starts; GNU reads all but `multibyte-syntax-as-symbol` live, so a `syntax-propertize` function that changes one mid-scan affects later positions there and none here. Each run reads the buffer's flat text, so a scan after an edit first flattens the buffer, and N propertize calls cost N scan prefixes. A signal muted in `internal--syntax-propertize` is logged with GNU's `Error muted by safe_call` text through `message` under `inhibit-message`, which VM2 does not yet record in `*Messages*`",
+   "why": "**Semantics match pinned GNU on `tests/syntax_scan.rs` (55 cases, two find_defun_start regimes) and 99/100 GNU `test/src/syntax-tests.el` bodies under the full loadup bootstrap when its resource file is inserted directly (Romacs `find-file` cannot yet read it; the 100th needs `byte-compile`).** Cost is linear in buffer size per call, not gap-buffer local.",
    "symbols": [
     "forward-comment",
     "scan-lists",

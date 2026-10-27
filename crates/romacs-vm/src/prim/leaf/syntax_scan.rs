@@ -13,12 +13,19 @@ enum Body<'a> {
 }
 
 /// The current buffer as `crate::syntax_scan::Text`.
+///
+/// A rerun after a mid-scan Lisp call replays the syntax the stopped run
+/// read, in order, then reads live: GNU's one scan read those positions
+/// before the call, so their syntax is what it was then, even where the
+/// call changed `syntax-table' properties since.
 struct View<'a> {
     vm: &'a Vm,
     body: Body<'a>,
     table: Value,
     properties: bool,
     ascii: [i32; 128],
+    replay: Vec<i32>,
+    read: std::cell::RefCell<Vec<i32>>,
 }
 
 /// SYNTAX_WITH_FLAGS of C in TABLE: the car of its (CODE . MATCH) entry.
@@ -43,7 +50,7 @@ impl<'a> View<'a> {
         };
         let mut ascii = [0; 128];
         for (c, code) in ascii.iter_mut().enumerate() { *code = entry_code(vm, table, c as u32); }
-        Self { vm, body, table, properties, ascii }
+        Self { vm, body, table, properties, ascii, replay: Vec::new(), read: Default::default() }
     }
     fn len(&self) -> usize {
         match self.body {
@@ -97,6 +104,22 @@ impl scan::Text for View<'_> {
         }
     }
     fn syntax(&self, at: Pos) -> i32 {
+        let mut read = self.read.borrow_mut();
+        let syntax = match self.replay.get(read.len()) {
+            Some(&syntax) => syntax,
+            None => self.live_syntax(at),
+        };
+        read.push(syntax);
+        syntax
+    }
+    fn table_syntax(&self, c: u32) -> i32 {
+        if c < 128 { self.ascii[c as usize] } else { entry_code(self.vm, self.table, c) }
+    }
+}
+
+impl View<'_> {
+    fn live_syntax(&self, at: Pos) -> i32 {
+        use scan::Text as _;
         let c = self.char_at(at);
         if self.properties {
             if let Some(value) = self.property(at.byte) {
@@ -105,9 +128,6 @@ impl scan::Text for View<'_> {
             }
         }
         self.table_syntax(c)
-    }
-    fn table_syntax(&self, c: u32) -> i32 {
-        if c < 128 { self.ascii[c as usize] } else { entry_code(self.vm, self.table, c) }
     }
 }
 
@@ -128,11 +148,38 @@ pub(crate) enum Outcome {
     Done(Value),
     /// Call `internal--syntax-propertize' with the first position, then
     /// require `syntax-propertize--done' past the second.
-    Propertize(i64, i64),
-    Ppss(i64),
+    /// Both stops carry the scan's memory for its rerun: a vector of the
+    /// start's BEGV, ZV and point and the syntax read so far.
+    Propertize(i64, i64, Value),
+    Ppss(i64, Value),
 }
 
 enum Result_ { Comment(Pos, bool), Lists(Option<i64>), Parse(ParseState), Prefix(Pos) }
+
+/// A scan's memory: the first run's BEGV, ZV and point, coerced FROM and
+/// TO, its variables as flags, its initial parse state (`state_memory'),
+/// then the syntax it read.
+const MEMORY_STATE: usize = 6;
+
+/// A parse state as eleven fixnums, its open-paren count, then the list.
+fn state_memory(state: &ParseState) -> Vec<Value> {
+    let fixnum = |n: i64| Value::integer(n).expect("fixnum");
+    let mut values: Vec<Value> = [state.depth, i64::from(state.instring), state.incomment, i64::from(state.comstyle),
+        i64::from(state.quoted), state.mindepth, state.thislevelstart, state.prevlevelstart, state.location,
+        state.comstr_start, i64::from(state.prev_syntax), state.levelstarts.len() as i64].into_iter().map(fixnum).collect();
+    values.extend(state.levelstarts.iter().map(|start| start.map_or(Value::NIL, fixnum)));
+    values
+}
+fn memory_state(values: &[Value]) -> ParseState {
+    let int = |i: usize| values[i].integer_value().expect("saved parse state");
+    let count = int(11) as usize;
+    ParseState {
+        depth: int(0), instring: int(1) as i32, incomment: int(2), comstyle: int(3) as i32, quoted: int(4) != 0,
+        mindepth: int(5), thislevelstart: int(6), prevlevelstart: int(7), location: int(8), comstr_start: int(9),
+        prev_syntax: int(10) as i32,
+        levelstarts: values[12..12 + count].iter().map(|v| v.integer_value()).collect(),
+    }
+}
 
 impl Leaf<'_> {
     fn syntax_var(&mut self, name: &str) -> std::result::Result<Value, Fault> {
@@ -279,10 +326,23 @@ impl Leaf<'_> {
 
     /// Run scanning primitive OP on ARGS. ANSWERS is an alist of the
     /// defun starts `syntax-ppss' gave for earlier runs.
-    pub(crate) fn syntax_scan(&mut self, op: Op, args: &[Value], answers: Value) -> std::result::Result<Outcome, Fault> {
+    /// MEMORY is nil on a scan's first run, else what its last stop returned.
+    pub(crate) fn syntax_scan(&mut self, op: Op, args: &[Value], answers: Value, memory: Value) -> std::result::Result<Outcome, Fault> {
+        // A rerun takes the inputs GNU's scan read once from the first run:
+        // its start, coerced positions, initial parse state and variables.
+        let memory = if memory == Value::NIL { None } else { Some(self.vector_values(memory)?) };
+        let int = |v: Value| v.integer_value().expect("saved scan input");
         // Argument checks, in GNU's order.
         let mut parse = None;
         match op {
+            Op::ParsePartialSexp if memory.is_some() => {
+                let memory = memory.as_ref().expect("rerun");
+                let target = if args[2] == Value::NIL { i64::MIN } else { int(args[2]) };
+                let syntax_table = self.intern("syntax-table");
+                let commentstop = if args[5] == Value::NIL { 0 } else if args[5] == syntax_table { -1 } else { 1 };
+                let state = memory_state(&memory[MEMORY_STATE..]);
+                parse = Some((int(memory[3]), int(memory[4]), target, args[3] != Value::NIL, commentstop, state));
+            }
             Op::ForwardComment => { self.fixnum(args[0])?; }
             Op::ScanLists => { for &arg in &args[..3] { self.fixnum(arg)?; } }
             Op::ScanSexps => { for &arg in &args[..2] { self.fixnum(arg)?; } }
@@ -306,14 +366,26 @@ impl Leaf<'_> {
             }
             Op::BackwardPrefixChars => {}
         }
-        let flag = |leaf: &mut Self, name: &str| leaf.syntax_var(name).map(|v| v != Value::NIL);
-        let properties = flag(self, "parse-sexp-lookup-properties")?;
+        const FLAGS: [&str; 6] = ["parse-sexp-lookup-properties", "parse-sexp-ignore-comments", "comment-end-can-be-escaped",
+            "multibyte-syntax-as-symbol", "open-paren-in-column-0-is-defun-start", "comment-use-syntax-ppss"];
+        let flags = match &memory {
+            Some(memory) => int(memory[5]),
+            None => {
+                let mut flags = 0;
+                for (bit, name) in FLAGS.iter().enumerate() {
+                    if self.syntax_var(name)? != Value::NIL { flags |= 1 << bit; }
+                }
+                flags
+            }
+        };
+        let flag = |bit: usize| flags & (1 << bit) != 0;
+        let properties = flag(0);
         let options = scan::Options {
-            ignore_comments: flag(self, "parse-sexp-ignore-comments")?,
-            comment_end_can_be_escaped: flag(self, "comment-end-can-be-escaped")?,
-            multibyte_syntax_as_symbol: flag(self, "multibyte-syntax-as-symbol")?,
-            open_paren_in_column_0_is_defun_start: flag(self, "open-paren-in-column-0-is-defun-start")?,
-            comment_use_syntax_ppss: flag(self, "comment-use-syntax-ppss")?,
+            ignore_comments: flag(1),
+            comment_end_can_be_escaped: flag(2),
+            multibyte_syntax_as_symbol: flag(3),
+            open_paren_in_column_0_is_defun_start: flag(4),
+            comment_use_syntax_ppss: flag(5),
             propertize_done: if properties {
                 Some(self.syntax_var("syntax-propertize--done")?.integer_value().unwrap_or(-1))
             } else {
@@ -335,7 +407,18 @@ impl Leaf<'_> {
             let state = self.buffer_state_mut(index);
             (state.defun_start.filter(|&(owner, _)| owner == epoch).map(|(_, cache)| cache), state.modification.modiff)
         };
-        let view = View::new(self.vm, index, table, properties);
+        let mut view = View::new(self.vm, index, table, properties);
+        // A rerun scans from the first run's start, whatever the call did
+        // to point or the restriction.
+        let (begv, zv, point) = match &memory {
+            None => (begv, zv, point),
+            Some(memory) => {
+                let reads = MEMORY_STATE + 12 + int(memory[MEMORY_STATE + 11]) as usize;
+                view.replay = memory[reads..].iter().map(|&s| int(s) as i32).collect();
+                let at = |i: usize| scan::Text::pos(&view, memory[i].integer_value().expect("saved position"));
+                (at(0), at(1), at(2))
+            }
+        };
         let mut scanner = Scanner { text: &view, begv, zv, options, ppss: &ppss, defun_start: cached, modiff };
         let result = match op {
             Op::ForwardComment => {
@@ -348,7 +431,7 @@ impl Leaf<'_> {
                 scanner.scan_lists(int(args[0]), int(args[1]), depth, matches!(op, Op::ScanSexps)).map(Result_::Lists)
             }
             Op::ParsePartialSexp => {
-                let (from, to, target, stopbefore, commentstop, mut state) = parse.expect("checked");
+                let (from, to, target, stopbefore, commentstop, mut state) = parse.clone().expect("checked");
                 let start = scan::Text::pos(&view, from);
                 scanner.scan_sexps_forward(&mut state, start, to, target, stopbefore, commentstop)
                     .map(|()| Result_::Parse(state))
@@ -356,12 +439,24 @@ impl Leaf<'_> {
             Op::BackwardPrefixChars => scanner.backward_prefix_chars(point).map(Result_::Prefix),
         };
         let written = scanner.defun_start.filter(|&cache| Some(cache) != cached);
+        let read = view.read.take();
         drop(view);
+        let mut memory = |leaf: &mut Self| {
+            let fixnum = |n: i64| Value::integer(n).expect("fixnum");
+            let (from, to, state) = match &parse {
+                Some((from, to, _, _, _, state)) => (fixnum(*from), fixnum(*to), state.clone()),
+                None => (Value::NIL, Value::NIL, ParseState::default()),
+            };
+            let mut values: Vec<Value> = vec![fixnum(begv.char), fixnum(zv.char), fixnum(point.char), from, to, fixnum(flags)];
+            values.extend(state_memory(&state));
+            values.extend(read.iter().map(|&s| fixnum(i64::from(s))));
+            leaf.vector(&values)
+        };
         let result = match result {
             Ok(result) => result,
             Err(Halt::ScanError(message, a, b)) => return Err(self.scan_error(message, a, b)),
-            Err(Halt::Propertize(arg, charpos)) => return Ok(Outcome::Propertize(arg, charpos)),
-            Err(Halt::Ppss(pos)) => return Ok(Outcome::Ppss(pos)),
+            Err(Halt::Propertize(arg, charpos)) => return Ok(Outcome::Propertize(arg, charpos, memory(self))),
+            Err(Halt::Ppss(pos)) => return Ok(Outcome::Ppss(pos, memory(self))),
         };
         if let Some(cache) = written {
             self.vm.defun_start_epoch += 1;

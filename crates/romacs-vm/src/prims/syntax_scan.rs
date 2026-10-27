@@ -2,7 +2,10 @@
 //! engine run (`crate::syntax_scan`); where GNU calls Lisp in the middle of
 //! one (`internal--syntax-propertize', `syntax-ppss'), the run stops, the
 //! engine performs the call, and the scan runs again from its arguments,
-//! which wait with the answers so far in the continuation's registers.
+//! which wait with the answers so far in the continuation's registers. The
+//! rerun starts where the first run started and replays the syntax the
+//! stopped run read (the scan's memory), so it reaches the stop exactly as
+//! GNU's single scan did.
 use super::*;
 use crate::prim::{SyntaxOp as Op, SyntaxOutcome as Outcome};
 
@@ -51,8 +54,9 @@ fn parse_partial_sexp(cx, from: Value, to: Value; optional targetdepth: Value, s
     start(cx, Op::ParsePartialSexp, &[from, to, targetdepth, stopbefore, oldstate, commentstop])
 }}
 
-/// Registers: the operation, its six arguments, the `syntax-ppss' answers.
-const ARGS: usize = 8;
+/// Registers: the operation, its six arguments, the `syntax-ppss' answers,
+/// the scan's memory.
+const ARGS: usize = 9;
 
 fn returned(_cx: &mut Leaf<'_>, value: Value, _saved: &[Value]) -> Next {
     Ok(Step::Done(value))
@@ -68,9 +72,10 @@ fn start(cx: &mut Leaf<'_>, op: Op, args: &[Value]) -> Next {
 fn run(cx: &mut Leaf<'_>, mut saved: Vec<Value>) -> Next {
     saved.truncate(ARGS);
     let int = |n: i64| Value::integer(n).expect("buffer position");
-    match cx.syntax_scan(Op::of(saved[0]), &saved[1..7], saved[7])? {
+    match cx.syntax_scan(Op::of(saved[0]), &saved[1..7], saved[7], saved[8])? {
         Outcome::Done(value) => Ok(Step::Done(value)),
-        Outcome::Propertize(arg, charpos) => {
+        Outcome::Propertize(arg, charpos, memory) => {
+            saved[8] = memory;
             // parse_sexp_propertize: safe_calln, then GNU's two checks.
             let modiff = cx.syntax_chars_modiff()?;
             saved.extend([int(charpos), int(modiff)]);
@@ -78,7 +83,8 @@ fn run(cx: &mut Leaf<'_>, mut saved: Vec<Value>) -> Next {
             let callee = cx.intern("internal--syntax-propertize");
             Ok(Step::Call { f, args: vec![callee, int(arg)], then: propertized, saved })
         }
-        Outcome::Ppss(pos) => {
+        Outcome::Ppss(pos, memory) => {
+            saved[8] = memory;
             // find_defun_start.
             let modiff = cx.syntax_chars_modiff()?;
             let point = cx.point()?;
