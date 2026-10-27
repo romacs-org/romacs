@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "8a390a7826bebd4e02f6fc9bf0069bfb29e3c011eeaeebac7e9b8b2627bcb3a9",
+  "source_fingerprint": "db5d9b17a09a5659c996b59877e737e15e163add7162b0d4dfea294ea63a15af",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -1421,7 +1421,7 @@
   "file-name-case-insensitive-p": {
    "name": "file-name-case-insensitive-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/savejourney.rs:199"
+   "registered_at": "crates/romacs-vm/src/prims/savejourney.rs:213"
   },
   "file-name-directory": {
    "name": "file-name-directory",
@@ -3367,7 +3367,7 @@
   "romacs--code-converting-work": {
    "name": "romacs--code-converting-work",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/insert_coding.rs:342"
+   "registered_at": "crates/romacs-vm/src/prims/insert_coding.rs:350"
   },
   "romacs--decode-output": {
    "name": "romacs--decode-output",
@@ -3382,12 +3382,12 @@
   "romacs--insert-file-contents-format": {
    "name": "romacs--insert-file-contents-format",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/insert_coding.rs:609"
+   "registered_at": "crates/romacs-vm/src/prims/insert_coding.rs:617"
   },
   "romacs--insert-file-contents-undecide": {
    "name": "romacs--insert-file-contents-undecide",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/insert_coding.rs:332"
+   "registered_at": "crates/romacs-vm/src/prims/insert_coding.rs:340"
   },
   "romacs--keymap-at-point": {
    "name": "romacs--keymap-at-point",

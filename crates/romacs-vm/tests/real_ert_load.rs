@@ -170,6 +170,10 @@ fn insert_file_contents_coding_matches_gnu() {
     let state = "last-coding-system-used (buffer-string) (and (local-variable-p 'buffer-file-coding-system) buffer-file-coding-system) (point) (buffer-modified-p) enable-multibyte-characters";
     let read = format!("(with-temp-buffer (list (cdr (insert-file-contents FILE)) {state}))");
     let big = [vec![b'x'; 6000], b"\n;; Local Variables:\n;; coding: latin-1\n;; End:\n\xe9\n".to_vec()].concat();
+    // The charset detector, with iso-latin-1 ahead of the ISO-2022
+    // categories VM2 cannot detect.
+    let encode = "(default-file-name-coding-system 'utf-8-unix) (file-name-coding-system nil) (set-auto-coding-function (lambda (f n) (setq seen (list last-coding-system-used (multibyte-string-p f) (equal f (encode-coding-string FILE 'utf-8-unix t)) n)) 'latin-1)))";
+    let latin = "(let ((saved (coding-system-priority-list))) (unwind-protect (progn (set-coding-system-priority 'iso-latin-1) (with-temp-buffer (list (cdr (insert-file-contents FILE)) last-coding-system-used (buffer-string)))) (apply #'set-coding-system-priority saved)))";
     let cases: Vec<(&str, Vec<u8>, String)> = vec![
         ("txt", "* Heading\nλ body\n".into(), read.clone()),
         ("txt", b"hi\n".to_vec(), read.clone()),
@@ -179,6 +183,9 @@ fn insert_file_contents_coding_matches_gnu() {
         // auto-coding-regexp-alist: the signature, then a coding cookie.
         ("txt", b"\xef\xbb\xbfx\n".to_vec(), read.clone()),
         ("el", b";; -*- coding: latin-1 -*-\ncaf\xe9\n".to_vec(), read.clone()),
+        // C1 bytes mule-conf.el's latin-extra-code-table admits, and CRLF.
+        ("txt", b"caf\xe9 \x93q\x94\n".to_vec(), latin.into()),
+        ("txt", b"caf\xe9\r\n".to_vec(), latin.into()),
         // The cookie in the 3 KiB tail, into an empty buffer and into text.
         ("el", big.clone(), "(with-temp-buffer (list (cdr (insert-file-contents FILE)) last-coding-system-used (substring (buffer-string) -3)))".into()),
         ("el", big, "(with-temp-buffer (insert \"AB\") (goto-char 2) (list (cdr (insert-file-contents FILE)) last-coding-system-used (substring (buffer-string) -4) (point)))".into()),
@@ -198,6 +205,11 @@ fn insert_file_contents_coding_matches_gnu() {
         // buffer, undo off; a non-local exit leaves the buffer as it was.
         ("txt", "é\n".into(), "(let* ((seen nil) (set-auto-coding-function (lambda (f n) (setq seen (list (equal f FILE) n enable-multibyte-characters (append (buffer-string) nil) buffer-undo-list (point))) 'latin-1))) (with-temp-buffer (buffer-enable-undo) (list (cdr (insert-file-contents FILE)) seen last-coding-system-used (buffer-string))))".into()),
         ("txt", "é\n".into(), "(let ((set-auto-coding-function (lambda (&rest _) (error \"rt-boom\")))) (with-temp-buffer (buffer-enable-undo) (list (condition-case e (insert-file-contents FILE) (error (cadr e))) (buffer-string) enable-multibyte-characters buffer-undo-list)))".into()),
+        // A non-ASCII name reaches the function as ENCODE_FILE makes it:
+        // encoded by `default-file-name-coding-system', unrecorded, into an
+        // empty buffer and into the work buffer of a buffer with text.
+        ("λ", "é\n".into(), format!("(let* ((seen nil) {encode} (with-temp-buffer (setq last-coding-system-used 'no-conversion) (list (cdr (insert-file-contents FILE)) seen (buffer-string))))")),
+        ("λ", "é\n".into(), format!("(let* ((seen nil) {encode} (with-temp-buffer (insert \"x\") (setq last-coding-system-used 'no-conversion) (list (cdr (insert-file-contents FILE)) seen (buffer-string))))")),
         // The work buffer of a buffer with text.
         ("txt", "é\n".into(), "(let* ((seen nil) (set-auto-coding-function (lambda (f n) (setq seen (list (buffer-name) n enable-multibyte-characters (append (buffer-string) nil) buffer-undo-list buffer-read-only)) nil))) (with-temp-buffer (insert \"x\") (list (cdr (insert-file-contents FILE)) seen last-coding-system-used)))".into()),
         // file-coding-system-alist: a function entry gets the arguments.

@@ -1468,6 +1468,7 @@ fn eol_index(seen: u8) -> Option<usize> {
 const CATEGORY_UTF_8_AUTO: usize = 6;
 const CATEGORY_UTF_8_NOSIG: usize = 7;
 const CATEGORY_UTF_8_SIG: usize = 8;
+const CATEGORY_CHARSET: usize = 14;
 const CATEGORY_RAW_TEXT: usize = 19;
 const MASK_UTF_8: u32 = 1 << CATEGORY_UTF_8_AUTO | 1 << CATEGORY_UTF_8_NOSIG | 1 << CATEGORY_UTF_8_SIG;
 const MASK_UTF_16: u32 = 0b11111 << 9;
@@ -1555,9 +1556,9 @@ impl Leaf<'_> {
     /// over BYTES: the system found, if any, and the EOL subsidiary index
     /// (adjust_coding_eol_type) its scan saw.
     /// Only the undecided type and the utf-8-auto category detect; the
-    /// detectors VM2 implements are UTF-8's, and reaching any other (ISO-2022
-    /// escapes, UTF-16 for text with NUL and 8-bit bytes, the charset, CCL
-    /// and CJK categories) refuses rather than guess.
+    /// detectors VM2 implements are UTF-8's and the charset category's, and
+    /// reaching any other (ISO-2022 escapes, UTF-16 for text with NUL and
+    /// 8-bit bytes, CCL and CJK categories) refuses rather than guess.
     pub(crate) fn coding_detect(&mut self, bytes: &[u8], attrs: Value) -> std::result::Result<(Option<Value>, Option<usize>), Fault> {
         let refuse = |what: &str| Fault::Error(format!("VM2 coding detection of {what} is unsupported"));
         let kind = self.vector_get(attrs, num(3))?;
@@ -1648,6 +1649,8 @@ impl Leaf<'_> {
                     if info.found & bit != 0 { chosen = Some((category, system)); break }
                 } else if (CATEGORY_UTF_8_AUTO..=CATEGORY_UTF_8_SIG).contains(&category) {
                     if detect_utf_8(bytes, head_ascii, &mut info) && info.found & bit != 0 { chosen = Some((category, system)); break }
+                } else if category == CATEGORY_CHARSET {
+                    if self.detect_charset(system, bytes, head_ascii, &mut info)? && info.found & bit != 0 { chosen = Some((category, system)); break }
                 } else {
                     return Err(refuse(&format!("the {} category", CATEGORIES[category])));
                 }
@@ -1678,5 +1681,58 @@ impl Leaf<'_> {
             return Ok((None, eol_index(eol_seen)));
         };
         Ok((Some(found), eol_index(eol_seen)))
+    }
+
+    /// coding.c detect_coding_charset over BYTES for SYSTEM, the system set
+    /// up for the charset category: every code must start at a byte its
+    /// charset-valids entry accepts and fit the code space of one of the
+    /// entry's charsets; an 8-bit byte makes it found. For an `iso-8859-' or
+    /// `iso-latin-' system a C1 byte also needs `latin-extra-code-table'.
+    fn detect_charset(&mut self, system: Value, bytes: &[u8], head_ascii: usize, info: &mut DetectInfo) -> std::result::Result<bool, Fault> {
+        info.checked |= 1 << CATEGORY_CHARSET;
+        let spec = self.coding_required(system)?;
+        let attrs = self.vector_get(spec, num(0))?;
+        let valids = self.vector_get(attrs, num(16))?;
+        let name = self.symbol_name(system)?;
+        let check_latin_extra = name.starts_with("iso-8859-") || name.starts_with("iso-latin-");
+        let symbol = self.intern("latin-extra-code-table");
+        let table = self.variable_value(symbol)?.filter(|&table| self.kind(table) == Kind::Vector);
+        let mut at = if self.vector_get(attrs, num(5))? != Value::NIL { head_ascii } else { 0 };
+        let mut found = false;
+        let accepted = 'codes: loop {
+            let Some(&c) = bytes.get(at) else { break true };
+            at += 1;
+            let entry = self.vector_get(valids, num(i64::from(c)))?;
+            if entry == Value::NIL { break false }
+            if c >= 0x80 {
+                if c < 0xA0 && check_latin_extra {
+                    let extra = match table { Some(table) => self.vector_get(table, num(i64::from(c)))?, None => Value::NIL };
+                    if extra == Value::NIL { break false }
+                }
+                found = true;
+            }
+            // A charset id, or a list of them, smallest dimension first.
+            // IDX carries across the list: a later charset continues after
+            // the bytes an earlier one consumed, as GNU's loop does.
+            let ids = if entry.integer_value().is_some() { vec![entry] } else { self.coding_items(entry)? };
+            let mut idx = 1;
+            for id in ids {
+                let record = &self.vm.charsets.records[self.vm.charsets.ids[id.integer_value().unwrap() as usize]];
+                let (dim, space) = (record.dimension as usize, record.space);
+                while idx < dim {
+                    // too_short
+                    let Some(&c) = bytes.get(at) else { break 'codes false };
+                    at += 1;
+                    let byte = (dim - 1 - idx) * 2;
+                    if !(space[byte]..=space[byte + 1]).contains(&u32::from(c)) { break }
+                    idx += 1;
+                }
+                if idx == dim { continue 'codes }
+            }
+            break false
+        };
+        let bit = 1 << CATEGORY_CHARSET;
+        if !accepted { info.rejected |= bit; } else { info.found |= if found { bit } else { 0 }; }
+        Ok(accepted)
     }
 }

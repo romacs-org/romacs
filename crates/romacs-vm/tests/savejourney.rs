@@ -70,6 +70,26 @@ impl Drop for Fixture {
         std::fs::remove_dir_all(self.0.parent().unwrap()).unwrap();
     }
 }
+/// `set-auto-coding' passes ENCODE_FILE's unibyte name to
+/// `auto-coding-alist-lookup', which asks about it: the encoded name answers
+/// as its multibyte spelling; bytes that are not UTF-8 are refused.
+#[test]
+fn filename_case_encoded_unibyte_name() {
+    let fixture = Fixture::new();
+    std::fs::write(fixture.0.join("λ"), b"unchanged").unwrap();
+    let mut vm = Vm::new();
+    let path = fixture.0.join("λ");
+    let name = serde_json::to_string(&path).unwrap();
+    let bytes: Vec<String> = path.to_str().unwrap().bytes().map(|b| b.to_string()).collect();
+    assert_eq!(
+        eval(&mut vm, &format!("(list (file-name-case-insensitive-p {name}) (file-name-case-insensitive-p (unibyte-string {})))", bytes.join(" "))),
+        "(nil nil)"
+    );
+    assert_eq!(
+        eval(&mut vm, "(condition-case e (file-name-case-insensitive-p (unibyte-string 47 255)) (error e))"),
+        "(error \"VM2 file-name-case-insensitive-p of a non-UTF-8 unibyte file name is unsupported\")"
+    );
+}
 #[test]
 fn filename_case_actual_file_directory_missing_and_type_contract() {
     let fixture = Fixture::new();
