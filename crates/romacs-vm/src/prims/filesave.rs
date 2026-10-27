@@ -84,6 +84,7 @@ fn returned(_: &mut Leaf<'_>, value: Value, _: &[Value]) -> Next {
     Ok(Step::Done(value))
 }
 
+/// fileio.c report_file_errno: an EEXIST carries no OPERATION.
 fn errno(cx: &mut Leaf<'_>, operation: &str, paths: &[Value], error: std::io::Error) -> Fault {
     let raw = error.raw_os_error();
     let text = error.to_string();
@@ -94,11 +95,7 @@ fn errno(cx: &mut Leaf<'_>, operation: &str, paths: &[Value], error: std::io::Er
     for path in paths.iter().rev() {
         data = cx.cons(*path, data);
     }
-    let message = cx.string(if raw == Some(libc::EEXIST) {
-        "File already exists"
-    } else {
-        text
-    });
+    let message = cx.string(text);
     data = cx.cons(message, data);
     let condition = match raw {
         Some(libc::EEXIST) => "file-already-exists",
@@ -111,6 +108,14 @@ fn errno(cx: &mut Leaf<'_>, operation: &str, paths: &[Value], error: std::io::Er
         data = cx.cons(op, data);
     }
     Fault::Signal(cx.intern(condition), data)
+}
+
+/// fileio.c barf_or_query_if_file_exists refusing an existing NAME.
+fn already_exists(cx: &mut Leaf<'_>, name: Value) -> Fault {
+    let message = cx.string("File already exists");
+    let data = cx.cons(name, Value::NIL);
+    let data = cx.cons(message, data);
+    Fault::Signal(cx.intern("file-already-exists"), data)
 }
 
 // ENOENT and ENOTDIR are both nil for GNU's metadata queries.
@@ -214,11 +219,9 @@ fn rename_file(cx, file: Value, newname: Value; optional overwrite: Value) -> St
     match cx.filesave_rename(&source, &target, overwrite != Value::NIL) {
         Ok(()) => Ok(Step::Done(Value::NIL)),
         Err(e) if e.raw_os_error() == Some(libc::EXDEV) => Err(refusal("rename-file cross-device copy/delete")),
-        Err(e) => {
-            // GNU's EEXIST carries only the destination, not both names.
-            let paths = if e.raw_os_error() == Some(libc::EEXIST) { vec![target_value] } else { vec![source_value, target_value] };
-            Err(errno(cx, "Renaming", &paths, e))
-        }
+        // GNU queries before renaming, so EEXIST names only the destination.
+        Err(e) if e.raw_os_error() == Some(libc::EEXIST) => Err(already_exists(cx, target_value)),
+        Err(e) => Err(errno(cx, "Renaming", &[source_value, target_value], e)),
     }
 }}
 
@@ -352,4 +355,212 @@ fn delete_directory_internal(cx, directory: Value) {
     native_encoding(cx)?;
     std::fs::remove_dir(&path).map_err(|e| errno(cx, "Removing directory", &[expanded], e))?;
     Ok(Value::NIL)
+}}
+
+/// fileio.c expand_cp_target: NEWNAME expanded, or FILE's last component
+/// under NEWNAME when NEWNAME is a directory name.
+fn cp_target(cx: &mut Leaf<'_>, file: Value, newname: Value) -> std::result::Result<(String, Value), Fault> {
+    if cx.string_bytes(newname)?.last() != Some(&b'/') {
+        return name(cx, newname, false);
+    }
+    super::fileio::refuse_handler(cx, file, "file-name-nondirectory")?;
+    let text = cx.string_text(file)?;
+    let base = text.rsplit('/').next().unwrap_or("");
+    let (directory, _) = name(cx, newname, false)?;
+    // Expanding BASE under the directory: `..' climbs, an empty BASE names
+    // the directory itself.
+    let joined = cx.string(&format!("{directory}{base}"));
+    name(cx, joined, base.is_empty())
+}
+
+/// barf_or_query_if_file_exists for a NAME known to exist: nil signals,
+/// an integer asks, which a leaf cannot do; any other value replaces.
+fn may_replace(cx: &mut Leaf<'_>, ok: Value, name: Value, operation: &str) -> std::result::Result<(), Fault> {
+    if ok == Value::NIL {
+        return Err(already_exists(cx, name));
+    }
+    if ok.integer_value().is_some() {
+        return Err(refusal(&format!("{operation} interactive overwrite confirmation")));
+    }
+    Ok(())
+}
+
+/// Create a name with CREATE; over an existing PATH, unlink it and try
+/// once more when OK allows (Fadd_name_to_file, Fmake_symbolic_link).
+fn create_name(
+    cx: &mut Leaf<'_>,
+    create: impl Fn() -> std::io::Result<()>,
+    path: &str,
+    name: Value,
+    ok: Value,
+    operation: &str,
+) -> std::result::Result<std::io::Result<()>, Fault> {
+    match create() {
+        Err(e) if e.raw_os_error() == Some(libc::EEXIST) => {
+            may_replace(cx, ok, name, operation)?;
+            let _ = cx.filesave_unlink(path);
+            Ok(create())
+        }
+        result => Ok(result),
+    }
+}
+
+/// The process umask, which GNU reads once at startup (fileio.c realmask).
+fn umask() -> std::result::Result<u32, Fault> {
+    let status = std::fs::read_to_string("/proc/self/status").map_err(|e| Fault::Error(format!("VM2 umask: {e}")))?;
+    status.lines().find_map(|line| line.strip_prefix("Umask:"))
+        .and_then(|mask| u32::from_str_radix(mask.trim(), 8).ok())
+        .ok_or_else(|| Fault::Error("VM2 umask: no Umask in /proc/self/status".into()))
+}
+
+// Fcopy_file: a regular FILE's bytes into NEWNAME, created exclusively with
+// FILE's mode bits (only the owner's under PRESERVE-UID-GID) or truncated in
+// place when OK-IF-ALREADY-EXISTS allows replacing it. GNU's mode, owner
+// and time rules follow; extended ACLs are refused, not dropped.
+defsubr! { name = "copy-file", gnu = "fileio.c:2252", effect = Global,
+fn copy_file(cx, file: Value, newname: Value; optional ok_if_already_exists: Value, keep_time: Value,
+             preserve_uid_gid: Value, preserve_permissions: Value) -> Step {
+    use std::io::{Read, Write};
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+    let (source, file) = name(cx, file, false)?;
+    let (target, newname) = cp_target(cx, file, newname)?;
+    let args = vec![file, newname, ok_if_already_exists, keep_time, preserve_uid_gid, preserve_permissions];
+    if let Some(call) = handler(cx, file, "copy-file", args.clone())? { return call; }
+    if let Some(call) = handler(cx, newname, "copy-file", args)? { return call; }
+    native_encoding(cx)?;
+    let mut input = std::fs::OpenOptions::new().read(true).custom_flags(libc::O_NONBLOCK).open(&source)
+        .map_err(|e| errno(cx, "Opening input file", &[file], e))?;
+    let status = input.metadata().map_err(|e| errno(cx, "Input file status", &[file], e))?;
+    if !status.is_file() {
+        let code = if status.is_dir() { libc::EISDIR } else { libc::EINVAL };
+        return Err(errno(cx, "Non-regular file", &[file], std::io::Error::from_raw_os_error(code)));
+    }
+    if preserve_permissions != Value::NIL && cx.filesave_has_acl(&input) {
+        return Err(refusal("copy-file ACL preservation"));
+    }
+    let new_mask = status.mode() & if preserve_uid_gid != Value::NIL { 0o700 } else { 0o777 };
+    let created = std::fs::OpenOptions::new().write(true).create_new(true).mode(new_mask).open(&target);
+    let (mut output, already_exists) = match created {
+        Ok(output) => (output, false),
+        Err(e) if e.raw_os_error() == Some(libc::EEXIST) => {
+            may_replace(cx, ok_if_already_exists, newname, "copy-file")?;
+            let output = std::fs::OpenOptions::new().write(true).truncate(true).open(&target)
+                .map_err(|e| errno(cx, "Opening output file", &[newname], e))?;
+            (output, true)
+        }
+        Err(e) => return Err(errno(cx, "Opening output file", &[newname], e)),
+    };
+    if already_exists {
+        // GNU has already truncated the output when it finds it is the input.
+        let existing = output.metadata().map_err(|e| errno(cx, "Output file status", &[newname], e))?;
+        if (existing.dev(), existing.ino()) == (status.dev(), status.ino()) {
+            let same = std::io::Error::from_raw_os_error(0);
+            return Err(errno(cx, "Input and output files are the same", &[file, newname], same));
+        }
+    }
+    if !cx.filesave_clone(&output, &input) {
+        // Read and write the rest, whatever copy_file_range did, as GNU does.
+        let mut buffer = vec![0; 1 << 16];
+        loop {
+            let count = match input.read(&mut buffer) {
+                Ok(0) => break,
+                Ok(count) => count,
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(e) => return Err(errno(cx, "Read error", &[file], e)),
+            };
+            output.write_all(&buffer[..count]).map_err(|e| errno(cx, "Write error", &[newname], e))?;
+        }
+    }
+    let realmask = umask()?;
+    let mut preserved = status.mode() & 0o7777;
+    let mut default = status.mode() & 0o777 & !realmask;
+    if preserve_uid_gid != Value::NIL
+        && std::os::unix::fs::fchown(&output, Some(status.uid()), Some(status.gid())).is_err()
+    {
+        if std::os::unix::fs::fchown(&output, None, Some(status.gid())).is_ok() {
+            preserved &= !0o4000;
+        } else {
+            // The group is wrong: drop set-id bits, give group the other bits.
+            preserved = (preserved & !0o6070) | ((preserved & 7) << 3);
+            default = (default & !0o70) | ((default & 7) << 3);
+        }
+    }
+    let mode = if preserve_permissions != Value::NIL {
+        Some(preserved)
+    } else if already_exists || new_mask & !realmask == default {
+        None
+    } else {
+        Some(default)
+    };
+    if let Some(mode) = mode {
+        output.set_permissions(std::fs::Permissions::from_mode(mode))
+            .map_err(|e| errno(cx, "Copying permissions to", &[newname], e))?;
+    }
+    if keep_time != Value::NIL {
+        let times = status.accessed().and_then(|atime| Ok(std::fs::FileTimes::new()
+            .set_accessed(atime).set_modified(status.modified()?)));
+        if times.and_then(|times| output.set_times(times)).is_err() {
+            let message = cx.string("Cannot set file date");
+            let data = cx.cons(newname, Value::NIL);
+            let data = cx.cons(message, data);
+            return Err(Fault::Signal(cx.intern("file-date-error"), data));
+        }
+    }
+    cx.fileio_close_output(output).map_err(|e| errno(cx, "Write error", &[newname], e))?;
+    Ok(Step::Done(Value::NIL))
+}}
+
+defsubr! { name = "add-name-to-file", gnu = "fileio.c:2851", effect = Global,
+fn add_name_to_file(cx, file: Value, newname: Value; optional ok_if_already_exists: Value) -> Step {
+    let (source, file) = name(cx, file, false)?;
+    let (target, newname) = cp_target(cx, file, newname)?;
+    let args = vec![file, newname, ok_if_already_exists];
+    if let Some(call) = handler(cx, file, "add-name-to-file", args.clone())? { return call; }
+    if let Some(call) = handler(cx, newname, "add-name-to-file", args)? { return call; }
+    native_encoding(cx)?;
+    create_name(cx, || std::fs::hard_link(&source, &target), &target, newname, ok_if_already_exists, "add-name-to-file")?
+        .map_err(|e| errno(cx, "Adding new name", &[file, newname], e))?;
+    Ok(Step::Done(Value::NIL))
+}}
+
+// Fmake_symbolic_link: TARGET is stored literally; only an integer
+// OK-IF-ALREADY-EXISTS expands its leading `~' or strips its leading `/:'.
+defsubr! { name = "make-symbolic-link", gnu = "fileio.c:2907", effect = Global,
+fn make_symbolic_link(cx, target: Value, linkname: Value; optional ok_if_already_exists: Value) -> Step {
+    let bytes = cx.string_bytes(target)?;
+    let target = if ok_if_already_exists.integer_value().is_none() {
+        target
+    } else if bytes.first() == Some(&b'~') {
+        name(cx, target, false)?.1
+    } else if bytes.starts_with(b"/:") {
+        let multibyte = cx.string_view(target)?.is_multibyte();
+        cx.make_string(bytes[2..].to_vec(), multibyte)
+    } else {
+        target
+    };
+    let (link, linkname) = cp_target(cx, target, linkname)?;
+    if let Some(call) = handler(cx, linkname, "make-symbolic-link", vec![target, linkname, ok_if_already_exists])? {
+        return call;
+    }
+    native_encoding(cx)?;
+    if cx.string_bytes(target)?.contains(&0) {
+        return Err(Fault::Wrong("filenamep", target));
+    }
+    let literal = cx.string_text(target)?;
+    create_name(cx, || std::os::unix::fs::symlink(&literal, &link), &link, linkname, ok_if_already_exists, "make-symbolic-link")?
+        .map_err(|e| errno(cx, "Making symbolic link", &[target, linkname], e))?;
+    Ok(Step::Done(Value::NIL))
+}}
+
+// Fset_file_times: both times to TIMESTAMP, or now when it is nil; any
+// non-nil FLAG sets a symbolic link's own times. Returns t.
+defsubr! { name = "set-file-times", gnu = "fileio.c:3741", effect = Global,
+fn set_file_times(cx, filename: Value; optional timestamp: Value, flag: Value) -> Step {
+    let time = if timestamp == Value::NIL { None } else { Some(super::time::timespec(cx, timestamp)?) };
+    let (path, expanded) = name(cx, filename, false)?;
+    if let Some(call) = handler(cx, expanded, "set-file-times", vec![expanded, timestamp, flag])? { return call; }
+    native_encoding(cx)?;
+    cx.filesave_utimens(&path, time, flag != Value::NIL)
+        .map_err(|e| errno(cx, "Setting file times", &[expanded], e))?;
+    Ok(Step::Done(Value::TRUE))
 }}

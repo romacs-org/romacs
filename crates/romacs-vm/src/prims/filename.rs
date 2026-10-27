@@ -25,6 +25,18 @@ fn directory_error(cx: &mut Leaf<'_>, operation: &str, path: &str, error: std::i
     Fault::Signal(cx.intern(condition), data)
 }
 
+/// File names decode as UTF-8 only; other file-name codings are refused.
+fn utf8_file_names(cx: &mut Leaf<'_>, operation: &str) -> std::result::Result<(), Fault> {
+    for variable in ["file-name-coding-system", "default-file-name-coding-system"] {
+        let symbol = cx.intern(variable);
+        let coding = cx.variable_value(symbol)?.unwrap_or(Value::NIL);
+        if coding != Value::NIL && !cx.symbol_name(coding).is_ok_and(|name| matches!(name.as_str(), "utf-8" | "utf-8-unix" | "undecided" | "undecided-unix")) {
+            return Err(refusal(&format!("{operation} non-UTF-8 filename coding")));
+        }
+    }
+    Ok(())
+}
+
 defsubr! { name = "directory-files", gnu = "dired.c:379", effect = Global,
 fn directory_files(cx, directory: Value; optional full: Value, pattern: Value, nosort: Value, count: Value) {
     if cx.string_bytes(directory)?.contains(&0) { return Err(Fault::Wrong("filenamep", directory)); }
@@ -36,13 +48,7 @@ fn directory_files(cx, directory: Value; optional full: Value, pattern: Value, n
         usize::try_from(n).unwrap_or(usize::MAX)
     };
     if pattern != Value::NIL { cx.string_text(pattern)?; }
-    for variable in ["file-name-coding-system", "default-file-name-coding-system"] {
-        let symbol = cx.intern(variable);
-        let coding = cx.variable_value(symbol)?.unwrap_or(Value::NIL);
-        if coding != Value::NIL && !cx.symbol_name(coding).is_ok_and(|name| matches!(name.as_str(), "utf-8" | "utf-8-unix" | "undecided" | "undecided-unix")) {
-            return Err(refusal("directory-files non-UTF-8 filename coding"));
-        }
-    }
+    utf8_file_names(cx, "directory-files")?;
     // Open even when COUNT is zero: GNU validates the directory first.
     let directory_file = if path == "/" { "/" } else { path.trim_end_matches('/') };
     let entries = std::fs::read_dir(directory_file).map_err(|e| directory_error(cx, "Opening directory", directory_file, e))?;
@@ -73,6 +79,64 @@ fn directory_files(cx, directory: Value; optional full: Value, pattern: Value, n
     }
     Ok(result)
 }}
+
+// Ffile_name_all_completions: the entries of DIRECTORY that begin with FILE
+// (ignoring case under `completion-ignore-case') and match every
+// `completion-regexp-list' regexp, a directory's name ending in a slash, in
+// reverse enumeration order. "./" and "../" are entries too.
+defsubr! { name = "file-name-all-completions", gnu = "dired.c:486", effect = Global,
+fn file_name_all_completions(cx, file: Value, directory: Value) -> Step {
+    if cx.string_bytes(directory)?.contains(&0) { return Err(Fault::Wrong("filenamep", directory)); }
+    let path = super::fileio::expand_file_name(cx, directory)?;
+    let directory = cx.string(&path);
+    let operation = cx.intern("file-name-all-completions");
+    for name in [directory, file] {
+        cx.string_view(name)?;
+        let handler = super::fileio::find_file_name_handler(cx, name, operation)?;
+        if handler != Value::NIL {
+            return Ok(Step::Call { f: handler, args: vec![operation, file, directory], then: completed_by_handler, saved: vec![] });
+        }
+    }
+    utf8_file_names(cx, "file-name-all-completions")?;
+    let fold = super::fileio::var(cx, "completion-ignore-case")? != Value::NIL;
+    let prefix = cx.string_bytes(file)?;
+    let prefix_chars = cx.string_view(file)?.chars;
+    let directory_file = if path == "/" { "/" } else { path.trim_end_matches('/') };
+    let entries = std::fs::read_dir(directory_file).map_err(|e| directory_error(cx, "Opening directory", &path, e))?;
+    // Rust omits the dot entries, which GNU sees first on Linux file systems.
+    let dots = [".", ".."].map(|name| Ok((std::ffi::OsString::from(name), Some(true))));
+    let entries = entries.map(|entry| entry.map(|e| (e.file_name(), e.file_type().ok().filter(|t| !t.is_symlink()).map(|t| t.is_dir()))));
+    let mut result = Value::NIL;
+    for entry in dots.into_iter().chain(entries) {
+        let (name, directoryp) = entry.map_err(|e| directory_error(cx, "Reading directory", &path, e))?;
+        let name = std::os::unix::ffi::OsStringExt::into_vec(name);
+        if name.len() < prefix.len() || (!fold && !name.starts_with(&prefix)) { continue; }
+        let name = String::from_utf8(name).map_err(|_| refusal("non-UTF-8 directory entry"))?;
+        let mut value = cx.make_string(name.as_bytes().to_vec(), !name.is_ascii());
+        if fold && super::string_compare::prefix(cx, value, file, prefix_chars, true)?.0 != std::cmp::Ordering::Equal {
+            continue;
+        }
+        // A symbolic link, or an entry of unknown type, is a directory when
+        // NAME/ resolves.
+        let directoryp = directoryp.unwrap_or_else(|| cx.filesave_access(&format!("{directory_file}/{name}/"), libc::F_OK).is_ok());
+        let mut regexps = super::fileio::var(cx, "completion-regexp-list")?;
+        let mut matched = true;
+        while let Some((regexp, rest)) = cx.pair(regexps) {
+            if !cx.completion_regexp_match(regexp, value, fold)? { matched = false; break; }
+            regexps = rest;
+        }
+        if !matched { continue; }
+        if directoryp {
+            value = cx.make_string(format!("{name}/").into_bytes(), !name.is_ascii());
+        }
+        result = cx.cons(value, result);
+    }
+    Ok(Step::Done(result))
+}}
+
+fn completed_by_handler(_: &mut Leaf<'_>, result: Value, _: &[Value]) -> Next {
+    Ok(Step::Done(result))
+}
 
 defsubr! { name = "substitute-in-file-name", gnu = "fileio.c:2046", effect = Global,
 fn substitute_in_file_name(cx, filename: Value) -> Step {

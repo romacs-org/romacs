@@ -108,6 +108,12 @@ impl Stamp {
             .map(|n| (n / self.hz) as i64).ok_or_else(time_overflow)
     }
 }
+/// GNU lisp_time_argument (timefns.c): TIME's seconds and nanoseconds,
+/// floored as lisp_to_timespec does. nil is the current time.
+pub(super) fn timespec(cx: &Leaf<'_>, time: Value) -> std::result::Result<(i64, i64), Fault> {
+    let stamp = stamp(cx, time, false)?;
+    Ok((stamp.seconds()?, stamp.nanos()?))
+}
 #[derive(PartialEq, Eq)]
 enum FrequencyIdentity {
     Lisp(Value),
