@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "1473fb6d68bac5b76016d3d58ccca0050b2395b2382ab97ba23383354038018a",
+  "source_fingerprint": "d028f2c82a9444e1fb1d7f2eed83c9c8dfa3a955129dc7d2caf74101da9f42a3",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 812,
-  "parsed_vm2_only": 812
+  "parsed_total": 813,
+  "parsed_vm2_only": 813
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -1126,6 +1126,11 @@
    "name": "directory-files",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/filename.rs:28"
+  },
+  "directory-name-p": {
+   "name": "directory-name-p",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/filename.rs:166"
   },
   "display-supports-face-attributes-p": {
    "name": "display-supports-face-attributes-p",

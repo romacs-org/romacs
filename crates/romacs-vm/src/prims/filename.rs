@@ -162,3 +162,9 @@ fn user_homedir(name: &[u8]) -> bool {
         .and_then(|account| account.home)
         .is_some_and(|home| home.starts_with('/'))
 }
+
+defsubr! { name = "directory-name-p", gnu = "fileio.c:703", effect = Pure,
+fn directory_name_p(cx, name: Value) {
+    let view = cx.string_view(name).map_err(|_| Fault::Wrong("stringp", name))?;
+    Ok(if view.bytes().last() == Some(&b'/') { Value::TRUE } else { Value::NIL })
+}}
