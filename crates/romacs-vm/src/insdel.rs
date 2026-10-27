@@ -26,8 +26,10 @@ pub(crate) struct Prepared {
     /// An insertion's `insert-behind-hooks' and `insert-in-front-hooks'.
     pub behind: Value,
     pub in_front: Value,
-    /// The overlays' hooks as (PROP . OVERLAY), in GNU's order.
-    pub overlays: Vec<(Value, Value)>,
+    /// Some overlay hook would run if the change met the overlays now.
+    /// When other Lisp runs first, `romacs--before-change' finds them
+    /// afresh after it, as report_overlay_modification does.
+    pub overlays: bool,
     /// `after-change-functions' was set (not inhibited).
     pub after: bool,
 }
@@ -167,7 +169,7 @@ impl Vm {
         let buffer = self.current_buffer_value()?;
         let index = buffer.index(0).map_err(Fault::Error)? - 1;
         let intervals = intervals || self.buffer_has_intervals(buffer);
-        let overlays = matches!(&self.objects[index], Object::Buffer(b) if !b.intervals.is_empty());
+        let overlays = self.buffer_has_overlays(index);
         // Positions are read only for the text's intervals and overlays.
         let bytes = if intervals || overlays {
             Some((self.change_byte(buffer, start)?, self.change_byte(buffer, end)?))
@@ -200,20 +202,20 @@ impl Vm {
                 }
             }
         }
-        let mut prepared = Prepared { inhibited, undoable, before: undoable, modification_hooks, behind, in_front, overlays: Vec::new(), after: false };
+        let mut prepared = Prepared { inhibited, undoable, before: undoable, modification_hooks, behind, in_front, overlays: false, after: false };
         if inhibited {
             return Ok(prepared);
         }
         if let Some((start_byte, end_byte)) = bytes.filter(|_| overlays) {
-            prepared.overlays = self.overlay_change_hooks(buffer, start_byte, end_byte)?;
+            prepared.overlays = !self.overlay_change_hooks(buffer, start_byte, end_byte)?.is_empty();
         }
         let unmodified = !self.buffer_state(buffer).map_err(Fault::Error)?.modified();
         let after = self.change_value(slots.after)?;
         let before = self.change_value(slots.before)?;
-        self.refuse_combined_after_change(before, after, !prepared.overlays.is_empty())?;
+        self.refuse_combined_after_change(before, after, overlays)?;
         prepared.after = after != Value::NIL;
         prepared.before |= !prepared.modification_hooks.is_empty()
-            || !prepared.overlays.is_empty()
+            || prepared.overlays
             || before != Value::NIL
             || (unmodified && self.change_value(slots.first)? != Value::NIL)
             // lock_file for a visited file's first change.
@@ -227,7 +229,8 @@ impl Vm {
     }
 
     /// signal_after_change defers to combine-after-change-calls, which VM2
-    /// does not implement: refuse before anything changes (VM2-EDIT-HOOKS1).
+    /// does not implement, unless the buffer has OVERLAYS: refuse before
+    /// anything changes (VM2-EDIT-HOOKS1).
     pub(crate) fn refuse_combined_after_change(&mut self, before: Value, after: Value, overlays: bool) -> Faulty<()> {
         let slots = self.change_slots();
         if after == Value::NIL || overlays || self.change_value(slots.combine)? == Value::NIL {
@@ -296,6 +299,22 @@ impl Vm {
     fn text_read_only(&mut self, value: Value) -> Fault {
         let data = if self.str_view(value).is_some() { vec![value] } else { vec![] };
         self.text_property_signal("text-read-only", &data)
+    }
+
+    fn buffer_has_overlays(&self, index: usize) -> bool {
+        matches!(&self.objects[index], Object::Buffer(b) if !b.intervals.is_empty())
+    }
+
+    /// overlay_change_hooks for character positions START..END of the
+    /// current buffer.
+    pub(crate) fn overlay_change_hooks_at(&mut self, start: i64, end: i64) -> Faulty<Vec<(Value, Value)>> {
+        let buffer = self.current_buffer_value()?;
+        let index = buffer.index(0).map_err(Fault::Error)? - 1;
+        if !self.buffer_has_overlays(index) {
+            return Ok(Vec::new());
+        }
+        let (start, end) = (self.change_byte(buffer, start)?, self.change_byte(buffer, end)?);
+        self.overlay_change_hooks(buffer, start, end)
     }
 
     /// report_overlay_modification's scan before a change of START..END:
@@ -389,14 +408,18 @@ impl Vm {
         self.set_variable_value(deactivate, Value::TRUE).map_err(Fault::Error)
     }
 
-    /// Run a storage kernel on ARGS outside the engine's registers. The
-    /// bracket made its read-only checks, which GNU does not repeat.
+    /// Run a storage kernel on ARGS outside the engine's registers, which
+    /// point into its own stack: the kernel gets the reused kernel stack.
+    /// The bracket made its read-only checks, which GNU does not repeat.
     fn edit_kernel(&mut self, args: &[Value], run: impl FnOnce(&mut Self, usize) -> Result<Value>) -> Faulty<Value> {
-        let saved = std::mem::replace(&mut self.stack, args.to_vec());
+        let mut kernel = std::mem::take(&mut self.kernel_stack);
+        kernel.clear();
+        kernel.extend_from_slice(args);
+        let saved = std::mem::replace(&mut self.stack, kernel);
         self.change_prepared = true;
         let result = run(self, args.len());
         self.change_prepared = false;
-        self.stack = saved;
+        self.kernel_stack = std::mem::replace(&mut self.stack, saved);
         result.map_err(Fault::Error)
     }
 
@@ -425,9 +448,17 @@ impl Vm {
     /// del_range_2 for FROM..TO of the current buffer after its hooks:
     /// record_delete with marker adjustments, then the deletion. Returns the
     /// deleted text (with properties) when EXTRACT or undo needed it, else nil.
+    /// FROM outside the accessible region (the hooks narrowed it) is refused
+    /// before anything is recorded, as make_buffer_string_both's
+    /// next-property-change refuses it in GNU (VM2-EDIT-HOOKS1).
     pub(crate) fn delete_change(&mut self, from: i64, to: i64, extract: bool) -> Faulty<Value> {
         let buffer = self.current_buffer_value()?;
         let index = buffer.index(0).map_err(Fault::Error)? - 1;
+        let (_, begv, zv) = self.point_extent()?;
+        if from < begv || from > to || to > zv {
+            let position = Value::integer(from).map_err(Fault::Error)?;
+            return Err(self.text_property_signal("args-out-of-range", &[position, position]));
+        }
         let recording = self.undo_list_of(index) != Value::TRUE;
         let text = if extract || recording { self.buffer_text(buffer, from, to)? } else { Value::NIL };
         if recording {
@@ -454,7 +485,8 @@ impl Vm {
     }
 
     /// The markers of buffer INDEX at character positions FROM..=TO, with
-    /// their insertion types, newest first as GNU's marker chain lists them.
+    /// their insertion types, the last attached first as GNU's marker chain
+    /// lists them.
     pub(crate) fn markers_between(&self, index: usize, from: i64, to: i64) -> Result<Vec<(Value, i64, bool)>> {
         let Object::Buffer(b) = &self.objects[index] else { return Ok(Vec::new()) };
         let (a, z) = (b.byte_of_char(CharOffset((from - 1) as usize))?, b.byte_of_char(CharOffset((to - 1) as usize))?);
@@ -463,15 +495,17 @@ impl Vm {
         }
         let buffer = Value::reference(index + 1, 0);
         let mut found = Vec::new();
-        for (i, object) in self.objects.iter().enumerate().rev() {
+        for (i, object) in self.objects.iter().enumerate() {
             let Object::Marker(m) = object else { continue };
             if m.buffer != buffer { continue; }
-            let Some(at) = m.anchor.and_then(|anchor| b.anchors.resolve(anchor)) else { continue };
+            let Some(anchor) = m.anchor else { continue };
+            let Some(at) = b.anchors.resolve(anchor) else { continue };
             if (a.0 as u32..=z.0 as u32).contains(&at) {
                 let position = b.char_of_byte(ByteOffset(at as usize))?.0 as i64 + 1;
-                found.push((Value::reference(i + 1, 0), position, m.bias == anchors::Bias::Right));
+                found.push((b.anchors.birth(anchor), Value::reference(i + 1, 0), position, m.bias == anchors::Bias::Right));
             }
         }
-        Ok(found)
+        found.sort_unstable_by_key(|&(birth, ..)| std::cmp::Reverse(birth));
+        Ok(found.into_iter().map(|(_, marker, position, insertion)| (marker, position, insertion)).collect())
     }
 }

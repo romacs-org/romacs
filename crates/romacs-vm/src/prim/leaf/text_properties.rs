@@ -38,7 +38,7 @@ impl Leaf<'_> {
         let (start, end) = (plan.start, plan.end);
         let prepared = self.in_buffer(buffer, |cx| {
             let prepared = cx.vm.prepare_change_of(start, end, true)?;
-            let after = !prepared.inhibited && cx.vm.after_change_runs(!prepared.overlays.is_empty(), false)?;
+            let after = !prepared.inhibited && cx.vm.after_change_runs(false, false)?;
             Ok(if prepared.before || after { Ok(prepared) } else { Err(!prepared.inhibited) })
         })?;
         match prepared {

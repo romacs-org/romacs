@@ -1049,6 +1049,9 @@ pub struct Vm {
     command_point: (i64, Value),
     /// A storage kernel runs inside insdel's bracket, which checked read-only.
     change_prepared: bool,
+    /// The storage kernels' argument stack, reused across changes
+    /// (`insdel::edit_kernel').
+    kernel_stack: Vec<Value>,
     /// The slots insdel's bracket reads on every change, once resolved.
     change_slots: Option<insdel::ChangeSlots>,
     case_symbols_slot: usize,
@@ -1205,6 +1208,7 @@ impl Vm {
             standard_case_tables: [Value::NIL; 4],
             command_point: (0, Value::NIL),
             change_prepared: false,
+            kernel_stack: Vec::new(),
             change_slots: None,
             case_symbols_slot: usize::MAX,
             undo_list_slot: u16::MAX,

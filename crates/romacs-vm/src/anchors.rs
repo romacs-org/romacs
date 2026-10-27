@@ -33,6 +33,10 @@ pub struct AnchorTree {
     free: u32,
     len: u32,
     extent: u32,
+    /// Each slot's creation sequence number, beside the nodes so that
+    /// relocation never touches it: GNU's marker chain order.
+    births: Vec<u64>,
+    born: u64,
 }
 #[inline]
 fn prio(i: u32) -> u32 {
@@ -193,6 +197,8 @@ impl AnchorTree {
             free: NIL,
             len: 0,
             extent,
+            births: Vec::new(),
+            born: 0,
         }
     }
     pub fn len(&self) -> usize {
@@ -210,6 +216,7 @@ impl AnchorTree {
         } else {
             self.n.len()
         }) * std::mem::size_of::<Node>()
+            + (if capacity { self.births.capacity() } else { self.births.len() }) * std::mem::size_of::<u64>()
     }
     pub const fn bytes_per_slot() -> usize {
         std::mem::size_of::<Node>()
@@ -288,6 +295,11 @@ impl AnchorTree {
         }
         any(self, self.root, 0, a, b)
     }
+    /// When H was created relative to the tree's other anchors: a later
+    /// anchor has a larger number.
+    pub fn birth(&self, h: Anchor) -> Option<u64> {
+        self.valid(h).then(|| self.births[h.slot as usize])
+    }
     #[inline]
     pub fn bias(&self, h: Anchor) -> Option<Bias> {
         self.valid(h).then(|| {
@@ -316,8 +328,11 @@ impl AnchorTree {
                 lazy: 0,
                 flags: 0,
             });
+            self.births.push(0);
             i
         };
+        self.births[i as usize] = self.born;
+        self.born += 1;
         let generation = self.n[i as usize].flags >> 2;
         self.n[i as usize] = Node {
             l: NIL,
@@ -472,6 +487,8 @@ impl AnchorTree {
             });
         }
         tree.len = positions.len() as u32;
+        tree.births = (0..positions.len() as u64).collect();
+        tree.born = positions.len() as u64;
         Some((tree, handles))
     }
 }

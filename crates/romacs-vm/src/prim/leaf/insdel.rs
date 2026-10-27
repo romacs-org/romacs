@@ -14,8 +14,8 @@ impl Leaf<'_> {
     pub(crate) fn point_extent(&mut self) -> std::result::Result<(i64, i64, i64), Fault> {
         self.vm.point_extent()
     }
-    pub(crate) fn after_change_runs(&mut self, overlays: Value, insert_hooks: bool) -> std::result::Result<bool, Fault> {
-        self.vm.after_change_runs(overlays != Value::NIL, insert_hooks)
+    pub(crate) fn after_change_runs(&mut self, overlays: bool, insert_hooks: bool) -> std::result::Result<bool, Fault> {
+        self.vm.after_change_runs(overlays, insert_hooks)
     }
     /// deactivate-mark is set once a change's before hooks ran, unless
     /// INHIBITED (modification hooks were inhibited when it was prepared).
@@ -28,22 +28,10 @@ impl Leaf<'_> {
     pub(crate) fn delete_change(&mut self, from: i64, to: i64, extract: bool) -> std::result::Result<Value, Fault> {
         self.vm.delete_change(from, to, extract)
     }
-    /// A marker that follows FROM through the before hooks (GNU's
-    /// preserve_ptr), or FROM itself in a unibyte buffer, which holds no
-    /// markers.
-    pub(crate) fn preserve_position(&mut self, from: i64) -> std::result::Result<Value, Fault> {
-        let buffer = self.current_buffer()?;
-        if matches!(self.vm.object_if(buffer), Some(data::Object::Buffer(_))) {
-            self.vm.watch_marker(buffer, from, false)
-        } else {
-            Value::integer(from).map_err(Fault::Error)
-        }
-    }
-    pub(crate) fn preserved_position(&mut self, preserved: Value) -> std::result::Result<i64, Fault> {
-        match preserved.integer_value() {
-            Some(position) => Ok(position),
-            None => self.vm.release_marker(preserved),
-        }
+    /// The overlay hooks a change of START..END of the current buffer
+    /// meets now (report_overlay_modification's scan).
+    pub(crate) fn overlay_change_hooks(&mut self, start: i64, end: i64) -> std::result::Result<Vec<(Value, Value)>, Fault> {
+        self.vm.overlay_change_hooks_at(start, end)
     }
     /// Point a marker made by `watch_marker' nowhere.
     pub(crate) fn release_watch(&mut self, marker: Value) -> std::result::Result<(), Fault> {

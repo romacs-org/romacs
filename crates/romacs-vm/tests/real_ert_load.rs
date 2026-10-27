@@ -815,6 +815,7 @@ fn edit_undo_matches_gnu() {
         r###"(with-temp-buffer (buffer-enable-undo) (dotimes (i 5) (insert "x")) (indent-to 12) (move-to-column 3 t) (insert "\t") (move-to-column 10 t) (undo-boundary) (list (buffer-string) buffer-undo-list (progn (primitive-undo 1 (cdr buffer-undo-list)) (buffer-string))))"###,
         r###"(with-temp-buffer (buffer-enable-undo) (let ((log nil)) (add-hook 'before-change-functions (lambda (b e) (push (list 'before b e) log)) nil t) (insert "abc") (kill-region 1 3) (yank) (list (buffer-string) (car kill-ring) (nreverse log) buffer-undo-list)))"###,
         r###"(with-temp-buffer (buffer-enable-undo) (insert "ab") (setq buffer-undo-list t) (insert "cd") (list buffer-undo-list (progn (buffer-enable-undo) (insert "e") buffer-undo-list)))"###,
+        r###"(with-temp-buffer (buffer-enable-undo) (insert "abcdef") (undo-boundary) (setq buffer-undo-list nil) (let ((log nil)) (add-hook 'before-change-functions (lambda (b e) (narrow-to-region 4 6)) nil t) (list (condition-case e (delete-region 1 3) (error e)) buffer-undo-list (progn (setq before-change-functions nil) (widen) (primitive-undo 1 buffer-undo-list) (buffer-string)))))"###,
     ];
     let binary = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
     let gnu = |source: &str| {

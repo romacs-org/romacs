@@ -32,16 +32,17 @@ pub(crate) fn install_half(cx: &mut Leaf<'_>, then: Then, saved: Vec<Value>) -> 
 // being inserted, each one a change of its own as general_insert_function
 // makes it; OPOINT is point before its hooks, where GNU's after-change
 // starts; INHIBITED whether modification hooks were inhibited when it was
-// prepared; BEHIND and IN-FRONT the text's insert hooks; OVERLAYS a list
-// of (PROP . OVERLAY). The registers are traced across the Lisp calls.
+// prepared; BEHIND and IN-FRONT the text's insert hooks; OVERLAYS the
+// (PROP . OVERLAY) hooks `romacs--before-change' found. The registers are
+// traced across the Lisp calls.
 const ARGS: usize = 7;
 
 fn list(cx: &mut Leaf<'_>, values: &[Value]) -> Value {
     values.iter().rev().fold(Value::NIL, |tail, &v| cx.cons(v, tail))
 }
-fn overlay_list(cx: &mut Leaf<'_>, hooks: &[(Value, Value)]) -> Value {
-    let pairs: Vec<Value> = hooks.iter().map(|&(prop, overlay)| cx.cons(prop, overlay)).collect();
-    list(cx, &pairs)
+/// The overlay hooks in `romacs--before-change''s value (PRESERVE . OVERLAYS).
+pub(crate) fn found_overlays(cx: &Leaf<'_>, before: Value) -> Value {
+    cx.pair(before).map_or(Value::NIL, |(_, overlays)| overlays)
 }
 fn flag(b: bool) -> Value { if b { Value::TRUE } else { Value::NIL } }
 fn fixnum(n: i64) -> Value { Value::integer(n).expect("buffer position") }
@@ -67,23 +68,23 @@ fn insert_from(cx: &mut Leaf<'_>, mut saved: Vec<Value>) -> Next {
         }
         let point = cx.point_char()?;
         let prepared = cx.prepare_change(point, point)?;
-        let overlays = overlay_list(cx, &prepared.overlays);
         let insert_hooks = prepared.behind != Value::NIL || prepared.in_front != Value::NIL;
-        if (prepared.before || cx.after_change_runs(overlays, insert_hooks)?) && half_missing(cx)? {
+        if (prepared.before || cx.after_change_runs(false, insert_hooks)?) && half_missing(cx)? {
             return install_half(cx, inserted, saved);
         }
-        saved[2..ARGS].copy_from_slice(&[fixnum(point), flag(prepared.inhibited), prepared.behind, prepared.in_front, overlays]);
+        saved[2..ARGS].copy_from_slice(&[fixnum(point), flag(prepared.inhibited), prepared.behind, prepared.in_front, Value::NIL]);
         if prepared.before {
             let buffer = cx.current_buffer()?;
-            let args = vec![buffer, fixnum(point), fixnum(point), Value::NIL, flag(prepared.undoable), overlays];
+            let args = vec![buffer, fixnum(point), fixnum(point), Value::NIL, flag(prepared.undoable)];
             return Ok(Step::Call { f: cx.intern("romacs--before-change"), args, then: insert_prepared, saved });
         }
         if let Some(step) = insert_edit(cx, &mut saved)? { return Ok(step); }
     }
 }
 
-fn insert_prepared(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
+fn insert_prepared(cx: &mut Leaf<'_>, before: Value, saved: &[Value]) -> Next {
     let mut saved = saved.to_vec();
+    saved[6] = found_overlays(cx, before);
     match insert_edit(cx, &mut saved)? {
         Some(step) => Ok(step),
         None => insert_from(cx, saved),
@@ -99,7 +100,7 @@ fn insert_edit(cx: &mut Leaf<'_>, saved: &mut Vec<Value>) -> std::result::Result
     cx.insert_change(saved[ARGS + next as usize], kind & 1 != 0, kind & 2 != 0)?;
     saved[1] = fixnum(next + 1);
     let (behind, in_front, overlays) = (saved[4], saved[5], saved[6]);
-    if !cx.after_change_runs(overlays, behind != Value::NIL || in_front != Value::NIL)? { return Ok(None); }
+    if !cx.after_change_runs(overlays != Value::NIL, behind != Value::NIL || in_front != Value::NIL)? { return Ok(None); }
     let point = cx.point_char()?;
     let buffer = cx.current_buffer()?;
     let args = vec![buffer, saved[2], fixnum(point), fixnum(0), behind, in_front, overlays];
@@ -130,27 +131,25 @@ fn insert_before_markers_and_inherit(cx; rest args) -> Step {
     insert_family(cx, 3, args)
 }}
 
-// Registers of a deletion between its steps:
-//   [EXTRACT, FROM, LENGTH, INHIBITED, OVERLAYS]
-// FROM follows the before hooks as GNU's preserve_ptr marker does; the
+// Registers of a deletion waiting on its before hooks:
+//   [EXTRACT, LENGTH, INHIBITED]
+// The hooks return FROM where they moved it, as GNU's preserve_ptr; the
 // deletion is then LENGTH characters from there, cut at ZV.
 
 /// del_range_1 for FROM..TO (FROM < TO, validated): prepare, the before
 /// hooks, the deletion, the after hooks. EXTRACT returns the text.
 fn delete_steps(cx: &mut Leaf<'_>, extract: bool, from: i64, to: i64) -> Next {
     let prepared = cx.prepare_change(from, to)?;
-    let overlays = overlay_list(cx, &prepared.overlays);
-    if (prepared.before || cx.after_change_runs(overlays, false)?) && half_missing(cx)? {
+    if (prepared.before || cx.after_change_runs(false, false)?) && half_missing(cx)? {
         return install_half(cx, delete_installed, vec![flag(extract), fixnum(from), fixnum(to)]);
     }
     if !prepared.before {
-        return delete_edit(cx, extract, from, to, prepared.inhibited, overlays);
+        return delete_edit(cx, extract, from, to, prepared.inhibited, Value::NIL);
     }
     let buffer = cx.current_buffer()?;
     let hooks = list(cx, &prepared.modification_hooks);
-    let preserved = cx.preserve_position(from)?;
-    let args = vec![buffer, fixnum(from), fixnum(to), hooks, flag(prepared.undoable), overlays];
-    let saved = vec![flag(extract), preserved, fixnum(to - from), flag(prepared.inhibited), overlays];
+    let args = vec![buffer, fixnum(from), fixnum(to), hooks, flag(prepared.undoable), fixnum(from)];
+    let saved = vec![flag(extract), fixnum(to - from), flag(prepared.inhibited)];
     Ok(Step::Call { f: cx.intern("romacs--before-change"), args, then: delete_prepared, saved })
 }
 
@@ -159,19 +158,19 @@ fn delete_installed(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
     delete_steps(cx, saved[0] != Value::NIL, from, to)
 }
 
-fn delete_prepared(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
-    let from = cx.preserved_position(saved[1])?;
+fn delete_prepared(cx: &mut Leaf<'_>, before: Value, saved: &[Value]) -> Next {
+    let (preserved, overlays) = cx.pair(before).expect("romacs--before-change value");
+    let from = preserved.integer_value().expect("preserved position");
     let (_, _, zv) = cx.point_extent()?;
-    let from = from.min(zv);
-    let to = zv.min(from + saved[2].integer_value().expect("deletion length"));
-    delete_edit(cx, saved[0] != Value::NIL, from, to, saved[3] != Value::NIL, saved[4])
+    let to = zv.min(from + saved[1].integer_value().expect("deletion length"));
+    delete_edit(cx, saved[0] != Value::NIL, from, to, saved[2] != Value::NIL, overlays)
 }
 
 fn delete_edit(cx: &mut Leaf<'_>, extract: bool, from: i64, to: i64, inhibited: bool, overlays: Value) -> Next {
     cx.change_deactivates_mark(inhibited)?;
     let text = cx.delete_change(from, to, extract)?;
     let result = if extract { text } else { Value::NIL };
-    if !cx.after_change_runs(overlays, false)? { return Ok(Step::Done(result)); }
+    if !cx.after_change_runs(overlays != Value::NIL, false)? { return Ok(Step::Done(result)); }
     let buffer = cx.current_buffer()?;
     let args = vec![buffer, fixnum(from), fixnum(from), fixnum(to - from), Value::NIL, Value::NIL, overlays];
     Ok(Step::Call { f: cx.intern("romacs--after-change"), args, then: deleted, saved: vec![result] })
@@ -257,3 +256,14 @@ fn self_insert_command(cx, n: Value; optional c: Value) -> Step {
 fn self_insert(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
     Ok(Step::Call { f: cx.intern("romacs--self-insert"), args: saved.to_vec(), then: done, saved: vec![] })
 }
+
+// report_overlay_modification's scan for `romacs--before-change', which
+// runs it after the hooks before it, as signal_before_change does.
+defsubr! { name = "romacs--overlay-change-hooks", gnu = "buffer.c:4164", effect = Reads,
+fn overlay_change_hooks(cx, beg: Value, end: Value) {
+    let beg = beg.integer_value().ok_or(Fault::Wrong("fixnump", beg))?;
+    let end = end.integer_value().ok_or(Fault::Wrong("fixnump", end))?;
+    let hooks = cx.overlay_change_hooks(beg, end)?;
+    let pairs: Vec<Value> = hooks.iter().map(|&(prop, overlay)| cx.cons(prop, overlay)).collect();
+    Ok(list(cx, &pairs))
+}}

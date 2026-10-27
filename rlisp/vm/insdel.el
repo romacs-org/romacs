@@ -28,8 +28,21 @@ PROP with the overlay, AFTER, BEG and END, and after a change LENGTH."
             (setq functions (cdr functions)))))
     (setq overlays (cdr overlays))))
 
+(defun romacs--relocated (positions function)
+  "Call FUNCTION, then return POSITIONS where markers at them moved.
+A nil position stays nil.  These are GNU's preserve and start/end markers
+\(PRESERVE_VALUE, PRESERVE_START_END): not insertion types, unchained
+after the hooks and left to the collector after a non-local exit.  A VM2
+unibyte buffer holds no markers: there POSITIONS stay as they are."
+  (if (not enable-multibyte-characters)
+      (progn (funcall function) positions)
+    (let ((markers (mapcar (lambda (p) (if p (copy-marker p))) positions)))
+      (funcall function)
+      (mapcar (lambda (m) (if m (prog1 (marker-position m) (set-marker m nil))))
+              markers))))
+
 (defun romacs--before-change (buffer beg end modification-hooks
-                                     &optional undoable overlays)
+                                     &optional undoable preserve)
   "Run what GNU runs before changing BEG..END of BUFFER.
 prepare_to_modify_buffer first calls `undo-auto--undoable-change' when
 UNDOABLE.  Then, unless `inhibit-modification-hooks':
@@ -37,21 +50,33 @@ verify_interval_modification calls each function of each
 MODIFICATION-HOOKS value (the characters' `modification-hooks', in
 order) with BEG and END; a visited file is locked on its first change;
 `select-active-regions' saves the region; and signal_before_change runs
-`first-change-hook' if BUFFER is unmodified, `before-change-functions'
-with BEG and END and the OVERLAYS' hooks, all with
-`inhibit-modification-hooks' bound to t.  A non-local exit from
-`before-change-functions' resets it to nil, as reset_var_on_error does."
+`first-change-hook' if BUFFER is unmodified and `before-change-functions'
+with BEG and END where the first-change hook moved them, then finds the
+hooks of the overlays at BEG..END where those moved them and calls them,
+all with `inhibit-modification-hooks' bound to t.  A non-local exit from
+`before-change-functions' resets it to nil, as reset_var_on_error does.
+
+The value is (PRESERVE . OVERLAYS): the position PRESERVE (nil for none)
+where the modification, first-change, before-change and overlay hooks
+moved it, as GNU's preserve_ptr, and the overlays' hooks found, as
+\(PROP . OVERLAY) pairs, which signal_after_change runs again."
   (save-current-buffer
     (set-buffer buffer)
     (if undoable (undo-auto--undoable-change))
-    (unless inhibit-modification-hooks
-      (let ((tail modification-hooks))
-        (while tail
-          (let ((functions (car tail)))
-            (while functions
-              (funcall (car functions) beg end)
-              (setq functions (cdr functions))))
-          (setq tail (cdr tail))))
+    (if inhibit-modification-hooks
+        (list preserve)
+      (if modification-hooks
+          (setq preserve
+                (car (romacs--relocated
+                      (list preserve)
+                      (lambda ()
+                        (let ((tail modification-hooks))
+                          (while tail
+                            (let ((functions (car tail)))
+                              (while functions
+                                (funcall (car functions) beg end)
+                                (setq functions (cdr functions))))
+                            (setq tail (cdr tail)))))))))
       (if (and buffer-file-truename buffer-file-name (not (buffer-modified-p))
                (fboundp 'lock-file))
           (lock-file buffer-file-truename))
@@ -62,16 +87,32 @@ with BEG and END and the OVERLAYS' hooks, all with
                    (eq (car-safe transient-mark-mode) 'only)
                  (and select-active-regions transient-mark-mode)))
           (setq saved-region-selection (funcall region-extract-function nil)))
-      (let ((inhibit-modification-hooks t))
+      (let ((inhibit-modification-hooks t)
+            (overlays nil))
         (if (and first-change-hook (not (buffer-modified-p)))
-            (run-hooks 'first-change-hook))
+            (let ((moved (romacs--relocated
+                          (list beg end preserve)
+                          (lambda () (run-hooks 'first-change-hook)))))
+              (setq beg (car moved) end (nth 1 moved) preserve (nth 2 moved))))
         (if before-change-functions
-            (let ((done nil))
-              (unwind-protect
-                  (progn (run-hook-with-args 'before-change-functions beg end)
-                         (setq done t))
-                (or done (setq before-change-functions nil)))))
-        (romacs--overlay-hooks overlays nil beg end)))))
+            (let ((moved (romacs--relocated
+                          (list beg end preserve)
+                          (lambda ()
+                            (let ((done nil))
+                              (unwind-protect
+                                  (progn (run-hook-with-args
+                                          'before-change-functions beg end)
+                                         (setq done t))
+                                (or done (setq before-change-functions nil))))))))
+              (setq beg (car moved) end (nth 1 moved) preserve (nth 2 moved))))
+        ;; report_overlay_modification finds the hooks only now.
+        (setq overlays (romacs--overlay-change-hooks beg end))
+        (if overlays
+            (setq preserve
+                  (car (romacs--relocated
+                        (list preserve)
+                        (lambda () (romacs--overlay-hooks overlays nil beg end))))))
+        (cons preserve overlays)))))
 
 (defun romacs--after-change (buffer beg end length
                                     &optional behind in-front overlays)
@@ -140,7 +181,9 @@ call for an undo boundary, 1 when it might not have been simple."
       (when (and (if (char-table-p auto-fill-chars)
                      (aref auto-fill-chars c)
                    (memq c '(?\s ?\n)))
-                 auto-fill-function (> n 0))
+                 ;; GNU's repetition loop counts N down to 0: only a
+                 ;; single insertion fills.
+                 auto-fill-function (= n 1))
         (if (= c ?\n) (forward-char -1))
         (let ((result (if (fboundp 'internal-auto-fill) (internal-auto-fill)
                         (funcall auto-fill-function))))
