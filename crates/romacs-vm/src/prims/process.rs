@@ -371,6 +371,20 @@ fn proc_pty(cx, process: Value) { cx.process_pty_only(process) }}
 defsubr! { name = "romacs--proc-pipe", gnu = "process.c:2441", effect = Global,
 fn proc_pipe(cx, process: Value) { cx.process_pipe(process) }}
 
+defsubr! { name = "romacs--proc-network", gnu = "process.c:3827", effect = Global,
+fn proc_network(cx, process: Value, server: Value, nowait: Value, host: Value, port: Integer, family: Value, contact: Value) {
+    let host = cx.string_text(host)?;
+    let family = if family == cx.intern("ipv4") { Some(false) } else if family == cx.intern("ipv6") { Some(true) } else { None };
+    let port = u16::try_from(port.0).map_err(|_| Fault::Error(format!("Invalid service port {}", port.0)))?;
+    cx.process_network(process, server != Value::NIL, nowait != Value::NIL, host, port, family, contact)
+}}
+
+defsubr! { name = "romacs--proc-accept", gnu = "process.c:5000", effect = Global,
+fn proc_accept(cx, server: Value) { cx.process_accept(server) }}
+
+defsubr! { name = "romacs--proc-attach", gnu = "romacs:process", effect = Global,
+fn proc_attach(cx, process: Value, connection: Integer) { cx.process_attach(process, connection.0) }}
+
 defsubr! { name = "romacs--proc-remove", gnu = "process.c:977", effect = Global,
 fn proc_remove(cx, process: Value) { cx.remove_process(process) }}
 

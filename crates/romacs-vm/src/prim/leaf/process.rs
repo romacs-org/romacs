@@ -381,6 +381,18 @@ impl Leaf<'_> {
     /// else woke the wait, or nil on timeout.
     pub(crate) fn process_select(&mut self, wait_proc: Value, just_this: bool, seconds: Option<f64>) -> Out {
         self.reap_children();
+        // A :nowait connection, connected (or refused) at creation, reports
+        // as soon as the wait looks: GNU's writable NON_BLOCKING_CONNECT_FD.
+        for proc in self.process_values() {
+            if wait_proc != Value::NIL && just_this && proc != wait_proc {
+                continue;
+            }
+            if let Some(errno) = self.channel_mut(proc).and_then(|c| c.connect.take()) {
+                let connect = self.sym("connect");
+                let tail = self.cons(proc, fixnum(errno.into()));
+                return Ok(self.cons(connect, tail));
+            }
+        }
         let mut fds: Vec<(RawFd, i16)> = Vec::new();
         let mut owners: Vec<(Value, bool)> = Vec::new();
         let candidates = if wait_proc != Value::NIL && just_this { vec![wait_proc] } else { self.process_values() };
@@ -870,6 +882,113 @@ impl Leaf<'_> {
         let Some(fd) = self.channel(proc).and_then(|c| c.infd.as_ref()).map(|f| f.as_raw_fd()) else { return Ok(Value::NIL) };
         let size = libc::winsize { ws_row: height, ws_col: width, ws_xpixel: 0, ws_ypixel: 0 };
         Ok(if unsafe { libc::ioctl(fd, libc::TIOCSWINSZ, &size) } < 0 { Value::NIL } else { Value::TRUE })
+    }
+
+    /// The network half of make-network-process for a stream socket:
+    /// listen (SERVER) or connect to HOST:SERVICE in FAMILY. Returns
+    /// (LOCAL REMOTE PORT); signals GNU's file-error with CONTACT.
+    pub(crate) fn process_network(&mut self, proc: Value, server: bool, nowait: bool, host: String, port: u16, family: Option<bool>, contact: Value) -> Out {
+        use std::net::ToSocketAddrs;
+        let addrs: Vec<std::net::SocketAddr> = match (host.as_str(), port).to_socket_addrs() {
+            Ok(addrs) => addrs.filter(|a| family.is_none_or(|v6| a.is_ipv6() == v6)).collect(),
+            Err(_) => Vec::new(),
+        };
+        if addrs.is_empty() {
+            let message = self.string(if server { "make server process failed" } else { "make client process failed" });
+            let text = self.string("Name or service not known");
+            let tail = self.cons(text, contact);
+            let data = self.cons(message, tail);
+            return Err(Fault::Signal(self.intern("file-error"), data));
+        }
+        let mut last_error = None;
+        let mut socket: Option<(OwnedFd, std::net::SocketAddr, Option<std::net::SocketAddr>)> = None;
+        for addr in addrs {
+            let result = if server {
+                std::net::TcpListener::bind(addr).and_then(|l| Ok((l.local_addr()?, None, OwnedFd::from(l))))
+            } else {
+                std::net::TcpStream::connect(addr).and_then(|s| Ok((s.local_addr()?, Some(s.peer_addr()?), OwnedFd::from(s))))
+            };
+            match result {
+                Ok((local, remote, fd)) => { socket = Some((fd, local, remote)); break; }
+                Err(error) => last_error = Some(error),
+            }
+        }
+        let Some((fd, local, remote)) = socket else {
+            let error = last_error.expect("an address was tried");
+            if nowait {
+                // A :nowait connection fails later, in the wait.
+                let errno = error.raw_os_error().unwrap_or(libc::ECONNREFUSED);
+                self.attach_channel(proc, Channel { connect: Some(errno), ..Channel::default() });
+                return Ok(Value::NIL);
+            }
+            return Err(self.file_errno_data(if server { "make server process failed" } else { "make client process failed" }, &error, contact));
+        };
+        sp::set_nonblocking(fd.as_raw_fd()).map_err(|e| self.file_errno("Setting socket", &e))?;
+        let mut channel = Channel::default();
+        channel.outfd = Some(sp::dup(&fd).map_err(|e| self.file_errno("Setting socket", &e))?);
+        channel.infd = Some(fd);
+        let filter = self.process(proc)?.get(Slot::Filter);
+        channel.reading = server || (filter != Value::TRUE && !nowait);
+        if nowait {
+            channel.connect = Some(0);
+        }
+        self.attach_channel(proc, channel);
+        let local_vec = self.sockaddr_vector(local);
+        let remote_vec = remote.map_or(Value::NIL, |r| self.sockaddr_vector(r));
+        Ok(self.list(&[local_vec, remote_vec, fixnum(local.port().into())]))
+    }
+    /// conv_sockaddr_to_lisp: [A B C D PORT] or [X1 ... X8 PORT].
+    fn sockaddr_vector(&mut self, addr: std::net::SocketAddr) -> Value {
+        let mut items: Vec<Value> = match addr.ip() {
+            std::net::IpAddr::V4(ip) => ip.octets().iter().map(|&b| fixnum(b.into())).collect(),
+            std::net::IpAddr::V6(ip) => ip.segments().iter().map(|&s| fixnum(s.into())).collect(),
+        };
+        items.push(fixnum(addr.port().into()));
+        self.vector(&items)
+    }
+    /// server_accept_connection's accept: nil when it would block,
+    /// (error . ERRNO), or (CONNECTION HOST SERVICE REMOTE LOCAL), where
+    /// CONNECTION is a channel handle for `romacs--process-attach'.
+    pub(crate) fn process_accept(&mut self, server: Value) -> Out {
+        let Some(fd) = self.channel(server).and_then(|c| c.infd.as_ref()).map(|f| f.as_raw_fd()) else { return Ok(Value::NIL) };
+        let listener = std::mem::ManuallyDrop::new(unsafe { <std::net::TcpListener as std::os::fd::FromRawFd>::from_raw_fd(fd) });
+        let (stream, remote) = match listener.accept() {
+            Ok(accepted) => accepted,
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return Ok(Value::NIL),
+            Err(error) => {
+                let error_symbol = self.sym("error");
+                return Ok(self.cons(error_symbol, fixnum(error.raw_os_error().unwrap_or(0).into())));
+            }
+        };
+        let local = stream.local_addr().ok();
+        let fd = OwnedFd::from(stream);
+        sp::set_nonblocking(fd.as_raw_fd()).map_err(|e| self.file_errno("Setting socket", &e))?;
+        let mut channel = Channel::default();
+        channel.outfd = Some(sp::dup(&fd).map_err(|e| self.file_errno("Setting socket", &e))?);
+        channel.infd = Some(fd);
+        let serial = self.vm.subprocesses.insert(channel);
+        let host = match remote.ip() {
+            std::net::IpAddr::V4(ip) => ip.to_string(),
+            std::net::IpAddr::V6(ip) => ip.segments().iter().map(|s| format!("{s:x}")).collect::<Vec<_>>().join(":"),
+        };
+        let host = self.string(&host);
+        let remote_vec = self.sockaddr_vector(remote);
+        let local_vec = local.map_or(Value::NIL, |l| self.sockaddr_vector(l));
+        let v6 = if remote.is_ipv6() { Value::TRUE } else { Value::NIL };
+        Ok(self.list(&[fixnum(serial as i64), host, fixnum(remote.port().into()), remote_vec, local_vec, v6]))
+    }
+    /// Give PROC the accepted channel CONNECTION.
+    pub(crate) fn process_attach(&mut self, proc: Value, connection: i64) -> Out {
+        self.process(proc)?;
+        let serial = u64::try_from(connection).map_err(|_| Fault::Error("invalid connection".into()))?;
+        if self.vm.subprocesses.get(serial).is_none() {
+            return Err(Fault::Error("invalid connection".into()));
+        }
+        self.deactivate_process(proc);
+        self.process_mut(proc).serial = serial;
+        let filter = self.process(proc)?.get(Slot::Filter);
+        self.set_process_reading(proc, filter != Value::TRUE);
+        Ok(proc)
     }
 
     /// call_process's child: run ARGV synchronously with INFILE on stdin.

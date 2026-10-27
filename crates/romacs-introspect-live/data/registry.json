@@ -8,14 +8,14 @@
   "provenance": {
     "generated_by": "romacs-introspect-live",
     "generated_on": "linux-x86_64",
-    "input_hash": "6507f1ea237d412b0eb852cd857e52a9bb5674982e6e34099da50932576348ec",
+    "input_hash": "b7f6a5dd94dd5c200bad7ede99b52075b4441f4c00b67d4c83ff914680ada65c",
     "source_only_at_generation": [],
     "vm2_probe_panics": [],
-    "vm2_universe": 3987
+    "vm2_universe": 3995
   },
   "schema": 2,
   "vm2": {
-    "count": 902,
+    "count": 905,
     "entries": [
       "#:vm2-closure-document",
       "#:vm2-closure-metadata",
@@ -632,12 +632,15 @@
       "romacs--keymap-at-point",
       "romacs--kill-buffer-finish",
       "romacs--oclosure-type",
+      "romacs--proc-accept",
+      "romacs--proc-attach",
       "romacs--proc-changed",
       "romacs--proc-deactivate",
       "romacs--proc-get",
       "romacs--proc-input-pending",
       "romacs--proc-kill-for-delete",
       "romacs--proc-make",
+      "romacs--proc-network",
       "romacs--proc-pipe",
       "romacs--proc-pty",
       "romacs--proc-read",

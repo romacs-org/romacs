@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "3b3ac4afcd9c363165f77dd9c24c4913c80c444a30c6d9f2bab3dfc1cbeb7c29",
+  "input_hash": "18ff9aa4857a932051bea87476787a9e1a8762f399cf0c5e87a962f45f2a64cc",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -4672,8 +4672,8 @@
    "planned": false,
    "mechanism": "Subprocesses, waits and timers",
    "gnu": "process.c and callproc.c: process objects (`make-process`, `make-pipe-process`, `make-network-process` for every socket kind, `make-serial-process`), filters and sentinels run by `wait_reading_process_output` in every wait (`accept-process-output`, `sleep-for`, `sit-for`, and the command loop's idle wait), which also runs ordinary and idle timers (keyboard.c `timer_check`); SIGCHLD wakes the wait; `call-process` reads its output incrementally, with DISPLAY redisplaying",
-   "romacs": "Process objects, `make-process` (pipes or a pty), `make-pipe-process`, `call-process`, `call-process-region`, signals, filters, sentinels and the wait are GNU's transcribed (`crates/romacs-vm/src/subprocess.rs`, `prims/process.rs`, `rlisp/vm/subprocess.el`). Limits, each an explicit refusal or a stated difference: `make-network-process`, `make-serial-process`, `process-attributes`, `list-system-processes`, `set-process-thread` and the datagram functions are void. Waits never read the keyboard and run no idle timers (`timer-idle-list`), and the GUI host's command loop neither runs timers nor reads process output: both happen only inside Lisp waits. `call-process` reads all output before inserting it, so DISPLAY never redisplays; a quit does not kill its child. Exited children are found by a polled `waitpid` and pidfds, not SIGCHLD. Process output is decoded per VM2-PROC2",
-   "why": "**Package-observable:** network and serial connections and idle timers cannot run; GUI sessions see process output and timers only while Lisp waits",
+   "romacs": "Process objects, `make-process` (pipes or a pty), `make-pipe-process`, `call-process`, `call-process-region`, signals, filters, sentinels and the wait are GNU's transcribed (`crates/romacs-vm/src/subprocess.rs`, `prims/process.rs`, `rlisp/vm/subprocess.el`). Limits, each an explicit refusal or a stated difference: `make-network-process` makes TCP stream servers and clients only, refusing datagrams, local sockets, `:local`/`:remote` addresses, numeric families, non-numeric service names, `:tls-parameters` and `:use-external-socket`; a `:nowait` client connects at creation, its outcome (the `open` sentinel or `failed`) reported by the next wait as GNU reports it; `make-serial-process`, `process-attributes`, `list-system-processes`, `set-process-thread` and the datagram functions are void. Waits never read the keyboard and run no idle timers (`timer-idle-list`), and the GUI host's command loop neither runs timers nor reads process output: both happen only inside Lisp waits. `call-process` reads all output before inserting it, so DISPLAY never redisplays; a quit does not kill its child. Exited children are found by a polled `waitpid` and pidfds, not SIGCHLD. Process output is decoded per VM2-PROC2",
+   "why": "**Package-observable:** asynchronous network code beyond TCP, serial ports and idle timers cannot run; GUI sessions see process output and timers only while Lisp waits",
    "symbols": [
     "make-process",
     "make-pipe-process",

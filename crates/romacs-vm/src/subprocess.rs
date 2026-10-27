@@ -101,6 +101,8 @@ pub(crate) struct Channel {
     pub pending: Vec<u8>,
     /// add_process_read_fd: the wait polls `infd'.
     pub reading: bool,
+    /// A :nowait connection's outcome not yet reported: 0 or an errno.
+    pub connect: Option<i32>,
     /// CODING_MODE_LAST_BLOCK: end of file was seen and the carryover flushed.
     pub last_block: bool,
 }

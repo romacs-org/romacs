@@ -13,7 +13,8 @@
 ;;
 ;; Limits (DIVERGENCES.md VM2-PROC1, VM2-PROC2): idle timers do not run;
 ;; waits never read the keyboard; `undecided' output decoding detects only
-;; ASCII and UTF-8; network processes do not exist yet.
+;; ASCII and UTF-8; network processes are TCP streams without :nowait,
+;; :local/:remote addresses, datagrams, local sockets or TLS.
 
 ;;; Code:
 
@@ -326,6 +327,192 @@ GNU process.c Fmake_pipe_process."
         (if (not done) (romacs--proc-remove proc)))
       proc)))
 
+(defun romacs--network-service (service)
+  "The TCP port SERVICE names: t for any, an integer, or a numeric string."
+  (cond ((eq service t) 0)
+        ((integerp service) service)
+        ((stringp service)
+         (if (and (> (length service) 0)
+                  (let ((digits t) (i 0))
+                    (while (and digits (< i (length service)))
+                      (if (not (and (>= (aref service i) ?0) (<= (aref service i) ?9))) (setq digits nil))
+                      (setq i (1+ i)))
+                    digits))
+             (string-to-number service)
+           ;; getservbyname: VM2 resolves numeric services only (VM2-PROC1).
+           (error "VM2 resolves only numeric network services: %s" service)))
+        (t (signal 'wrong-type-argument (list 'stringp service)))))
+
+(defun make-network-process (&rest args)
+  "Create and return a network server or client process.
+GNU process.c Fmake_network_process, for TCP streams."
+  (if (null args)
+      nil
+    (romacs--check-keyword-args args)
+    (let* ((contact args)
+           (type (plist-get contact :type)))
+      (if type (error "Unsupported connection type"))
+      (let* ((name (romacs--required-string-keyword contact :name))
+             (buffer (plist-get contact :buffer))
+             (filter (plist-get contact :filter))
+             (sentinel (plist-get contact :sentinel))
+             (server (plist-get contact :server))
+             (nowait (plist-get contact :nowait))
+             (family-spec (plist-get contact :family))
+             (family nil)
+             (service (plist-get contact :service))
+             (host (plist-get contact :host))
+             (port nil)
+             proc)
+        (if (and server nowait) (error "`:server' is incompatible with `:nowait'"))
+        ;; Refusals: VM2-PROC1.
+        (if (plist-get contact (if server :local :remote))
+            (error "VM2 network processes do not take :local or :remote addresses"))
+        (if (plist-get contact :tls-parameters)
+            (error "VM2 network processes do not support :tls-parameters"))
+        (if (plist-get contact :use-external-socket)
+            (error "VM2 network processes do not support :use-external-socket"))
+        (setq family (cond ((null family-spec) nil)
+                           ((eq family-spec 'ipv4) 'ipv4)
+                           ((eq family-spec 'ipv6) 'ipv6)
+                           ((eq family-spec 'local)
+                            (error "VM2 network processes do not support local sockets"))
+                           ((integerp family-spec)
+                            (error "VM2 network processes do not support numeric address families"))
+                           (t (error "Unknown address family"))))
+        (cond ((null host) (setq host (if (eq family 'ipv6) "::1" "127.0.0.1")))
+              ((eq host 'local) (setq host (if (eq family 'ipv6) "::1" "127.0.0.1"))))
+        (or (stringp host) (signal 'wrong-type-argument (list 'stringp host)))
+        (setq port (romacs--network-service service))
+        (if (not (and (<= 0 port) (< port 65536)))
+            (signal 'error (list (format "Unknown service: %s" service))))
+        (if buffer (setq buffer (get-buffer-create buffer)))
+        (setq proc (romacs--proc-make name))
+        (let ((done nil))
+          (unwind-protect
+              (progn
+                (romacs--proc-set proc 'childp contact)
+                (romacs--proc-set proc 'plist (copy-sequence (plist-get contact :plist)))
+                (romacs--proc-set proc 'type 'network)
+                (romacs--proc-set proc 'buffer buffer)
+                (romacs--proc-set proc 'sentinel (or sentinel 'internal-default-process-sentinel))
+                (romacs--proc-set proc 'filter (or filter 'internal-default-process-filter))
+                (romacs--proc-set proc 'log (plist-get contact :log))
+                (if (plist-get contact :noquery) (romacs--proc-set proc 'kill-without-query t))
+                (if (plist-get contact :stop) (romacs--proc-set proc 'command t))
+                (romacs--set-network-socket-coding-system proc host service name)
+                ;; connect_network_socket.
+                (let* ((addresses (romacs--proc-network proc server nowait host port family contact))
+                       (local (nth 0 addresses))
+                       (remote (nth 1 addresses)))
+                  (if (and addresses server (= port 0))
+                      (setq contact (plist-put contact :service (nth 2 addresses))))
+                  (if addresses
+                      (progn
+                        (setq contact (plist-put contact (if server :local :remote) (if server local remote)))
+                        (if (not server) (setq contact (plist-put contact :local local)))))
+                  (romacs--proc-set proc 'childp contact)
+                  (if server (romacs--proc-set proc 'status 'listen))
+                  (romacs--update-process-mark proc)
+                  ;; A :nowait connection is (connect) until the wait
+                  ;; reports it: VM2 connects at once, so it never blocks
+                  ;; there, but the outcome arrives as GNU's does.
+                  (if nowait
+                      (romacs--proc-set proc 'status (list 'connect))
+                    (romacs--proc-set proc 'reading
+                                      (or (and (not (eq (process-filter proc) t))
+                                               (not (eq (process-command proc) t)))
+                                          (and server (null (process-command proc))))))
+                  (romacs--setup-process-coding-systems proc))
+                (setq done t))
+            (if (not done) (romacs--proc-remove proc))))
+        proc))))
+
+(defun romacs--set-network-socket-coding-system (proc host service name)
+  "set_network_socket_coding_system."
+  (let* ((contact (romacs--proc-get proc 'childp))
+         (buffer (process-buffer proc))
+         (tem (plist-get contact :coding))
+         (coding-systems t)
+         (val nil))
+    (setq val
+          (cond (tem (if (consp tem) (car tem) tem))
+                (coding-system-for-read coding-system-for-read)
+                ((if buffer
+                     (not (buffer-local-value 'enable-multibyte-characters buffer))
+                   (not (default-value 'enable-multibyte-characters)))
+                 nil)
+                (t
+                 (setq coding-systems
+                       (if (or (null host) (null service)) nil
+                         (find-operation-coding-system 'open-network-stream name buffer host service)))
+                 (cond ((consp coding-systems) (car coding-systems))
+                       ((consp default-process-coding-system) (car default-process-coding-system))))))
+    (romacs--proc-set proc 'decode val)
+    (setq val
+          (cond (tem (if (consp tem) (cdr tem) tem))
+                (coding-system-for-write coding-system-for-write)
+                ((not enable-multibyte-characters) nil)
+                (t
+                 (if (eq coding-systems t)
+                     (setq coding-systems
+                           (if (or (null host) (null service)) nil
+                             (find-operation-coding-system 'open-network-stream name buffer host service))))
+                 (cond ((consp coding-systems) (cdr coding-systems))
+                       ((consp default-process-coding-system) (cdr default-process-coding-system))))))
+    (romacs--proc-set proc 'encode val)))
+
+(defun romacs--server-accept-connection (server)
+  "server_accept_connection: accept one client of SERVER."
+  (let ((accepted (romacs--proc-accept server)))
+    (cond
+     ((null accepted) nil)
+     ((eq (car accepted) 'error)
+      (if (romacs--proc-get server 'log)
+          (funcall (romacs--proc-get server 'log) server nil
+                   (concat "accept failed with code" (number-to-string (cdr accepted)) "\n"))))
+     (t
+      (let* ((connection (nth 0 accepted))
+             (host (nth 1 accepted))
+             (service (nth 2 accepted))
+             (remote (nth 3 accepted))
+             (local (nth 4 accepted))
+             (v6 (nth 5 accepted))
+             (suffix (if v6 (format " <[%s]:%d>" host service) (format " <%s:%d>" host service)))
+             (filter (process-filter server))
+             (buffer nil)
+             (contact nil)
+             proc)
+        (if (or (eq filter 'internal-default-process-filter) (eq filter t))
+            (let ((base (if (process-buffer server)
+                            (buffer-name (process-buffer server))
+                          (process-name server))))
+              (if base (setq buffer (get-buffer-create (concat base suffix))))))
+        (setq proc (romacs--proc-make (concat (process-name server) suffix)))
+        (setq contact (copy-sequence (romacs--proc-get server 'childp)))
+        (setq contact (plist-put contact :server nil))
+        (setq contact (plist-put contact :host host))
+        (if service (setq contact (plist-put contact :service service)))
+        (setq contact (plist-put contact :remote remote))
+        (if local (setq contact (plist-put contact :local local)))
+        (romacs--proc-set proc 'childp contact)
+        (romacs--proc-set proc 'plist (copy-sequence (process-plist server)))
+        (romacs--proc-set proc 'type 'network)
+        (romacs--proc-set proc 'buffer buffer)
+        (romacs--proc-set proc 'sentinel (process-sentinel server))
+        (romacs--proc-set proc 'filter filter)
+        (romacs--proc-attach proc connection)
+        (romacs--proc-set proc 'status 'run)
+        (romacs--proc-set proc 'decode (romacs--proc-get server 'decode))
+        (romacs--proc-set proc 'encode (romacs--proc-get server 'encode))
+        (romacs--proc-set proc 'inherit-coding
+                          (and buffer (romacs--proc-get server 'inherit-coding)))
+        (let ((host-string (if (stringp host) host "-")))
+          (if (romacs--proc-get server 'log)
+              (funcall (romacs--proc-get server 'log) server proc
+                       (concat "accept from " host-string "\n")))
+          (romacs--exec-sentinel proc (concat "open from " host-string "\n"))))))))
+
 ;;;; Process state changes that run Lisp
 
 (defun set-process-buffer (process buffer)
@@ -442,9 +629,34 @@ GNU process.c Fdelete_process."
 
 ;;;; Sending
 
+(defun romacs--connecting-p (proc)
+  "connecting_status: PROC's :nowait connection has not completed."
+  (eq (car-safe (romacs--proc-get proc 'status)) 'connect))
+
+(defun romacs--wait-while-connecting (proc)
+  "wait_while_connecting."
+  (while (romacs--connecting-p proc)
+    (romacs--wait-reading-process-output 0.02 nil 0)))
+
+(defun romacs--connect-finished (proc errno)
+  "The wait's handling of PROC's completed :nowait connection: run and
+\"open\", or failed with ERRNO."
+  (if (/= errno 0)
+      (progn
+        (romacs--proc-tick proc)
+        (romacs--proc-set proc 'status (list 'failed errno))
+        (romacs--proc-deactivate proc))
+    (romacs--proc-set proc 'status 'run)
+    (romacs--exec-sentinel proc "open\n")
+    (if (and (romacs--proc-get proc 'infd)
+             (not (eq (process-filter proc) t))
+             (not (eq (process-command proc) t)))
+        (romacs--proc-set proc 'reading t))))
+
 (defun romacs--send-process (proc string)
   "send_process: encode STRING as PROC's encoding requires, and write it,
 waiting (and reading output) while the channel is full."
+  (if (eq (process-type proc) 'network) (romacs--wait-while-connecting proc))
   (let ((bytes string))
     (if (multibyte-string-p string)
         (let ((coding (romacs--complement-process-encoding-system (romacs--proc-get proc 'encode))))
@@ -463,12 +675,14 @@ waiting (and reading output) while the channel is full."
 (defun process-send-region (process start end)
   "Send current contents of region as input to PROCESS.  GNU process.c Fprocess_send_region."
   (let ((proc (romacs--get-process process)))
+    (if (eq (process-type proc) 'network) (romacs--wait-while-connecting proc))
     (romacs--send-process proc (buffer-substring-no-properties start end)))
   nil)
 
 (defun process-send-eof (&optional process)
   "Make PROCESS see end-of-file in its input.  GNU process.c Fprocess_send_eof."
   (let ((proc (romacs--get-process process)))
+    (if (eq (process-type proc) 'network) (romacs--wait-while-connecting proc))
     (if (not (eq (romacs--proc-get proc 'status) 'run))
         (error "Process %s not running: %s" (process-name proc)
                (romacs--proc-status-message proc)))
@@ -624,6 +838,8 @@ first reading what remains of its output.  GNU's got_some_output."
           (let ((more t))
             (while (and more
                         (not (eq (process-filter proc) t))
+                        (not (romacs--connecting-p proc))
+                        (not (eq (romacs--proc-get proc 'status) 'listen))
                         (not (eq (process-command proc) t))
                         (romacs--proc-get proc 'infd)
                         (not (eq proc deleting)))
@@ -700,7 +916,8 @@ run no timers).  Return GNU's got_some_output."
             (setq got-some-output (romacs--status-notify nil wait-proc)))
         ;; Don't wait for output from a non-running process: read what it has.
         (if (and (not done) wait-proc
-                 (not (eq (romacs--proc-get wait-proc 'status) 'run)))
+                 (not (eq (romacs--proc-get wait-proc 'status) 'run))
+                 (not (romacs--connecting-p wait-proc)))
             (progn
               (if (romacs--proc-get wait-proc 'infd)
                   (let ((more t))
@@ -740,6 +957,10 @@ run no timers).  Return GNU's got_some_output."
                       (if (and (not done) cmp (<= cmp (float-time)))
                           (setq done t)))))
                  ((eq ready t) nil)
+                 ((eq (car-safe ready) 'connect)
+                  (romacs--connect-finished (car (cdr ready)) (cdr (cdr ready))))
+                 ((eq (romacs--proc-get ready 'status) 'listen)
+                  (romacs--server-accept-connection ready))
                  (t
                   (let ((nread (romacs--read-process-output ready t)))
                     (if (and (or (null wait-proc) (eq wait-proc ready))
