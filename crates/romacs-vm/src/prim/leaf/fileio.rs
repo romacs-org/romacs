@@ -320,29 +320,36 @@ impl Leaf<'_> {
     }
 
     /// GNU `bset_enable_multibyte_characters' on the current buffer while it
-    /// holds no text: only the representation changes. Markers and overlays
-    /// would need GNU's marker adjustment, which this does not model.
+    /// holds no text: only the representation changes. A unibyte buffer holds
+    /// no markers, so the empty multibyte buffer, whose markers and overlays
+    /// all stay at BEG, is held aside until the toggle back.
     pub fn fileio_set_multibyte_flag(&mut self, multibyte: bool) -> std::result::Result<(), Fault> {
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
         let replacement = match &self.vm.objects[index] {
             data::Object::Buffer(t) if !multibyte => {
-                if t.len_bytes() != 0 || !t.anchors.is_empty() {
-                    return Err(fileio_refusal("insert-file-contents unibyte toggle of a buffer with text, markers or overlays"));
+                if t.len_bytes() != 0 {
+                    return Err(fileio_refusal("insert-file-contents unibyte toggle of a buffer with text"));
                 }
                 let mut b = t.binary();
                 b.state = t.state.clone();
                 b.per_buffer = t.per_buffer.clone();
                 b.case_tables = t.case_tables;
+                b.held = Some(t.clone());
                 data::Object::ByteBuffer(Box::new(b))
             }
             data::Object::ByteBuffer(b) if multibyte => {
                 if !b.bytes.is_empty() || !b.saved_restrictions.is_empty() || !b.saved_points.is_empty() {
                     return Err(fileio_refusal("insert-file-contents multibyte toggle of a buffer with text, saved restrictions or excursions"));
                 }
-                let mut a: crate::annotations::AnnotatedBuffer = crate::text::Text::decode_binary(b).map_err(Fault::Error)?.into();
+                let mut a: crate::annotations::AnnotatedBuffer = match &b.held {
+                    Some(held) => (**held).clone(),
+                    None => crate::text::Text::decode_binary(b).map_err(Fault::Error)?.into(),
+                };
                 a.state = b.state.clone();
                 a.per_buffer = b.per_buffer.clone();
                 a.case_tables = b.case_tables;
+                a.syntax_table = b.syntax_table;
+                a.category_table = b.category_table;
                 data::Object::Buffer(Box::new(a))
             }
             _ => return Ok(()),

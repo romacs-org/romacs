@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "743f59dfe975ebb11ef25841301b9f003b645a163163fd0185a5e0aa11e7d0c0",
+  "source_fingerprint": "30a7f7abbdacd223a2f04e7240ea34a940c3b83fdd7a13bfaed0b7fa53d70e71",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -1420,7 +1420,7 @@
   "find-file-name-handler": {
    "name": "find-file-name-handler",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:493"
+   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:496"
   },
   "find-operation-coding-system": {
    "name": "find-operation-coding-system",
@@ -2179,7 +2179,7 @@
   "locate-file-internal": {
    "name": "locate-file-internal",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:688"
+   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:693"
   },
   "locate-library": {
    "name": "locate-library",
@@ -3112,17 +3112,17 @@
   "romacs--code-converting-work": {
    "name": "romacs--code-converting-work",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/insert_coding.rs:339"
+   "registered_at": "crates/romacs-vm/src/prims/insert_coding.rs:342"
   },
   "romacs--insert-file-contents-format": {
    "name": "romacs--insert-file-contents-format",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/insert_coding.rs:606"
+   "registered_at": "crates/romacs-vm/src/prims/insert_coding.rs:609"
   },
   "romacs--insert-file-contents-undecide": {
    "name": "romacs--insert-file-contents-undecide",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/insert_coding.rs:329"
+   "registered_at": "crates/romacs-vm/src/prims/insert_coding.rs:332"
   },
   "romacs--keymap-at-point": {
    "name": "romacs--keymap-at-point",
@@ -3223,7 +3223,7 @@
   "romacs--write-region-body": {
    "name": "romacs--write-region-body",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:576"
+   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:581"
   },
   "romacs-find-buffer-visiting": {
    "name": "romacs-find-buffer-visiting",
@@ -4488,7 +4488,7 @@
   "write-region": {
    "name": "write-region",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:509"
+   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:512"
   },
   "yank-handle-category-property": {
    "name": "yank-handle-category-property",

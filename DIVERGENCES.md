@@ -279,6 +279,20 @@ replacement is case-independent and supports GNU's mode-name suffix removal.
   `insert-file-contents` runs `set-auto-coding` in exactly such a buffer.
   <!-- symbols: save-excursion, set-buffer-multibyte -->
 
+- **VM2-IFC-HELD1 — markers of a buffer `insert-file-contents` is deciding
+  are held aside.** GNU makes the empty buffer unibyte while
+  `set-auto-coding-function` reads the file's bytes, and its markers stay at
+  BEG. A unibyte VM2 buffer holds no markers, so the empty multibyte buffer,
+  markers and overlays included, is held on the unibyte representation and
+  restored by the unwind (`fileio_set_multibyte_flag`). While it is held,
+  `marker-position`, `set-marker` and overlay queries on that buffer's
+  markers signal, and `set-buffer-multibyte t` signals `cannot decode buffer
+  while insert-file-contents decides its coding`, where GNU succeeds. GNU's
+  `set-auto-coding` only reads the buffer, so only a custom
+  `set-auto-coding-function` can observe this; the buffer and its markers
+  are intact afterwards (`insert_file_contents_refuses_unsupported_decoding_intact`).
+  <!-- symbols: insert-file-contents, set-auto-coding-function -->
+
 - **VM2-RESTRICT1 — a unibyte buffer with a saved restriction stays unibyte.**
   `save-restriction` in a narrowed unibyte buffer keeps the saved bounds in the
   buffer (`src/bytes.rs`), moved as GNU moves its BEGV and ZV markers, because

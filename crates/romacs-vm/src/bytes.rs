@@ -60,6 +60,10 @@ pub(crate) struct ByteBuffer {
     pub had_intervals: bool,
     /// GNU's per-buffer variable slots (`struct buffer`, forwarded.rs).
     pub per_buffer: crate::forwarded::PerBuffer,
+    /// The empty multibyte buffer, with its markers and overlays, while
+    /// insert-file-contents holds it unibyte to decide the coding
+    /// (fileio.c decide_coding_unwind); its anchors all stay at BEG.
+    pub(crate) held: Option<Box<crate::annotations::AnnotatedBuffer>>,
 }
 /// insdel.c adjust_markers_for_{insert,delete,replace}: where a marker at P
 /// lands when R is replaced by INSERTED bytes. RIGHT is its insertion type,
@@ -135,6 +139,7 @@ impl ByteBuffer {
         visit(&mut self.category_table);
         for root in &mut self.case_tables { visit(root); }
         self.per_buffer.visit_values(visit);
+        if let Some(held) = &mut self.held { held.visit_values(visit); }
         for props in self.properties.values_mut() {
             for v in props.values_mut() {
                 visit(v);

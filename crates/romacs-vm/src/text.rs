@@ -125,6 +125,7 @@ impl Text {
                 .collect(),
             had_intervals: self.properties.has_intervals(),
             per_buffer: Default::default(),
+            held: None,
         }
     }
     pub(crate) fn decode_binary(b: &crate::bytes::ByteBuffer) -> Result<Self> {

@@ -539,11 +539,14 @@ impl Vm {
                 continue;
             };
             let (buffer, anchor) = (m.buffer, m.anchor);
-            if let Some(anchor) = anchor
-                && let Ok(index) = buffer.index(0)
-                && let Some(data::Object::Buffer(b)) = self.objects.get_mut(index.saturating_sub(1))
-            {
-                b.anchors.remove(anchor);
+            let Some(anchor) = anchor else { continue };
+            let Ok(index) = buffer.index(0) else { continue };
+            match self.objects.get_mut(index.saturating_sub(1)) {
+                Some(data::Object::Buffer(b)) => { b.anchors.remove(anchor); }
+                Some(data::Object::ByteBuffer(b)) => {
+                    if let Some(held) = &mut b.held { held.anchors.remove(anchor); }
+                }
+                _ => {}
             }
         }
         // Dead-owner entries have been swept. Discard only their unowned

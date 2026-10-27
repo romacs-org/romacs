@@ -84,8 +84,9 @@ pub(super) struct Read {
     pub empty_undo: bool,
     pub had_text: bool,
     pub modifying: bool,
-    /// fileio.c:4322-4345's tail start, relative to the first byte read.
-    pub tail: usize,
+    /// fileio.c:4344-4373's tail start, relative to the first byte read;
+    /// None when GNU reads no tail (the first 4 KiB read reached END or EOF).
+    pub tail: Option<usize>,
 }
 
 /// VisitedModtime as register data: 0 unknown, -1 missing, else
@@ -125,7 +126,7 @@ pub(super) fn start(cx: &mut Leaf<'_>, read: Read) -> Next {
     r[INSERTED] = fixnum(inserted as i64)?;
     r[MODTIME] = modtime_value(cx, read.modtime)?;
     r[ERRNO] = fixnum(read.errno.into())?;
-    r[TAIL] = fixnum(read.tail as i64)?;
+    r[TAIL] = match read.tail { Some(tail) => fixnum(tail as i64)?, None => Value::NIL };
     let bits = [(read.empty_undo, EMPTY_UNDO), (read.had_text, HAD_TEXT), (read.modifying, MODIFYING)]
         .iter().filter(|(on, _)| *on).map(|(_, bit)| bit).sum::<i64>();
     r[FLAGS] = fixnum(bits)?;
@@ -180,7 +181,7 @@ fn encoded_name(cx: &mut Leaf<'_>, name: Value) -> std::result::Result<Value, Fa
 /// Evaluate the `lambda' form SOURCE into a closure, then (in THEN) call
 /// it with the live objects as arguments. Romacs's `eval' copies quoted
 /// constants, so data whose identity matters is never quoted into a form.
-fn closure_then(cx: &mut Leaf<'_>, source: &str, then: crate::prim::Then, saved: Vec<Value>) -> Next {
+pub(super) fn closure_then(cx: &mut Leaf<'_>, source: &str, then: crate::prim::Then, saved: Vec<Value>) -> Next {
     let text = cx.string(source);
     let read = cx.read_from_string(text, Value::NIL, Value::NIL)?;
     let (form, _) = cx.pair(read).expect("read result");
@@ -193,11 +194,13 @@ fn closure_then(cx: &mut Leaf<'_>, source: &str, then: crate::prim::Then, saved:
 fn auto_coding_work(cx: &mut Leaf<'_>, r: Vec<Value>) -> Next {
     let bytes = cx.string_view(r[BYTES])?.bytes().to_vec();
     if bytes.is_empty() { return alist(cx, r, Value::NIL); }
-    let sample = if bytes.len() > 4 * 1024 {
-        let tail = r[TAIL].integer_value().unwrap() as usize;
-        let tail = &bytes[tail..bytes.len().min(tail + 16 * 1024 - 1024)];
-        [&bytes[..1024], tail].concat()
-    } else { bytes };
+    let sample = match r[TAIL].integer_value() {
+        Some(tail) => {
+            let tail = &bytes[tail as usize..bytes.len().min(tail as usize + 16 * 1024 - 1024)];
+            [&bytes[..1024], tail].concat()
+        }
+        None => bytes,
+    };
     encoded_name(cx, r[ORIG])?;
     let mut r = r;
     r[DATA] = cx.make_string(sample, false);

@@ -90,7 +90,7 @@ fn write_region_coding_matches_gnu() {
     let mut vm = bootstrapped_with(&root, "rlisp/romacs-loadup-bootstrap.el");
     let dir = std::env::temp_dir().join(format!("rt-write-coding-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
-    let cases: [(&str, &str); 23] = [
+    let cases: [(&str, &str); 24] = [
         ("txt", r#"(with-temp-buffer (insert "héllo\n") (list (write-region nil nil FILE) last-coding-system-used))"#),
         // file-coding-system-alist's prefer-utf-8, then select-safe-coding-system.
         ("el", r#"(with-temp-buffer (insert "λ x\n") (write-region nil nil FILE) last-coding-system-used)"#),
@@ -123,6 +123,8 @@ fn write_region_coding_matches_gnu() {
         // A narrowed unibyte buffer keeps its restriction across the extent.
         ("txt", r#"(with-temp-buffer (set-buffer-multibyte nil) (insert "abcd") (narrow-to-region 2 4) (list (let ((coding-system-for-write 'no-conversion)) (write-region 2 4 FILE)) last-coding-system-used (point-min) (point-max)))"#),
         ("txt", r#"(with-temp-buffer (set-buffer-multibyte nil) (insert "abcd") (narrow-to-region 2 4) (list (let ((coding-system-for-write 'no-conversion)) (write-region nil nil FILE)) (point-min) (point-max)))"#),
+        // A coding function sees the live START string, not a copy.
+        ("rtid", r#"(let* ((s (copy-sequence "λbc")) (same nil) (file-coding-system-alist (list (cons "\\.rtid\\'" (lambda (args) (setq same (and (memq s args) t)) (aset s 1 ?z) 'utf-8))))) (write-region s nil FILE) (list same s last-coding-system-used))"#),
     ];
     let binary = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
     let mut failures = Vec::new();
@@ -208,6 +210,12 @@ fn insert_file_contents_coding_matches_gnu() {
         // A visited missing file decides and records before it signals.
         ("txt", b"".to_vec(), "(with-temp-buffer (delete-file FILE) (list (condition-case e (let ((coding-system-for-read 'latin-1)) (insert-file-contents FILE t)) (error (car e))) last-coding-system-used (and (local-variable-p 'buffer-file-coding-system) buffer-file-coding-system) (buffer-modified-p)))".into()),
         ("txt", b"".to_vec(), "(with-temp-buffer (delete-file FILE) (list (condition-case e (let ((coding-system-for-read 'raw-text)) (insert-file-contents FILE t)) (error (car e))) last-coding-system-used enable-multibyte-characters))".into()),
+        // Markers and overlays of the empty buffer survive its unibyte
+        // decision phase, and save-excursion restores point.
+        ("txt", "é\n".into(), "(with-temp-buffer (let ((m (point-marker)) (m2 (copy-marker 1 t)) (o (make-overlay 1 1))) (list (save-excursion (cdr (insert-file-contents FILE))) (point) (marker-position m) (marker-position m2) (overlay-start o) (overlay-end o) (buffer-string) last-coding-system-used)))".into()),
+        // A file of exactly 4 KiB: with END omitted the tail read finds EOF
+        // and set-auto-coding-function sees 1 KiB; END = 4096 keeps 4 KiB.
+        ("txt", [vec![b'y'; 4095], b"\n".to_vec()].concat(), "(let* ((seen nil) (set-auto-coding-function (lambda (_f n) (push n seen) nil))) (with-temp-buffer (insert \"x\") (insert-file-contents FILE) (insert-file-contents FILE nil 0 4096) (insert-file-contents FILE nil 0 5000) (insert-file-contents FILE nil 1) (list (nreverse seen) (buffer-size))))".into()),
     ];
     let binary = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
     let mut failures = Vec::new();
@@ -258,6 +266,12 @@ fn insert_file_contents_refuses_unsupported_decoding_intact() {
         let actual = vm.eval_source(&empty).unwrap().display().unwrap();
         assert_eq!(actual, format!("(\"VM2 {refusal} is unsupported\" 0 t t)"), "empty {bytes:?}");
     }
+    // VM2-IFC-HELD1: the decision phase holds the empty buffer's markers, so
+    // set-auto-coding-function may not make it multibyte; the markers survive.
+    let file = dir.join("held.txt");
+    std::fs::write(&file, b"hi\n").unwrap();
+    let probe = format!("(with-temp-buffer (let ((m (point-marker)) (set-auto-coding-function (lambda (&rest _) (set-buffer-multibyte t)))) (list (condition-case e (save-excursion (insert-file-contents {:?})) (error (cadr e))) (point) (marker-position m) (buffer-size) enable-multibyte-characters)))", file.to_str().unwrap());
+    assert_eq!(vm.eval_source(&probe).unwrap().display().unwrap(), "(\"cannot decode buffer while insert-file-contents decides its coding\" 1 1 0 t)");
     let _ = std::fs::remove_dir_all(&dir);
 }
 

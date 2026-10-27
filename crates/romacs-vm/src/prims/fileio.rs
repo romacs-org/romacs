@@ -372,7 +372,7 @@ fn insert_file_contents(cx, filename: Value; optional visit: Value, beg: Value, 
             let modtime = if matches!(error.raw_os_error(), Some(libc::ENOENT | libc::ENOTDIR)) {
                 VisitedModtime::Missing
             } else { VisitedModtime::Unknown };
-            return insert_coding::start(cx, read(None, modtime, error.raw_os_error().unwrap_or(libc::EIO), 0));
+            return insert_coding::start(cx, read(None, modtime, error.raw_os_error().unwrap_or(libc::EIO), None));
         }
     };
     let meta = file.metadata().map_err(|e| file_errno(cx, "Input file status", orig, &e))?;
@@ -410,13 +410,16 @@ fn insert_file_contents(cx, filename: Value; optional visit: Value, beg: Value, 
         if truename != Value::NIL { refuse_handler(cx, truename, "unlock-file")?; }
         refuse_handler(cx, orig, "unlock-file")?;
     }
-    // fileio.c:4336-4373: with more than 4 KiB, set-auto-coding-function
-    // sees 1 KiB of head and the tail from 3 KiB before the end of the file
-    // (or of END), never overlapping the 4 KiB first read.
+    // fileio.c:4344-4373: when the first 4 KiB read stops short of END,
+    // set-auto-coding-function sees 1 KiB of head and the tail from 3 KiB
+    // before the end of the file (or of END), never overlapping that read;
+    // a file ending at exactly 4 KiB gives an empty tail.
     let size = meta.len();
-    let tail = if size.saturating_sub(3 * 1024) <= beg_offset + 4 * 1024 { 4 * 1024 }
-        else { size.saturating_sub(3 * 1024).min(end_offset.saturating_sub(3 * 1024)).saturating_sub(beg_offset) };
-    insert_coding::start(cx, read(Some(bytes), metadata_modtime(&meta), 0, tail as usize))
+    let tail = (bytes.len() >= 4 * 1024 && beg_offset + 4 * 1024 < end_offset).then(|| {
+        if size.saturating_sub(3 * 1024) <= beg_offset + 4 * 1024 { 4 * 1024 }
+        else { size.saturating_sub(3 * 1024).min(end_offset.saturating_sub(3 * 1024)).saturating_sub(beg_offset) }
+    });
+    insert_coding::start(cx, read(Some(bytes), metadata_modtime(&meta), 0, tail.map(|t| t as usize)))
 }}
 
 /// Open PATH for `insert-file-contents' with O_NONBLOCK, so a FIFO without a
@@ -558,17 +561,19 @@ fn write_region(cx, start: Value, end: Value, filename: Value; optional append: 
     let widen = start == Value::NIL;
     let (start, end) = if stringp(cx, start) { (start, end) } else { (fixnum(b)?, fixnum(e)?) };
     // fileio.c:5583 save_restriction_save holds from here through the coding
-    // choice and the write, across its Lisp calls and non-local exits:
-    // (save-restriction [(widen)] (romacs--write-region-body 'ARG...)).
-    let quote = cx.intern("quote");
-    let mut body = vec![cx.intern("romacs--write-region-body")];
-    for v in [start, end, name, append, visit, lock, mustbenew, visit_file] { body.push(cx.coding_list(&[quote, v])); }
-    let mut form = vec![cx.intern("save-restriction")];
-    if widen { let f = cx.intern("widen"); form.push(cx.coding_list(&[f])); }
-    form.push(cx.coding_list(&body));
-    let form = cx.coding_list(&form);
-    Ok(Step::Call { f: cx.intern("eval"), args: vec![form, Value::TRUE], then: written, saved: vec![] })
+    // choice and the write, across its Lisp calls and non-local exits. The
+    // arguments reach the body live, not quoted: `eval' copies constants.
+    let source = format!("(lambda (romacs--s romacs--e romacs--n romacs--a romacs--v romacs--l romacs--m romacs--f)
+                            (save-restriction {}
+                              (romacs--write-region-body romacs--s romacs--e romacs--n romacs--a
+                                                         romacs--v romacs--l romacs--m romacs--f)))",
+                         if widen { "(widen)" } else { "" });
+    let args = vec![start, end, name, append, visit, lock, mustbenew, visit_file];
+    insert_coding::closure_then(cx, &source, write_closure, args)
 }}
+fn write_closure(_: &mut Leaf<'_>, closure: Value, saved: &[Value]) -> Next {
+    Ok(Step::Call { f: closure, args: saved.to_vec(), then: written, saved: vec![] })
+}
 fn written(_: &mut Leaf<'_>, value: Value, _: &[Value]) -> Next { Ok(Step::Done(value)) }
 
 // Internal: write-region's tail inside its restriction extent, from the
