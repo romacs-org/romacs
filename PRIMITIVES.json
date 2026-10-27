@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "06f4a75d2223d8ba8fc7a80b8132d3c6938e5a5fca08927b24a5311d0270d69f",
+  "source_fingerprint": "77166ab84911a2be562300cd6ec27ee72d6d163c5245624333e79f18682ed6b7",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -1420,7 +1420,7 @@
   "find-file-name-handler": {
    "name": "find-file-name-handler",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:792"
+   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:797"
   },
   "find-operation-coding-system": {
    "name": "find-operation-coding-system",
@@ -2179,7 +2179,7 @@
   "locate-file-internal": {
    "name": "locate-file-internal",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:651"
+   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:656"
   },
   "locate-library": {
    "name": "locate-library",

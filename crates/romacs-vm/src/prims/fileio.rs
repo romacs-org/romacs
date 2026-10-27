@@ -1,11 +1,12 @@
 //! GNU src/fileio.c `insert-file-contents' (fileio.c:4057) and `write-region'
 //! (fileio.c:5461): read a file into the current buffer, write buffer text or
-//! a string to a file. Both are T1 leaves: GNU calls Lisp from these DEFUNs
-//! only through file name handlers, `set-auto-coding-function',
-//! `format-decode', `after-insert-file-set-coding', the change hooks,
-//! `select-safe-coding-system-function' and the write annotation functions,
-//! and VM2 REFUSES every one of those paths before it touches the buffer or
-//! the file (below), so no Lisp ever runs inside them.
+//! a string to a file. `insert-file-contents' is a T1 leaf: GNU calls Lisp
+//! from it only through file name handlers, `set-auto-coding-function',
+//! `format-decode', `after-insert-file-set-coding' and the change hooks, and
+//! VM2 REFUSES every one of those paths before it touches the buffer or the
+//! file (below), so no Lisp ever runs inside it. `write-region' is T2: its
+//! coding choice calls Lisp (prims/write_coding.rs); it refuses handlers and
+//! the annotation functions.
 //!
 //! Supported subset (DIVERGENCES.md VM2-FILEIO1 lists the rest):
 //!
@@ -17,11 +18,10 @@
 //!   would detect a DOS/Mac EOL). `last-coding-system-used' is the name GNU
 //!   reports for each of those cases (recorded live, tools/primh). Anything
 //!   else SIGNALS `(error "VM2 ...")' rather than decode differently.
-//! * Encoding: `coding-system-for-write' nil, `utf-8' or `utf-8-unix', and
-//!   `buffer-file-coding-system' unbound, nil, `utf-8' or `utf-8-unix': the
-//!   buffer's UTF-8 bytes (a unibyte string's own bytes) are written as is,
-//!   which is exactly GNU's utf-8-unix encoding of Unicode text.
-//! * Multibyte buffers only; regular input files only; no REPLACE, no `~user'.
+//! * Encoding: GNU's choose_write_coding_system, then the native string
+//!   encoder (`encode-coding-string''s coding types) over the region's text,
+//!   multibyte or unibyte.
+//! * Regular input files only; no REPLACE, no `~user'.
 use super::*;
 use crate::prim::leaf::Kind;
 use crate::forwarded::VisitedModtime;
@@ -180,7 +180,7 @@ pub(super) fn refuse(what: &str) -> Fault {
 
 /// The value of special variable NAME, nil when void (the C value of every
 /// variable read here is nil).
-fn var(cx: &mut Leaf<'_>, name: &str) -> std::result::Result<Value, Fault> {
+pub(super) fn var(cx: &mut Leaf<'_>, name: &str) -> std::result::Result<Value, Fault> {
     let symbol = cx.intern(name);
     Ok(cx.variable_value(symbol)?.unwrap_or(Value::NIL))
 }
@@ -508,8 +508,8 @@ fn position(cx: &Leaf<'_>, v: Value) -> std::result::Result<i64, Fault> {
 }
 defsubr! { name = "write-region", gnu = "fileio.c:5461", effect = Global,
 fn write_region(cx, start: Value, end: Value, filename: Value; optional append: Value,
-                visit: Value, lockname: Value, mustbenew: Value) {
-    let visiting = visit == Value::TRUE || stringp(cx, visit);
+                visit: Value, lockname: Value, mustbenew: Value) -> Step {
+    use super::write_coding as w;
     // fileio.c:5539-5540 validate_region (editfns.c:2504).
     let shape = cx.buffer_shape()?;
     let mut region = None;
@@ -542,55 +542,60 @@ fn write_region(cx, start: Value, end: Value, filename: Value; optional append: 
     // GNU invokes lock/unlock handlers even when create-lockfiles is nil.
     let lock = if lockname != Value::NIL { lockname } else { visit_file };
     refuse_handler(cx, lock, "lock-file")?;
-    if !visiting { refuse_handler(cx, lock, "unlock-file")?; }
+    if !(visit == Value::TRUE || stringp(cx, visit)) { refuse_handler(cx, lock, "unlock-file")?; }
     // build_annotations (fileio.c:5604) and the post-annotation call (5811).
     if var(cx, "write-region-annotate-functions")? != Value::NIL
         || var(cx, "write-region-post-annotation-function")? != Value::NIL
         || (!stringp(cx, start) && var(cx, "buffer-file-format")? != Value::NIL) {
         return Err(refuse("write-region annotations"));
     }
-    if shape.unibyte && !stringp(cx, start) {
-        return Err(refuse("write-region in a unibyte buffer"));
+    // choose_write_coding_system's CODING_MODE_SELECTIVE_DISPLAY (fileio.c:5455).
+    if !stringp(cx, start) && var(cx, "selective-display")? == Value::TRUE {
+        return Err(refuse("write-region with selective-display t"));
     }
-    // choose_write_coding_system (fileio.c:5348).
-    let csw = var(cx, "coding-system-for-write")?;
-    let utf8 = |cx: &mut Leaf<'_>, v: Value| symbol_is(cx, v, &["utf-8", "utf-8-unix"]);
-    if csw != Value::NIL {
-        if !utf8(cx, csw) {
-            return Err(refuse("coding-system-for-write other than nil, utf-8 and utf-8-unix"));
-        }
-    } else {
-        let bfcs = var(cx, "buffer-file-coding-system")?;
-        if bfcs != Value::NIL && !utf8(cx, bfcs) {
-            return Err(refuse("buffer-file-coding-system other than nil, utf-8 and utf-8-unix"));
-        }
-        if var(cx, "file-coding-system-alist")? != Value::NIL {
-            return Err(refuse("write-region with file-coding-system-alist"));
-        }
-        let select = var(cx, "select-safe-coding-system-function")?;
-        if select != Value::NIL && cx.kind(select) == Kind::Symbol && cx.fboundp(select) {
-            return Err(refuse("write-region with select-safe-coding-system-function"));
-        }
-    }
+    // A nil START widens (fileio.c:5593) and then means BEGV..ZV.
+    let (b, e) = match region { Some(r) => r, None => (1, shape.z) };
+    let narrowed = start == Value::NIL && (shape.begv != 1 || shape.zv != shape.z);
+    let fixnum = |n: i64| Value::integer(n).map_err(Fault::Error);
+    let (start, end) = if stringp(cx, start) { (start, end) } else { (fixnum(b)?, fixnum(e)?) };
+    let mut r = vec![Value::NIL; w::REGISTERS];
+    r[w::START] = start;
+    r[w::END] = end;
+    r[w::FILENAME] = name;
+    r[w::APPEND] = append;
+    r[w::VISIT] = visit;
+    r[w::LOCKNAME] = lock;
+    r[w::MUSTBENEW] = mustbenew;
+    r[w::VISIT_FILE] = visit_file;
+    r[w::FLAGS] = Value::integer(if narrowed { w::WIDEN } else { 0 }).unwrap();
+    w::choose(cx, r)
+}}
+
+/// The rest of write_region once the coding system R[VAL] is chosen
+/// (fileio.c:5623 onwards): encode, open, write, sync and visit.
+pub(super) fn write_chosen(cx: &mut Leaf<'_>, r: &[Value]) -> Next {
+    use super::write_coding as w;
+    let (start, end, name, append, visit) = (r[w::START], r[w::END], r[w::FILENAME], r[w::APPEND], r[w::VISIT]);
+    let (lockname, mustbenew, visit_file, coding) = (r[w::LOCKNAME], r[w::MUSTBENEW], r[w::VISIT_FILE], r[w::VAL]);
+    let visiting = visit == Value::TRUE || stringp(cx, visit);
     let lcsu = cx.intern("last-coding-system-used");
-    let coding = cx.intern("utf-8-unix");
     cx.variable_set(lcsu, coding)?;
     // fileio.c:5629 Flock_file: VM2 creates no lock files (VM2-FILEIO1),
     // but the name is still checked as Flock_file's expand-file-name does.
-    if lockname != Value::NIL {
-        expand_file_name(cx, lockname)?;
-    }
-    let bytes = if stringp(cx, start) {
-        let view = cx.string_view(start)?;
-        if view.is_multibyte() && std::str::from_utf8(view.bytes()).is_err() {
-            return Err(Fault::NotUnicode(start));
-        }
-        view.bytes().to_vec()
-    } else {
-        // fileio.c:5593 Fwiden for a nil START.
-        let (b, e) = region.unwrap_or((1, shape.z));
-        cx.buffer_text_bytes(b, e)?
+    expand_file_name(cx, lockname)?;
+    let (path, _) = expanded_name(cx, name)?;
+    let text = if stringp(cx, start) { start } else {
+        // A Lisp call during the choice may have edited the buffer.
+        let (b, e) = (start.integer_value().unwrap(), end.integer_value().unwrap());
+        let shape = cx.buffer_shape()?;
+        if !(1 <= b && b <= e && e <= shape.z) { return Err(Fault::Range(start, end)); }
+        let bytes = cx.buffer_text_bytes(b, e)?;
+        cx.make_string(bytes, !shape.unibyte)
     };
+    let encoded = cx.coding_convert_string(text, coding, Value::TRUE, Value::NIL, true)?;
+    let bytes = cx.string_view(encoded)?.bytes().to_vec();
+    cx.variable_set(lcsu, coding)?;
+    let excl = symbol_is(cx, mustbenew, &["excl"]);
     let mut options = std::fs::OpenOptions::new();
     options.write(true);
     // NUMBERP (append): an offset to seek to (fileio.c:5638).
@@ -641,8 +646,8 @@ fn write_region(cx, start: Value, end: Value, filename: Value; optional append: 
         cx.fileio_set_modtime(written_modtime.unwrap())?;
         cx.set_buffer_modified(Value::NIL, true)?;
     }
-    Ok(Value::NIL)
-}}
+    Ok(Step::Done(Value::NIL))
+}
 
 // GNU defines `locate-file' in Lisp (lisp/files.el:1113) and only
 // `locate-file-internal' in C (src/lread.c:1590), so only the C entry point

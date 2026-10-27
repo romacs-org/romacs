@@ -81,6 +81,61 @@ fn charset_coding_systems_match_gnu() {
     assert_eq!(actual, expected);
 }
 
+// fileio.c choose_write_coding_system and the encoding after it, on the
+// loadup chain's coding systems: the value and the bytes written must be
+// pinned GNU's. Each case writes the file FILE, named by its extension.
+#[test]
+fn write_region_coding_matches_gnu() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut vm = bootstrapped_with(&root, "rlisp/romacs-loadup-bootstrap.el");
+    let dir = std::env::temp_dir().join(format!("rt-write-coding-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let cases: [(&str, &str); 18] = [
+        ("txt", r#"(with-temp-buffer (insert "héllo\n") (list (write-region nil nil FILE) last-coding-system-used))"#),
+        // file-coding-system-alist's prefer-utf-8, then select-safe-coding-system.
+        ("el", r#"(with-temp-buffer (insert "λ x\n") (write-region nil nil FILE) last-coding-system-used)"#),
+        ("bin", r#"(with-temp-buffer (set-buffer-multibyte nil) (insert "h\351\n") (write-region nil nil FILE) last-coding-system-used)"#),
+        ("txt", r#"(let ((coding-system-for-write 'latin-1)) (write-region "café\n" nil FILE) last-coding-system-used)"#),
+        ("txt", r#"(with-temp-buffer (setq buffer-file-coding-system 'utf-8-dos) (insert "a\nb") (write-region nil nil FILE) last-coding-system-used)"#),
+        ("txt", r#"(with-temp-buffer (setq buffer-file-coding-system 'latin-1) (insert "é") (write-region nil nil FILE) (list last-coding-system-used (local-variable-p 'buffer-file-coding-system)))"#),
+        // A nil START widens: the whole buffer, the restriction kept.
+        ("txt", r#"(with-temp-buffer (insert "xéyz") (narrow-to-region 2 3) (write-region nil nil FILE) (list last-coding-system-used (point-min) (point-max)))"#),
+        ("txt", r#"(with-temp-buffer (insert "été") (let ((coding-system-for-write 'utf-8)) (write-region 2 2 FILE)) last-coding-system-used)"#),
+        ("txt", r#"(progn (write-region "é" nil FILE) last-coding-system-used)"#),
+        // A function entry of the alist receives write-region's seven arguments.
+        ("rtfn", r#"(let* ((seen nil) (file-coding-system-alist (list (cons "\\.rtfn\\'" 'rt-rtfn-coding)))) (defalias 'rt-rtfn-coding (lambda (args) (setq seen (list (car args) (nth 1 args) (nth 2 args) (length args))) 'latin-1)) (with-temp-buffer (insert "é!") (write-region nil nil FILE) (list seen last-coding-system-used)))"#),
+        ("txt", r#"(let ((select-safe-coding-system-function 'rt-select-utf-16le)) (defalias 'rt-select-utf-16le (lambda (&rest _) 'utf-16le)) (with-temp-buffer (insert "é\n") (write-region nil nil FILE) last-coding-system-used))"#),
+        // The function sees the widened buffer of a nil START.
+        ("txt", r#"(let* ((seen nil) (select-safe-coding-system-function 'rt-select-seen)) (defalias 'rt-select-seen (lambda (from to &rest _) (setq seen (list from to (point-min) (point-max))) nil)) (with-temp-buffer (insert "abcé") (narrow-to-region 2 3) (write-region nil nil FILE) (list seen last-coding-system-used (point-min) (point-max))))"#),
+        ("txt", r#"(let* ((seen nil) (coding-system-require-warning t) (coding-system-for-write 'latin-1) (select-safe-coding-system-function 'rt-select-warned)) (defalias 'rt-select-warned (lambda (_from _to codings &rest _) (setq seen codings) 'utf-8)) (write-region "é" nil FILE) (list seen last-coding-system-used))"#),
+        ("txt", r#"(with-temp-buffer (setq buffer-file-coding-system 'raw-text-dos) (insert "é\n") (write-region nil nil FILE) last-coding-system-used)"#),
+        ("txt", r#"(let ((coding-system-for-write 'undecided-dos)) (write-region "é\nx" nil FILE) last-coding-system-used)"#),
+        ("txt", r#"(list (let ((coding-system-for-write 'rt-nosuch)) (condition-case e (write-region "x" nil FILE) (error e))) (file-exists-p FILE))"#),
+        // CHECK_CODING_SYSTEM evaluates a lazy coding system's define form.
+        ("txt", r#"(progn (put 'rt-lazy 'coding-system-define-form '(define-coding-system-alias 'rt-lazy 'latin-1)) (let ((coding-system-for-write 'rt-lazy)) (write-region "é" nil FILE)) (list last-coding-system-used (get 'rt-lazy 'coding-system-define-form)))"#),
+        ("txt", r#"(list (let ((select-safe-coding-system-function (lambda (&rest _) 'utf-8))) (condition-case e (write-region "x" nil FILE) (error (list (car e) (cadr e))))) (let ((select-safe-coding-system-function 'rt-select-string)) (defalias 'rt-select-string (lambda (&rest _) "utf-8")) (condition-case e (write-region "x" nil FILE) (error e))))"#),
+    ];
+    let binary = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
+    let mut failures = Vec::new();
+    for (index, (extension, expression)) in cases.iter().enumerate() {
+        let file = dir.join(format!("case-{index}.{extension}"));
+        let expression = expression.replace("FILE", &format!("{:?}", file.to_str().unwrap()));
+        let source = format!("(string-to-list (prin1-to-string (condition-case err {expression} (error (list 'signal err)))))");
+        let output = std::process::Command::new(&binary).args(["-Q", "--batch", "--eval", &format!("(prin1 {source})")]).output().unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        let expected = (String::from_utf8(output.stdout).unwrap(), std::fs::read(&file).ok());
+        let _ = std::fs::remove_file(&file);
+        let actual = (vm.eval_source(&source).unwrap().display().unwrap(), std::fs::read(&file).ok());
+        if actual != expected {
+            let text = |codes: &str| codes.trim_matches(|c| c == '(' || c == ')').split_whitespace()
+                .filter_map(|n| n.parse::<u32>().ok().and_then(char::from_u32)).collect::<String>();
+            failures.push(format!("{expression}\n  GNU    {} {:?}\n  Romacs {} {:?}", text(&expected.0), expected.1, text(&actual.0), actual.1));
+        }
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
 // The runtime pieces Gnosis and emacs-hermes reach, on the full loadup chain.
 #[test]
 fn daily_driver_load_slice_matches_gnu() {

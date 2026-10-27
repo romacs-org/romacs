@@ -348,9 +348,12 @@ fn an_edited_visit_saves_back_byte_identically() {
          (list (write-region nil nil buffer-file-name nil t) last-coding-system-used))",
         lisp(&f)
     );
-    assert_eq!(eval(&mut vm, &source), "(nil utf-8-unix)");
+    // Bare VM: no mule-conf, so choose_write_coding_system's nil choice
+    // (raw-text-unix in GNU) is the native no-conversion (VM2-FILEIO1);
+    // real_ert_load.rs proves GNU's utf-8-unix choice in the loadup regime.
+    assert_eq!(eval(&mut vm, &source), "(nil no-conversion)");
     assert_eq!(std::fs::read(&f).unwrap(), "* Heading\nλ body\nédit\n".as_bytes());
-    // CR survives untouched: VM2 never converts EOL on write (utf-8-unix).
+    // CR survives untouched: a unix-EOL coding never converts EOL on write.
     let crlf = d.join("crlf");
     let source = format!("(with-temp-buffer (insert \"a\\r\\nb\") (write-region nil nil {}))", lisp(&crlf));
     assert_eq!(eval(&mut vm, &source), "nil");
@@ -379,10 +382,39 @@ fn write_region_writes_regions_strings_offsets_and_visits() {
         assert!(value == "nil" || value == "(3 5)", "{source}: {value}");
         assert_eq!(std::fs::read(&path).unwrap(), bytes, "{source}");
     }
+    // A unibyte buffer is written as its octets (raw-text, fileio.c:5385).
+    let source = format!("(with-temp-buffer (set-buffer-multibyte nil) (insert \"a\\351\\n\") (list (write-region nil nil {}) last-coding-system-used))", lisp(&f("ub")));
+    assert_eq!(eval(&mut vm, &source), "(nil no-conversion)");
+    assert_eq!(std::fs::read(f("ub")).unwrap(), b"a\xe9\n");
+    // The bare registry has no utf-8: naming it is GNU's coding-system-error,
+    // raised before the file is opened.
+    let source = format!("(let ((coding-system-for-write 'utf-8)) (condition-case e (write-region \"x\" nil {}) (error e)))", lisp(&f("none")));
+    assert_eq!(eval(&mut vm, &source), "(coding-system-error utf-8)");
+    assert!(!f("none").exists());
     let (vs, other) = (lisp(&f("vs")), lisp(&f("other")));
     let source = format!("(with-temp-buffer (insert \"x\") (write-region nil nil {vs} nil {other}) (list (equal buffer-file-name {other}) (condition-case e (insert-file-contents {other}) (file-missing 'missing))))");
     assert_eq!(eval(&mut vm, &source), "(t missing)");
     assert_eq!(std::fs::read(f("vs")).unwrap(), b"x");
+}
+
+/// choose_write_coding_system's Lisp calls (prims/write_coding.rs): the
+/// alist's function entry and `select-safe-coding-system-function', the latter
+/// on the widened buffer of a nil START. Each collects; the registers carry
+/// the choice across.
+#[test]
+fn write_region_coding_calls_survive_collection() {
+    let d = dir("coding-calls");
+    let mut vm = Vm::new();
+    vm.set_collection_floor(1);
+    let f = lisp(&d.join("out.gc"));
+    let source = format!(r#"(progn
+      (defalias 'rt-alist (lambda (args) (garbage-collect) (make-list 64 (length args)) 'undecided))
+      (defalias 'rt-select (lambda (from to default &rest _) (garbage-collect) (setq rt-seen (list from to (point-min) (point-max) default)) default))
+      (let ((file-coding-system-alist '(("\\.gc\\'" . rt-alist))) (select-safe-coding-system-function 'rt-select))
+        (with-temp-buffer (insert "héllo\n") (narrow-to-region 2 3)
+          (list (write-region nil nil {f}) last-coding-system-used rt-seen (point-min) (point-max)))))"#);
+    assert_eq!(eval(&mut vm, &source), "(nil undecided-unix (1 7 1 7 undecided) 2 3)");
+    assert_eq!(std::fs::read(d.join("out.gc")).unwrap(), "h\u{e9}llo\n".as_bytes());
 }
 
 #[test]
@@ -444,7 +476,7 @@ fn unsupported_reads_refuse_and_leave_the_buffer_alone() {
         (format!("(let ((file-name-handler-alist '((\"/handler-only\\\\'\" . ignore)))) (insert-file-contents {crlf}))"), "insert-file-contents detection of CR, NUL or ESC bytes"),
         // The matching control must still refuse before touching the buffer or file.
         (format!("(let ((file-name-handler-alist '((\"/crlf\\\\'\" . ignore)))) (insert-file-contents {crlf}))"), "expand-file-name matching file name handler"),
-        (format!("(let ((coding-system-for-write 'latin-1)) (write-region \"x\" nil {crlf}))"), "coding-system-for-write other than nil, utf-8 and utf-8-unix"),
+        (format!("(let ((selective-display t)) (write-region nil nil {crlf}))"), "write-region with selective-display t"),
         (format!("(let ((write-region-annotate-functions '(ignore))) (write-region \"x\" nil {crlf}))"), "write-region annotations"),
         (format!("(write-region \"x\" nil {crlf} nil nil nil t)"), "write-region MUSTBENEW confirmation"),
     ] {

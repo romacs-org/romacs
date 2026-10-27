@@ -1487,9 +1487,12 @@
   }
  ],
  "pinned": {
+  "write-region/0198": "VALUE",
+  "write-region/0224": "SIGNAL-VS-VALUE",
+  "write-region/0225": "SIGNAL-VS-VALUE",
   "write-region/0226": "SIGNAL-VS-VALUE",
   "write-region/0227": "SIGNAL-VS-VALUE",
-  "write-region/0229": "SIGNAL-VS-VALUE",
-  "write-region/0230": "SIGNAL-VS-VALUE"
+  "write-region/0228": "SIGNAL-VS-VALUE",
+  "write-region/0229": "SIGNAL-VS-VALUE"
  }
 }

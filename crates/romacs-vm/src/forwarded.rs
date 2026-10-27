@@ -551,6 +551,8 @@ pub(crate) static C_VARIABLES: &[CVariable] = &[
     CVariable { name: "buffer-file-truename", gnu: "buffer.c:5446", kind: Kind::PerBuffer { default: Init::Nil, predicate: Some(Predicate::Stringp) } },
     CVariable { name: "buffer-read-only", gnu: "buffer.c:5458", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
     CVariable { name: "buffer-file-format", gnu: "buffer.c:5837", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
+    // Local only when set; permanent (buffer.c:4811 buffer_permanent_local_flags).
+    CVariable { name: "buffer-file-coding-system", gnu: "buffer.c:5314", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
     CVariable { name: "mark-active", gnu: "buffer.c:5795", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
     // Text edits record undo entries here (undo.c); t disables recording.
     CVariable { name: "buffer-undo-list", gnu: "buffer.c:5743", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },

@@ -66,7 +66,10 @@ impl Leaf<'_> {
         let utf8 = kind == self.intern("utf-8");
         let charset = kind == self.intern("charset");
         let utf16 = kind == self.intern("utf-16");
-        if !utf8 && !charset && !utf16 && kind != self.intern("raw-text") {
+        // setup_coding_system (coding.c:5706): an undecided type encodes
+        // through encode_coding_raw_text; decoding it means detection.
+        let raw = kind == self.intern("raw-text") || (encode && kind == self.intern("undecided"));
+        if !utf8 && !charset && !utf16 && !raw {
             return Err(Fault::Error("string conversion for this coding type is not implemented (supported: UTF-8, UTF-16, charset and raw-text)".into()));
         }
         for index in [6, 7, 9, 10] {

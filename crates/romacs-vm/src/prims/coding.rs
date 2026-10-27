@@ -5,7 +5,7 @@ use super::*;
 fn list(cx: &mut Leaf<'_>, items: &[Value]) -> Value {
     cx.coding_list(items)
 }
-fn realize(cx: &mut Leaf<'_>, name: Value, saved: Vec<Value>, then: crate::prim::Then) -> Next {
+pub(super) fn realize(cx: &mut Leaf<'_>, name: Value, saved: Vec<Value>, then: crate::prim::Then) -> Next {
     let form = cx.coding_define_form(name, true)?;
     if form == Value::NIL {
         return then(cx, Value::NIL, &saved);
