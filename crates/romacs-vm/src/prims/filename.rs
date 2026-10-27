@@ -122,7 +122,7 @@ fn file_name_all_completions(cx, file: Value, directory: Value) -> Step {
         let mut regexps = super::fileio::var(cx, "completion-regexp-list")?;
         let mut matched = true;
         while let Some((regexp, rest)) = cx.pair(regexps) {
-            if !cx.completion_regexp_match(regexp, value, fold)? { matched = false; break; }
+            if !cx.file_completion_regexp_match(regexp, value, fold)? { matched = false; break; }
             regexps = rest;
         }
         if !matched { continue; }

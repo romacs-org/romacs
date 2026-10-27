@@ -788,6 +788,9 @@ fn file_names_links_and_copies_match_gnu() {
         r#"(copy-file "absent" "b")"#,
         r#"(copy-file "sub" "b")"#,
         r#"(copy-file "a" "sub/")"#,
+        // FILE's last component is expanded under a directory NEWNAME: `~'
+        // names the home directory, which exists (nothing is written).
+        r#"(progn (copy-file "a" "./~") (copy-file "./~" "sub/"))"#,
         r#"(copy-file "a" "sub" t)"#,
         r#"(copy-file "a" "nodir/b")"#,
         r#"(copy-file "a" "dangling" t)"#,
@@ -830,6 +833,8 @@ fn file_names_links_and_copies_match_gnu() {
         r#"(set-file-times 1 0)"#,
         // file-name-all-completions
         r#"(sort (file-name-all-completions "" default-directory) #'string<)"#,
+        // Regexps match with the standard canonical table, not the buffer's.
+        r#"(with-temp-buffer (let ((tbl (copy-case-table (standard-case-table)))) (set-case-syntax-pair ?X ?b tbl) (set-case-table tbl) (let ((completion-ignore-case t) (completion-regexp-list (list "X"))) (sort (file-name-all-completions "" default-directory) #'string<))))"#,
         r#"(list (file-name-all-completions "s" default-directory) (file-name-all-completions "zz" default-directory) (sort (file-name-all-completions "." "sub") #'string<))"#,
         r#"(let ((completion-ignore-case t)) (sort (file-name-all-completions "b" default-directory) #'string<))"#,
         r#"(let ((completion-ignore-case nil)) (file-name-all-completions "b" default-directory))"#,

@@ -367,9 +367,10 @@ fn cp_target(cx: &mut Leaf<'_>, file: Value, newname: Value) -> std::result::Res
     let text = cx.string_text(file)?;
     let base = text.rsplit('/').next().unwrap_or("");
     let (directory, _) = name(cx, newname, false)?;
-    // Expanding BASE under the directory: `..' climbs, an empty BASE names
-    // the directory itself.
-    let joined = cx.string(&format!("{directory}{base}"));
+    // (expand-file-name BASE NEWNAME): `~' is the home directory, `..'
+    // climbs, an empty BASE names the directory itself.
+    let joined = if base.starts_with('~') { base.to_owned() } else { format!("{directory}{base}") };
+    let joined = cx.string(&joined);
     name(cx, joined, base.is_empty())
 }
 

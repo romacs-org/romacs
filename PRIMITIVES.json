@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "7274c2e27971b6883c87d5e5ebfeb372a21850cefa465fe740e6beffc3522f2e",
+  "source_fingerprint": "03a5150aad733b3ca524b2a55c8dfe40637cf7c8b4ddb23358302d559040c974",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -196,7 +196,7 @@
   "add-name-to-file": {
    "name": "add-name-to-file",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:513"
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:514"
   },
   "add-text-properties": {
    "name": "add-text-properties",
@@ -836,7 +836,7 @@
   "copy-file": {
    "name": "copy-file",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:420"
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:421"
   },
   "copy-hash-table": {
    "name": "copy-hash-table",
@@ -2385,7 +2385,7 @@
   "make-symbolic-link": {
    "name": "make-symbolic-link",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:528"
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:529"
   },
   "make-temp-file-internal": {
    "name": "make-temp-file-internal",
@@ -3733,7 +3733,7 @@
   "set-file-times": {
    "name": "set-file-times",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:557"
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:558"
   },
   "set-frame-selected-window": {
    "name": "set-frame-selected-window",
