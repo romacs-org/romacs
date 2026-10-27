@@ -1,6 +1,7 @@
 //! C primitives and variables emacs-hermes reaches, against pinned GNU:
 //! line-number-at-pos, text-property-any, get-buffer-process (no process
-//! exists), frame-first-window and timer-idle-list.
+//! exists), frame-first-window, timer-idle-list, and the subrs in the
+//! special forms' function cells.
 use romacs_vm::Vm;
 
 /// One expression per line.
@@ -14,6 +15,12 @@ const CASES: &str = r###"
 (list (get-buffer-process nil) (get-buffer-process "nonexistent") (get-buffer-process (current-buffer)) (get-buffer-process (buffer-name)) (condition-case e (get-buffer-process 1) (error e)))
 (list (eq (frame-first-window) (selected-window)) (eq (frame-first-window (selected-frame)) (selected-window)) (eq (frame-first-window (selected-window)) (selected-window)) (condition-case e (frame-first-window 1) (error e)))
 (list (boundp 'timer-idle-list) (special-variable-p 'timer-idle-list))
+(list (subr-arity (symbol-function 'and)) (subr-arity (symbol-function 'catch)) (subr-arity (symbol-function 'cond)) (subr-arity (symbol-function 'condition-case)) (subr-arity (symbol-function 'defconst)) (subr-arity (symbol-function 'defvar)) (subr-arity (symbol-function 'function)) (subr-arity (symbol-function 'if)) (subr-arity (symbol-function 'interactive)) (subr-arity (symbol-function 'let)) (subr-arity (symbol-function 'let*)) (subr-arity (symbol-function 'or)) (subr-arity (symbol-function 'prog1)) (subr-arity (symbol-function 'progn)) (subr-arity (symbol-function 'quote)) (subr-arity (symbol-function 'save-current-buffer)) (subr-arity (symbol-function 'save-excursion)) (subr-arity (symbol-function 'save-restriction)) (subr-arity (symbol-function 'setq)) (subr-arity (symbol-function 'unwind-protect)) (subr-arity (symbol-function 'while)))
+(list (fboundp 'progn) (subrp (symbol-function 'if)) (functionp 'if) (functionp (symbol-function 'progn)) (subr-name (symbol-function 'save-excursion)) (subr-name (symbol-function 'car)) (condition-case e (subr-name 'car) (error e)))
+(list (condition-case e (funcall 'if t 1) (error (list (car e) (eq (car (cdr e)) (symbol-function 'if))))) (condition-case e (apply #'progn '(1 2)) (error (car e))))
+(list (condition-case e (eval '(catch) t) (error e)) (condition-case e (eval '(if) t) (error e)) (condition-case e (eval '(quote) t) (error e)) (condition-case e (eval '(quote 1 2) t) (error e)) (condition-case e (eval '(function) t) (error e)) (condition-case e (eval '(let) t) (error e)) (condition-case e (eval '(while) t) (error e)) (condition-case e (eval '(defvar) t) (error e)) (condition-case e (eval '(prog1) t) (error e)) (condition-case e (eval '(condition-case x) t) (error e)) (condition-case e (eval '(unwind-protect) t) (error e)) (condition-case e (eval '(defconst x) t) (error e)))
+(list (if t 1 2) (let ((a 1)) (let* ((b (1+ a))) (and a b (or nil b)))) (catch 'k (throw 'k 5)) (condition-case nil (car 1) (error 'caught)) (prog1 1 2) (cond ((= 1 2) 'a) (t 'b)) (save-excursion 7) (save-restriction 8) (save-current-buffer 9) (unwind-protect 10 11) (quote q) (function car))
+(list (type-of (symbol-function 'if)) (cl-type-of (symbol-function 'if)) (type-of (symbol-function 'car)) (cl-type-of (symbol-function 'car)) (condition-case e (eval '(defvar x 1 nil 4) t) (error e)) (condition-case e (eval '(defconst x 1 nil 4) t) (error e)) (condition-case e (eval '(defvar 1 2 nil 4) t) (error e)) (condition-case e (eval '(defconst 1 2 nil 4) t) (error e)))
 "###;
 
 #[test]

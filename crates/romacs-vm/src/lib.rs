@@ -1996,7 +1996,10 @@ impl Vm {
                                 self.expr(b, &lowered)?;
                             }
                         } else if head == "defconst" {
-                            return Err("defconst needs an initializer".into());
+                            let quote = |f: Form| Form::List(vec![Form::Sym("quote".into()), f]);
+                            let data = Form::List(vec![Form::Sym("defconst".into()), Form::Int(1)]);
+                            let signal = Form::List(vec![Form::Sym("signal".into()), quote(Form::Sym("wrong-number-of-arguments".into())), quote(data)]);
+                            return self.expr(b, &signal);
                         } else {
                             b.local_specials.insert(name.into());
                         }
@@ -2131,18 +2134,30 @@ impl Vm {
                         Ok(r)
                     }
                     _ => {
-                        if matches!(
-                            head,
-                            "lambda"
-                                | "function"
-                                | "defun"
-                                | "setq"
-                                | "if"
-                                | "while"
-                                | "let"
-                                | "let*"
-                                | "quote"
-                        ) {
+                        // eval_sub: a special form given too few arguments
+                        // (or, for quote and function, too many).
+                        if prim::prims::special_forms::special_form_min(head).is_some() {
+                            let quote = |f: Form| Form::List(vec![Form::Sym("quote".into()), f]);
+                            // Fdefvar and Fdefconst refuse a fourth argument themselves.
+                            if matches!(head, "defvar" | "defconst") && rest.len() > 3 {
+                                if !matches!(rest[0], Form::Sym(_) | Form::Generated(_)) {
+                                    let data = Form::List(vec![Form::Sym("symbolp".into()), rest[0].clone()]);
+                                    let signal = Form::List(vec![Form::Sym("signal".into()), quote(Form::Sym("wrong-type-argument".into())), quote(data)]);
+                                    return self.expr(b, &signal);
+                                }
+                                let signal = Form::List(vec![Form::Sym("signal".into()), quote(Form::Sym("error".into())),
+                                    quote(Form::List(vec![Form::String("Too many arguments".into())]))]);
+                                return self.expr(b, &signal);
+                            }
+                            let data = Form::List(vec![Form::Sym(head.into()), Form::Int(rest.len() as i64)]);
+                            let signal = Form::List(vec![
+                                Form::Sym("signal".into()),
+                                quote(Form::Sym("wrong-number-of-arguments".into())),
+                                quote(data),
+                            ]);
+                            return self.expr(b, &signal);
+                        }
+                        if matches!(head, "lambda" | "defun") {
                             return Err(format!("invalid or unsupported {head}"));
                         }
                         let (target, args) = if head == "funcall" {

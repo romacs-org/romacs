@@ -1653,6 +1653,11 @@ pub(crate) fn arity(value: Value) -> Option<(usize, Option<usize>)> {
     })
 }
 
+/// The generated subr declared as NAME.
+pub(crate) fn subr_named(name: &str) -> Option<Value> {
+    GENERATED.iter().position(|d| d.name == name).map(|i| Value::reference(PRIMITIVES.len() + i, 6))
+}
+
 pub(crate) fn name(v: Value) -> Option<&'static str> {
     Some(descriptor(v.index_if(6)?)?.name())
 }

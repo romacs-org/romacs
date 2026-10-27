@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "4ab757f55fe84abd387b5736a7d1754635d7af2c199f6fd53f61857d7b1bfe68",
+  "source_fingerprint": "1151339a2287c8b65d8054d745291a2b65b1a29376085b22ffa054f7cde5b17b",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 749,
-  "parsed_vm2_only": 749
+  "parsed_total": 771,
+  "parsed_vm2_only": 771
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -202,6 +202,11 @@
    "name": "all-completions",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/completion.rs:17"
+  },
+  "and": {
+   "name": "and",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/special_forms.rs:25"
   },
   "append": {
    "name": "append",
@@ -533,6 +538,11 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/casetab.rs:3"
   },
+  "catch": {
+   "name": "catch",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/special_forms.rs:28"
+  },
   "category-docstring": {
    "name": "category-docstring",
    "implementation": "vm2",
@@ -751,6 +761,16 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/widen.rs:49"
   },
+  "cond": {
+   "name": "cond",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/special_forms.rs:31"
+  },
+  "condition-case": {
+   "name": "condition-case",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/special_forms.rs:34"
+  },
   "cons": {
    "name": "cons",
    "implementation": "vm2",
@@ -944,6 +964,11 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/vars.rs:118"
   },
+  "defconst": {
+   "name": "defconst",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/special_forms.rs:37"
+  },
   "define-category": {
    "name": "define-category",
    "implementation": "vm2",
@@ -986,6 +1011,11 @@
    "implementation": "vm2",
    "variant": "Primitive::DefineKey",
    "registered_at": "crates/romacs-vm/src/lib.rs:707"
+  },
+  "defvar": {
+   "name": "defvar",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/special_forms.rs:40"
   },
   "defvar-1": {
    "name": "defvar-1",
@@ -1537,6 +1567,11 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/callint.rs:117"
   },
+  "function": {
+   "name": "function",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/special_forms.rs:43"
+  },
   "functionp": {
    "name": "functionp",
    "implementation": "vm2",
@@ -1713,6 +1748,11 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/identity.rs:4"
   },
+  "if": {
+   "name": "if",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/special_forms.rs:46"
+  },
   "indent-to": {
    "name": "indent-to",
    "implementation": "vm2",
@@ -1772,6 +1812,11 @@
    "implementation": "vm2",
    "variant": "Primitive::Integerp",
    "registered_at": "crates/romacs-vm/src/lib.rs:650"
+  },
+  "interactive": {
+   "name": "interactive",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/special_forms.rs:49"
   },
   "interactive-form": {
    "name": "interactive-form",
@@ -1987,6 +2032,16 @@
    "name": "length>",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/str.rs:230"
+  },
+  "let": {
+   "name": "let",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/special_forms.rs:52"
+  },
+  "let*": {
+   "name": "let*",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/special_forms.rs:55"
   },
   "libxml-available-p": {
    "name": "libxml-available-p",
@@ -2553,6 +2608,11 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/char_table.rs:57"
   },
+  "or": {
+   "name": "or",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/special_forms.rs:58"
+  },
   "overlay-buffer": {
    "name": "overlay-buffer",
    "implementation": "vm2",
@@ -2701,6 +2761,16 @@
    "variant": "Primitive::ProcessLines",
    "registered_at": "crates/romacs-vm/src/lib.rs:558"
   },
+  "prog1": {
+   "name": "prog1",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/special_forms.rs:61"
+  },
+  "progn": {
+   "name": "progn",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/special_forms.rs:64"
+  },
   "proper-list-p": {
    "name": "proper-list-p",
    "implementation": "vm2",
@@ -2739,6 +2809,11 @@
    "implementation": "vm2",
    "variant": "Primitive::Puthash",
    "registered_at": "crates/romacs-vm/src/lib.rs:628"
+  },
+  "quote": {
+   "name": "quote",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/special_forms.rs:67"
   },
   "rassoc": {
    "name": "rassoc",
@@ -2990,6 +3065,21 @@
    "name": "safe-length",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/fns.rs:80"
+  },
+  "save-current-buffer": {
+   "name": "save-current-buffer",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/special_forms.rs:70"
+  },
+  "save-excursion": {
+   "name": "save-excursion",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/special_forms.rs:73"
+  },
+  "save-restriction": {
+   "name": "save-restriction",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/special_forms.rs:76"
   },
   "search-backward": {
    "name": "search-backward",
@@ -3252,6 +3342,11 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/symbol.rs:27"
   },
+  "setq": {
+   "name": "setq",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/special_forms.rs:79"
+  },
   "signal": {
    "name": "signal",
    "implementation": "vm2",
@@ -3420,6 +3515,11 @@
    "name": "subr-arity",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/subr.rs:3"
+  },
+  "subr-name": {
+   "name": "subr-name",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/subr.rs:17"
   },
   "subrp": {
    "name": "subrp",
@@ -3664,6 +3764,11 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/filelock.rs:240"
   },
+  "unwind-protect": {
+   "name": "unwind-protect",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/special_forms.rs:82"
+  },
   "upcase": {
    "name": "upcase",
    "implementation": "vm2",
@@ -3745,6 +3850,11 @@
    "name": "visited-file-modtime",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/fileio.rs:42"
+  },
+  "while": {
+   "name": "while",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/special_forms.rs:85"
   },
   "widen": {
    "name": "widen",

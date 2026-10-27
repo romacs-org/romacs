@@ -1,7 +1,7 @@
 {
  "protocol": "primh-v1",
  "primitive": "subrp",
- "pinned": {"subrp/0035": "VALUE", "subrp/0036": "VALUE", "subrp/0037": "MISSING", "subrp/0052": "PRINTER"},
+ "pinned": {"subrp/0036": "VALUE", "subrp/0037": "MISSING", "subrp/0052": "PRINTER"},
  "spec_sha256": "118f1e95637cb30770011cd40d71bf39593b57127f48d0c48d61d6ff33dcbee7",
  "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
  "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
