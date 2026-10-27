@@ -37,6 +37,9 @@ pub(super) struct Window {
     pub vscroll_px: u32,
     /// Deferred scroll, applied after the frozen frame paints (D-ML1).
     pub pending_vscroll: Option<u32>,
+    /// GNU `w->hscroll`, in columns. The display does not apply it yet
+    /// (VM2-HSCROLL1).
+    pub hscroll: i64,
     pub parameters: Vec<(Value, Value)>,
     /// GNU `w->prev_buffers` and `w->next_buffers`: Lisp lists kept for
     /// window.el's buffer history (`window-prev-buffers`).
@@ -85,6 +88,7 @@ impl Window {
             left_margin: 0,
             vscroll_px: 0,
             pending_vscroll: None,
+            hscroll: 0,
             right_margin: 0,
             parameters: vec![],
             prev_buffers: Value::NIL,
@@ -364,6 +368,7 @@ impl Vm {
             // per-buffer last window start, so it starts at 1. See
             // DIVERGENCES.md VM2-WB1.
             self.set_marker_object(st, Value::integer(1)?, buffer)?;
+            self.window_mut(v)?.hscroll = 0;
         }
         self.discard_buffer_from_window(buffer, v)?;
         let w = self.window_mut(v)?;
@@ -1510,6 +1515,17 @@ impl<'a> Windows<'a> {
         self.live_frame(frame)?;
         Ok(if frame == Value::NIL { self.frame() } else { frame })
     }
+    /// GNU frame.c:2103 select-frame through do_switch_frame: selecting the
+    /// selected frame returns it. VM2 has one live frame.
+    pub(crate) fn select_frame(&mut self, frame: Value) -> Out {
+        if self.frame_live_p(frame) == Value::NIL {
+            return Err(Fault::Wrong("frame-live-p", frame));
+        }
+        if frame != self.frame() {
+            return Err(internal("VM2 switching to another frame is unsupported".into()));
+        }
+        Ok(frame)
+    }
     pub(crate) fn frame_live_p(&mut self, object: Value) -> Value {
         if matches!(self.vm.object_if(object), Some(Object::Frame(f)) if f.live) { Value::TRUE } else { Value::NIL }
     }
@@ -1716,6 +1732,32 @@ impl<'a> Windows<'a> {
         Ok(windows.into_iter().find(|&w| {
             self.get(w).is_ok_and(|w| w.live() && w.buffer == buffer && (!w.mini || self.vm.names.get("romacs--minibuf-level").is_some_and(|&i| self.vm.slots[i].value.integer_value().is_some_and(|depth| depth > 0))))
         }).unwrap_or(Value::NIL))
+    }
+    /// GNU window.c:748.
+    pub(crate) fn set_window_combination_limit(&mut self, window: Value, limit: Value) -> Out {
+        if window == Value::NIL { return Err(Fault::Wrong("window-valid-p", window)); }
+        let window = self.valid(window)?;
+        if self.get(window)?.children.is_empty() {
+            return Err(Fault::Error("Combination limit is meaningful for internal windows only".into()));
+        }
+        self.get_mut(window)?.combination_limit = limit;
+        Ok(limit)
+    }
+    /// GNU window.c:1278.
+    pub(crate) fn window_hscroll(&mut self, window: Value) -> Out {
+        let window = self.live(window)?;
+        Self::int(self.get(window)?.hscroll)
+    }
+    /// GNU window.c:1313 and set_window_hscroll: clipped to 0..most-positive-fixnum.
+    pub(crate) fn set_window_hscroll(&mut self, window: Value, ncol: Value) -> Out {
+        let n = ncol.integer_value().ok_or(Fault::Wrong("fixnump", ncol))?;
+        let window = self.live(window)?;
+        let n = n.clamp(0, Value::MAX_FIXNUM);
+        let w = self.get_mut(window)?;
+        if w.hscroll != n { w.end_valid = false; }
+        w.hscroll = n;
+        self.vm.display_state.version += 1;
+        Self::int(n)
     }
     pub(crate) fn window_combination_limit(&mut self, window: Value) -> Out {
         if window == Value::NIL { return Err(Fault::Wrong("window-valid-p", window)); }

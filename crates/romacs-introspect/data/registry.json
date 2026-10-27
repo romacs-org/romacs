@@ -8,14 +8,14 @@
   "provenance": {
     "generated_by": "romacs-introspect-live",
     "generated_on": "linux-x86_64",
-    "input_hash": "a3c32f0fcf20b1c7902ef79c823d911077022d4d3c8dd9c7a9f44babf377a0fa",
+    "input_hash": "8f8d2a4c30444722ffb0827e91cea05e11aa4080a78d773f89b6d1bab49dc109",
     "source_only_at_generation": [],
     "vm2_probe_panics": [],
-    "vm2_universe": 4042
+    "vm2_universe": 4052
   },
   "schema": 2,
   "vm2": {
-    "count": 921,
+    "count": 926,
     "entries": [
       "#:vm2-closure-document",
       "#:vm2-closure-metadata",
@@ -607,6 +607,7 @@
       "read-from-minibuffer",
       "read-from-string",
       "read-string",
+      "recent-auto-save-p",
       "recent-keys",
       "record",
       "recordp",
@@ -702,6 +703,7 @@
       "search-backward",
       "search-forward",
       "secure-hash-algorithms",
+      "select-frame",
       "select-window",
       "selected-frame",
       "selected-window",
@@ -744,8 +746,10 @@
       "set-time-zone-rule",
       "set-visited-file-modtime",
       "set-window-buffer",
+      "set-window-combination-limit",
       "set-window-configuration",
       "set-window-dedicated-p",
+      "set-window-hscroll",
       "set-window-margins",
       "set-window-new-normal",
       "set-window-new-pixel",
@@ -895,6 +899,7 @@
       "window-frame",
       "window-fringes",
       "window-header-line-height",
+      "window-hscroll",
       "window-left-child",
       "window-list",
       "window-list-1",

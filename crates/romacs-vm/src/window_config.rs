@@ -25,6 +25,7 @@ pub(crate) struct SavedWindow {
     left_margin: u32,
     right_margin: u32,
     vscroll_px: u32,
+    hscroll: i64,
     combination_limit: Value,
     /// GNU `p->dedicated`.
     dedicated: Value,
@@ -125,6 +126,7 @@ impl Vm {
             left_margin: w.left_margin,
             right_margin: w.right_margin,
             vscroll_px: w.vscroll_px,
+            hscroll: w.hscroll,
             combination_limit: w.combination_limit,
             dedicated: w.dedicated,
             parameters,
@@ -257,6 +259,7 @@ impl Vm {
                 w.left_margin = p.left_margin;
                 w.right_margin = p.right_margin;
                 w.vscroll_px = p.vscroll_px;
+                w.hscroll = p.hscroll;
                 w.combination_limit = p.combination_limit;
                 // Saved parameters are restored; a nil one only resets an
                 // existing non-nil value. Others are left alone.

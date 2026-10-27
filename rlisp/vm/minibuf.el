@@ -125,6 +125,9 @@ error, a function is called (minibuffer-quit-recursive-edit throws one)."
   (let* ((outer-prefix current-prefix-arg)
          (outer-default minibuffer-default)
          (outer-level romacs--minibuf-level)
+         ;; window.c:8428: the entry's window configuration saves the caller
+         ;; only inside a minibuffer, and its restore puts it back.
+         (outer-selected (and (> outer-level 0) romacs--minibuf-selected-window))
          (level (1+ outer-level))
          (buffer (get-buffer-create (format " *Minibuf-%d*" level)))
          (calling-buffer (current-buffer))
@@ -140,6 +143,9 @@ error, a function is called (minibuffer-quit-recursive-edit throws one)."
         (progn
           (set-buffer buffer)
           (set-window-buffer mini buffer)
+          ;; minibuf.c:827.
+          (when (or (= level 1) (not (eq mini calling-window)))
+            (setq romacs--minibuf-selected-window calling-window))
           (select-window mini)
           (set-buffer buffer)
           (setq mark-active nil)
@@ -183,7 +189,8 @@ error, a function is called (minibuffer-quit-recursive-edit throws one)."
       ;; may have deleted it; GNU's record_unwind_current_buffer likewise
       ;; restores the buffer only if it is live).
       (setq current-prefix-arg outer-prefix prefix-arg nil
-            minibuffer-default outer-default romacs--minibuf-level outer-level)
+            minibuffer-default outer-default romacs--minibuf-level outer-level
+            romacs--minibuf-selected-window outer-selected)
       (set-buffer buffer)
       (erase-buffer)
       (set-window-buffer mini mini-buffer)

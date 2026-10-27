@@ -25,6 +25,19 @@ fn get_buffer_window(cx; optional buffer: Value, all_frames: Value) {
 }}
 defsubr! { name = "window-combination-limit", gnu = "window.c:731", effect = Reads,
 fn window_combination_limit(cx, window: Value) { cx.windows().window_combination_limit(window) }}
+defsubr! { name = "set-window-combination-limit", gnu = "window.c:748", effect = Global,
+fn set_window_combination_limit(cx, window: Value, limit: Value) { cx.windows().set_window_combination_limit(window, limit) }}
+defsubr! { name = "window-hscroll", gnu = "window.c:1278", effect = Reads,
+fn window_hscroll(cx; optional window: Value) { cx.windows().window_hscroll(window) }}
+defsubr! { name = "set-window-hscroll", gnu = "window.c:1313", effect = Global,
+fn set_window_hscroll(cx, window: Value, ncol: Value) { cx.windows().set_window_hscroll(window, ncol) }}
+defsubr! { name = "select-frame", gnu = "frame.c:2103", effect = Global,
+fn select_frame(cx, frame: Value; optional _norecord: Value) { cx.windows().select_frame(frame) }}
+defsubr! { name = "recent-auto-save-p", gnu = "fileio.c:6541", effect = Reads,
+fn recent_auto_save_p(cx) {
+    let state = cx.buffer_modification(Value::NIL)?;
+    Ok(if state.save_modiff < state.autosave_modiff { Value::TRUE } else { Value::NIL })
+}}
 /// Fframe_parameters for a frame without a window system: the stored alist
 /// plus the entries GNU computes, each added as store_in_alist would.
 fn frame_alist(cx: &mut Leaf<'_>, frame: Value) -> std::result::Result<Vec<(Value, Value)>, Fault> {

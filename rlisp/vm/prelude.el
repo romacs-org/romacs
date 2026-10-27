@@ -396,6 +396,20 @@ See also `find-buffer-visiting'."
         (throw 'romacs--find-buffer buffer)))
     nil))
 
+;; window.c's `minibuffer-selected-window'. minibuf.el, loaded on the
+;; first minibuffer read, records the window as read_minibuf does.
+
+(defvar romacs--minibuf-selected-window nil)
+
+(defun minibuffer-selected-window ()
+  "Return window selected just before minibuffer window was selected.
+Return nil if the selected window is not a minibuffer window."
+  (and (boundp 'romacs--minibuf-level)
+       (> romacs--minibuf-level 0)
+       (window-minibuffer-p (selected-window))
+       (window-live-p romacs--minibuf-selected-window)
+       romacs--minibuf-selected-window))
+
 ;; eval.c's `func-arity' and its `lambda_arity'.  Closure parameter
 ;; counts come from the compiled function.
 
