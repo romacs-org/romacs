@@ -1,7 +1,8 @@
 //! C primitives and variables emacs-hermes reaches, against pinned GNU:
 //! line-number-at-pos, text-property-any, get-buffer-process (no process
 //! exists), frame-first-window, timer-idle-list, and the subrs in the
-//! special forms' function cells.
+//! special forms' function cells, and print-gensym as gnosis's serializer
+//! binds it.
 use romacs_vm::Vm;
 
 /// One expression per line.
@@ -21,6 +22,8 @@ const CASES: &str = r###"
 (list (condition-case e (eval '(catch) t) (error e)) (condition-case e (eval '(if) t) (error e)) (condition-case e (eval '(quote) t) (error e)) (condition-case e (eval '(quote 1 2) t) (error e)) (condition-case e (eval '(function) t) (error e)) (condition-case e (eval '(let) t) (error e)) (condition-case e (eval '(while) t) (error e)) (condition-case e (eval '(defvar) t) (error e)) (condition-case e (eval '(prog1) t) (error e)) (condition-case e (eval '(condition-case x) t) (error e)) (condition-case e (eval '(unwind-protect) t) (error e)) (condition-case e (eval '(defconst x) t) (error e)))
 (list (if t 1 2) (let ((a 1)) (let* ((b (1+ a))) (and a b (or nil b)))) (catch 'k (throw 'k 5)) (condition-case nil (car 1) (error 'caught)) (prog1 1 2) (cond ((= 1 2) 'a) (t 'b)) (save-excursion 7) (save-restriction 8) (save-current-buffer 9) (unwind-protect 10 11) (quote q) (function car))
 (list (type-of (symbol-function 'if)) (cl-type-of (symbol-function 'if)) (type-of (symbol-function 'car)) (cl-type-of (symbol-function 'car)) (condition-case e (eval '(defvar x 1 nil 4) t) (error e)) (condition-case e (eval '(defconst x 1 nil 4) t) (error e)) (condition-case e (eval '(defvar 1 2 nil 4) t) (error e)) (condition-case e (eval '(defconst 1 2 nil 4) t) (error e)))
+(let ((s (make-symbol "g")) (e (make-symbol "")) (print-gensym t)) (list (prin1-to-string (list s s 'a :k e nil t)) (let ((print-circle t)) (prin1-to-string (list s s e e 'zz))) (prin1-to-string (list s) nil '((gensym . nil))) (let ((print-gensym nil)) (prin1-to-string s nil '((gensym . t)))) (let ((print-charset-text-property t)) (prin1-to-string (propertize "ab" 'face 'bold))) (let ((print-circle t)) (prin1-to-string (list (intern "x" (obarray-make)) 'y)))))
+(let ((print-gensym t) (print-circle t) (x (intern "x" (obarray-make)))) (list (prin1-to-string (list x x)) (prin1-to-string (list (make-symbol "quote") (make-symbol "x"))) (prin1-to-string '(quote a)) (prin1-to-string '(function f))))
 "###;
 
 #[test]

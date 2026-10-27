@@ -807,7 +807,15 @@ fn route_escape(e: &mut Engine<'_>) -> Option<(*mut Value, *const Inst)> {
                 "error"
             };
             let slot = e.vm.slot(condition);
-            Escape::Signal(Value::reference(slot + 1, 7), Value::NIL)
+            // A plain error keeps its message as data, as GNU's `error' does.
+            let data = match original.as_deref() {
+                Some(message) if condition == "error" => {
+                    let message = e.vm.make_lisp_string(message.as_bytes().to_vec(), true);
+                    e.vm.list_value(&[message])
+                }
+                _ => Value::NIL,
+            };
+            Escape::Signal(Value::reference(slot + 1, 7), data)
         }
     };
     let failed_depth = e.failed_eval_depth.take();

@@ -162,3 +162,15 @@ fn error_data_survives_a_forced_moving_collection() {
         "fixture collected nothing, so it proves nothing about moving data"
     );
 }
+
+/// A VM-internal message the escape fallback cannot classify still reaches
+/// the handler as `error' data. The witness is a printer setting this VM
+/// refuses; pick another unsupported one if it becomes supported.
+#[test]
+fn unclassified_internal_error_keeps_its_message() {
+    let mut vm = Vm::new();
+    assert_eq!(
+        text(&mut vm, "(condition-case e (let ((print-symbols-bare t)) (prin1-to-string 'a)) (error e))"),
+        "(error \"printing print-symbols-bare is not supported\")"
+    );
+}

@@ -121,16 +121,18 @@ impl Vm {
     }
 
     pub(super) fn print_render(&mut self, value: Value, quoted: bool, overrides: Value, buffer_output: bool) -> Result<String> {
-        for name in ["float-output-format", "print-gensym", "print-continuous-numbering", "print-number-table", "print-integers-as-characters", "print-unreadable-function", "print-charset-text-property", "print-symbols-bare"] {
+        for name in ["float-output-format", "print-continuous-numbering", "print-number-table", "print-integers-as-characters", "print-unreadable-function", "print-charset-text-property", "print-symbols-bare"] {
             let slot = self.slot(name);
             let v = self.variable_value(slot)?;
-            if v != Value::UNBOUND && v != Value::NIL { return Err(format!("printing {name} is not supported")); }
+            // Text properties print unpruned, which is GNU's `t'.
+            let supported = v == Value::UNBOUND || v == Value::NIL || (name == "print-charset-text-property" && v == Value::TRUE);
+            if !supported { return Err(format!("printing {name} is not supported")); }
         }
         let mut options = PrintOptions::default();
         for (key, name) in [("length", "print-length"), ("level", "print-level"), ("quoted", "print-quoted"),
             ("escape-newlines", "print-escape-newlines"), ("escape-nonascii", "print-escape-nonascii"),
             ("escape-multibyte", "print-escape-multibyte"), ("escape-control-characters", "print-escape-control-characters"),
-            ("circle", "print-circle")] {
+            ("circle", "print-circle"), ("gensym", "print-gensym")] {
             let slot = self.slot(name);
             let v = self.variable_value(slot)?;
             if v != Value::UNBOUND { options.set(key, v); }
@@ -163,7 +165,10 @@ impl Vm {
                     pending.push(CharTableSlot::Node(std::sync::Arc::clone(node)));
                     continue;
                 }
-                if v.tag() != 3 && !matches!(self.object_if(v), Some(data::Object::Vector(_) | data::Object::Record(_) | data::Object::CharTable(_))) && !self.str_view(v).is_some_and(|s| !s.bytes().is_empty()) { continue; }
+                // print_circle_candidate_p: uninterned symbols too under print-gensym.
+                let gensym = options.gensym && self.printed_as_gensym(v)
+                    && !self.obarray_symbol_names.contains_key(&(v.payload() as usize - 1));
+                if !gensym && v.tag() != 3 && !matches!(self.object_if(v), Some(data::Object::Vector(_) | data::Object::Record(_) | data::Object::CharTable(_))) && !self.str_view(v).is_some_and(|s| !s.bytes().is_empty()) { continue; }
                 let count = options.graph.get_mut().counts.entry((0, v.0)).or_default();
                 *count += 1;
                 if *count > 1 { continue; }
@@ -241,6 +246,13 @@ impl Vm {
             start = end;
         }
         runs
+    }
+
+    /// A symbol print-gensym marks with `#:': one not interned in the
+    /// initial obarray.
+    fn printed_as_gensym(&self, value: Value) -> bool {
+        value.index_if(7).and_then(|n| n.checked_sub(1))
+            .is_some_and(|slot| self.symbol_names.get(slot).is_some_and(|name| self.names.get(name) != Some(&slot)))
     }
 
     fn print_object(&self, value: Value, quoted: bool, options: &PrintOptions, depth: usize) -> Result<String> {
@@ -330,7 +342,9 @@ impl Vm {
             if options.quoted {
                 if let Ok((arg, end)) = self.cons_pair(cdr) {
                     if end == Value::NIL {
-                        let prefix = match car.index_if(7).and_then(|n| n.checked_sub(1)).and_then(|n| self.symbol_names.get(n)).map(String::as_str) { Some("quote") => Some("'"), Some("function") => Some("#'"), _ => None };
+                        // Only the interned `quote' and `function', not namesakes.
+                        let interned = |name: &str| self.names.get(name).is_some_and(|&slot| car == Value::reference(slot + 1, 7));
+                        let prefix = if interned("quote") { Some("'") } else if interned("function") { Some("#'") } else { None };
                         if let Some(prefix) = prefix { return Ok(format!("{prefix}{}", self.print_object(arg, quoted, options, depth)?)); }
                     }
                 }
@@ -381,12 +395,13 @@ impl Vm {
             });
         }
         if let Some(name) = value.index_if(7).and_then(|n| n.checked_sub(1)).and_then(|n| self.symbol_names.get(n)) {
-            if name.is_empty() { return Ok("##".into()); }
-            if !quoted { return Ok(name.clone()); }
+            let prefix = if options.gensym && self.printed_as_gensym(value) { "#:" } else { "" };
+            if name.is_empty() { return Ok(if prefix.is_empty() { "##" } else { prefix }.into()); }
+            if !quoted { return Ok(format!("{prefix}{name}")); }
             let unsigned = name.strip_prefix(['+', '-']).unwrap_or(name);
             let numeric = unsigned.starts_with(|c: char| c.is_ascii_digit() || c == '.') && name.parse::<f64>().is_ok();
             let confusing = numeric || name.starts_with('?') || (name.starts_with('.') && !name.chars().nth(1).is_some_and(char::is_alphabetic));
-            let mut text = String::new();
+            let mut text = String::from(prefix);
             for (i, c) in name.chars().enumerate() {
                 if (i == 0 && confusing) || c <= ' ' || c == '\u{a0}' || "\"\\';#(),`[]".contains(c) { text.push('\\'); }
                 text.push(c);
@@ -414,10 +429,10 @@ struct PrintGraph { counts: HashMap<(u8, u64), usize>, labels: HashMap<(u8, u64)
 struct PrintOptions {
     graph: std::cell::RefCell<PrintGraph>,
     length: Option<usize>, level: Option<i64>, quoted: bool, newlines: bool,
-    nonascii: bool, multibyte: bool, controls: bool, circle: bool,
+    nonascii: bool, multibyte: bool, controls: bool, circle: bool, gensym: bool,
 }
 impl Default for PrintOptions {
-    fn default() -> Self { Self { graph: std::cell::RefCell::default(), length: None, level: None, quoted: true, newlines: false, nonascii: false, multibyte: false, controls: false, circle: false } }
+    fn default() -> Self { Self { graph: std::cell::RefCell::default(), length: None, level: None, quoted: true, newlines: false, nonascii: false, multibyte: false, controls: false, circle: false, gensym: false } }
 }
 impl PrintOptions {
     fn set(&mut self, key: &str, value: Value) -> bool {
@@ -431,6 +446,7 @@ impl PrintOptions {
             "escape-multibyte" => self.multibyte = on,
             "escape-control-characters" => self.controls = on,
             "circle" => self.circle = on,
+            "gensym" => self.gensym = on,
             _ => return false,
         }
         true

@@ -25,11 +25,11 @@ const DIVERGENT: &[(&str, &str, &str)] = &[
     // Completed numbered aliases are now checked against the GNU answer.
     // Hash-table limits/circles explicitly refuse; nested list print-level
     // now agrees with GNU and therefore has no divergence pin.
-    ("p-print-length", "VM2-EV2", "(SIGNAL (error))"),
-    ("p-print-length-0", "VM2-EV2", "(SIGNAL (error))"),
-    ("p-circle-shared", "VM2-EV2", "(SIGNAL (error))"),
-    ("p-self-ref-circle", "VM2-EV2", "(SIGNAL (error))"),
-    ("p-self-ref-nocircle", "VM2-EV2", "(SIGNAL (error))"),
+    ("p-print-length", "VM2-EV2", r#"(SIGNAL (error "hash-table print-length is not supported"))"#),
+    ("p-print-length-0", "VM2-EV2", r#"(SIGNAL (error "hash-table print-length is not supported"))"#),
+    ("p-circle-shared", "VM2-EV2", r#"(SIGNAL (error "hash-table print-circle is not supported"))"#),
+    ("p-self-ref-circle", "VM2-EV2", r#"(SIGNAL (error "hash-table print-circle is not supported"))"#),
+    ("p-self-ref-nocircle", "VM2-EV2", r#"(SIGNAL (error "print nesting limit exceeded"))"#),
     // The dot is read as GNU does; two pre-existing reader boundaries remain.
     // GNU's "expected )" after a dotted tail is VM2's internal message
     // (also pinned as read-from-string/0170).
