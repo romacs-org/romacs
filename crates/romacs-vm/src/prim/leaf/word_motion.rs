@@ -19,10 +19,11 @@ impl Leaf<'_> {
         if count == 0 {
             return Ok(Value::TRUE);
         }
-        let syntax = self.vm.word_motion_syntax()?;
+        let source = self.vm.word_motion_syntax()?;
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
+        let syntax = crate::regexp::VmSyntax::new(self.vm, source);
         // Byte offsets stay relative to the accessible region, matching the
-        // syntax snapshot. No buffer mutation or moving-GC value is retained.
+        // syntax properties.
         let (characters, start, end): (Vec<(usize, char)>, usize, usize) =
             match &self.vm.objects[index] {
                 data::Object::Buffer(buffer) => {
@@ -66,6 +67,7 @@ impl Leaf<'_> {
             remaining -= 1;
         }
         let offset = characters.get(at).map_or(end, |&(offset, _)| offset);
+        drop(syntax);
         match &mut self.vm.objects[index] {
             data::Object::Buffer(buffer) => {
                 buffer.point = ByteOffset(buffer.accessible().start.0 + offset);
@@ -94,11 +96,12 @@ impl Leaf<'_> {
         let negate = spec.first() == Some(&b'^');
         let mut classes = [negate; 256];
         for &c in &spec[usize::from(negate)..] { classes[syntax_spec_code(c)] = !negate; }
-        let syntax = self.vm.word_motion_syntax()?;
+        let source = self.vm.word_motion_syntax()?;
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
+        let syntax = crate::regexp::VmSyntax::new(self.vm, source);
         // Character positions walked from point, as skip_chars does; the
         // syntax lookup takes byte offsets relative to the accessible start.
-        let (start, at) = match &mut self.vm.objects[index] {
+        let (start, at, point) = match &self.vm.objects[index] {
             data::Object::Buffer(buffer) => {
                 let accessible = buffer.accessible();
                 let low = buffer.char_of_byte(accessible.start).map_err(Fault::Error)?.0;
@@ -114,8 +117,7 @@ impl Leaf<'_> {
                     if !classes[syntax.char_syntax_at(ch, offset) as usize] { break; }
                     if forward { at += 1; } else { at -= 1; }
                 }
-                buffer.point = buffer.byte_of_char(CharOffset(at)).map_err(Fault::Error)?;
-                (start, at)
+                (start, at, buffer.byte_of_char(CharOffset(at)).map_err(Fault::Error)?)
             }
             data::Object::ByteBuffer(buffer) => {
                 let (low, high) = (buffer.restriction.start.0, buffer.restriction.end.0);
@@ -128,11 +130,16 @@ impl Leaf<'_> {
                     if !classes[syntax.char_syntax_at(char::from(buffer.bytes[character]), character - low) as usize] { break; }
                     if forward { at += 1; } else { at -= 1; }
                 }
-                buffer.point = ByteOffset(at);
-                (start, at)
+                (start, at, ByteOffset(at))
             }
             _ => return Err(Fault::Error("buffer required".into())),
         };
+        drop(syntax);
+        match &mut self.vm.objects[index] {
+            data::Object::Buffer(buffer) => buffer.point = point,
+            data::Object::ByteBuffer(buffer) => buffer.point = point,
+            _ => unreachable!("matched above"),
+        }
         Value::integer(at as i64 - start as i64).map_err(Fault::Error)
     }
 }

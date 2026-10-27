@@ -1,4 +1,5 @@
-//! Syntax snapshot for one engine call. No VM value survives in this adapter.
+//! The current syntax table, read live for one engine call, as GNU's SYNTAX()
+//! reads it; the borrow of the VM keeps it unchanged for that call.
 use super::*;
 use crate::char_table::CharTable;
 use regex::{SyntaxClass, SyntaxLookup};
@@ -82,21 +83,17 @@ mod tests {
             &mut vm,
             "(setq syntax-parent (copy-syntax-table) syntax-child (make-char-table 'syntax-table)) (set-char-table-parent syntax-child syntax-parent) (set-syntax-table syntax-child) (set-char-table-range syntax-parent '(128 . 4194303) '(1)) (aset syntax-child 946 '(2))",
         );
-        let before = vm.regexp_syntax(None).ok().unwrap();
+        let source = vm.regexp_syntax(None).ok().unwrap();
+        let before = VmSyntax::new(&vm, source);
         assert_eq!(before.char_syntax('β'), SyntaxClass::Word);
         assert_eq!(before.char_syntax('γ'), SyntaxClass::Punctuation);
-        assert!(before.classes.len() < 1024, "wide ranges stay compressed");
         run(
             &mut vm,
             "(aset syntax-child 946 nil) (set-char-table-range syntax-parent '(128 . 4194303) '(3))",
         );
-        let after = vm.regexp_syntax(None).ok().unwrap();
+        let source = vm.regexp_syntax(None).ok().unwrap();
+        let after = VmSyntax::new(&vm, source);
         assert_eq!(after.char_syntax('β'), SyntaxClass::Symbol);
-        assert_eq!(
-            before.char_syntax('β'),
-            SyntaxClass::Word,
-            "snapshot owns no live VM values"
-        );
         let value = run(&mut vm, r#"(string-match "\\s_" "β")"#);
         assert_eq!(value, Value::integer(0).unwrap());
     }
@@ -114,10 +111,8 @@ mod tests {
             "(list (aref (syntax-table) 946) (aref (char-table-parent syntax-root) 40))",
         );
         assert_eq!(vm.display(value).unwrap(), "((4 . 955) (4 . 41))");
-        assert_eq!(
-            vm.regexp_syntax(None).ok().unwrap().char_syntax('β'),
-            SyntaxClass::Open
-        );
+        let source = vm.regexp_syntax(None).ok().unwrap();
+        assert_eq!(VmSyntax::new(&vm, source).char_syntax('β'), SyntaxClass::Open);
     }
 
     #[test]
@@ -149,37 +144,55 @@ mod tests {
     }
 }
 
-pub(super) struct VmSyntax {
-    classes: BTreeMap<u32, SyntaxClass>,
+/// The syntax-table text properties of one search subject, by byte offset,
+/// and the table the search reads.
+pub(crate) struct SyntaxSource {
+    table: Value,
+    properties: BTreeMap<usize, SyntaxClass>,
+}
+
+pub(crate) struct VmSyntax<'a> {
+    vm: &'a Vm,
+    table: Value,
+    /// Memo of the ASCII classes this call has read.
+    ascii: [std::cell::Cell<Option<SyntaxClass>>; 128],
     properties: BTreeMap<usize, SyntaxClass>,
     id: usize,
 }
-impl SyntaxLookup for VmSyntax {
+impl<'a> VmSyntax<'a> {
+    pub(crate) fn new(vm: &'a Vm, source: SyntaxSource) -> Self {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        // A fresh identity per call keeps the engine's TLS caches from
+        // confusing separate VMs or table contents.
+        static NEXT: AtomicUsize = AtomicUsize::new(1);
+        Self {
+            vm,
+            table: source.table,
+            ascii: std::array::from_fn(|_| std::cell::Cell::new(None)),
+            properties: source.properties,
+            id: NEXT.fetch_add(1, Ordering::Relaxed),
+        }
+    }
+    fn class(&self, code: u32) -> SyntaxClass {
+        let lookup = || self.vm.regexp_table_class(self.table, code).unwrap_or(SyntaxClass::Whitespace);
+        match self.ascii.get(code as usize) {
+            Some(memo) => memo.get().unwrap_or_else(|| { let class = lookup(); memo.set(Some(class)); class }),
+            None => lookup(),
+        }
+    }
+}
+impl SyntaxLookup for VmSyntax<'_> {
     fn char_syntax(&self, c: char) -> SyntaxClass {
-        self.classes
-            .range(..=c as u32)
-            .next_back()
-            .map(|(_, class)| *class)
-            .unwrap_or_else(|| regex::standard_syntax_class_for_char(c))
+        self.class(c as u32)
     }
     fn char_syntax_at(&self, c: char, pos: usize) -> SyntaxClass {
-        self.properties
-            .get(&pos)
-            .copied()
-            .unwrap_or_else(|| self.char_syntax(c))
+        self.properties.get(&pos).copied().unwrap_or_else(|| self.char_syntax(c))
     }
     fn emacs_char_syntax(&self, c: regex::emacs_char::EmacsChar) -> SyntaxClass {
-        self.classes
-            .range(..=c.code())
-            .next_back()
-            .map(|(_, class)| *class)
-            .unwrap_or_else(|| regex::standard_syntax_class_for_code(c.code()))
+        self.class(c.code())
     }
     fn emacs_char_syntax_at(&self, c: regex::emacs_char::EmacsChar, pos: usize) -> SyntaxClass {
-        self.properties
-            .get(&pos)
-            .copied()
-            .unwrap_or_else(|| self.emacs_char_syntax(c))
+        self.properties.get(&pos).copied().unwrap_or_else(|| self.emacs_char_syntax(c))
     }
     fn char_has_category(&self, c: char, cat: u8) -> bool {
         regex::default_char_has_category(c, cat)
@@ -201,9 +214,10 @@ impl SyntaxLookup for VmSyntax {
     }
 }
 impl Vm {
+    /// The syntax source for word motion; read it through [`VmSyntax::new`].
     pub(crate) fn word_motion_syntax(
         &mut self,
-    ) -> std::result::Result<impl SyntaxLookup + use<>, crate::prim::Fault> {
+    ) -> std::result::Result<SyntaxSource, crate::prim::Fault> {
         self.regexp_syntax(None).map_err(|fault| match fault {
             Fault::Wrong(predicate, value) => crate::prim::Fault::Wrong(predicate, value),
             Fault::Internal(text) => crate::prim::Fault::Error(text),
@@ -337,48 +351,6 @@ impl Vm {
             .unwrap_or(SyntaxClass::Whitespace);
         Some(class)
     }
-    fn regexp_syntax_map(&self, table: Value) -> SearchResult<BTreeMap<u32, SyntaxClass>> {
-        // Split only at native leaf boundaries, not at every character. Parent
-        // boundaries matter even where the child stores nil and inherits.
-        fn boundaries(
-            node: &char_table::CharTableNodeHandle,
-            out: &mut std::collections::BTreeSet<u32>,
-        ) {
-            let node = node.lock().unwrap();
-            for (i, slot) in node.slots.iter().enumerate() {
-                out.insert(
-                    (node.min_char + i * char_table::CharTableNode::WIDTHS[node.depth]) as u32,
-                );
-                if let char_table::CharTableSlot::Node(child) = slot {
-                    boundaries(child, out);
-                }
-            }
-        }
-        self.regexp_syntax_table(table)?;
-        let mut points = std::collections::BTreeSet::new();
-        let mut current = table;
-        let mut seen = HashSet::new();
-        while let Some(Object::CharTable(t)) = self.object_if(current) {
-            if !seen.insert(current.0) {
-                return Err(Fault::Text("error", "Cyclic syntax table parent".into()));
-            }
-            t.validate_mapping()?;
-            boundaries(&t.root, &mut points);
-            current = t.parent;
-        }
-        let mut previous = None;
-        Ok(points
-            .into_iter()
-            .map(|code| {
-                (
-                    code,
-                    self.regexp_table_class(table, code)
-                        .unwrap_or(SyntaxClass::Whitespace),
-                )
-            })
-            .filter(|(_, class)| previous.replace(*class) != Some(*class))
-            .collect())
-    }
     fn regexp_property_class(&self, value: Value, code: u32) -> Option<SyntaxClass> {
         if self.regexp_syntax_table(value).is_ok() {
             return self.regexp_table_class(value, code);
@@ -408,12 +380,21 @@ impl Vm {
         }
         Ok(self.char_table_get(current, c as usize).ok().and_then(|e| raw(self, e)).unwrap_or(0))
     }
-    pub(super) fn regexp_syntax(&mut self, subject: Option<Value>) -> SearchResult<VmSyntax> {
-        use std::sync::atomic::{AtomicUsize, Ordering};
-        static NEXT: AtomicUsize = AtomicUsize::new(1);
+    /// The current syntax table and SUBJECT's syntax-table properties (the
+    /// current buffer's when None) for one engine call.
+    pub(super) fn regexp_syntax(&mut self, subject: Option<Value>) -> SearchResult<SyntaxSource> {
         self.regexp_standard_syntax();
         let current = self.regexp_current_syntax()?;
-        let classes = self.regexp_syntax_map(current)?;
+        self.regexp_syntax_table(current)?;
+        // char_table_get follows parents, so a cycle must be refused here.
+        let mut seen = HashSet::new();
+        let mut table = current;
+        while let Some(Object::CharTable(t)) = self.object_if(table) {
+            if !seen.insert(table.0) {
+                return Err(Fault::Text("error", "Cyclic syntax table parent".into()));
+            }
+            table = t.parent;
+        }
         let mut properties = BTreeMap::new();
         if self.slots[self.names["parse-sexp-lookup-properties"]].value != Value::NIL {
             let object = subject.unwrap_or(self.slots[self.buffer_slot].value);
@@ -466,14 +447,7 @@ impl Vm {
                 _ => (),
             }
         }
-        // These snapshots are not cached. A fresh plain-Rust identity prevents
-        // the engine's TLS caches from confusing separate VMs or table epochs.
-        let id = NEXT.fetch_add(1, Ordering::Relaxed);
-        Ok(VmSyntax {
-            classes,
-            properties,
-            id,
-        })
+        Ok(SyntaxSource { table: current, properties })
     }
     pub(super) fn regexp_syntax_primitive(
         &mut self,
