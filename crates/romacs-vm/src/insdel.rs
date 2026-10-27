@@ -313,7 +313,18 @@ impl Vm {
         if !self.buffer_has_overlays(index) {
             return Ok(Vec::new());
         }
-        let (start, end) = (self.change_byte(buffer, start)?, self.change_byte(buffer, end)?);
+        // Earlier hooks may have shrunk the buffer below the change's
+        // original bounds. GNU's scan only meets overlays intersecting them,
+        // and every overlay ends at or before Z: a START past Z meets none,
+        // and an END past Z meets the same overlays as Z.
+        let z = match self.object_if(buffer) {
+            Some(Object::Buffer(b)) => b.len_chars() as i64 + 1,
+            _ => return Ok(Vec::new()),
+        };
+        if start > z {
+            return Ok(Vec::new());
+        }
+        let (start, end) = (self.change_byte(buffer, start)?, self.change_byte(buffer, end.min(z))?);
         self.overlay_change_hooks(buffer, start, end)
     }
 
