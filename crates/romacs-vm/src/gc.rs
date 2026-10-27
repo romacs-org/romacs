@@ -219,6 +219,7 @@ impl Vm {
                     data::Object::Frame(f) => f.storage_bytes(),
                     data::Object::Terminal(t) => t.storage_bytes(),
                     data::Object::WindowConfiguration(c) => c.storage_bytes(),
+                    data::Object::Sqlite(h) => h.storage_bytes(),
                     data::Object::String(v) | data::Object::RawString(v) => v.storage_bytes(false),
                     data::Object::Bytes(v) => v.len(),
                     data::Object::BoolVector(v) => size_of::<data::BoolVector>() + v.bytes.len(),
@@ -266,6 +267,7 @@ impl Vm {
                     data::Object::Frame(f) => f.storage_bytes(),
                     data::Object::Terminal(t) => t.storage_bytes(),
                     data::Object::WindowConfiguration(c) => c.storage_bytes(),
+                    data::Object::Sqlite(h) => h.storage_bytes(),
                     data::Object::String(v) | data::Object::RawString(v) => v.storage_bytes(true),
                     data::Object::Bytes(v) => v.capacity(),
                     data::Object::BoolVector(v) => size_of::<data::BoolVector>() + v.bytes.capacity(),
@@ -473,6 +475,7 @@ impl Vm {
                     data::Object::Frame(f) => f.visit_values(&mut |v| pending.push(*v)),
                     data::Object::Terminal(t) => t.visit_values(&mut |v| pending.push(*v)),
                     data::Object::WindowConfiguration(c) => c.visit_values(&mut |v| pending.push(*v)),
+                    data::Object::Sqlite(_) => {}
                     data::Object::Vector(values) | data::Object::Record(values) => pending.extend_from_slice(values),
                     data::Object::CharTable(t) => t.visit_values_seen(&mut native_nodes, &mut |v| pending.push(*v)),
                     data::Object::SubCharTable(node) => char_table::visit_char_table_node_values(node, &mut native_nodes, &mut |v| pending.push(*v)),
@@ -700,6 +703,7 @@ impl Vm {
                     data::Object::Frame(f) => f.visit_values(&mut |v| rewrite(v)),
                     data::Object::Terminal(t) => t.visit_values(&mut |v| rewrite(v)),
                     data::Object::WindowConfiguration(c) => c.visit_values(&mut |v| rewrite(v)),
+                    data::Object::Sqlite(_) => {}
                     data::Object::Buffer(t) => t.visit_values(&mut |v| rewrite(v)),
                     data::Object::ByteBuffer(t) => t.visit_values(&mut |v| rewrite(v)),
                     data::Object::Marker(m) => m.visit_values(&mut |v| rewrite(v)),

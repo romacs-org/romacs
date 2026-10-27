@@ -140,6 +140,7 @@ impl Vm {
                 data::Object::Frame(_) => Ok(json!({"type":"frame"})),
                 data::Object::Terminal(_) => Ok(json!({"type":"terminal"})),
                 data::Object::WindowConfiguration(_) => Ok(json!({"type":"window-configuration"})),
+                data::Object::Sqlite(_) => Ok(json!({"type":"sqlite"})),
                 data::Object::Marker(_) => Ok(json!({"type":"marker"})),
                 data::Object::Overlay(_) => Ok(json!({"type":"overlay"})),
                 data::Object::Buffer(_) => Ok(json!({"type":"buffer"})),

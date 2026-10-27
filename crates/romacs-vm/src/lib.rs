@@ -40,6 +40,7 @@ type NameMap<K, V> = std::collections::HashMap<K, V, foldhash::fast::RandomState
 type NameSet<K> = std::collections::HashSet<K, foldhash::fast::RandomState>;
 use std::sync::Arc;
 mod code_image;
+mod sqlite;
 mod gc;
 mod handle;
 pub use handle::{Arg, Fixed, Local, Rooted};
@@ -2580,6 +2581,7 @@ impl Vm {
                             | data::Object::Frame(_)
                             | data::Object::Terminal(_)
                             | data::Object::WindowConfiguration(_)
+                            | data::Object::Sqlite(_)
                             | data::Object::HashTable(_) => {
                                 return Err("sequence required".into());
                             }
@@ -2620,6 +2622,7 @@ impl Vm {
                 data::Object::Frame(_) => Ok("#<frame initial>".into()),
                 data::Object::Terminal(_) => Ok("#<terminal initial>".into()),
                 data::Object::WindowConfiguration(_) => Ok("#<window-configuration>".into()),
+                data::Object::Sqlite(h) => Ok(h.describe()),
                 data::Object::Marker(_) => Ok("#<marker>".into()),
                 data::Object::Overlay(_) => Ok("#<overlay>".into()),
                 data::Object::ByteBuffer(_) => Ok("#<byte-buffer>".into()),

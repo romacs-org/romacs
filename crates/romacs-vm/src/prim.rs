@@ -168,6 +168,7 @@ mod leaf {
         Frame,
         Terminal,
         WindowConfiguration,
+        Sqlite,
         Invalid,
     }
 
@@ -1291,6 +1292,7 @@ mod leaf {
                     Some(data::Object::Frame(_)) => Kind::Frame,
                     Some(data::Object::Terminal(_)) => Kind::Terminal,
                     Some(data::Object::WindowConfiguration(_)) => Kind::WindowConfiguration,
+                    Some(data::Object::Sqlite(_)) => Kind::Sqlite,
                     None => Kind::Invalid,
                 },
                 _ => Kind::Invalid,
@@ -1502,6 +1504,7 @@ mod leaf {
     mod completion;
     mod backtrace;
     mod text_properties;
+    mod sqlite;
 }
 pub(crate) use leaf::{Leaf, Kind};
 

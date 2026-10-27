@@ -338,6 +338,24 @@ fn coding_decode_eol(tokens: Vec<CodingToken>, mode: usize) -> Vec<CodingToken> 
     result
 }
 
+/// Decoding BYTES with the `utf-8' coding system (no BOM, line ends
+/// detected unless INHIBIT_EOL) as coding_convert_string does, without a
+/// coding-system lookup: the internal bytes of the multibyte result.
+pub(super) fn decode_utf8_detecting_eol(bytes: &[u8], inhibit_eol: bool) -> Vec<u8> {
+    let tokens: Vec<CodingToken> = bytes.iter().map(|&b| CodingToken::Byte(b)).collect();
+    let mode = if inhibit_eol { 0 } else { coding_eol(&tokens).unwrap_or(0) };
+    let tokens = coding_decode_utf8(&tokens, false, false).into_iter()
+        .map(|code| if code < 128 { CodingToken::Byte(code as u8) } else { CodingToken::Character(code) }).collect();
+    let mut out = Vec::with_capacity(bytes.len());
+    for token in coding_decode_eol(tokens, mode) {
+        match token {
+            CodingToken::Byte(byte) => coding_emit(u32::from(byte), &mut out),
+            CodingToken::Character(code) => coding_emit(code, &mut out),
+        }
+    }
+    out
+}
+
 // GNU consume_chars validates internal byte8 forms even in unibyte input.
 fn coding_encode_unibyte(mut bytes: &[u8]) -> Vec<CodingToken> {
     let mut tokens = Vec::new();

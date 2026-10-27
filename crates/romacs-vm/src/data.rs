@@ -16,6 +16,7 @@ pub(super) enum Object {
     Frame(Box<frame::Frame>),
     Terminal(Box<frame::Terminal>),
     WindowConfiguration(Box<crate::window::WindowConfiguration>),
+    Sqlite(Box<crate::sqlite::Handle>),
     String(Box<LispString>),
     RawString(Box<LispString>),
     Vector(Vec<Value>),
@@ -704,6 +705,7 @@ impl Vm {
                             | Object::Frame(_)
                             | Object::Terminal(_)
                             | Object::WindowConfiguration(_)
+                            | Object::Sqlite(_)
                         | Object::HashTable(_)
                         | Object::SyntaxTable(_) => Err("array required".into()),
                     };
@@ -750,6 +752,7 @@ impl Vm {
                         | Object::Frame(_)
                         | Object::Terminal(_)
                         | Object::WindowConfiguration(_)
+                            | Object::Sqlite(_)
                         | Object::HashTable(_)
                     | Object::SyntaxTable(_) => {
                         return Err("array required".into());
@@ -797,6 +800,8 @@ impl Vm {
                         | Object::Obarray(_)
                             | Object::Frame(_)
                             | Object::Terminal(_)
+                            | Object::WindowConfiguration(_)
+                            | Object::Sqlite(_)
                         | Object::HashTable(_)
                         | Object::SyntaxTable(_)
                 ) {
