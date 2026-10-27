@@ -1814,6 +1814,20 @@ fn no_collection<R>(vm: &mut Vm, run: impl FnOnce(&mut Vm) -> R) -> R {
 }
 
 impl Vm {
+    /// The legacy `expand-file-name' row (kept for its ordinal) runs the
+    /// defsubr's expansion, refusing where a file name handler would be called.
+    pub(crate) fn expand_file_name_legacy(&mut self, name: Value, default: Value) -> crate::Result<Value> {
+        let expanded = no_collection(self, |vm| prims::expand_file_name::expand(&mut Leaf::new(vm), name, default));
+        match expanded {
+            Ok(Some(value)) => Ok(value),
+            Ok(None) => Err("VM2 expand-file-name matching file name handler is unsupported".into()),
+            Err(fault) => {
+                let (condition, data) = self.fault(fault);
+                self.propagated_escape = Some(crate::threaded::Escape::Signal(condition, data));
+                Err("expand-file-name signalled".into())
+            }
+        }
+    }
     /// Legacy fset shares the checked Leaf cell writer without exposing Vm to leaves.
     pub(crate) fn set_function_leaf(
         &mut self,

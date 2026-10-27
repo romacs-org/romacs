@@ -572,6 +572,10 @@ pub(crate) static C_VARIABLES: &[CVariable] = &[
     // plain specials (`Vm::declare_fileio_specials`) so they stay
     // localizable, as add-hook LOCAL needs for the change hooks.
     CVariable { name: "write-region-inhibit-fsync", gnu: "fileio.c:6971", kind: Kind::Bool(true) },
+    // Always local and permanent (PER_BUFFER_IDX -1); a new buffer copies
+    // the current buffer's (buffer.c:1093 reset_buffer), the first one gets
+    // the process directory (buffer.c:4969 init_buffer).
+    CVariable { name: "default-directory", gnu: "buffer.c:5426", kind: Kind::PerBuffer { default: Init::Nil, predicate: Some(Predicate::Stringp) } },
     CVariable { name: "buffer-file-name", gnu: "buffer.c:5441", kind: Kind::PerBuffer { default: Init::Nil, predicate: Some(Predicate::Stringp) } },
     CVariable { name: "buffer-file-truename", gnu: "buffer.c:5446", kind: Kind::PerBuffer { default: Init::Nil, predicate: Some(Predicate::Stringp) } },
     CVariable { name: "buffer-read-only", gnu: "buffer.c:5458", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
@@ -957,7 +961,7 @@ impl Vm {
     /// GNU `PER_BUFFER_VALUE_P (buf, idx)`.
     pub(super) fn per_buffer_always_local(&self, i: u16) -> bool {
         matches!(C_VARIABLES[self.forwarded.buffer_vars[i as usize]].name,
-            "buffer-invisibility-spec" | "buffer-file-name" | "buffer-file-truename" | "buffer-read-only" | "buffer-file-format" | "major-mode" | "mode-name" | "mark-active" | "buffer-undo-list" | "buffer-auto-save-file-name")
+            "buffer-invisibility-spec" | "default-directory" | "buffer-file-name" | "buffer-file-truename" | "buffer-read-only" | "buffer-file-format" | "major-mode" | "mode-name" | "mark-active" | "buffer-undo-list" | "buffer-auto-save-file-name")
     }
     pub(super) fn clear_forwarded_local(&mut self, buffer: usize, i: u16) {
         if !self.per_buffer_always_local(i) {
@@ -1004,6 +1008,38 @@ impl Vm {
             self.undo_list_slot = i;
         }
         self.undo_list_slot
+    }
+    /// The directory a new buffer starts with: the current buffer's
+    /// (reset_buffer), or before any buffer exists the process directory as
+    /// a directory name (init_buffer). init_buffer makes it unibyte and GNU's
+    /// startup.el later decodes it; VM2 runs no such startup, so it is
+    /// decoded here: unibyte when ASCII (as GNU's decoding leaves it),
+    /// multibyte when other UTF-8, else its raw bytes. No file
+    /// name handler exists yet when the first buffer is made, so
+    /// init_buffer's `/:' quoting never applies.
+    pub(crate) fn inherited_directory(&mut self) -> Value {
+        let Some(Fwd::Buffer(i)) = self.forwarded.lookup("default-directory") else { unreachable!("declared") };
+        let current = self.slots[self.buffer_slot].value;
+        if let Some(buffer) = current.index_if(0).and_then(|n| n.checked_sub(1))
+            && self.per_buffer(buffer).is_some()
+        {
+            return self.forwarded_buffer_value(buffer, i);
+        }
+        // init_buffer starts from emacs_wd, a symlinked PWD's spelling kept.
+        match crate::environment::startup_directory() {
+            Some(dir) => {
+                let mut bytes = dir.to_vec();
+                if bytes.last() != Some(&b'/') { bytes.push(b'/'); }
+                let decoded = !bytes.is_ascii() && std::str::from_utf8(&bytes).is_ok();
+                self.make_lisp_string(bytes, decoded)
+            }
+            None => Value::NIL,
+        }
+    }
+    /// bset_directory (BUFFER, DIRECTORY).
+    pub(crate) fn set_directory_of(&mut self, buffer: usize, directory: Value) {
+        let Some(Fwd::Buffer(i)) = self.forwarded.lookup("default-directory") else { unreachable!("declared") };
+        if let Some(locals) = self.per_buffer_mut(buffer) { locals.set(i, directory); }
     }
     pub(super) fn per_buffer_local_p(&self, buffer: usize, i: u16) -> bool {
         self.per_buffer_always_local(i) || self.per_buffer(buffer).and_then(|p| p.get(i)).is_some()

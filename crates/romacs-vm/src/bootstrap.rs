@@ -185,45 +185,7 @@ impl Vm {
                 }
                 Ok(out)
             }
-            ExpandFileName => {
-                let name = self.source_string(a[0])?;
-                let name = if name == "~" || name.starts_with("~/") {
-                    std::path::PathBuf::from(std::env::var_os("HOME").ok_or("HOME missing")?)
-                        .join(name.strip_prefix("~/").unwrap_or(""))
-                } else if name.starts_with('~') {
-                    return Err("~user path expansion is not supported".into());
-                } else {
-                    std::path::PathBuf::from(name)
-                };
-                let dir = if n == 2 && a[1] != Value::NIL {
-                    std::path::PathBuf::from(self.source_string(a[1])?)
-                } else {
-                    std::env::current_dir().map_err(|e| e.to_string())?
-                };
-                let base = if dir.is_absolute() {
-                    dir
-                } else {
-                    std::env::current_dir()
-                        .map_err(|e| e.to_string())?
-                        .join(dir)
-                };
-                let path = if name.is_absolute() {
-                    name
-                } else {
-                    base.join(name)
-                };
-                let mut out = std::path::PathBuf::new();
-                for c in path.components() {
-                    match c {
-                        std::path::Component::ParentDir => {
-                            out.pop();
-                        }
-                        std::path::Component::CurDir => {}
-                        _ => out.push(c.as_os_str()),
-                    }
-                }
-                self.literal(&Form::String(out.to_string_lossy().into_owned()))
-            }
+            ExpandFileName => self.expand_file_name_legacy(a[0], a.get(1).copied().unwrap_or(Value::NIL)),
             FileDirectoryP => Ok(
                 if std::path::Path::new(self.source_string(a[0])?).is_dir() {
                     Value::TRUE

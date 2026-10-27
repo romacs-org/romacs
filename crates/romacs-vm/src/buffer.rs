@@ -99,7 +99,9 @@ impl Vm {
         let mut buffer: crate::annotations::AnnotatedBuffer = Text::new(b"")?.into();
         buffer.state.name = Some(actual.clone());
         buffer.case_tables = self.buffer_standard_case_roots()?;
+        let directory = self.inherited_directory();
         let value = self.allocate_object(Object::Buffer(Box::new(buffer)));
+        self.set_directory_of(value.index(0)? - 1, directory);
         let slot = self.slot(&format!("#:vm2-buffer:{actual}"));
         self.slots[slot].value = value;
         // Fget_buffer_create: no undo for buffers whose names start with a space.

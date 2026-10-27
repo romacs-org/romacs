@@ -26,6 +26,12 @@ fn environment_string(cx: &mut Leaf<'_>, bytes: Vec<u8>) -> Value {
     cx.make_string(bytes, multibyte)
 }
 
+/// GNU egetenv: VARIABLE's value in `process-environment', None when unset.
+pub(super) fn egetenv(cx: &mut Leaf<'_>, variable: &str) -> std::result::Result<Option<Vec<u8>>, Fault> {
+    let environment = environment_value(cx, "process-environment")?;
+    Ok(lookup(cx, variable.as_bytes(), environment)?.flatten())
+}
+
 fn environment_value(cx: &mut Leaf<'_>, name: &str) -> Out {
     let symbol = cx.intern(name);
     cx.variable_value(symbol)?.ok_or(Fault::VoidVariable(symbol))

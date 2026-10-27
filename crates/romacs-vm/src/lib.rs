@@ -579,8 +579,11 @@ const PRIMITIVES: &[(&str, Primitive)] = &[
     ("stringp", Primitive::Stringp),
     ("null", Primitive::Null),
     ("nconc", Primitive::Nconc),
-    ("expand-file-name", Primitive::ExpandFileName),
-    ("file-directory-p", Primitive::FileDirectoryP),
+    // T2 defsubrs (prims/expand_file_name.rs, prims/filesave.rs) so they can
+    // call file name handlers; the rows stay because legacy primitive
+    // references are table ordinals.
+    ("#:vm2-expand-file-name", Primitive::ExpandFileName),
+    ("#:vm2-file-directory-p", Primitive::FileDirectoryP),
     ("max", Primitive::Max),
     ("boundp", Primitive::Boundp),
     ("defalias", Primitive::Defalias),
@@ -1205,6 +1208,8 @@ impl Vm {
         self.conses.len() + self.cells.len() + self.closures.len() + self.objects.len()
     }
     pub fn new() -> Self {
+        // emacs_wd is taken when Emacs starts, not when first used.
+        let _ = environment::startup_directory();
         let mut vm = Self {
             charsets: charset::Registry::default(),
             standard_case_tables: [Value::NIL; 4],

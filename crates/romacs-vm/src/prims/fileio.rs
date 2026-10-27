@@ -192,92 +192,22 @@ fn symbol_is(cx: &mut Leaf<'_>, v: Value, names: &[&str]) -> bool {
     cx.kind(v) == Kind::Symbol && cx.symbol_name(v).is_ok_and(|n| names.contains(&n.as_str()))
 }
 
-/// GNU `Fexpand_file_name (NAME, Qnil)' (fileio.c:1068) for the names VM2
-/// supports: `~' and `~/' through $HOME, absolute names, and relative names
-/// against `default-directory' when that is a string, else (VM2 has no
-/// `default-directory' of its own, DIVERGENCES.md VM2-PATH2) the process
-/// directory.
+/// GNU `Fexpand_file_name (NAME, Qnil)' (prims/expand_file_name.rs) as
+/// text, refusing where GNU would call a file name handler: callers that
+/// cannot continue through Lisp use this.
 pub(super) fn expand_file_name(cx: &mut Leaf<'_>, name: Value) -> std::result::Result<String, Fault> {
+    Ok(expanded_name(cx, name)?.0)
+}
+
+/// `Fexpand_file_name (NAME, Qnil)' as text and as the Lisp string GNU
+/// returns: NAME itself when the expansion leaves it unchanged.
+fn expanded_name(cx: &mut Leaf<'_>, name: Value) -> std::result::Result<(String, Value), Fault> {
     if !stringp(cx, name) {
         return Err(Fault::Wrong("stringp", name));
     }
-    refuse_handler(cx, name, "expand-file-name")?;
-    let text = cx.string_text(name)?;
-    let default = var(cx, "default-directory")?;
-    if stringp(cx, default) {
-        refuse_handler(cx, default, "expand-file-name")?;
-    }
-    let home = || std::env::var("HOME").map_err(|_| Fault::Error("VM2 expand-file-name: HOME is unset".into()));
-    let tilde = |text: &str| -> std::result::Result<Option<String>, Fault> {
-        if text == "~" || text.starts_with("~/") {
-            Ok(Some(format!("{}{}", home()?, &text[1..])))
-        } else if text.starts_with('~') {
-            Err(refuse("~user file name expansion"))
-        } else {
-            Ok(None)
-        }
-    };
-    let base = if stringp(cx, default) {
-        let dd = cx.string_text(default)?;
-        let dd = tilde(&dd)?.unwrap_or(dd);
-        if dd.starts_with('/') { dd } else {
-            format!("{}/{dd}", std::env::current_dir().map_err(|e| Fault::Error(e.to_string()))?.display())
-        }
-    } else {
-        // GNU checks its root fallback even though VM2's local fallback is cwd.
-        let fallback = cx.string("/");
-        refuse_handler(cx, fallback, "expand-file-name")?;
-        std::env::current_dir().map_err(|e| Fault::Error(e.to_string()))?.display().to_string()
-    };
-    let base = normalize_file_name(&base, &base)?;
-    let expanded_default = cx.string(&base);
-    refuse_handler(cx, expanded_default, "expand-file-name")?;
-    let joined = if let Some(t) = tilde(&text)? { t }
-        else if text.starts_with('/') { text.clone() }
-        else { format!("{base}/{text}") };
-    let out = normalize_file_name(&text, &joined)?;
-    let expanded = cx.string(&out);
-    refuse_handler(cx, expanded, "expand-file-name")?;
-    Ok(out)
-}
-
-fn normalize_file_name(text: &str, joined: &str) -> std::result::Result<String, Fault> {
-    // Repeated slashes collapse; `.' and `..' resolve lexically; a trailing
-    // slash survives only when NAME itself ends in one (fileio.c:1068-1400).
-    let trailing = text.ends_with('/') && joined.len() > 1;
-    let mut parts: Vec<&str> = vec![];
-    for part in joined.split('/') {
-        match part {
-            "" | "." => {}
-            ".." => {
-                // GNU keeps a `..' that would climb above the root
-                // (`/x/../..' => "/.."); VM2 refuses that spelling instead.
-                if parts.pop().is_none() {
-                    return Err(refuse("expand-file-name of a name above the root"));
-                }
-            }
-            p => parts.push(p),
-        }
-    }
-    let mut out = format!("/{}", parts.join("/"));
-    if trailing && out != "/" {
-        out.push('/');
-    }
-    Ok(out)
-}
-
-/// `Fexpand_file_name (NAME, Qnil)' as a Lisp string: NAME itself when the
-/// expansion leaves it unchanged (GNU returns its argument then, so the
-/// visited name is EQ to the caller's string), else a fresh string that is
-/// multibyte iff NAME is or the result is not ASCII.
-fn expanded_name(cx: &mut Leaf<'_>, name: Value) -> std::result::Result<(String, Value), Fault> {
-    let path = expand_file_name(cx, name)?;
-    if cx.string_text(name)? == path {
-        return Ok((path, name));
-    }
-    let multibyte = cx.string_view(name)?.is_multibyte() || !path.is_ascii();
-    let value = cx.make_string(path.as_bytes().to_vec(), multibyte);
-    Ok((path, value))
+    let value = super::expand_file_name::expand(cx, name, Value::NIL)?
+        .ok_or_else(|| refuse("expand-file-name matching file name handler"))?;
+    Ok((cx.string_text(value)?, value))
 }
 
 /// GNU `file_offset' (fileio.c:3949): a non-negative integer, or a float
@@ -691,79 +621,85 @@ pub(super) fn write_chosen(cx: &mut Leaf<'_>, r: &[Value]) -> Next {
 // belongs in the native substrate: GNU's own Lisp must supply the wrapper once
 // files.el loads. A native `locate-file' is a stand-in for GNU Lisp.
 defsubr! { name = "locate-file-internal", gnu = "lread.c:1590", effect = Global,
-fn locate_file_internal(cx, filename: Value, path: Value; optional suffixes: Value, predicate: Value) {
-    locate_readable_file(cx, filename, path, suffixes, predicate)
-}}
-
-fn locate_readable_file(cx: &mut Leaf<'_>, filename: Value, path: Value,
-    suffixes: Value, predicate: Value) -> Out {
-    let name = cx.string_text(filename)?;
-    let multibyte = cx.string_view(filename)?.is_multibyte();
+fn locate_file_internal(cx, filename: Value, path: Value; optional suffixes: Value, predicate: Value) -> Step {
+    cx.string_view(filename)?;
     // openp: nil or t opens the file for reading; a natural number is an
     // access(2) mode tested with AT_EACCESS. Function predicates need a Lisp
     // call from inside the search and remain refused.
-    let access_mode = match predicate.integer_value() {
-        Some(mode) if mode >= 0 => Some(mode),
-        _ if predicate == Value::NIL || predicate == Value::TRUE => None,
-        _ => return Err(refuse("locate-file-internal function predicate")),
-    };
-    let nil_path = path == Value::NIL;
-    let mut roots = if nil_path { cx.cons(Value::NIL, Value::NIL) } else { path };
-    let mut seen_roots = std::collections::HashSet::new();
-    while let Some((root, rest)) = cx.pair(roots) {
-        if !seen_roots.insert(roots.0) { break; }
-        roots = rest;
-        let absolute = std::path::Path::new(&name).is_absolute();
-        let base = if absolute && nil_path {
-            // openp's nil PATH fast path preserves the caller's spelling.
-            name.clone()
-        } else {
-            // openp invokes expand-file-name with the original name and root.
-            // Its handler checks include the default directory even for an
-            // absolute NAME; do not replace that with a check on joined text.
-            refuse_locate_handler(cx, filename, "expand-file-name")?;
-            let directory = if stringp(cx, root) { root } else { var(cx, "default-directory")? };
-            if stringp(cx, directory) {
-                refuse_locate_handler(cx, directory, "expand-file-name")?;
-            }
-            let base = if absolute || name.starts_with('~') || root == Value::NIL {
-                name.clone()
-            } else {
-                format!("{}/{}", cx.string_text(root)?, name)
-            };
-            let value = cx.make_string(base.as_bytes().to_vec(), multibyte || !base.is_ascii());
-            let expanded = expand_file_name(cx, value)?;
-            let value = cx.make_string(expanded.as_bytes().to_vec(), multibyte || !expanded.is_ascii());
-            refuse_locate_handler(cx, value, "expand-file-name")?;
-            expanded
+    if !(predicate == Value::NIL || predicate == Value::TRUE || predicate.integer_value().is_some_and(|n| n >= 0)) {
+        return Err(refuse("locate-file-internal function predicate"));
+    }
+    // FOR_EACH_TAIL_SAFE: the elements up to a cycle or dotted end, as a
+    // fresh list the continuations can carry. A nil PATH uses NAME itself.
+    let mut roots = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let mut tail = path;
+    while let Some((root, rest)) = cx.pair(tail) {
+        if !seen.insert(tail.0) { break; }
+        roots.push(root);
+        tail = rest;
+    }
+    let nil_path = if path == Value::NIL { Value::TRUE } else { Value::NIL };
+    if path == Value::NIL { roots.push(Value::NIL); }
+    let roots = roots.into_iter().rev().fold(Value::NIL, |list, root| cx.cons(root, list));
+    locate_next(cx, &[filename, roots, suffixes, predicate, nil_path])
+}}
+
+// Continuations share SAVED = [FILENAME ROOTS SUFFIXES PREDICATE NIL-PATH],
+// ROOTS being the elements not yet tried after the current one.
+
+/// openp's next PATH element: NAME itself for a nil PATH, else
+/// (expand-file-name NAME ROOT).
+fn locate_next(cx: &mut Leaf<'_>, saved: &[Value]) -> Next {
+    let Some((root, rest)) = cx.pair(saved[1]) else { return Ok(Step::Done(Value::NIL)) };
+    let mut saved = saved.to_vec();
+    saved[1] = rest;
+    if saved[4] != Value::NIL { return locate_expanded(cx, saved[0], &saved); }
+    super::expand_file_name::expanding(cx, saved[0], root, locate_expanded, saved)
+}
+
+/// A result still relative expands against the buffer's directory.
+fn locate_expanded(cx: &mut Leaf<'_>, expanded: Value, saved: &[Value]) -> Next {
+    if cx.string_bytes(expanded)?.first() == Some(&b'/') { return locate_absolute(cx, expanded, saved); }
+    let directory = var(cx, "default-directory")?;
+    super::expand_file_name::expanding(cx, expanded, directory, locate_absolute, saved.to_vec())
+}
+
+/// Try each suffix on an absolute EXPANDED; skip an element left relative.
+fn locate_absolute(cx: &mut Leaf<'_>, expanded: Value, saved: &[Value]) -> Next {
+    if cx.string_bytes(expanded)?.first() != Some(&b'/') { return locate_next(cx, saved); }
+    let (filename, suffixes, predicate) = (saved[0], saved[2], saved[3]);
+    let multibyte = cx.string_view(filename)?.is_multibyte();
+    let access_mode = predicate.integer_value();
+    // openp drops a leading `/:' before trying the suffixes.
+    let text = cx.string_text(expanded)?;
+    let base = match text.strip_prefix("/:") { Some(rest) if text.len() > 2 => rest.to_owned(), _ => text };
+    let mut suffix_tail = if suffixes == Value::NIL {
+        let empty = cx.make_string(Vec::new(), multibyte);
+        cx.cons(empty, Value::NIL)
+    } else { suffixes };
+    let mut seen_suffixes = std::collections::HashSet::new();
+    while let Some((suffix, rest)) = cx.pair(suffix_tail) {
+        if !seen_suffixes.insert(suffix_tail.0) { break; }
+        suffix_tail = rest;
+        let candidate = format!("{base}{}", cx.string_text(suffix)?);
+        let candidate_value = cx.make_string(candidate.as_bytes().to_vec(), multibyte || !candidate.is_ascii());
+        // lread.c openp selects after suffix concatenation, even for an
+        // absolute filename. A selected handler can run Lisp: still refuse.
+        // A natural-number predicate tests access(2) without handlers.
+        if access_mode.is_none() {
+            refuse_locate_handler(cx, candidate_value, "file-exists-p")?;
+        }
+        let found = match access_mode {
+            None => std::path::Path::new(&candidate).is_file() && open_for_reading(&candidate).is_ok(),
+            Some(mode) => i32::try_from(mode).is_ok_and(|mode| cx.filesave_access(&candidate, mode).is_ok())
+                && !std::path::Path::new(&candidate).is_dir(),
         };
-        let mut suffix_tail = if suffixes == Value::NIL {
-            let empty = cx.make_string(Vec::new(), multibyte);
-            cx.cons(empty, Value::NIL)
-        } else { suffixes };
-        let mut seen_suffixes = std::collections::HashSet::new();
-        while let Some((suffix, rest)) = cx.pair(suffix_tail) {
-            if !seen_suffixes.insert(suffix_tail.0) { break; }
-            suffix_tail = rest;
-            let candidate = format!("{base}{}", cx.string_text(suffix)?);
-            let candidate_value = cx.make_string(candidate.as_bytes().to_vec(), multibyte || !candidate.is_ascii());
-            // lread.c openp selects after suffix concatenation, even for an
-            // absolute filename. A selected handler can run Lisp: still refuse.
-            // A natural-number predicate tests access(2) without handlers.
-            if access_mode.is_none() {
-                refuse_locate_handler(cx, candidate_value, "file-exists-p")?;
-            }
-            let found = match access_mode {
-                None => std::path::Path::new(&candidate).is_file() && open_for_reading(&candidate).is_ok(),
-                Some(mode) => i32::try_from(mode).is_ok_and(|mode| cx.filesave_access(&candidate, mode).is_ok())
-                    && !std::path::Path::new(&candidate).is_dir(),
-            };
-            if found {
-                return Ok(candidate_value);
-            }
+        if found {
+            return Ok(Step::Done(candidate_value));
         }
     }
-    Ok(Value::NIL)
+    locate_next(cx, saved)
 }
 
 /// Native file lookup still refuses dispatch when a handler is selected.

@@ -49,3 +49,24 @@ impl Vm {
         self.declare_special_raw("exec-path", exec);
     }
 }
+
+/// GNU's emacs_wd, as glibc's get_current_dir_name gives it at startup:
+/// PWD when it names the same file as ".", so a directory reached through a
+/// symlink keeps its spelling, else getcwd. Captured once, by the first
+/// `Vm::new` as the host starts; VM2 never changes the process working
+/// directory. None when it cannot be determined, or names an unreachable
+/// directory (a leading `(', emacs_get_current_dir_name).
+pub(crate) fn startup_directory() -> Option<&'static [u8]> {
+    use std::os::unix::{ffi::OsStrExt, fs::MetadataExt};
+    static DIRECTORY: std::sync::OnceLock<Option<Vec<u8>>> = std::sync::OnceLock::new();
+    DIRECTORY.get_or_init(|| {
+        let dot = std::fs::metadata(".").ok();
+        if let (Some(pwd), Some(dot)) = (std::env::var_os("PWD"), dot.as_ref())
+            && let Ok(meta) = std::fs::metadata(&pwd)
+            && meta.dev() == dot.dev() && meta.ino() == dot.ino()
+        {
+            return Some(pwd.as_bytes().to_vec());
+        }
+        std::env::current_dir().ok().map(|dir| dir.as_os_str().as_bytes().to_vec())
+    }).as_deref().filter(|dir| dir.first() != Some(&b'('))
+}
