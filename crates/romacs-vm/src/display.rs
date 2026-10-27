@@ -25,6 +25,8 @@ pub(super) struct DisplayState {
     /// churning.
     previous: std::collections::BTreeMap<u64, WindowSnapshot>,
     pub version: u64,
+    /// Whether a host has applied a layout: batch never does (VM2-POSVIS1).
+    pub(super) hosted: bool,
     pub(super) width: u32,
     pub(super) height: u32,
     building_band: bool,
@@ -93,6 +95,7 @@ impl DisplayState {
             )
             .expect("default theme"),
             version: 0,
+            hosted: false,
             width: 0,
             height: 0,
             building_band: false,

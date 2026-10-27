@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "c2206c95b3d2c16bd6b7bee3068ea3c23173658c8c4ea256fe07630e3216034d",
+  "source_fingerprint": "ed2d446a36b81b6e9ce105ece1ddb4decd5a1b9bd3450c32b8dd63c0ca387595",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 912,
-  "parsed_vm2_only": 912
+  "parsed_total": 913,
+  "parsed_vm2_only": 913
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -2848,6 +2848,11 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/line_position.rs:26"
   },
+  "pos-visible-in-window-p": {
+   "name": "pos-visible-in-window-p",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/window.rs:339"
+  },
   "position-bytes": {
    "name": "position-bytes",
    "implementation": "vm2",
@@ -4689,12 +4694,12 @@
   "window-pixel-left": {
    "name": "window-pixel-left",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/window.rs:339"
+   "registered_at": "crates/romacs-vm/src/prims/window.rs:344"
   },
   "window-pixel-top": {
    "name": "window-pixel-top",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/window.rs:344"
+   "registered_at": "crates/romacs-vm/src/prims/window.rs:349"
   },
   "window-pixel-width": {
    "name": "window-pixel-width",

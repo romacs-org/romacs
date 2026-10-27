@@ -336,6 +336,11 @@ fn redisplay(cx; optional _force: Value) {
     Ok(if cx.variable_value(macro_)?.is_some_and(|m| m != Value::NIL) { Value::NIL } else { Value::TRUE })
 }}
 
+defsubr! { name = "pos-visible-in-window-p", gnu = "window.c:1998", effect = Reads,
+fn pos_visible_in_window_p(cx; optional pos: Value, window: Value, partially: Value) {
+    cx.windows().pos_visible_in_window_p(pos, window, partially)
+}}
+
 defsubr! { name = "window-pixel-left", gnu = "window.c:1001", effect = Reads,
 fn window_pixel_left(cx; optional window: Value) {
     cx.windows().window_pixel_edge(window, false)

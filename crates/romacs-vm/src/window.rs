@@ -928,6 +928,7 @@ impl Vm {
             let end_char = b.char_of_byte(coordinates::ByteOffset(end))?.0;
             changes.push((index, b.len_chars() - end_char));
         }
+        self.display_state.hosted = true;
         for (index, distance) in changes {
             let Object::Window(w) = &mut self.objects[index] else {
                 unreachable!()
@@ -1402,6 +1403,48 @@ impl<'a> Windows<'a> {
     /// no fringes, scroll bars, dividers, header or tab lines.
     /// window_pixel_left / window_pixel_top: the window's frame-relative
     /// pixel edge.
+    /// GNU window.c:1998 Fpos_visible_in_window_p. pos_visible_p (xdisp.c:1703)
+    /// sees nothing on the initial frame, batch's, which no host lays out. A
+    /// displayed window would need display simulation (VM2-POSVIS1).
+    pub(crate) fn pos_visible_in_window_p(&mut self, pos: Value, window: Value, _partially: Value) -> Out {
+        let w = self.live(window)?;
+        let posint = if pos == Value::TRUE {
+            None
+        } else if pos == Value::NIL && w == self.vm.window_root(SELECTED) {
+            // PT: the current buffer's point, whichever buffer W shows.
+            let index = self.vm.buffer_index().map_err(internal)?;
+            Some(match &self.vm.objects[index] {
+                Object::Buffer(b) => b.char_of_byte(b.point).map_err(internal)?.0 as i64 + 1,
+                Object::ByteBuffer(b) => b.point.0 as i64 + 1,
+                _ => return Err(internal("buffer required".into())),
+            })
+        } else if pos == Value::NIL {
+            let point = self.get(w)?.point;
+            Some(self.vm.marker_position_value(point).map_err(internal)?.as_integer().map_err(internal)?)
+        } else {
+            Some(match self.vm.object_if(pos) {
+                Some(Object::Marker(_)) => {
+                    let at = self.vm.marker_position_value(pos).map_err(internal)?;
+                    at.as_integer().map_err(|_| internal("Marker does not point anywhere".into()))?
+                }
+                // fix_position saturates a bignum.
+                Some(Object::Bignum(n)) => if n.sign() == num_bigint::Sign::Minus { i64::MIN } else { i64::MAX },
+                _ => pos.as_integer().map_err(|_| Fault::Wrong("integer-or-marker-p", pos))?,
+            })
+        };
+        let (start, buffer) = { let x = self.get(w)?; (x.start, x.buffer) };
+        let top = self.vm.marker_position_value(start).map_err(internal)?.as_integer().map_err(internal)?;
+        let Object::Buffer(b) = self.vm.object(buffer).map_err(internal)? else {
+            return Err(internal("buffer required".into()));
+        };
+        let accessible = b.accessible();
+        let char_at = |byte| b.char_of_byte(byte).map(|c| c.0 as i64 + 1).map_err(internal);
+        let (begv, zv) = (char_at(accessible.start)?, char_at(accessible.end)?);
+        if posint.is_some_and(|p| p < top || p > zv) || top < begv || top > zv || !self.vm.display_state.hosted {
+            return Ok(Value::NIL);
+        }
+        Err(internal("VM2 pos-visible-in-window-p in a displayed window is unsupported".into()))
+    }
     pub(crate) fn window_pixel_edge(&mut self, window: Value, top: bool) -> Out {
         let w = self.valid(window)?;
         let x = self.get(w)?;
