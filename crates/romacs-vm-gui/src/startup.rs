@@ -307,6 +307,8 @@ fn policy(vm: &mut Vm, root: Option<&std::path::Path>, name: &str, embedded: &st
 }
 
 fn initialize_files_with_sources(vm: &mut Vm, files: &[std::path::PathBuf], root: Option<&std::path::Path>) -> Result<Started, String> {
+    // VM2's own runtime (its Lisp-written primitives), as every GUI path installs.
+    vm.install_lisp_prelude()?;
     policy(vm, root, "romacs-startup.el", include_str!("../../../rlisp/romacs-startup.el"))?;
     policy(vm, root, "romacs-find-file.el", include_str!("../../../rlisp/romacs-find-file.el"))?;
     policy(vm, root, "romacs-buffer-switch.el", include_str!("../../../rlisp/romacs-buffer-switch.el"))?;
