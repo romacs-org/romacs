@@ -95,6 +95,7 @@ mod productivity;
 mod protocol;
 mod reader;
 mod regexp;
+mod syntax_scan;
 mod surface;
 mod tails;
 mod prim;
@@ -1098,6 +1099,8 @@ pub struct Vm {
     buffer_slot: usize,
     multibyte_slot: usize,
     truncate_lines_slot: usize,
+    /// Owner of syntax.c's defun-start cache (`BufferState::defun_start`).
+    defun_start_epoch: u64,
     variable_redirects: Vec<Option<VariableRedirect>>,
     /// Storage of GNU's built-in (C) variables; collector roots (`gc.rs`).
     forwarded: forwarded::Forwarded,
@@ -1219,6 +1222,7 @@ impl Vm {
             buffer_slot: 0,
             multibyte_slot: 0,
             truncate_lines_slot: usize::MAX,
+            defun_start_epoch: 0,
             variable_redirects: Vec::new(),
             forwarded: forwarded::Forwarded::default(),
             fixnum_slots: [usize::MAX; 2],

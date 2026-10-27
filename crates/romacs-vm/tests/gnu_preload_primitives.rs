@@ -75,6 +75,7 @@ fn hooks_until_success_and_failure_match_gnu() {
         "(progn (setq h1 (list (lambda (x) nil) (lambda (x) (* x 2)) (lambda (x) 99))) (list (run-hook-with-args-until-success 'h1 4) (run-hook-with-args-until-failure 'h1 4)))",
         "(progn (setq h2 nil) (list (run-hook-with-args-until-success 'h2) (run-hook-with-args-until-failure 'h2)))",
         "(progn (setq h3 (lambda (&rest a) a)) (run-hook-with-args-until-success 'h3 1 2))",
+        "(with-temp-buffer (set-default 'h4 (list (lambda (x) 7) t 'cdr)) (set (make-local-variable 'h4) (list (lambda (x) nil) 'car t (lambda (x) 9))) (let (log) (list (run-hook-wrapped 'h4 (lambda (f &rest a) (setq log (cons (cons (functionp f) a) log)) nil) 1 2) (nreverse log) (run-hook-wrapped 'h4 (lambda (f x) (and (not (symbolp f)) (funcall f x))) 3) (run-hook-wrapped 'h3 (lambda (f &rest a) (apply f a)) 5) (run-hook-wrapped 'h2 #'ignore) (condition-case e (run-hook-wrapped 'h4) (error (car e))))))",
     ]);
 }
 

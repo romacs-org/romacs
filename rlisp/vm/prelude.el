@@ -331,4 +331,14 @@ END and LENGTH, the length of the text the change replaced, with
                          (setq done t))
                 (or done (setq after-change-functions nil)))))))))
 
+;; GNU safe_calln (eval.c): a signal from FUNCTION is muted, logged to
+;; *Messages* only (add_to_log), and the call returns nil.  syntax.c calls
+;; `internal--syntax-propertize' this way in the middle of a scan.
+(defun romacs--safe-call (function &rest args)
+  (let ((inhibit-redisplay t))
+    (condition-case err (apply function args)
+      (t (let ((inhibit-message t))
+           (message "%s" (format "Error muted by safe_call: %S signaled %S" (cons function args) err)))
+         nil))))
+
 ;;; prelude.el ends here

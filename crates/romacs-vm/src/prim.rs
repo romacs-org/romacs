@@ -1503,6 +1503,8 @@ mod leaf {
     mod search;
     mod skip_chars;
     mod word_motion;
+    mod syntax_scan;
+    pub(crate) use syntax_scan::{Op as SyntaxOp, Outcome as SyntaxOutcome};
     mod face;
     mod value_order;
     mod completion;
@@ -1513,7 +1515,7 @@ mod leaf {
     mod sqlite;
     mod random;
 }
-pub(crate) use leaf::{Leaf, Kind};
+pub(crate) use leaf::{Leaf, Kind, SyntaxOp, SyntaxOutcome};
 
 /// Realize C-initialized coding variables before their first Lisp observation.
 /// Like the charset slot hook, this preserves allocation-free VM construction.
