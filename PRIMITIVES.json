@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "b547b05f77d8150273eaff8e0742355dd8f60fedc232bf9339299a937763c030",
+  "source_fingerprint": "06f4a75d2223d8ba8fc7a80b8132d3c6938e5a5fca08927b24a5311d0270d69f",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 836,
-  "parsed_vm2_only": 836
+  "parsed_total": 837,
+  "parsed_vm2_only": 837
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -1230,6 +1230,11 @@
    "implementation": "vm2",
    "variant": "Primitive::DeepEqual",
    "registered_at": "crates/romacs-vm/src/lib.rs:736"
+  },
+  "equal-including-properties": {
+   "name": "equal-including-properties",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/fns_equal.rs:157"
   },
   "erase-buffer": {
    "name": "erase-buffer",

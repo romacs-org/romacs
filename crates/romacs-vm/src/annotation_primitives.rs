@@ -1062,7 +1062,7 @@ impl Vm {
     /// The positions in OBJECT's accessible text, from its start, where its
     /// text properties change: the starts of its property runs (GNU's
     /// intervals, merged where their plists are equal).
-    fn property_run_starts(&self, object: Value) -> std::result::Result<Vec<i64>, crate::prim::Fault> {
+    pub(crate) fn property_run_starts(&self, object: Value) -> std::result::Result<Vec<i64>, crate::prim::Fault> {
         use crate::prim::Fault;
         let (bytes, start) = match self.object_if(object) {
             Some(Object::Buffer(b)) => {

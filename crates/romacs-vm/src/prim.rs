@@ -820,6 +820,9 @@ mod leaf {
         pub fn equal(&self, a: Value, b: Value) -> std::result::Result<bool, hash::HashFault> {
             self.vm.equal(a, b)
         }
+        pub fn equal_including_properties(&self, a: Value, b: Value) -> std::result::Result<bool, hash::HashFault> {
+            self.vm.equal_including_properties(a, b)
+        }
         fn symbol_slot(&self, v: Value) -> std::result::Result<usize, Fault> {
             v.index_if(7)
                 .and_then(|i| i.checked_sub(1))
