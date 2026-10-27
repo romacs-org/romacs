@@ -2,7 +2,8 @@ use romacs_vm::Vm;
 
 // Oracle: GNU 32.0.50, commit 45b0f7699df36b3849edc3bdef37d4cb9e75b9ea.
 // openp selects on each suffixed candidate for file-exists-p, not on the
-// mere presence of file-name-handler-alist. Handler dispatch remains refused.
+// mere presence of file-name-handler-alist. A file-exists-p handler remains
+// refused; an expand-file-name handler is called, as Fexpand_file_name does.
 fn fixture() -> (std::path::PathBuf, Vm) {
     let root = std::env::temp_dir().join(format!("romacs-locate-handlers-{}-{:?}", std::process::id(), std::thread::current().id()));
     std::fs::create_dir_all(&root).unwrap();
@@ -44,12 +45,20 @@ fn handler_operations_and_inhibition_are_operation_specific() {
 }
 
 #[test]
+fn expansion_handlers_are_called_with_the_name_and_root() {
+    let (root, mut vm) = fixture();
+    let expected = format!("{:?}", root.join("local.el").display().to_string());
+    let source = "(let ((file-name-handler-alist '((\"local\" . handler))) (inhibit-file-name-operation nil) (inhibit-file-name-handlers nil) (seen nil)) (put 'handler 'operations '(expand-file-name)) (defalias 'handler (lambda (op &rest args) (setq seen (cons (cons op args) seen)) (let ((inhibit-file-name-handlers '(handler)) (inhibit-file-name-operation op)) (apply op args)))) (list (locate-file-internal \"local\" '(nil) '(\".el\")) seen))";
+    assert_eq!(vm.eval_source(source).unwrap().display().unwrap(), format!("({expected} ((expand-file-name \"local\" nil)))"), "{source}");
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn matching_candidate_handlers_remain_explicitly_refused() {
     let (root, mut vm) = fixture();
     for setup in [
         "(put 'handler 'operations '(file-exists-p))",
         "(put 'handler 'operations '(file-exists-p)) (setq inhibit-file-name-operation 'write-region inhibit-file-name-handlers '(handler))",
-        "(put 'handler 'operations '(expand-file-name))",
     ] {
         let source = format!("(let ((file-name-handler-alist '((\"local\" . handler))) (inhibit-file-name-operation nil) (inhibit-file-name-handlers nil)) {setup} (condition-case e (locate-file-internal \"local\" '(nil) '(\".el\")) (error (car (cdr e)))))");
         assert_eq!(vm.eval_source(&source).unwrap().display().unwrap(), "\"VM2 locate-file-internal matching file name handler is unsupported\"", "{source}");

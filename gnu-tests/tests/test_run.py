@@ -435,7 +435,7 @@ class Ledger(unittest.TestCase):
                                                                                  'symbol = "car"')))
 
     def test_a_symbol_the_test_never_uses_is_refused(self):
-        row = VALID_ROW.replace('"VM2-FMT1"', '"VM2-PATH1"').replace('symbol = "format"',
+        row = VALID_ROW.replace('"VM2-FMT1"', '"VM2-PATH2"').replace('symbol = "format"',
                                                                      'symbol = "expand-file-name"')
         self.assertIn('never mentions', self.refused(row))
 

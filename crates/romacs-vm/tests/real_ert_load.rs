@@ -997,3 +997,89 @@ fn file_names_links_and_copies_match_gnu() {
     let _ = std::fs::remove_dir_all(&dir);
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
+
+// default-directory is GNU's per-buffer C variable (buffer.c:5426): always
+// local, inherited by new buffers, kept by kill-all-local-variables, and
+// what every file primitive expands against, so a `let' of it redirects
+// them; expand-file-name follows fileio.c's rules and handlers, so a
+// `/:'-quoted directory reaches file-name-non-special. Each case runs with
+// default-directory DIR, a fresh copy of one fixture; every write names a
+// subdirectory that exists only there, so a wrong base cannot touch the
+// process directory. Its printed value and DIR afterwards must be pinned
+// GNU's.
+#[test]
+fn default_directory_and_expansion_match_gnu() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut vm = bootstrapped_with(&root, "rlisp/romacs-loadup-bootstrap.el");
+    let dir = std::env::temp_dir().join(format!("rt-default-directory-{}", std::process::id()));
+    let fixture = || {
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("sub/deep")).unwrap();
+        for (name, text) in [("a", "hello"), ("sub/inner", "inner\n"), ("sub/deep/leaf", "leaf")] {
+            std::fs::write(dir.join(name), text).unwrap();
+        }
+    };
+    fn snapshot(base: &Path, at: &Path, out: &mut Vec<String>) {
+        let mut entries: Vec<_> = std::fs::read_dir(at).unwrap().map(|e| e.unwrap().path()).collect();
+        entries.sort();
+        for path in entries {
+            let name = path.strip_prefix(base).unwrap().display().to_string();
+            if path.is_dir() {
+                out.push(format!("{name}/"));
+                snapshot(base, &path, out);
+            } else {
+                out.push(format!("{name} {:?}", std::fs::read_to_string(&path).unwrap()));
+            }
+        }
+    }
+    let cases = [
+        // The variable itself.
+        r#"(list (local-variable-p 'default-directory) (default-value 'default-directory) (assq 'default-directory (buffer-local-variables)) (special-variable-p 'default-directory))"#,
+        r#"(let ((b (generate-new-buffer "rt-dd"))) (prog1 (list (equal (buffer-local-value 'default-directory b) default-directory) (with-current-buffer b (local-variable-p 'default-directory))) (kill-buffer b)))"#,
+        r#"(list (with-temp-buffer default-directory) (let ((default-directory "/tmp/")) (with-temp-buffer default-directory)) default-directory)"#,
+        r#"(with-temp-buffer (setq default-directory "/x/") (list (progn (kill-all-local-variables) default-directory) (progn (kill-all-local-variables t) default-directory)))"#,
+        r#"(list (condition-case e (setq default-directory 3) (error e)) default-directory (progn (setq-default default-directory "/d/") (list (default-value 'default-directory) default-directory (with-temp-buffer default-directory))))"#,
+        r#"(let ((b (generate-new-buffer "rt-dd")) r) (let ((default-directory "/tmp/")) (setq r (with-current-buffer b default-directory))) (prog1 (list r (with-current-buffer b (let ((default-directory "/q/")) (set-buffer (get-buffer-create " rt-other")) default-directory))) (kill-buffer b)))"#,
+        // vc-setup-buffer sets the value under a `let' of it.
+        r#"(list (let ((default-directory "/tmp/")) (set-buffer-local-toplevel-value 'default-directory "/var/") (list default-directory (buffer-local-toplevel-value 'default-directory))) default-directory)"#,
+        // expand-file-name.
+        r#"(list (expand-file-name "/tmp/x/") (expand-file-name "a//b/") (expand-file-name "//a") (expand-file-name "///a") (expand-file-name "/a/./b/../c") (expand-file-name "/a/b/..") (expand-file-name "..") (expand-file-name "../../..") (expand-file-name ".") (expand-file-name "") (expand-file-name "/.") (expand-file-name "/..") (expand-file-name "/x/../..") (expand-file-name "a" "//") (expand-file-name "a" "/b//"))"#,
+        r#"(list (expand-file-name "~") (expand-file-name "~/") (expand-file-name "~/a/../b") (expand-file-name "a" "~/r") (expand-file-name "~root/x") (expand-file-name "~root") (expand-file-name "~nosuchuser-rt/a") (expand-file-name "a" "sub") (expand-file-name "x" "sub/../sub/deep/") (expand-file-name "/:/a/../b") (expand-file-name "/:~/x"))"#,
+        r#"(list (let ((default-directory nil)) (expand-file-name "a")) (let ((default-directory 7)) (expand-file-name "a")) (equal (let ((default-directory "rel/")) (expand-file-name "a")) (concat invocation-directory "rel/a")) (expand-file-name "a" 7) (let ((x "/tmp/y")) (eq x (expand-file-name x))) (condition-case e (expand-file-name "a\0b") (error e)) (condition-case e (expand-file-name 1) (error e)) (condition-case e (expand-file-name "a" "/b\0") (error e)) (multibyte-string-p (expand-file-name (string-to-unibyte "a") "/")) (multibyte-string-p (expand-file-name "é" "/")) (multibyte-string-p (expand-file-name "\351" "/é/")))"#,
+        r#"(progn (defalias 'rt-efn (lambda (op &rest args) (list op args))) (let ((file-name-handler-alist '(("\\`/rt-efn:" . rt-efn)))) (list (expand-file-name "/rt-efn:x") (expand-file-name "a" "/rt-efn:d/") (let ((default-directory "/rt-efn:dd/")) (expand-file-name "/tmp/z")) (expand-file-name "/rt-efn:x/../../q") (let ((inhibit-file-name-handlers '(rt-efn)) (inhibit-file-name-operation 'expand-file-name)) (expand-file-name "/rt-efn:x")))))"#,
+        r#"(progn (defalias 'rt-efn2 (lambda (&rest _) 7)) (let ((file-name-handler-alist '(("\\`/rt-efn2:" . rt-efn2)))) (condition-case e (expand-file-name "/rt-efn2:x") (error e))))"#,
+        // A let-bound directory reaches the file primitives.
+        r#"(let ((default-directory (expand-file-name "sub/"))) (list (expand-file-name "f") (file-exists-p "inner") (file-readable-p "inner") (file-regular-p "inner") (file-directory-p "deep") (file-directory-p "") (file-exists-p "a") (file-writable-p "new") (file-modes "inner") (file-name-absolute-p "inner") (directory-files "." nil "^[^.]") (locate-file "leaf" '("deep")) (file-truename "deep/leaf")))"#,
+        r#"(let ((default-directory (expand-file-name "sub/"))) (write-region "data" nil "w") (list (with-temp-buffer (insert-file-contents "w") (buffer-string)) (with-temp-buffer (insert-file-contents "inner" t) (list buffer-file-name (buffer-string)))))"#,
+        r#"(let ((default-directory (expand-file-name "sub/"))) (copy-file "inner" "Makefile") (list (file-exists-p "Makefile") (progn (delete-file "inner") (file-exists-p "inner")) (progn (make-directory "made") (file-directory-p "made")) (progn (rename-file "Makefile" "made/") (directory-files "made" nil "^[^.]")) (progn (delete-directory "made" t) (file-exists-p "made"))))"#,
+        r#"(with-temp-buffer (setq default-directory (expand-file-name "sub/deep/")) (list (file-exists-p "leaf") (with-temp-buffer (file-exists-p "leaf")) (progn (kill-all-local-variables) (file-exists-p "leaf"))))"#,
+        // copy-directory into a NEWNAME ending in a slash. One call only:
+        // its file-truename probes each ancestor's case sensitivity, which
+        // VM2 refuses when a shared ancestor changes during the probe.
+        r#"(progn (make-directory "sub/dest") (copy-directory "sub/deep" "sub/dest/") (directory-files "sub/dest" nil "^[^.]"))"#,
+        // `/:'-quoted names and directories go through file-name-non-special.
+        r#"(list (file-name-quote default-directory) (file-name-unquote (file-name-quote default-directory)) (file-name-quoted-p (file-name-quote "a")) (executable-find "sh") (let ((default-directory (file-name-quote default-directory))) (list (expand-file-name "a") (expand-file-name "/:~/x") (file-exists-p "a") (file-directory-p "sub") (file-regular-p "sub/inner") (file-exists-p "absent") (executable-find "sh") (locate-file "inner" '("sub")))))"#,
+        r#"(list (file-exists-p (concat "/:" default-directory "a")) (file-directory-p (concat "/:" default-directory "sub/")) (file-modes (concat "/:" default-directory "a")) (expand-file-name (concat "/:" default-directory "sub/../a")) (progn (delete-file (concat "/:" default-directory "sub/inner")) (file-exists-p "sub/inner")))"#,
+    ];
+    let binary = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
+    let directory = format!("{}/", dir.display());
+    let mut failures = Vec::new();
+    for expression in cases {
+        let source = format!("(progn (setq default-directory {directory:?}) (string-to-list (prin1-to-string (condition-case err {expression} (error (list 'signal err))))))");
+        fixture();
+        let output = std::process::Command::new(&binary).args(["-Q", "--batch", "--eval", &format!("(prin1 {source})")]).output().unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        let mut expected = (String::from_utf8(output.stdout).unwrap(), vec![]);
+        snapshot(&dir, &dir, &mut expected.1);
+        fixture();
+        let mut actual = (vm.eval_source(&source).and_then(|v| v.display()).unwrap_or_else(|e| e), vec![]);
+        snapshot(&dir, &dir, &mut actual.1);
+        if actual != expected {
+            let text = |codes: &str| codes.trim_matches(|c| c == '(' || c == ')').split_whitespace()
+                .filter_map(|n| n.parse::<u32>().ok().and_then(char::from_u32)).collect::<String>();
+            failures.push(format!("{expression}\n  GNU    {} {:?}\n  Romacs {} {:?}", text(&expected.0), expected.1, text(&actual.0), actual.1));
+        }
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}

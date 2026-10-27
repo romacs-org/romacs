@@ -26,38 +26,72 @@ fn native_encoding(cx: &mut Leaf<'_>) -> std::result::Result<(), Fault> {
     Ok(())
 }
 
+/// Fexpand_file_name (VALUE, Qnil) for a primitive that cannot continue
+/// through Lisp: refused where GNU would call an expansion handler.
 fn name(
     cx: &mut Leaf<'_>,
     value: Value,
     strip_slash: bool,
 ) -> std::result::Result<(String, Value), Fault> {
-    if cx.string_bytes(value)?.contains(&0) {
-        return Err(Fault::Wrong("filenamep", value));
+    let expanded = super::expand_file_name::expand(cx, value, Value::NIL)?
+        .ok_or_else(|| refusal("filesave expand-file-name handler"))?;
+    as_file(cx, expanded, strip_slash)
+}
+
+/// An expanded name as text and value; with STRIP_SLASH, the
+/// directory-file-name step of fileio.c expand_and_dir_to_file, taken only
+/// for a name ending in a slash.
+fn as_file(
+    cx: &mut Leaf<'_>,
+    expanded: Value,
+    strip_slash: bool,
+) -> std::result::Result<(String, Value), Fault> {
+    let path = cx.string_text(expanded)?;
+    if !strip_slash || path.len() < 2 || !path.ends_with('/') {
+        return Ok((path, expanded));
     }
-    // Expansion callbacks require a multi-stage request; do not silently bypass
-    // one merely because the final operation has no handler.
-    let expansion = cx.intern("expand-file-name");
-    if super::fileio::find_file_name_handler(cx, value, expansion)? != Value::NIL {
-        return Err(refusal("filesave expand-file-name handler"));
+    let operation = cx.intern("directory-file-name");
+    if super::fileio::find_file_name_handler(cx, expanded, operation)? != Value::NIL {
+        return Err(refusal("filesave directory-file-name handler"));
     }
-    let mut path = super::fileio::expand_file_name(cx, value)?;
-    if strip_slash {
-        let expanded = cx.string(&path);
-        let operation = cx.intern("directory-file-name");
-        if super::fileio::find_file_name_handler(cx, expanded, operation)? != Value::NIL {
-            return Err(refusal("filesave directory-file-name handler"));
-        }
-    }
-    if strip_slash && path.len() > 1 {
-        path = path.trim_end_matches('/').to_owned();
-    }
-    let multibyte = cx.string_view(value)?.is_multibyte() || !path.is_ascii();
-    let result = if cx.string_text(value)? == path {
-        value
-    } else {
-        cx.make_string(path.as_bytes().to_vec(), multibyte)
-    };
+    let path = path.trim_end_matches('/');
+    let path = if path.is_empty() { "/" } else { path }.to_owned();
+    let multibyte = cx.string_view(expanded)?.is_multibyte();
+    let result = cx.make_string(path.as_bytes().to_vec(), multibyte);
     Ok((path, result))
+}
+
+/// fileio.c expand_and_dir_to_file after the expansion, for BODY whose
+/// own arguments are the first ARGS of SAVED: EXPANDED through
+/// Fdirectory_file_name when it ends in a slash. A directory-file-name
+/// handler is called first; BODY then runs again on its value, which an
+/// extra entry in SAVED marks as final.
+fn dir_to_file(
+    cx: &mut Leaf<'_>,
+    expanded: Value,
+    body: crate::prim::Then,
+    saved: &[Value],
+    args: usize,
+) -> std::result::Result<std::result::Result<(String, Value), Next>, Fault> {
+    let bytes = cx.string_bytes(expanded)?;
+    if saved.len() > args || bytes.len() < 2 || bytes.last() != Some(&b'/') {
+        return Ok(Ok((cx.string_text(expanded)?, expanded)));
+    }
+    match super::savejourney::directory_file_name(cx, expanded)? {
+        Step::Done(file) => Ok(Ok((cx.string_text(file)?, file))),
+        Step::Call { f, args, .. } => {
+            let mut saved = saved.to_vec();
+            saved.push(Value::TRUE);
+            Ok(Err(Ok(Step::Call { f, args, then: body, saved })))
+        }
+        _ => unreachable!("directory-file-name returns or calls its handler"),
+    }
+}
+
+/// Fexpand_file_name (FILENAME, Qnil), then THEN with the expansion; through
+/// Lisp `expand-file-name' only where GNU would call a handler.
+fn expanding(cx: &mut Leaf<'_>, filename: Value, then: crate::prim::Then, saved: Vec<Value>) -> Next {
+    super::expand_file_name::expanding(cx, filename, Value::NIL, then, saved)
 }
 
 fn handler(
@@ -125,19 +159,25 @@ fn metadata_missing(error: &std::io::Error) -> bool {
 
 defsubr! { name = "make-directory-internal", gnu = "fileio.c", effect = Global,
 fn make_directory_internal(cx, directory: Value) -> Step {
-    let (path, expanded) = name(cx, directory, false)?;
+    expanding(cx, directory, make_directory_expanded, vec![])
+}}
+fn make_directory_expanded(cx: &mut Leaf<'_>, expanded: Value, _: &[Value]) -> Next {
+    let (path, expanded) = as_file(cx, expanded, false)?;
     // GNU dispatches make-directory handlers in the Lisp wrapper, not here.
     native_encoding(cx)?;
     cx.filesave_mkdir(&path).map_err(|e| errno(cx, "Creating directory", &[expanded], e))?;
     Ok(Step::Done(Value::NIL))
-}}
+}
 
 defsubr! { name = "delete-file", gnu = "fileio.c", effect = Global,
 fn delete_file(cx, filename: Value; optional trash: Value) -> Step {
-    let (_, expanded) = name(cx, filename, false)?;
+    expanding(cx, filename, delete_file_expanded, vec![trash])
+}}
+fn delete_file_expanded(cx: &mut Leaf<'_>, expanded: Value, saved: &[Value]) -> Next {
+    let trash = saved[0];
     if let Some(call) = handler(cx, expanded, "delete-file", vec![expanded, trash])? { return call; }
     if trash != Value::NIL { return Err(refusal("delete-file trash")); }
-    let (path, _) = name(cx, expanded, true)?;
+    let (path, _) = as_file(cx, expanded, true)?;
     native_encoding(cx)?;
     match cx.filesave_unlink(&path) {
         Ok(()) => (),
@@ -145,11 +185,14 @@ fn delete_file(cx, filename: Value; optional trash: Value) -> Step {
         Err(e) => return Err(errno(cx, "Removing old name", &[expanded], e)),
     }
     Ok(Step::Done(Value::NIL))
-}}
+}
 
 defsubr! { name = "file-writable-p", gnu = "fileio.c:3040", effect = Global,
 fn file_writable_p(cx, filename: Value) -> Step {
-    let (path, expanded) = name(cx, filename, false)?;
+    expanding(cx, filename, file_writable_expanded, vec![])
+}}
+fn file_writable_expanded(cx: &mut Leaf<'_>, expanded: Value, _: &[Value]) -> Next {
+    let (path, expanded) = as_file(cx, expanded, false)?;
     if let Some(call) = handler(cx, expanded, "file-writable-p", vec![expanded])? { return call; }
     native_encoding(cx)?;
     let writable = match cx.filesave_access(&path, libc::W_OK) {
@@ -162,11 +205,15 @@ fn file_writable_p(cx, filename: Value) -> Step {
         Err(_) => false,
     };
     Ok(Step::Done(if writable { Value::TRUE } else { Value::NIL }))
-}}
+}
 
 defsubr! { name = "file-modes", gnu = "fileio.c:3644", effect = Global,
 fn file_modes(cx, filename: Value; optional flag: Value) -> Step {
-    let (path, expanded) = name(cx, filename, true)?;
+    expanding(cx, filename, file_modes_expanded, vec![flag])
+}}
+fn file_modes_expanded(cx: &mut Leaf<'_>, expanded: Value, saved: &[Value]) -> Next {
+    let flag = saved[0];
+    let (path, expanded) = match dir_to_file(cx, expanded, file_modes_expanded, saved, 1)? { Ok(file) => file, Err(call) => return call };
     if let Some(call) = handler(cx, expanded, "file-modes", vec![expanded, flag])? { return call; }
     native_encoding(cx)?;
     let meta = if flag == Value::NIL { std::fs::metadata(&path) } else { std::fs::symlink_metadata(&path) };
@@ -176,18 +223,23 @@ fn file_modes(cx, filename: Value; optional flag: Value) -> Step {
         Err(e) => return Err(errno(cx, "Getting attributes", &[expanded], e)),
     };
     Ok(Step::Done(value))
-}}
+}
 
 defsubr! { name = "set-file-modes", gnu = "fileio.c:3666", effect = Global,
 fn set_file_modes(cx, filename: Value, mode: Value; optional flag: Value) -> Step {
-    let bits = mode.integer_value().ok_or(Fault::Wrong("fixnump", mode))?;
-    let (path, expanded) = name(cx, filename, false)?;
+    mode.integer_value().ok_or(Fault::Wrong("fixnump", mode))?;
+    expanding(cx, filename, set_file_modes_expanded, vec![mode, flag])
+}}
+fn set_file_modes_expanded(cx: &mut Leaf<'_>, expanded: Value, saved: &[Value]) -> Next {
+    let (mode, flag) = (saved[0], saved[1]);
+    let bits = mode.integer_value().expect("checked fixnum");
+    let (path, expanded) = as_file(cx, expanded, false)?;
     if let Some(call) = handler(cx, expanded, "set-file-modes", vec![expanded, mode, flag])? { return call; }
     native_encoding(cx)?;
     cx.filesave_chmod(&path, (bits & 0o7777) as u32, flag != Value::NIL)
         .map_err(|e| errno(cx, "Doing chmod", &[expanded], e))?;
     Ok(Step::Done(Value::NIL))
-}}
+}
 
 defsubr! { name = "rename-file", gnu = "fileio.c:2724", effect = Global,
 fn rename_file(cx, file: Value, newname: Value; optional overwrite: Value) -> Step {
@@ -257,30 +309,56 @@ fn make_temp_name(cx, prefix: Value) {
 }}
 
 /// fileio.c check_file_access: expand, dispatch a handler, then faccessat.
-fn check_file_access(cx: &mut Leaf<'_>, filename: Value, operation: &str, mode: i32) -> Next {
-    let (path, expanded) = name(cx, filename, false)?;
+/// The access mode, saved as a fixnum, names the operation.
+fn check_file_access(cx: &mut Leaf<'_>, expanded: Value, saved: &[Value]) -> Next {
+    let mode = saved[0].integer_value().expect("access mode") as i32;
+    let operation = match mode {
+        libc::F_OK => "file-exists-p",
+        libc::X_OK => "file-executable-p",
+        _ => "file-readable-p",
+    };
+    let (path, expanded) = as_file(cx, expanded, false)?;
     if let Some(call) = handler(cx, expanded, operation, vec![expanded])? { return call; }
     native_encoding(cx)?;
     Ok(Step::Done(if cx.filesave_access(&path, mode).is_ok() { Value::TRUE } else { Value::NIL }))
 }
 
+fn access(cx: &mut Leaf<'_>, filename: Value, mode: i32) -> Next {
+    expanding(cx, filename, check_file_access, vec![Value::integer(mode.into()).unwrap()])
+}
+
 defsubr! { name = "file-exists-p", gnu = "fileio.c:3010", effect = Global,
-fn file_exists_p(cx, filename: Value) -> Step { check_file_access(cx, filename, "file-exists-p", libc::F_OK) }}
+fn file_exists_p(cx, filename: Value) -> Step { access(cx, filename, libc::F_OK) }}
 
 defsubr! { name = "file-executable-p", gnu = "fileio.c:3022", effect = Global,
-fn file_executable_p(cx, filename: Value) -> Step { check_file_access(cx, filename, "file-executable-p", libc::X_OK) }}
+fn file_executable_p(cx, filename: Value) -> Step { access(cx, filename, libc::X_OK) }}
 
 defsubr! { name = "file-readable-p", gnu = "fileio.c:3032", effect = Global,
-fn file_readable_p(cx, filename: Value) -> Step { check_file_access(cx, filename, "file-readable-p", libc::R_OK) }}
+fn file_readable_p(cx, filename: Value) -> Step { access(cx, filename, libc::R_OK) }}
 
 defsubr! { name = "file-regular-p", gnu = "fileio.c:3359", effect = Global,
 fn file_regular_p(cx, filename: Value) -> Step {
+    expanding(cx, filename, file_regular_expanded, vec![])
+}}
+fn file_regular_expanded(cx: &mut Leaf<'_>, expanded: Value, saved: &[Value]) -> Next {
     // expand_and_dir_to_file, then stat following symlinks.
-    let (path, expanded) = name(cx, filename, true)?;
+    let (path, expanded) = match dir_to_file(cx, expanded, file_regular_expanded, saved, 0)? { Ok(file) => file, Err(call) => return call };
     if let Some(call) = handler(cx, expanded, "file-regular-p", vec![expanded])? { return call; }
     native_encoding(cx)?;
     Ok(Step::Done(if std::fs::metadata(&path).is_ok_and(|m| m.is_file()) { Value::TRUE } else { Value::NIL }))
+}
+
+defsubr! { name = "file-directory-p", gnu = "fileio.c:3185", effect = Global,
+fn file_directory_p(cx, filename: Value) -> Step {
+    expanding(cx, filename, file_directory_expanded, vec![])
 }}
+fn file_directory_expanded(cx: &mut Leaf<'_>, expanded: Value, saved: &[Value]) -> Next {
+    // expand_and_dir_to_file, then a directory or a symlink to one.
+    let (path, expanded) = match dir_to_file(cx, expanded, file_directory_expanded, saved, 0)? { Ok(file) => file, Err(call) => return call };
+    if let Some(call) = handler(cx, expanded, "file-directory-p", vec![expanded])? { return call; }
+    native_encoding(cx)?;
+    Ok(Step::Done(if std::path::Path::new(&path).is_dir() { Value::TRUE } else { Value::NIL }))
+}
 
 /// gnulib gen_tempname's six random filename characters.
 fn temp_name_letters() -> String {
@@ -339,39 +417,44 @@ fn temp_file_written(_: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
 // Fdelete_file_internal: unlink the expanded FILENAME; a missing file is
 // not an error. files.el's `delete-file' handles handlers and trash.
 defsubr! { name = "delete-file-internal", gnu = "fileio.c:2602", effect = Global,
-fn delete_file_internal(cx, filename: Value) {
-    let (path, expanded) = name(cx, filename, false)?;
+fn delete_file_internal(cx, filename: Value) -> Step {
+    expanding(cx, filename, delete_file_internal_expanded, vec![])
+}}
+fn delete_file_internal_expanded(cx: &mut Leaf<'_>, expanded: Value, _: &[Value]) -> Next {
+    let (path, expanded) = as_file(cx, expanded, false)?;
     native_encoding(cx)?;
     match cx.filesave_unlink(&path) {
         Err(e) if e.raw_os_error() != Some(libc::ENOENT) => Err(errno(cx, "Removing old name", &[expanded], e)),
-        _ => Ok(Value::NIL),
+        _ => Ok(Step::Done(Value::NIL)),
     }
-}}
+}
 
 // Fdelete_directory_internal: rmdir the expanded directory file name.
 defsubr! { name = "delete-directory-internal", gnu = "fileio.c:2583", effect = Global,
-fn delete_directory_internal(cx, directory: Value) {
-    let (path, expanded) = name(cx, directory, true)?;
+fn delete_directory_internal(cx, directory: Value) -> Step {
+    expanding(cx, directory, delete_directory_expanded, vec![])
+}}
+fn delete_directory_expanded(cx: &mut Leaf<'_>, expanded: Value, saved: &[Value]) -> Next {
+    let (path, expanded) = match dir_to_file(cx, expanded, delete_directory_expanded, saved, 0)? { Ok(file) => file, Err(call) => return call };
     native_encoding(cx)?;
     std::fs::remove_dir(&path).map_err(|e| errno(cx, "Removing directory", &[expanded], e))?;
-    Ok(Value::NIL)
-}}
+    Ok(Step::Done(Value::NIL))
+}
 
 /// fileio.c expand_cp_target: NEWNAME expanded, or FILE's last component
-/// under NEWNAME when NEWNAME is a directory name.
+/// expanded against NEWNAME when NEWNAME is a directory name.
 fn cp_target(cx: &mut Leaf<'_>, file: Value, newname: Value) -> std::result::Result<(String, Value), Fault> {
     if cx.string_bytes(newname)?.last() != Some(&b'/') {
         return name(cx, newname, false);
     }
     super::fileio::refuse_handler(cx, file, "file-name-nondirectory")?;
-    let text = cx.string_text(file)?;
-    let base = text.rsplit('/').next().unwrap_or("");
-    let (directory, _) = name(cx, newname, false)?;
-    // (expand-file-name BASE NEWNAME): `~' is the home directory, `..'
-    // climbs, an empty BASE names the directory itself.
-    let joined = if base.starts_with('~') { base.to_owned() } else { format!("{directory}{base}") };
-    let joined = cx.string(&joined);
-    name(cx, joined, base.is_empty())
+    let bytes = cx.string_bytes(file)?;
+    let base = bytes.rsplit(|&b| b == b'/').next().unwrap_or(&[]).to_vec();
+    let multibyte = cx.string_view(file)?.is_multibyte();
+    let base = cx.make_string(base, multibyte);
+    let expanded = super::expand_file_name::expand(cx, base, newname)?
+        .ok_or_else(|| refusal("filesave expand-file-name handler"))?;
+    as_file(cx, expanded, false)
 }
 
 /// barf_or_query_if_file_exists for a NAME known to exist: nil signals,
@@ -557,11 +640,16 @@ fn make_symbolic_link(cx, target: Value, linkname: Value; optional ok_if_already
 // non-nil FLAG sets a symbolic link's own times. Returns t.
 defsubr! { name = "set-file-times", gnu = "fileio.c:3741", effect = Global,
 fn set_file_times(cx, filename: Value; optional timestamp: Value, flag: Value) -> Step {
+    if timestamp != Value::NIL { super::time::timespec(cx, timestamp)?; }
+    expanding(cx, filename, set_file_times_expanded, vec![timestamp, flag])
+}}
+fn set_file_times_expanded(cx: &mut Leaf<'_>, expanded: Value, saved: &[Value]) -> Next {
+    let (timestamp, flag) = (saved[0], saved[1]);
     let time = if timestamp == Value::NIL { None } else { Some(super::time::timespec(cx, timestamp)?) };
-    let (path, expanded) = name(cx, filename, false)?;
+    let (path, expanded) = as_file(cx, expanded, false)?;
     if let Some(call) = handler(cx, expanded, "set-file-times", vec![expanded, timestamp, flag])? { return call; }
     native_encoding(cx)?;
     cx.filesave_utimens(&path, time, flag != Value::NIL)
         .map_err(|e| errno(cx, "Setting file times", &[expanded], e))?;
     Ok(Step::Done(Value::TRUE))
-}}
+}

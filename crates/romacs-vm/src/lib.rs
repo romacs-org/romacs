@@ -585,8 +585,11 @@ const PRIMITIVES: &[(&str, Primitive)] = &[
     ("stringp", Primitive::Stringp),
     ("null", Primitive::Null),
     ("nconc", Primitive::Nconc),
-    ("expand-file-name", Primitive::ExpandFileName),
-    ("file-directory-p", Primitive::FileDirectoryP),
+    // T2 defsubrs (prims/expand_file_name.rs, prims/filesave.rs) so they can
+    // call file name handlers; the rows stay because legacy primitive
+    // references are table ordinals.
+    ("#:vm2-expand-file-name", Primitive::ExpandFileName),
+    ("#:vm2-file-directory-p", Primitive::FileDirectoryP),
     ("max", Primitive::Max),
     ("boundp", Primitive::Boundp),
     ("defalias", Primitive::Defalias),

@@ -47,8 +47,8 @@ pub const STAND_INS: [(&str, &str, &str); 13] = [
 static FILES: std::sync::Mutex<Vec<std::path::PathBuf>> = std::sync::Mutex::new(Vec::new());
 
 /// Queue FILE for [`visit_queued`]. Relative names stay relative: the
-/// evaluator expands them against the process directory (DIVERGENCES.md
-/// VM2-PATH2), which is where `romacs FILE` was typed.
+/// evaluator expands them against the current buffer's `default-directory`,
+/// which starts as the process directory, where `romacs FILE` was typed.
 pub fn visit_at_startup(file: &str) {
     FILES.lock().unwrap().push(file.into());
 }
