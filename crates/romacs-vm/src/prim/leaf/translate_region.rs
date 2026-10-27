@@ -95,7 +95,7 @@ impl Leaf<'_> {
         // empty region is checked as an insertion point.
         let at = range.start;
         let empty = range.is_empty();
-        self.vm.check_text_property_edit(buffer, range, false)?;
+        self.vm.check_text_property_edit(buffer, range)?;
         if empty {
             let inhibit = self.intern("inhibit-read-only");
             let inhibit = self.variable_value(inhibit)?.unwrap_or(Value::NIL);

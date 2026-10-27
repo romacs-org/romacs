@@ -544,6 +544,8 @@ pub(crate) static C_VARIABLES: &[CVariable] = &[
     CVariable { name: "buffer-read-only", gnu: "buffer.c:5458", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
     CVariable { name: "buffer-file-format", gnu: "buffer.c:5837", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
     CVariable { name: "mark-active", gnu: "buffer.c:5795", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
+    // Text edits record undo entries here (undo.c); t disables recording.
+    CVariable { name: "buffer-undo-list", gnu: "buffer.c:5743", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
     CVariable { name: "transient-mark-mode", gnu: "buffer.c:5875", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "mark-even-if-inactive", gnu: "callint.c:898", kind: Kind::Lisp(Init::True) },
     // Heap-valued C variables materialize lazily on first read.
@@ -899,7 +901,7 @@ impl Vm {
     /// GNU `PER_BUFFER_VALUE_P (buf, idx)`.
     pub(super) fn per_buffer_always_local(&self, i: u16) -> bool {
         matches!(C_VARIABLES[self.forwarded.buffer_vars[i as usize]].name,
-            "buffer-invisibility-spec" | "buffer-file-name" | "buffer-file-truename" | "buffer-read-only" | "buffer-file-format" | "major-mode" | "mode-name" | "mark-active")
+            "buffer-invisibility-spec" | "buffer-file-name" | "buffer-file-truename" | "buffer-read-only" | "buffer-file-format" | "major-mode" | "mode-name" | "mark-active" | "buffer-undo-list")
     }
     pub(super) fn clear_forwarded_local(&mut self, buffer: usize, i: u16) {
         if !self.per_buffer_always_local(i) {
@@ -930,6 +932,15 @@ impl Vm {
         locals.1 = VisitedModtime::Unknown;
         locals.2 = None;
         locals.3 = None;
+    }
+    /// BVAR (BUFFER, undo_list), and bset_undo_list.
+    pub(crate) fn undo_list_of(&mut self, buffer: usize) -> Value {
+        let Some(Fwd::Buffer(i)) = self.forwarded.lookup("buffer-undo-list") else { unreachable!("declared") };
+        self.forwarded_buffer_value(buffer, i)
+    }
+    pub(crate) fn set_undo_list_of(&mut self, buffer: usize, value: Value) {
+        let Some(Fwd::Buffer(i)) = self.forwarded.lookup("buffer-undo-list") else { unreachable!("declared") };
+        if let Some(locals) = self.per_buffer_mut(buffer) { locals.set(i, value); }
     }
     pub(super) fn per_buffer_local_p(&self, buffer: usize, i: u16) -> bool {
         self.per_buffer_always_local(i) || self.per_buffer(buffer).and_then(|p| p.get(i)).is_some()

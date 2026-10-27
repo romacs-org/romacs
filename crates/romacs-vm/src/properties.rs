@@ -471,6 +471,15 @@ impl Properties {
     pub fn is_empty(&self) -> bool {
         self.layers.is_empty()
     }
+    /// GNU's text has an interval tree once any property was ever put on
+    /// it, even after every property is removed again.
+    pub fn has_intervals(&self) -> bool {
+        self.stamp != 0 || !self.layers.is_empty()
+    }
+    /// Note that the text has had properties (a unibyte buffer's map).
+    pub fn mark_intervals(&mut self) {
+        self.stamp = self.stamp.max(1);
+    }
     pub fn new() -> Self {
         Self::default()
     }

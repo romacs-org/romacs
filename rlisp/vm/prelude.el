@@ -283,4 +283,52 @@ shortens ends the walk early."
       (setq tail (cdr tail)))
     (or answer (car found))))
 
+;; Change hooks around a buffer edit (insdel.c, VM2-EDIT-HOOKS1).  The
+;; edit primitive itself is native; it calls these only when a hook can run,
+;; with the edit's region in BUFFER.
+
+(defun romacs--before-change (buffer beg end modification-hooks)
+  "Run what GNU runs before changing BEG..END of BUFFER.
+verify_interval_modification calls each function of each
+MODIFICATION-HOOKS value (the characters' `modification-hooks', in
+order) with BEG and END; then signal_before_change runs
+`first-change-hook' if BUFFER is unmodified and
+`before-change-functions' with BEG and END, both with
+`inhibit-modification-hooks' bound to t.  A non-local exit from
+`before-change-functions' resets it to nil, as reset_var_on_error does."
+  (save-current-buffer
+    (set-buffer buffer)
+    (unless inhibit-modification-hooks
+      (let ((tail modification-hooks))
+        (while tail
+          (let ((functions (car tail)))
+            (while functions
+              (funcall (car functions) beg end)
+              (setq functions (cdr functions))))
+          (setq tail (cdr tail))))
+      (let ((inhibit-modification-hooks t))
+        (if (and first-change-hook (not (buffer-modified-p)))
+            (run-hooks 'first-change-hook))
+        (if before-change-functions
+            (let ((done nil))
+              (unwind-protect
+                  (progn (run-hook-with-args 'before-change-functions beg end)
+                         (setq done t))
+                (or done (setq before-change-functions nil)))))))))
+
+(defun romacs--after-change (buffer beg end length)
+  "Run signal_after_change for BUFFER: `after-change-functions' with BEG,
+END and LENGTH, the length of the text the change replaced, with
+`inhibit-modification-hooks' bound to t; a non-local exit resets it to nil."
+  (save-current-buffer
+    (set-buffer buffer)
+    (unless inhibit-modification-hooks
+      (let ((inhibit-modification-hooks t))
+        (if after-change-functions
+            (let ((done nil))
+              (unwind-protect
+                  (progn (run-hook-with-args 'after-change-functions beg end length)
+                         (setq done t))
+                (or done (setq after-change-functions nil)))))))))
+
 ;;; prelude.el ends here

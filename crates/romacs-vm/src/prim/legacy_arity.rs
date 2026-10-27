@@ -141,7 +141,7 @@ pub(super) fn arity(primitive: Primitive) -> (usize, Option<usize>) {
         | ExpandFileName | RawPropertiesAt | KillNew | CurrentKill | CopyMarker | LookingAt
         | MatchString | SelectWindow | Macroexpand | Signal => (1, Some(2)),
         Require | Prin1ToString | SwitchToBuffer | AutoloadDoLoad => (1, Some(3)),
-        PutProperty | SplitWindowInternal => (4, Some(5)),
+        SplitWindowInternal => (4, Some(5)),
         GetProperty | Defalias | GetCharProperty | SetMarker | DefineError | Gethash
         | ModifySyntaxEntry | SetWindowMargins | SetWindowStart
         | SetWindowNewPixel | LookupKey | ClosureDocument => (2, Some(3)),

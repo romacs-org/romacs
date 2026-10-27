@@ -1508,6 +1508,8 @@ mod leaf {
     mod completion;
     mod backtrace;
     mod text_properties;
+    pub(crate) use text_properties::{PropertyBegin, Retry};
+    mod undo;
     mod sqlite;
     mod random;
 }

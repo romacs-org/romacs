@@ -46,6 +46,8 @@ pub(crate) struct ByteBuffer {
     pub point: ByteOffset,
     pub restriction: Range<ByteOffset>,
     pub properties: BTreeMap<ByteOffset, BTreeMap<String, Value>>,
+    /// GNU keeps a buffer's interval tree once it had a property.
+    pub had_intervals: bool,
     /// GNU's per-buffer variable slots (`struct buffer`, forwarded.rs).
     pub per_buffer: crate::forwarded::PerBuffer,
 }

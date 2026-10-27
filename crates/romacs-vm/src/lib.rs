@@ -44,6 +44,7 @@ mod sqlite;
 mod random;
 mod posix_tz;
 mod tzfile;
+mod undo;
 mod gc;
 mod handle;
 pub use handle::{Arg, Fixed, Local, Rooted};
@@ -301,7 +302,6 @@ enum Primitive {
     Widen,
     CharToByte,
     ByteToChar,
-    PutProperty,
     GetProperty,
     SetMultibyte,
     BufferString,
@@ -552,7 +552,6 @@ const PRIMITIVES: &[(&str, Primitive)] = &[
     ("widen", Primitive::Widen),
     ("position-bytes", Primitive::CharToByte),
     ("byte-to-position", Primitive::ByteToChar),
-    ("put-text-property", Primitive::PutProperty),
     ("get-text-property", Primitive::GetProperty),
     ("set-buffer-multibyte", Primitive::SetMultibyte),
     ("buffer-string", Primitive::BufferString),

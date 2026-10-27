@@ -59,7 +59,9 @@ fn native_modification_missing_visit_clears_empty_modified_buffer() {
 #[test]
 fn native_undo_frontier_is_explicit_not_an_inverse_edit() {
     let mut vm = Vm::new();
-    assert_eq!(eval(&mut vm, "(list (fboundp 'undo) (fboundp 'undo-only) (fboundp 'primitive-undo) (fboundp 'buffer-enable-undo))"), "(nil nil nil nil)", "COUNTERS_UNDO_SUBSTRATE_UNAVAILABLE_NOT_PARITY");
+    // buffer-enable-undo is C; the undo commands are simple.el, which the
+    // bare VM does not load.
+    assert_eq!(eval(&mut vm, "(list (fboundp 'undo) (fboundp 'undo-only) (fboundp 'primitive-undo) (fboundp 'buffer-enable-undo))"), "(nil nil nil t)", "COUNTERS_UNDO_COMMANDS_ARE_SIMPLE_EL");
 }
 #[test]
 fn native_modification_visit_success_and_failed_save() {

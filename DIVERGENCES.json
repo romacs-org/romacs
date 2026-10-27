@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "116b3fd0776956d7c4ea8d87403f371d1502c37c582c84cc5db95a65946046ed",
+  "input_hash": "9a88eda33c546fe2dd9a9393d993bad46ebe5d70ad51ef7b51fd4a831eddb9fb",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -4516,8 +4516,8 @@
    "planned": false,
    "mechanism": "Change hooks and undo for buffer text primitives",
    "gnu": "`insdel.c` runs `before-change-functions`, `after-change-functions` and `first-change-hook` around each change and records it in `buffer-undo-list` (`undo.c`).",
-   "romacs": "Text primitives (`insert`, `delete-region`, `insert-char`, `indent-to`, `move-to-column` with FORCE, `subst-char-in-region`, the text-property setters) run none of these hooks, and `buffer-undo-list` and `buffer-enable-undo` are void. Text-property changes refuse explicitly while a change hook is set.",
-   "why": "Undo and change hooks are one subsystem in GNU and land together; until then packages that rely on them (font-lock jit, electric modes, undo) misbehave silently.",
+   "romacs": "The text-property setters (`put-text-property`, `add-text-properties`, `set-text-properties`, `remove-text-properties`, `remove-list-of-text-properties`) run GNU's hooks in GNU's order (characters' `modification-hooks`, `first-change-hook`, `before-change-functions`, `after-change-functions`, with `inhibit-modification-hooks` bound and a failing hook variable reset) and record their undo entries; `buffer-undo-list`, `buffer-enable-undo` and `undo-boundary` exist. Text insertion and deletion (`insert`, `delete-region`, `insert-char`, `indent-to`, `move-to-column` with FORCE, `subst-char-in-region`) still run no hooks and record no undo. Overlay modification hooks and `combine-after-change-calls` deferral refuse explicitly before anything changes. Property undo entries follow VM2's merged property runs: where GNU's interval tree keeps equal adjacent intervals apart it records more, finer entries that undo to the same text.",
+   "why": "Insertion and deletion are the next slice of the same machinery (the change state machine and undo recording are shared); until then packages that rely on their hooks (font-lock jit, electric modes, undo of typing) misbehave silently.",
    "symbols": [
     "before-change-functions",
     "after-change-functions",
@@ -6011,7 +6011,7 @@
    "planned": false,
    "mechanism": "Bulk text-property edits and forward boundary queries",
    "gnu": "GNU supports arbitrary property keys, modification callbacks, byte buffers and raw interval traversal with `next-property-change` LIMIT t.",
-   "romacs": "Bulk edits support interned symbol keys, mutable strings and annotated text buffers, with atomic validation, read-only checks and a changed-result flag. Callback-bearing mutations, other key types, immutable image-string writes and unibyte-buffer edits refuse explicitly. The two forward queries support strings and annotated text buffers; unibyte-buffer queries and raw interval LIMIT t refuse explicitly. Effective property queries retain the existing general property-resolution limits.",
+   "romacs": "Bulk edits support interned symbol keys, mutable strings and annotated text buffers, with atomic validation, read-only checks and a changed-result flag. Unibyte buffers are edited too, and change hooks run as VM2-EDIT-HOOKS1 describes. Other key types and immutable image-string writes refuse explicitly. The two forward queries support strings and annotated text buffers; unibyte-buffer queries and raw interval LIMIT t refuse explicitly. Effective property queries retain the existing general property-resolution limits.",
    "why": "Reuse the native property runs and overlay precedence for the ERT printer's actual calls.",
    "symbols": [
     "add-text-properties",

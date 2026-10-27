@@ -1,15 +1,140 @@
 use super::*;
+use crate::buffer::PropertyEdit;
+
+/// GNU's interval I before the change hooks: the characters-modified count,
+/// I's character POSITION and LENGTH (the start of the change and its run)
+/// and the run's plist, and in a multibyte buffer markers at both ends (the
+/// end one advancing) that show whether the hooks moved or resized I (nil in
+/// a unibyte buffer, which has no markers; there any text change counts).
+pub(crate) struct Retry { pub chars: u64, pub plist: Value, pub start: Value, pub end: Value, pub position: i64, pub length: i64 }
+
+/// What a property primitive does next: it is finished, or the change hooks
+/// must run around it (`romacs--before-change' ... `romacs--after-change').
+pub(crate) enum PropertyBegin {
+    Done(Value),
+    /// RETRY is what GNU's retry check compares after the hooks.
+    Hooks { buffer: Value, start: i64, end: i64, modification_hooks: Vec<Value>, retry: Retry },
+}
 
 impl Leaf<'_> {
-    pub(crate) fn add_text_properties(
-        &mut self,
-        start: Value,
-        end: Value,
-        properties: Value,
-        object: Value,
-    ) -> super::super::Out {
-        self.vm
-            .add_text_properties_native(start, end, properties, object)
+    /// Run F with BUFFER current, restoring the current buffer after.
+    fn in_buffer<T>(&mut self, buffer: Value, f: impl FnOnce(&mut Self) -> std::result::Result<T, Fault>) -> std::result::Result<T, Fault> {
+        let current = self.vm.slots[self.vm.buffer_slot].value;
+        self.vm.slots[self.vm.buffer_slot].value = buffer;
+        let result = f(self);
+        self.vm.slots[self.vm.buffer_slot].value = current;
+        result
+    }
+    fn hook_value(&mut self, name: &str) -> std::result::Result<Value, Fault> {
+        let symbol = self.intern(name);
+        Ok(self.variable_value(symbol)?.unwrap_or(Value::NIL))
+    }
+
+    /// modify_text_properties up to its hooks: plan EDIT; finish it here
+    /// when it changes nothing, touches a string, or no change hook can
+    /// run; else say which hooks must run first.
+    pub(crate) fn property_begin(&mut self, edit: &PropertyEdit, start: Value, end: Value, object: Value) -> std::result::Result<PropertyBegin, Fault> {
+        let Some(plan) = self.vm.property_plan(edit, start, end, object, false)? else { return Ok(PropertyBegin::Done(Value::NIL)) };
+        let buffer = plan.object;
+        if !matches!(self.vm.object_if(buffer), Some(data::Object::Buffer(_) | data::Object::ByteBuffer(_))) {
+            self.vm.property_apply(plan, false)?;
+            return Ok(PropertyBegin::Done(Value::TRUE));
+        }
+        let range = plan.range.clone();
+        let hooks = self.in_buffer(buffer, |cx| {
+            cx.vm.check_text_property_edit(buffer, range.clone())?;
+            if cx.hook_value("inhibit-modification-hooks")? != Value::NIL { return Ok(Err(false)); }
+            let modification_hooks = cx.vm.modification_hooks_in(buffer, range.clone())?;
+            let modified = cx.vm.buffer_state(buffer).map_err(Fault::Error)?.modified();
+            let first = !modified && cx.hook_value("first-change-hook")? != Value::NIL;
+            let before = cx.hook_value("before-change-functions")?;
+            let after = cx.hook_value("after-change-functions")?;
+            cx.refuse_unported_change_hooks(buffer, range.clone(), before, after)?;
+            let any = !modification_hooks.is_empty() || first || before != Value::NIL || after != Value::NIL;
+            Ok(if any { Ok(modification_hooks) } else { Err(true) })
+        })?;
+        match hooks {
+            Err(hooks) => {
+                self.vm.property_apply(plan, hooks)?;
+                Ok(PropertyBegin::Done(Value::TRUE))
+            }
+            Ok(modification_hooks) => {
+                let chars = self.vm.buffer_state(buffer).map_err(Fault::Error)?.chars_modiff;
+                let (run_end, plist) = self.vm.property_run_at(buffer, plan.first)?;
+                let (position, length) = (self.vm.char_position(buffer, plan.first)?, self.vm.char_position(buffer, run_end)?);
+                let length = length - position;
+                let (start, end) = if matches!(self.vm.object_if(buffer), Some(data::Object::Buffer(_))) {
+                    (self.vm.watch_marker(buffer, position, false)?, self.vm.watch_marker(buffer, position + length, true)?)
+                } else { (Value::NIL, Value::NIL) };
+                let retry = Retry { chars, plist, start, end, position, length };
+                Ok(PropertyBegin::Hooks { buffer, start: plan.start, end: plan.end, modification_hooks, retry })
+            }
+        }
+    }
+
+    /// The rest of the primitive once the before hooks ran: the modify tail,
+    /// then the change, applied even if the hooks made it moot unless GNU's
+    /// interval I changed under it. GNU then re-scans, and if nothing is left
+    /// to do returns nil and runs no after-change hooks (None). I changes
+    /// when text moved (characters modified), or when the hooks split it:
+    /// add, remove and face watch I's position (a hook that changed the
+    /// properties at I's start and ended inside it), set also I's length
+    /// (any shorter run); remove-list never re-scans (WATCHES false). Some
+    /// is the after hooks' BEG and END.
+    pub(crate) fn property_finish(&mut self, edit: &PropertyEdit, start: Value, end: Value, buffer: Value, retry: Retry, watches: bool) -> std::result::Result<Option<(i64, i64)>, Fault> {
+        // I moved or changed length: the markers moved apart, or (unibyte) text changed.
+        let moved = if retry.start == Value::NIL {
+            self.vm.buffer_state(buffer).map_err(Fault::Error)?.chars_modiff != retry.chars
+        } else {
+            let (s, e) = (self.vm.release_marker(retry.start)?, self.vm.release_marker(retry.end)?);
+            s != retry.position || e - s != retry.length
+        };
+        let rescan = watches && {
+            moved || {
+                // Same characters, but their bytes may not be: re-resolve I.
+                let first = self.vm.byte_position(buffer, retry.position)?;
+                let (run_end, plist) = self.vm.property_run_at(buffer, first)?;
+                let shorter = self.vm.char_position(buffer, run_end)? - retry.position < retry.length;
+                let same = self.vm.list_values(plist).ok() == self.vm.list_values(retry.plist).ok();
+                if matches!(edit, PropertyEdit::Set(_)) { shorter } else { shorter && !same }
+            }
+        };
+        let plan = self.vm.property_plan(edit, start, end, buffer, !rescan)?;
+        self.vm.property_modify_tail(buffer, true)?;
+        let Some(plan) = plan else { return Ok(None) };
+        let positions = (plan.start, plan.end);
+        self.vm.property_install(plan)?;
+        Ok(Some(positions))
+    }
+
+    /// Change hooks VM2 does not run yet refuse before anything changes
+    /// (VM2-EDIT-HOOKS1): overlay modification hooks, and the deferral
+    /// combine-after-change-calls asks for.
+    pub(crate) fn refuse_unported_change_hooks(&mut self, buffer: Value, range: std::ops::Range<crate::coordinates::ByteOffset>, before: Value, after: Value) -> std::result::Result<(), Fault> {
+        // Unibyte buffers have no overlays.
+        let mut overlays = Vec::new();
+        if matches!(self.vm.object_if(buffer), Some(data::Object::Buffer(_))) {
+            self.vm.visit_overlays_in(buffer, range.clone(), |overlay, span| {
+                if span.start < range.end && span.end > range.start { overlays.push(overlay); }
+            }).map_err(Fault::Error)?;
+        }
+        // A property change runs only the overlays' modification-hooks.
+        let name = self.intern("modification-hooks");
+        for overlay in overlays {
+            if let Some(data::Object::Overlay(o)) = self.vm.object_if(overlay)
+                && o.properties.iter().any(|(k, v)| *k == name && *v != Value::NIL) {
+                return Err(Fault::Error("VM2 overlay modification hooks are not implemented".into()));
+            }
+        }
+        if self.hook_value("combine-after-change-calls")? != Value::NIL && after != Value::NIL && before == Value::NIL {
+            return Err(Fault::Error("VM2 combine-after-change-calls deferral is not implemented".into()));
+        }
+        Ok(())
+    }
+
+    /// add-text-properties on a string (decoding's runs): no change hooks.
+    pub(crate) fn add_text_properties(&mut self, start: Value, end: Value, properties: Value, object: Value) -> super::super::Out {
+        self.vm.property_edit_now(&PropertyEdit::Add(properties), start, end, object)
     }
     pub(crate) fn next_property_change(
         &mut self,
@@ -34,12 +159,6 @@ impl Leaf<'_> {
     }
     pub(crate) fn text_property_any(&mut self, start: Value, end: Value, property: Value, value: Value, object: Value) -> super::super::Out {
         self.vm.text_property_any_values(start, end, property, value, object)
-    }
-    pub(crate) fn set_text_properties(&mut self, start: Value, end: Value, properties: Value, object: Value) -> super::super::Out {
-        self.vm.set_text_properties_native(start, end, properties, object)
-    }
-    pub(crate) fn remove_text_properties(&mut self, start: Value, end: Value, names: &[Value], object: Value) -> super::super::Out {
-        self.vm.remove_text_properties_native(start, end, names, object)
     }
 }
 

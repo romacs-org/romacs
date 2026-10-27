@@ -121,6 +121,7 @@ impl Text {
                 .into_iter()
                 .filter(|(at, _)| self.boundary(*at).is_ok())
                 .collect(),
+            had_intervals: self.properties.has_intervals(),
             per_buffer: Default::default(),
         }
     }
