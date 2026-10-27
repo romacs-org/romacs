@@ -314,6 +314,7 @@ fn initialize_files_with_sources(vm: &mut Vm, files: &[std::path::PathBuf], root
     policy(vm, root, "romacs-buffer-switch.el", include_str!("../../../rlisp/romacs-buffer-switch.el"))?;
     policy(vm, root, "romacs-extended-command.el", include_str!("../../../rlisp/romacs-extended-command.el"))?;
     initialize_editing_from_sources(vm, root)?;
+    initialize_coding(vm, root)?;
     policy(vm, root, "romacs-dired.el", include_str!("../../../rlisp/romacs-dired.el"))?;
     policy(vm, root, "romacs-term.el", include_str!("../../../rlisp/romacs-term.el"))?;
     policy(vm, root, "vm/process.el", include_str!("../../../rlisp/vm/process.el"))?;
@@ -431,6 +432,46 @@ fn initialize_editing_from_sources(vm: &mut Vm, root: Option<&std::path::Path>) 
         }
     }
     Ok(())
+}
+
+/// The workspace's file coding: without loadup only coding.c's built-in
+/// systems exist, so a visit of UTF-8 text would find nothing. Evaluate,
+/// verbatim from the pinned mirror, mule.el's `define-coding-system' and
+/// visit bookkeeping and mule-conf.el's fundamental, Latin-1 and UTF-8
+/// definitions; then romacs-coding.el sets the state GNU's locale startup
+/// reaches. Each head names exactly one top-level form.
+fn initialize_coding(vm: &mut Vm, root: Option<&std::path::Path>) -> Result<(), String> {
+    for (source, heads) in [
+        (include_str!("../../../gnu-lisp/international/mule.el"), &[
+            "(defun define-coding-system", "(defun coding-system-type",
+            "(defvar-local buffer-file-coding-system-explicit",
+            "(defun after-insert-file-set-coding", "(defun find-new-buffer-file-coding-system",
+        ][..]),
+        (include_str!("../../../gnu-lisp/international/mule-conf.el"), &[
+            "(define-coding-system-alias 'binary", "(define-coding-system-alias 'unix",
+            "(define-coding-system-alias 'dos", "(define-coding-system-alias 'mac",
+            "(define-coding-system 'prefer-utf-8", "(define-coding-system 'raw-text",
+            "(define-coding-system 'no-conversion-multibyte", "(define-coding-system 'iso-latin-1",
+            "(define-coding-system-alias 'iso-8859-1", "(define-coding-system-alias 'latin-1",
+            "(define-coding-system 'utf-8", "(define-coding-system 'utf-8-with-signature",
+            "(define-coding-system 'utf-8-auto", "(define-coding-system-alias 'mule-utf-8",
+            "(define-coding-system-alias 'cp65001", "(define-coding-system 'utf-8-emacs",
+            "(define-coding-system-alias 'emacs-internal",
+            "(aset latin-extra-code-table ?\\221", "(aset latin-extra-code-table ?\\222",
+            "(aset latin-extra-code-table ?\\223", "(aset latin-extra-code-table ?\\224",
+            "(aset latin-extra-code-table ?\\225", "(aset latin-extra-code-table ?\\226",
+        ][..]),
+    ] {
+        let spans = crate::loadup::form_spans(source)?;
+        for head in heads {
+            let forms: Vec<_> = spans.iter().map(|&(start, end, _)| &source[start..end])
+                .filter(|form| form.strip_prefix(head).is_some_and(|tail| tail.starts_with(char::is_whitespace)))
+                .collect();
+            let [form] = forms[..] else { return Err(format!("Expected one GNU coding form: {head}")) };
+            vm.eval_source(form)?;
+        }
+    }
+    policy(vm, root, "romacs-coding.el", include_str!("../../../rlisp/romacs-coding.el"))
 }
 
 /// Evaluate sorted `.el` command modules beside GNU's runtime Lisp directory.

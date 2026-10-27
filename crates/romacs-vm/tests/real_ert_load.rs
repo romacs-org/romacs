@@ -170,6 +170,9 @@ fn insert_file_contents_coding_matches_gnu() {
     let state = "last-coding-system-used (buffer-string) (and (local-variable-p 'buffer-file-coding-system) buffer-file-coding-system) (point) (buffer-modified-p) enable-multibyte-characters";
     let read = format!("(with-temp-buffer (list (cdr (insert-file-contents FILE)) {state}))");
     let big = [vec![b'x'; 6000], b"\n;; Local Variables:\n;; coding: latin-1\n;; End:\n\xe9\n".to_vec()].concat();
+    // The charset detector, with iso-latin-1 ahead of the ISO-2022
+    // categories VM2 cannot detect.
+    let latin = "(let ((saved (coding-system-priority-list))) (unwind-protect (progn (set-coding-system-priority 'iso-latin-1) (with-temp-buffer (list (cdr (insert-file-contents FILE)) last-coding-system-used (buffer-string)))) (apply #'set-coding-system-priority saved)))";
     let cases: Vec<(&str, Vec<u8>, String)> = vec![
         ("txt", "* Heading\nλ body\n".into(), read.clone()),
         ("txt", b"hi\n".to_vec(), read.clone()),
@@ -179,6 +182,9 @@ fn insert_file_contents_coding_matches_gnu() {
         // auto-coding-regexp-alist: the signature, then a coding cookie.
         ("txt", b"\xef\xbb\xbfx\n".to_vec(), read.clone()),
         ("el", b";; -*- coding: latin-1 -*-\ncaf\xe9\n".to_vec(), read.clone()),
+        // C1 bytes mule-conf.el's latin-extra-code-table admits, and CRLF.
+        ("txt", b"caf\xe9 \x93q\x94\n".to_vec(), latin.into()),
+        ("txt", b"caf\xe9\r\n".to_vec(), latin.into()),
         // The cookie in the 3 KiB tail, into an empty buffer and into text.
         ("el", big.clone(), "(with-temp-buffer (list (cdr (insert-file-contents FILE)) last-coding-system-used (substring (buffer-string) -3)))".into()),
         ("el", big, "(with-temp-buffer (insert \"AB\") (goto-char 2) (list (cdr (insert-file-contents FILE)) last-coding-system-used (substring (buffer-string) -4) (point)))".into()),

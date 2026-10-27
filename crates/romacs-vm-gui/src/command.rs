@@ -213,4 +213,57 @@ mod tests {
         assert_eq!(std::fs::read(&file).unwrap(), "* Heading λ!\nλ body\n".as_bytes());
         let _ = std::fs::remove_dir_all(&dir);
     }
+    /// The same journey over UTF-8, CRLF and Latin-1 files (with and without
+    /// a coding cookie): the decoded text, `last-coding-system-used' and
+    /// `buffer-file-coding-system' after the visit and after C-x C-s, and the
+    /// bytes on disk are what pinned GNU's find-file-noselect, insert and
+    /// save-buffer give for a copy of the same file.
+    #[test]
+    fn coding_journey_visits_edits_and_saves_as_pinned_gnu() {
+        let dir = std::env::temp_dir().join(format!("romacs-gui-coding-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let (ours, gnu) = (dir.join("romacs"), dir.join("gnu"));
+        for d in [&ours, &gnu, &dir.join("home")] { std::fs::create_dir_all(d).unwrap(); }
+        let files: [(&str, &[u8]); 4] = [
+            ("utf8.txt", "* Heading\nλ body\n".as_bytes()),
+            ("crlf.txt", "* Heading\r\nλ body\r\n".as_bytes()),
+            ("cookie.txt", b"-*- coding: latin-1 -*-\ncaf\xe9\n"),
+            // 0x93 and 0x94 are C1 bytes mule-conf.el's latin-extra-code-table admits.
+            ("latin.txt", b"caf\xe9 \x93q\x94\n"),
+        ];
+        let oracle = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
+        let mut vm = Vm::new();
+        vm.set_collection_floor(1);
+        vm.set_frame_geometry(1600, 1000, 20, 10).unwrap();
+        crate::startup::initialize(&mut vm).unwrap();
+        let state = "(with-current-buffer (window-buffer (selected-window)) (list (buffer-string) last-coding-system-used buffer-file-coding-system))";
+        for (name, bytes) in files {
+            std::fs::write(ours.join(name), bytes).unwrap();
+            std::fs::write(gnu.join(name), bytes).unwrap();
+            let path = |d: &std::path::Path| serde_json::to_string(d.join(name).to_str().unwrap()).unwrap();
+            let expression = format!(
+                "(with-current-buffer (find-file-noselect {}) (let ((visited (list (buffer-string) last-coding-system-used buffer-file-coding-system))) (goto-char (point-min)) (end-of-line) (insert \" é!\") (save-buffer) (list visited (cdr (list (buffer-string) last-coding-system-used buffer-file-coding-system)))))",
+                path(&gnu));
+            let output = std::process::Command::new(&oracle).current_dir(&gnu)
+                .env("HOME", dir.join("home")).env("LANG", "C.UTF-8").env_remove("LC_ALL")
+                .args(["-Q", "--batch", "--eval", &format!("(prin1 (append (prin1-to-string {expression}) nil))")])
+                .output().unwrap();
+            assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+            let expected = String::from_utf8(output.stdout).unwrap();
+            vm.eval_source(&format!("(romacs-gui-visit-file {} {name:?})", path(&ours))).unwrap();
+            let visited = vm.eval_source(&format!("(prin1-to-string {state})")).unwrap().display().unwrap();
+            let mut keys = Commands::default();
+            for key in [1, 5, 32, 0xe9, 33, 24, 19] {   // C-a C-e " é!" C-x C-s
+                vm.eval_source("(set-buffer (window-buffer (selected-window)))").unwrap();
+                if let Some(out) = keys.dispatch(&mut vm, CommandEvent::Character(key)).unwrap() {
+                    assert!(!out.bell && out.signal.is_none(), "{name}: {out:?}");
+                }
+            }
+            let saved = vm.eval_source(&format!("(prin1-to-string (cdr {state}))")).unwrap().display().unwrap();
+            let actual = vm.eval_source(&format!("(append (format \"(%s %s)\" {visited} {saved}) nil)")).unwrap().display().unwrap();
+            assert_eq!(actual, expected, "{name}");
+            assert_eq!(std::fs::read(ours.join(name)).unwrap(), std::fs::read(gnu.join(name)).unwrap(), "{name} bytes");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
