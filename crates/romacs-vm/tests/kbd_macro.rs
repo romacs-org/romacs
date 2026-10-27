@@ -155,6 +155,24 @@ const CASES: &[&str] = &[
   (global-set-key [f7] (lambda () (interactive) (push (list 'f7 (this-command-keys-vector)) got)))
   (list (execute-kbd-macro (kbd "a C-c q z b q z")) (condition-case e (execute-kbd-macro (kbd "c C-c q")) (error e))
         got (with-current-buffer "*scratch*" (buffer-string))))"#,
+    // When a pending prefix fails, each map's scan moves on one event and
+    // a later map translates a shorter sequence inside it; the translated
+    // keys are reread through the maps after it. C-c q y: key-translation-map
+    // turns C-c into A behind input-decode-map's C-c q z; behind
+    // function-key-map's, it turns q into Q, which is unbound and looked up
+    // as q, then restored.
+    r#"(let ((input-decode-map (make-sparse-keymap)) (key-translation-map (make-sparse-keymap)) got)
+  (define-key input-decode-map [3 113 122] [f7]) (define-key key-translation-map [3] "A")
+  (global-set-key "k" (lambda () (interactive) (push (list (read-key-sequence-vector "") (this-command-keys-vector)) got)))
+  (global-set-key [f7] (lambda () (interactive) (push (list 'f7 (this-command-keys-vector)) got)))
+  (list (execute-kbd-macro [?k 3 113 121 ?k 3 113 122]) (execute-kbd-macro [3 113 121 ?b 3 113 122])
+        (nreverse got) (with-current-buffer "*scratch*" (buffer-string))))"#,
+    r#"(let ((local-function-key-map (make-sparse-keymap)) (key-translation-map (make-sparse-keymap)) got)
+  (define-key local-function-key-map [3 113 122] [f7]) (define-key key-translation-map [113] "Q")
+  (global-set-key "k" (lambda () (interactive) (push (list (read-key-sequence-vector "") (this-command-keys-vector)) got)))
+  (global-set-key [f7] (lambda () (interactive) (push (list 'f7 (this-command-keys-vector)) got)))
+  (list (execute-kbd-macro [?k 3 113 121 ?k 3 113 122]) (execute-kbd-macro [3 113 121 ?b 3 113 122])
+        (nreverse got) (with-current-buffer "*scratch*" (buffer-string))))"#,
     r#"(list (progn (set--this-command-keys "\370abc") (this-command-keys-vector))
   (progn (set--this-command-keys "") (this-command-keys-vector)) (condition-case e (set--this-command-keys 1) (error e)))"#,
     // The minibuffer reads its input from the macro.

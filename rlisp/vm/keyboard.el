@@ -173,38 +173,74 @@ Nil when EVENT is neither shifted nor an upper-case character."
   (or (null binding) (eq binding 'undefined)
       (and (symbolp binding) (eq (command-remapping binding) 'undefined))))
 
-(defun romacs--keyremap (keys start end map doit)
-  "keyboard.c keyremap_step: translate a suffix of KEYS before END through MAP.
-The events from START to END are tried, then from each later start. With
-DOIT, ones bound to an array (or to a function returning one) are
-replaced by it, the events from END on kept. Return (KEYS START): START
-is where later translation may begin; short of END, it begins a prefix
-of a longer translation that later events may complete."
-  (let ((searching t))
-    (while (and searching (< start end))
-      (let ((next (and (keymapp map)
-                       (lookup-key map (romacs--subvector keys start end) t))))
-        (when (and doit (functionp next) (not (keymapp next)))
-          (setq next (funcall next nil))
-          (unless (or (null next) (vectorp next) (stringp next))
-            (error "Function %s returns invalid key sequence" next)))
-        (cond ((and doit (or (vectorp next) (stringp next)))
-               (setq keys (vconcat (romacs--subvector keys 0 start) next
-                                   (romacs--subvector keys end))
-                     start (+ start (length next)) searching nil))
-              ((keymapp next) (setq searching nil))
-              (t (setq start (1+ start))))))
-    (list keys start)))
+(defun romacs--keyremap (map)
+  "A keyboard.c keyremap scanning through MAP: [PARENT MAP START END].
+MAP is the submap of PARENT the events from START to END lead to."
+  (vector map map 0 0))
 
-(defun romacs--first-unbound (keys)
-  "keyboard.c first_unbound: the index of the first event of KEYS that
-leaves the active keymaps, or nil when every prefix of KEYS is bound."
-  (let ((i 0) (found nil))
-    (while (and (not found) (< i (length keys)))
-      (if (key-binding (romacs--subvector keys 0 (1+ i)) t t)
-          (setq i (1+ i))
-        (setq found i)))
-    found))
+(defun romacs--keyremap-reset (remap start)
+  "Restart REMAP's scan at START, from its whole map."
+  (aset remap 1 (aref remap 0))
+  (aset remap 2 start)
+  (aset remap 3 start))
+
+(defun romacs--keyremap-shift (remap diff)
+  "Move REMAP's scan by DIFF events, after a translation before it."
+  (aset remap 2 (+ (aref remap 2) diff))
+  (aset remap 3 (+ (aref remap 3) diff)))
+
+(defun romacs--keyremap-step (keys remap doit)
+  "keyboard.c keyremap_step: extend REMAP's scan of KEYS by the event at its END.
+With DOIT, when the events from START through that one are bound to an
+array (or to a function returning one), return KEYS with them replaced
+by it; the scan restarts after the replacement. Otherwise return nil:
+a prefix of a longer translation keeps START, and anything else moves
+START on by one event, where the scan restarts."
+  (let* ((start (aref remap 2)) (end (aref remap 3))
+         (next (and (keymapp (aref remap 0))
+                    (lookup-key (aref remap 1) (vector (aref keys end)) t))))
+    (aset remap 3 (1+ end))
+    ;; access_keymap_keyremap: a symbol whose function is an array or keymap.
+    (when (and next (symbolp next) (fboundp next)
+               (or (arrayp (symbol-function next)) (keymapp (symbol-function next))))
+      (setq next (symbol-function next)))
+    (when (and doit (functionp next))
+      (setq next (let ((current-key-remap-sequence (romacs--subvector keys start (1+ end))))
+                   (funcall next nil)))
+      (unless (or (null next) (vectorp next) (stringp next))
+        (error "Function %s returns invalid key sequence" next)))
+    (cond ((and doit (or (vectorp next) (stringp next)))
+           (romacs--keyremap-reset remap (+ start (length next)))
+           (vconcat (romacs--subvector keys 0 start) next (romacs--subvector keys (1+ end))))
+          ((keymapp next) (aset remap 1 next) nil)
+          (t (romacs--keyremap-reset remap (1+ start)) nil))))
+
+(defun romacs--translate-keys (keys n binding indec fkey keytran)
+  "read_key_sequence's translation scans once N events of KEYS are read.
+Each map scans, one event at a time, only what the map before it has
+finished with: `input-decode-map' (INDEC) up to N, the function key map
+(FKEY) up to INDEC's start while BINDING is undefined or a prefix, and
+`key-translation-map' (KEYTRAN) up to FKEY's start. The scans advance
+in place. Return KEYS with the first translation made, the scans of
+the maps before it moved by its change of length, or nil."
+  (let ((new nil))
+    (while (and (null new) (< (aref indec 3) n))
+      (setq new (romacs--keyremap-step keys indec t)))
+    (unless new
+      (if (and (not (keymapp binding)) (not (romacs--undefined-p binding))
+               (>= (aref indec 2) n))
+          ;; A complete binding with no decoding pending holds no function key.
+          (when (< (aref fkey 2) n) (romacs--keyremap-reset fkey n))
+        (while (and (null new) (< (aref fkey 3) (aref indec 2)))
+          (setq new (romacs--keyremap-step
+                     keys fkey (and (= (1+ (aref fkey 3)) n) (romacs--undefined-p binding))))
+          (when new (romacs--keyremap-shift indec (- (length new) (length keys)))))))
+    (while (and (null new) (< (aref keytran 3) (aref fkey 2)))
+      (setq new (romacs--keyremap-step keys keytran t))
+      (when new
+        (romacs--keyremap-shift indec (- (length new) (length keys)))
+        (romacs--keyremap-shift fkey (- (length new) (length keys)))))
+    new))
 
 (defun romacs--read-key-sequence (dont-downcase-last)
   "keyboard.c read_key_sequence: read a complete key sequence.
@@ -214,87 +250,91 @@ active keymaps (defaults included, not remapped) and
 `romacs--key-sequence-remapped' to that command's remapping.
 As GNU does, `input-decode-map' translates every sequence,
 `local-function-key-map' an undefined one and `key-translation-map' any
-one; an unbound upper-case or shifted key is then looked up without its
-shift, and `this-command-keys-shift-translated' says when that was used."
-  (let* ((start (length romacs--command-keys))
-         (decode (and (boundp 'input-decode-map) input-decode-map))
-         (function-keys (if (boundp 'local-function-key-map) local-function-key-map function-key-map))
-         (keys []) (raw []) (upper nil) (binding nil) (reading t)
-         (indec 0) (fkey 0) (keytran 0))
-    (setq romacs--single-command-key-start start)
-    (while reading
-      (if (and executing-kbd-macro (romacs--at-end-of-macro-p)
-               (not unread-command-events))
-          (setq keys nil reading nil)
-        (let ((event (romacs--read-char)))
-          (setq raw (vconcat raw (list event))
-                last-nonmenu-event event)
-          ;; A click in a mode line, header line or margin is looked up
-          ;; after its area, a fake prefix key.
-          (when (and (= (length keys) 0) (consp event) (consp (cdr event))
-                     (consp (car (cdr event))))
-            (let ((area (posn-area (event-start event))))
-              (when (and area (symbolp area))
-                (setq keys (vector area) indec 1 fkey 1 keytran 1))))
-          (setq keys (vconcat keys (list event)))
-          (let ((step (romacs--keyremap keys indec (length keys) decode t)))
-            (setq keys (nth 0 step) indec (nth 1 step)))
-          (setq binding (key-binding keys t t))
-          ;; Each map scans only what the map before it has finished with,
-          ;; so a pending prefix in one holds back those after it.
-          (if (and (not (keymapp binding)) (not (romacs--undefined-p binding))
-                   (= indec (length keys)))
-              (setq fkey (max fkey (length keys)))
-            (let ((step (romacs--keyremap keys fkey indec function-keys
-                                          (and (= indec (length keys))
-                                               (romacs--undefined-p binding)))))
-              (unless (eq (nth 0 step) keys)
-                (setq indec (+ indec (- (length (nth 0 step)) (length keys)))
-                      binding (key-binding (nth 0 step) t t)))
-              (setq keys (nth 0 step) fkey (nth 1 step))))
-          (let ((step (romacs--keyremap keys keytran fkey key-translation-map t)))
-            (unless (eq (nth 0 step) keys)
-              (let ((diff (- (length (nth 0 step)) (length keys))))
-                (setq indec (+ indec diff) fkey (+ fkey diff)
-                      binding (key-binding (nth 0 step) t t))))
-            (setq keys (nth 0 step) keytran (nth 1 step)))
-          ;; While a translation is pending, an unbound prefix that none
-          ;; is left to try is dropped; the sequence goes on after it.
-          (let ((unbound (and (null binding) (< keytran (length keys))
-                              (romacs--first-unbound keys))))
-            (while (and unbound (< unbound keytran))
-              (setq keys (romacs--subvector keys (1+ unbound))
-                    indec (- indec unbound 1) fkey (- fkey unbound 1)
-                    keytran (- keytran unbound 1)
-                    binding (key-binding keys t t)
-                    unbound (and (null binding) (romacs--first-unbound keys)))))
-          (cond
-           ((keymapp binding))
-           (binding (setq reading nil))
-           ((< keytran (length keys)))
-           (t
-            (let ((lower (romacs--unshifted (aref keys (1- (length keys))))))
-              (if (null lower)
-                  (setq reading nil)
-                (setq upper (cons (1- (length keys)) (aref keys (1- (length keys)))))
-                (aset keys (1- (length keys)) lower)
-                (setq binding (key-binding keys t t))
-                ;; S-backspace reaches DEL through function-key-map.
-                (let ((step (romacs--keyremap keys (1- (length keys)) (length keys)
-                                              function-keys (romacs--undefined-p binding))))
-                  (unless (eq (nth 0 step) keys)
-                    (setq binding (key-binding (nth 0 step) t t)))
-                  (setq keys (nth 0 step) fkey (nth 1 step) keytran (min keytran fkey)))
-                (unless (keymapp binding) (setq reading nil)))))))))
-    (when keys
-      (let ((shifted (and upper (= (car upper) (1- (length keys))))))
-        (when (and shifted (or dont-downcase-last (null binding)))
-          (aset keys (car upper) (cdr upper))
-          (setq shifted nil))
-        (when shifted (setq this-command-keys-shift-translated t)))
-      ;; The record holds the sequence as read, translations applied.
-      (setq romacs--command-keys
-            (vconcat (romacs--subvector romacs--command-keys 0 start) keys)))
+one (`romacs--translate-keys'), and the sequence is then reread from its
+start, so a translation's events pass through the maps after it. An
+unbound upper-case or shifted key is looked up without its shift, and
+`this-command-keys-shift-translated' says when that was used."
+  (let* ((keys-start (length romacs--command-keys))
+         (indec (romacs--keyremap (and (boundp 'input-decode-map) input-decode-map)))
+         (fkey (romacs--keyremap (if (boundp 'local-function-key-map)
+                                     local-function-key-map function-key-map)))
+         (keytran (romacs--keyremap key-translation-map))
+         ;; KEYS is keyboard.c's keybuf: N events of it are read, and those
+         ;; up to MOCK (mock_input) are reread before new input. It always
+         ;; holds (max N MOCK) events.
+         (keys []) (n 0) (mock 0) (raw []) (binding nil) (first-unbound 0)
+         (upper nil) (shift-translated nil) (fake-prefixed nil) (state 'replay))
+    (setq romacs--single-command-key-start keys-start)
+    (while (eq state 'replay)
+      ;; replay_sequence: the record and the active maps start over.
+      (setq state 'read n 0 first-unbound most-positive-fixnum binding '(keymap)
+            last-nonmenu-event nil
+            romacs--command-keys (romacs--subvector romacs--command-keys 0 keys-start))
+      ;; Read while the sequence is a prefix, or unbound with a translation
+      ;; still pending.
+      (while (and (eq state 'read)
+                  (if binding (keymapp binding) (< (aref keytran 2) n)))
+        (if (< first-unbound (aref keytran 2))
+            ;; The prefix up to FIRST-UNBOUND is unbound with no translation
+            ;; left to try: drop it and go on after it.
+            (let ((drop (1+ first-unbound)))
+              (setq keys (romacs--subvector keys drop n) mock (- n drop) state 'replay)
+              (dolist (remap (list indec fkey keytran))
+                (romacs--keyremap-reset remap (- (aref remap 2) drop))))
+          (let ((local-keys romacs--command-keys) (key nil) (again t))
+            ;; replay_key, again after a fake prefix key.
+            (while again
+              (setq again nil romacs--command-keys local-keys)
+              (cond ((< n mock)
+                     (setq key (aref keys n))
+                     (romacs--add-command-key key))
+                    ((and executing-kbd-macro (romacs--at-end-of-macro-p)
+                          (not unread-command-events))
+                     (setq state 'end))
+                    (t (setq key (romacs--read-char)
+                             raw (vconcat raw (list key))
+                             keys (vconcat keys (list key)))))
+              ;; A click in a mode line, header line or margin is looked
+              ;; up after its area, a fake prefix key.
+              (when (and (eq state 'read) (consp key) (consp (cdr key))
+                         (consp (car (cdr key))) (not (memq key fake-prefixed)))
+                (let ((area (posn-area (event-start key))))
+                  (when (and area (symbolp area))
+                    (setq keys (vconcat (romacs--subvector keys 0 n) (vector area key))
+                          mock (+ n 2) fake-prefixed (cons key fake-prefixed) again t)))))
+            (when (eq state 'read)
+              (setq binding (key-binding (romacs--subvector keys 0 (1+ n)) t t)
+                    first-unbound (if binding (max (1+ n) first-unbound) (min n first-unbound))
+                    n (1+ n)
+                    last-nonmenu-event key
+                    romacs--single-command-key-start
+                    (max 0 (- (length romacs--command-keys) n)))
+              (let ((new (romacs--translate-keys keys n binding indec fkey keytran))
+                    (lower (romacs--unshifted key)))
+                (cond
+                 ;; mock_input = diff + max (t, mock_input): all of NEW.
+                 (new (setq keys new mock (length new) state 'replay))
+                 ((and (null binding) (>= (aref keytran 2) n) lower)
+                  (aset keys (1- n) lower)
+                  (setq upper (cons (1- n) key) mock (max n mock)
+                        shift-translated t state 'replay)
+                  ;; A shifted function key goes through the function key
+                  ;; map again: S-backspace reaches DEL through backspace.
+                  (unless (integerp key)
+                    (aset fkey 2 0) (aset fkey 3 0)
+                    (aset keytran 2 0) (aset keytran 3 0))))))))))
+    (if (eq state 'end)
+        (setq keys nil)
+      (when (and upper (= (car upper) (1- n)) (or dont-downcase-last (null binding)))
+        (aset keys (car upper) (cdr upper))
+        (setq shift-translated nil))
+      (when shift-translated (setq this-command-keys-shift-translated t))
+      ;; A translation's events are all part of the sequence, even past
+      ;; its binding.
+      (while (< n mock)
+        (romacs--add-command-key (aref keys n))
+        (setq n (1+ n)))
+      (setq keys (romacs--subvector keys 0 n)))
     (setq romacs--raw-command-keys raw
           romacs--key-sequence-command (and keys binding)
           romacs--key-sequence-remapped
