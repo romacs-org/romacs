@@ -40,9 +40,8 @@ fn sleep_for(cx, seconds: Value; optional milliseconds: Value) -> Step {
     if duration > 0.0 {
         let wait = cx.intern("romacs--wait-reading-process-output");
         if cx.fboundp(wait) {
-            let limit = cx.float(duration.min(1e9));
-            let zero = Value::integer(0).expect("fixnum");
-            return Ok(Step::Call { f: wait, args: vec![limit, Value::NIL, zero], then: slept, saved: Vec::new() });
+            let end = cx.float(now() + duration.min(1e9));
+            return slept(cx, Value::NIL, &[wait, end]);
         }
         for name in ["timer-list", "timer-idle-list"] {
             let symbol = cx.intern(name);
@@ -55,6 +54,20 @@ fn sleep_for(cx, seconds: Value; optional milliseconds: Value) -> Step {
     Ok(Step::Done(Value::NIL))
 }}
 
-fn slept(_: &mut Leaf<'_>, _: Value, _: &[Value]) -> Next {
-    Ok(Step::Done(Value::NIL))
+/// The wait returns as soon as it reads output, so wait again until the
+/// end time saved after the wait function, as Fsleep_for loops.
+fn slept(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
+    let (wait, end) = (saved[0], saved[1]);
+    let remaining = cx.float_value(end)? - now();
+    if remaining <= 0.0 {
+        return Ok(Step::Done(Value::NIL));
+    }
+    let limit = cx.float(remaining);
+    let zero = Value::integer(0).expect("fixnum");
+    Ok(Step::Call { f: wait, args: vec![limit, Value::NIL, zero], then: slept, saved: saved.to_vec() })
+}
+
+/// current_timespec, as `float-time' reads it.
+fn now() -> f64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0.0, |d| d.as_secs_f64())
 }

@@ -415,8 +415,7 @@ GNU process.c Fmake_network_process, for TCP streams."
                   (if server (romacs--proc-set proc 'status 'listen))
                   (romacs--update-process-mark proc)
                   ;; A :nowait connection is (connect) until the wait
-                  ;; reports it: VM2 connects at once, so it never blocks
-                  ;; there, but the outcome arrives as GNU's does.
+                  ;; sees its nonblocking connect finish.
                   (if nowait
                       (romacs--proc-set proc 'status (list 'connect))
                     (romacs--proc-set proc 'reading
@@ -638,14 +637,19 @@ GNU process.c Fdelete_process."
   (while (romacs--connecting-p proc)
     (romacs--wait-reading-process-output 0.02 nil 0)))
 
-(defun romacs--connect-finished (proc errno)
+(defun romacs--connect-finished (proc errno remote local)
   "The wait's handling of PROC's completed :nowait connection: run and
-\"open\", or failed with ERRNO."
+\"open\" with the REMOTE and LOCAL addresses it connected, or failed
+with ERRNO."
   (if (/= errno 0)
       (progn
         (romacs--proc-tick proc)
         (romacs--proc-set proc 'status (list 'failed errno))
         (romacs--proc-deactivate proc))
+    (if remote
+        (romacs--proc-set proc 'childp
+                          (plist-put (plist-put (romacs--proc-get proc 'childp) :remote remote)
+                                     :local local)))
     (romacs--proc-set proc 'status 'run)
     (romacs--exec-sentinel proc "open\n")
     (if (and (romacs--proc-get proc 'infd)
@@ -958,7 +962,7 @@ run no timers).  Return GNU's got_some_output."
                           (setq done t)))))
                  ((eq ready t) nil)
                  ((eq (car-safe ready) 'connect)
-                  (romacs--connect-finished (car (cdr ready)) (cdr (cdr ready))))
+                  (apply #'romacs--connect-finished (cdr ready)))
                  ((eq (romacs--proc-get ready 'status) 'listen)
                   (romacs--server-accept-connection ready))
                  (t

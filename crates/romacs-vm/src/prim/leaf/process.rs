@@ -377,38 +377,50 @@ impl Leaf<'_> {
 
     /// One pass of wait_reading_process_output's select: reap, poll for at
     /// most SECONDS (nil: forever), flush queued writes, and return the
-    /// process whose channel is readable (round robin), t when something
-    /// else woke the wait, or nil on timeout.
+    /// process whose channel is readable (round robin), (connect PROC ERRNO
+    /// REMOTE LOCAL) for a finished :nowait connection, t when something
+    /// else woke the wait or a status changed, or nil on timeout.
     pub(crate) fn process_select(&mut self, wait_proc: Value, just_this: bool, seconds: Option<f64>) -> Out {
+        // Reaping closes a child's pidfd and stops reading it, so nothing
+        // would wake the poll for its status change: hand that change to
+        // status_notify before blocking, as GNU's SIGCHLD wakeup does.
+        let tick = self.vm.subprocesses.tick;
         self.reap_children();
-        // A :nowait connection, connected (or refused) at creation, reports
-        // as soon as the wait looks: GNU's writable NON_BLOCKING_CONNECT_FD.
+        if self.vm.subprocesses.tick != tick {
+            return Ok(Value::TRUE);
+        }
+        // A :nowait connection refused at creation reports as soon as the
+        // wait looks.
         for proc in self.process_values() {
             if wait_proc != Value::NIL && just_this && proc != wait_proc {
                 continue;
             }
             if let Some(errno) = self.channel_mut(proc).and_then(|c| c.connect.take()) {
                 let connect = self.sym("connect");
-                let tail = self.cons(proc, fixnum(errno.into()));
-                return Ok(self.cons(connect, tail));
+                return Ok(self.list(&[connect, proc, fixnum(errno.into()), Value::NIL, Value::NIL]));
             }
         }
         let mut fds: Vec<(RawFd, i16)> = Vec::new();
-        let mut owners: Vec<(Value, bool)> = Vec::new();
+        let mut owners: Vec<(Value, Wake)> = Vec::new();
         let candidates = if wait_proc != Value::NIL && just_this { vec![wait_proc] } else { self.process_values() };
         for proc in candidates {
             let Some(channel) = self.channel(proc) else { continue };
-            if (channel.reading || (just_this && proc == wait_proc)) && let Some(fd) = &channel.infd {
+            let connecting = channel.connecting.is_some();
+            if connecting && let Some(fd) = &channel.infd {
+                fds.push((fd.as_raw_fd(), libc::POLLOUT));
+                owners.push((proc, Wake::Connect));
+            }
+            if !connecting && (channel.reading || (just_this && proc == wait_proc)) && let Some(fd) = &channel.infd {
                 fds.push((fd.as_raw_fd(), libc::POLLIN));
-                owners.push((proc, true));
+                owners.push((proc, Wake::Read));
             }
             if !channel.pending.is_empty() && let Some(fd) = &channel.outfd {
                 fds.push((fd.as_raw_fd(), libc::POLLOUT));
-                owners.push((proc, false));
+                owners.push((proc, Wake::Write));
             }
             if let Some(fd) = &channel.pidfd {
                 fds.push((fd.as_raw_fd(), libc::POLLIN));
-                owners.push((Value::NIL, false));
+                owners.push((proc, Wake::Child));
             }
         }
         if wait_proc != Value::NIL && just_this && !self.process_infd(wait_proc) {
@@ -421,15 +433,21 @@ impl Leaf<'_> {
         }
         self.reap_children();
         let mut readable = Vec::new();
-        for (i, &r) in revents.iter().enumerate() {
-            let (proc, read) = owners[i];
-            if r == 0 || proc == Value::NIL {
+        let mut connected = Vec::new();
+        for (&r, &(proc, wake)) in revents.iter().zip(&owners) {
+            if r == 0 {
                 continue;
             }
-            if read {
-                readable.push(proc);
-            } else {
-                self.process_flush(proc)?;
+            match wake {
+                Wake::Read => readable.push(proc),
+                Wake::Write => self.process_flush(proc)?,
+                Wake::Connect => connected.push(proc),
+                Wake::Child => {}
+            }
+        }
+        for proc in connected {
+            if let Some(ready) = self.process_connect_poll(proc) {
+                return Ok(ready);
             }
         }
         if readable.is_empty() {
@@ -445,6 +463,38 @@ impl Leaf<'_> {
             .unwrap_or(readable[0]);
         self.vm.subprocesses.last_read = serial(self, chosen);
         Ok(chosen)
+    }
+    /// The wait's handling of PROC's writable NON_BLOCKING_CONNECT_FD:
+    /// SO_ERROR, and on failure GNU's retry of the next address. Returns
+    /// (connect PROC ERRNO REMOTE LOCAL) once the connection is done, with
+    /// the connected addresses when ERRNO is 0, or None while the next
+    /// address is connecting.
+    fn process_connect_poll(&mut self, proc: Value) -> Option<Value> {
+        let channel = self.channel_mut(proc)?;
+        let fd = channel.infd.as_ref()?.as_raw_fd();
+        // Borrowed, never closed here: the channel owns the descriptor.
+        let stream = std::mem::ManuallyDrop::new(unsafe { <std::net::TcpStream as std::os::fd::FromRawFd>::from_raw_fd(fd) });
+        let mut errno = match stream.take_error() {
+            Ok(None) => 0,
+            Ok(Some(error)) | Err(error) => error.raw_os_error().unwrap_or(libc::ECONNREFUSED),
+        };
+        while errno != 0 && let Some(next) = channel.connecting.as_mut().filter(|rest| !rest.is_empty()).map(|rest| rest.remove(0)) {
+            match sp::connect_nonblocking(next).and_then(|fd| Ok((sp::dup(&fd)?, fd))) {
+                Ok((outfd, infd)) => {
+                    channel.infd = Some(infd);
+                    channel.outfd = Some(outfd);
+                    return None;
+                }
+                Err(error) => errno = error.raw_os_error().unwrap_or(libc::ECONNREFUSED),
+            }
+        }
+        channel.connecting = None;
+        let addresses = (errno == 0).then(|| (stream.peer_addr().ok(), stream.local_addr().ok()));
+        let (remote, local) = addresses.unwrap_or((None, None));
+        let remote = remote.map_or(Value::NIL, |a| self.sockaddr_vector(a));
+        let local = local.map_or(Value::NIL, |a| self.sockaddr_vector(a));
+        let connect = self.sym("connect");
+        Some(self.list(&[connect, proc, fixnum(errno.into()), remote, local]))
     }
     /// A zero-timeout poll of every reading channel: is any input waiting?
     pub(crate) fn process_input_pending(&mut self) -> Result<bool> {
@@ -486,12 +536,16 @@ impl Leaf<'_> {
         Ok(self.cons(fixnum((nbytes + carried) as i64), text))
     }
     /// decode_coding_c_string into a string with PROC's decoding coding
-    /// system, holding an incomplete UTF-8 tail as carryover unless LAST;
-    /// then read_process_output_set_last_coding_system.
+    /// system, holding as carryover unless LAST an incomplete UTF-8 tail or
+    /// the CR a DOS end of line may continue; then
+    /// read_process_output_set_last_coding_system.
     fn process_decode(&mut self, proc: Value, mut bytes: Vec<u8>, last: bool) -> Out {
         let coding = self.process(proc)?.get(Slot::Decode);
-        if !last && self.coding_utf8_family(coding)? {
-            let keep = incomplete_utf8_tail(&bytes);
+        if !last {
+            let mut keep = if self.coding_utf8_family(coding)? { incomplete_utf8_tail(&bytes) } else { 0 };
+            if keep == 0 && bytes.last() == Some(&b'\r') && self.coding_eol_dos(coding)? {
+                keep = 1;
+            }
             let tail = bytes.split_off(bytes.len() - keep);
             self.channel_mut(proc).expect("decoding channel").carryover = tail;
         }
@@ -520,6 +574,13 @@ impl Leaf<'_> {
         let attrs = self.vector_get(spec, fixnum(0))?;
         let kind = self.vector_get(attrs, fixnum(3))?;
         Ok(kind == self.intern("undecided") || kind == self.intern("utf-8"))
+    }
+    /// Whether CODING's end of line is DOS (not undetermined: GNU detects
+    /// that from what has arrived).
+    fn coding_eol_dos(&mut self, coding: Value) -> Result<bool> {
+        let spec = self.coding_spec_checked(coding)?;
+        let eol = self.vector_get(spec, fixnum(2))?;
+        Ok(eol == self.intern("dos"))
     }
     /// decode_coding_c_string of BYTES with CODING (nil: no-conversion),
     /// setting `last-coding-system-used'. `undecided' detects ASCII and
@@ -902,9 +963,14 @@ impl Leaf<'_> {
         }
         let mut last_error = None;
         let mut socket: Option<(OwnedFd, std::net::SocketAddr, Option<std::net::SocketAddr>)> = None;
-        for addr in addrs {
+        let mut addrs = addrs.into_iter();
+        for addr in addrs.by_ref() {
             let result = if server {
                 std::net::TcpListener::bind(addr).and_then(|l| Ok((l.local_addr()?, None, OwnedFd::from(l))))
+            } else if nowait {
+                // GNU's remote is the address tried; the peer is not known yet.
+                sp::connect_nonblocking(addr).map(std::net::TcpStream::from)
+                    .and_then(|s| Ok((s.local_addr()?, Some(addr), OwnedFd::from(s))))
             } else {
                 std::net::TcpStream::connect(addr).and_then(|s| Ok((s.local_addr()?, Some(s.peer_addr()?), OwnedFd::from(s))))
             };
@@ -930,7 +996,7 @@ impl Leaf<'_> {
         let filter = self.process(proc)?.get(Slot::Filter);
         channel.reading = server || (filter != Value::TRUE && !nowait);
         if nowait {
-            channel.connect = Some(0);
+            channel.connecting = Some(addrs.collect());
         }
         self.attach_channel(proc, channel);
         let local_vec = self.sockaddr_vector(local);
@@ -1051,6 +1117,15 @@ impl Leaf<'_> {
         let text = self.make_string(bytes, false);
         Ok(self.cons(fixnum(status.into()), text))
     }
+}
+
+/// Why a descriptor is in process_select's poll.
+#[derive(Clone, Copy)]
+enum Wake {
+    Read,
+    Write,
+    Connect,
+    Child,
 }
 
 /// Where call_process sends a child stream.

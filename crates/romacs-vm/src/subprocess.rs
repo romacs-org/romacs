@@ -101,8 +101,11 @@ pub(crate) struct Channel {
     pub pending: Vec<u8>,
     /// add_process_read_fd: the wait polls `infd'.
     pub reading: bool,
-    /// A :nowait connection's outcome not yet reported: 0 or an errno.
+    /// A :nowait connection that failed at creation, not yet reported: its errno.
     pub connect: Option<i32>,
+    /// A :nowait connection in progress (GNU's NON_BLOCKING_CONNECT_FD): the
+    /// addresses still to try if this one fails (GNU's addrinfos).
+    pub connecting: Option<Vec<std::net::SocketAddr>>,
     /// CODING_MODE_LAST_BLOCK: end of file was seen and the carryover flushed.
     pub last_block: bool,
 }
@@ -153,15 +156,35 @@ impl Table {
 
 impl Drop for Table {
     /// shut_down_emacs's kill_buffer_processes (Qnil): SIGHUP to the group of
-    /// each child not yet reaped (its pidfd still open, so its pid is not
-    /// reused).
+    /// each child not yet reaped (unreaped, so its pid is not reused). The
+    /// host outlives the VM, so these and the deleted children are then
+    /// reaped where GNU leaves them to init.
     fn drop(&mut self) {
+        let mut children = std::mem::take(&mut self.deleted);
         for channel in self.channels.values() {
             if channel.pidfd.is_some() && channel.pid > 0 {
                 unsafe { libc::kill(-channel.pid, libc::SIGHUP) };
+                // One reaper per pid: a second wait could reap a reused pid.
+                if !children.iter().any(|&(pid, _)| pid == channel.pid) {
+                    children.push((channel.pid, None));
+                }
             }
         }
+        children.into_iter().for_each(reap_detached);
     }
+}
+
+/// Reap PID, then unlink FILE, on a thread of its own: no child's lifetime
+/// delays another's reaping, and none blocks the VM's owner.
+fn reap_detached((pid, file): (i32, Option<std::path::PathBuf>)) {
+    let reap = move || {
+        let _ = wait_blocking(pid);
+        if let Some(file) = file {
+            let _ = std::fs::remove_file(file);
+        }
+    };
+    // A host that cannot start a thread keeps the zombie, as before.
+    let _ = std::thread::Builder::new().name("romacs-reaper".into()).stack_size(64 * 1024).spawn(reap);
 }
 
 pub(crate) fn last_error() -> io::Error {
@@ -349,6 +372,43 @@ pub(crate) fn wait_blocking(pid: i32) -> io::Result<i32> {
             return Err(error);
         }
     }
+}
+
+/// connect_network_socket's nonblocking connect: a close-on-exec stream
+/// socket to ADDR, connected or (EINPROGRESS) connecting.
+pub(crate) fn connect_nonblocking(addr: std::net::SocketAddr) -> io::Result<OwnedFd> {
+    let mut storage: libc::sockaddr_storage = unsafe { std::mem::zeroed() };
+    let len = match addr {
+        std::net::SocketAddr::V4(a) => {
+            let sin = unsafe { &mut *(&mut storage as *mut libc::sockaddr_storage).cast::<libc::sockaddr_in>() };
+            sin.sin_family = libc::AF_INET as libc::sa_family_t;
+            sin.sin_port = a.port().to_be();
+            sin.sin_addr = libc::in_addr { s_addr: u32::from_ne_bytes(a.ip().octets()) };
+            size_of::<libc::sockaddr_in>()
+        }
+        std::net::SocketAddr::V6(a) => {
+            let sin6 = unsafe { &mut *(&mut storage as *mut libc::sockaddr_storage).cast::<libc::sockaddr_in6>() };
+            sin6.sin6_family = libc::AF_INET6 as libc::sa_family_t;
+            sin6.sin6_port = a.port().to_be();
+            sin6.sin6_flowinfo = a.flowinfo();
+            sin6.sin6_addr = libc::in6_addr { s6_addr: a.ip().octets() };
+            sin6.sin6_scope_id = a.scope_id();
+            size_of::<libc::sockaddr_in6>()
+        }
+    };
+    let s = unsafe { libc::socket(i32::from(storage.ss_family), libc::SOCK_STREAM | libc::SOCK_NONBLOCK | libc::SOCK_CLOEXEC, 0) };
+    if s < 0 {
+        return Err(last_error());
+    }
+    let socket = unsafe { OwnedFd::from_raw_fd(s) };
+    if unsafe { libc::connect(s, (&storage as *const libc::sockaddr_storage).cast(), len as libc::socklen_t) } != 0 {
+        let error = last_error();
+        // EINTR leaves a nonblocking connect in progress, as EINPROGRESS does.
+        if !matches!(error.raw_os_error(), Some(libc::EINPROGRESS | libc::EINTR)) {
+            return Err(error);
+        }
+    }
+    Ok(socket)
 }
 
 /// emacs_read: Ok(0) at end of file.
