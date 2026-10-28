@@ -280,7 +280,7 @@
     }
    ],
    "files_measured": 1596,
-   "gnu_parity_loaded": 393,
+   "gnu_parity_loaded": 392,
    "gnu_target_total": 1596,
    "loaded": [
     "lisp/abbrev.el",
@@ -478,7 +478,6 @@
     "lisp/mail/mail-prsvr.el",
     "lisp/mail/mail-utils.el",
     "lisp/mail/mailheader.el",
-    "lisp/mail/mspools.el",
     "lisp/mail/qp.el",
     "lisp/mail/reporter.el",
     "lisp/mail/rfc6068.el",
@@ -13986,8 +13985,10 @@
    "lisp/files-x-tests.el::files-x-test-connection-local-set-profile-variables": {
     "class": "UNPROBEABLE",
     "counted": false,
-    "failed_forms": [],
-    "file_loaded": true,
+    "failed_forms": [
+     3
+    ],
+    "file_loaded": false,
     "method": null,
     "vacuous_catch": [],
     "why": "no probe evidence for this member: protected like a genuine pass, never counted as one until probed"
@@ -13995,8 +13996,10 @@
    "lisp/files-x-tests.el::files-x-test-connection-local-set-profiles": {
     "class": "UNPROBEABLE",
     "counted": false,
-    "failed_forms": [],
-    "file_loaded": true,
+    "failed_forms": [
+     3
+    ],
+    "file_loaded": false,
     "method": null,
     "vacuous_catch": [],
     "why": "no probe evidence for this member: protected like a genuine pass, never counted as one until probed"
@@ -14004,8 +14007,10 @@
    "lisp/files-x-tests.el::files-x-test-connection-local-update-profile-variables": {
     "class": "UNPROBEABLE",
     "counted": false,
-    "failed_forms": [],
-    "file_loaded": true,
+    "failed_forms": [
+     3
+    ],
+    "file_loaded": false,
     "method": null,
     "vacuous_catch": [],
     "why": "no probe evidence for this member: protected like a genuine pass, never counted as one until probed"
@@ -14013,8 +14018,10 @@
    "lisp/files-x-tests.el::files-x-test-hack-connection-local-variables-apply": {
     "class": "UNPROBEABLE",
     "counted": false,
-    "failed_forms": [],
-    "file_loaded": true,
+    "failed_forms": [
+     3
+    ],
+    "file_loaded": false,
     "method": null,
     "vacuous_catch": [],
     "why": "no probe evidence for this member: protected like a genuine pass, never counted as one until probed"
@@ -33863,7 +33870,7 @@
    ]
   },
   "real_ert": {
-   "adapter_sha256": "36c00032f0780bcea4fdf9b88d30eaaace7681290a446833d9c5df1e86bcc890",
+   "adapter_sha256": "7307443a885a90adca00ddb6d20028522048cb9a190d589369836a0618a0e870",
    "ert_adapter": {
     "automatic_window_isolation": false,
     "condition_format": "native-prin1",
@@ -33871,13 +33878,13 @@
     "sha256": "9a98e90300ff93da933c3a434ee4fe666243e5fb3b99d370d0bf21ee84c84f90"
    },
    "files": 224,
-   "files_aborted": 47,
+   "files_aborted": 48,
    "harness": "gnu-ert: GNU ert.el with Romacs batch adapter, pinned GNU oracle",
    "is_gnu_ert": true,
    "is_unmodified_gnu_ert": false,
    "of": 2619,
    "oracle_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
-   "passed": 2020,
+   "passed": 2016,
    "passing": {
     "lisp/abbrev-tests.el": [
      "abbrev--table-symbols-test",
@@ -34776,12 +34783,6 @@
     ],
     "lisp/faces-tests.el": [
      "test-tty-find-type"
-    ],
-    "lisp/files-x-tests.el": [
-     "files-x-test-connection-local-set-profile-variables",
-     "files-x-test-connection-local-set-profiles",
-     "files-x-test-connection-local-update-profile-variables",
-     "files-x-test-hack-connection-local-variables-apply"
     ],
     "lisp/format-spec-tests.el": [
      "format-spec",
@@ -37182,39 +37183,48 @@
     "lisp/obsolete/vt100-led.el"
    ],
    "unit": "census-warm"
+  },
+  {
+   "at_commit": "1c80b4053dfca417f383efaf60ae9f3813f8d4bc",
+   "because": "lisp/mail/mspools.el was recorded at 84daf78 from a shell with MAIL set; in a clean environment its defcustom reads rmail-spool-directory, whose custom-initialize-delay leaves it unbound until startup, past the warm chain. Re-measured with a minimal environment and the gate slot unlimited stack.",
+   "from_commit": "d3b082c6b7539a2501a4f7c5130db4cfae6f15e1",
+   "members": [
+    "lisp/mail/mspools.el"
+   ],
+   "unit": "census-warm"
   }
  ],
  "provenance": {
-  "census_sha256": "eccb0bf280bfaef65068906692cc830d461629e52482785a9a757e667f19a192",
-  "commit": "d3b082c6b7539a2501a4f7c5130db4cfae6f15e1",
-  "gnu_ert_sha256": "36c00032f0780bcea4fdf9b88d30eaaace7681290a446833d9c5df1e86bcc890",
+  "census_sha256": "390cda143fd9010cf7108843351d9fec98ab962390ed8771fdabdb2000bbbed5",
+  "commit": "1c80b4053dfca417f383efaf60ae9f3813f8d4bc",
+  "gnu_ert_sha256": "7307443a885a90adca00ddb6d20028522048cb9a190d589369836a0618a0e870",
   "host": "constantinople",
   "loadavg_after": [
-   1.38,
-   3.34,
-   4.02
+   3.16,
+   4.44,
+   5.72
   ],
   "loadavg_before": [
-   1.42,
-   1.96,
-   1.68
+   3.63,
+   6.67,
+   7.58
   ],
-  "recorded_at": "2026-10-28T05:45:11+0200",
+  "recorded_at": "2026-10-28T08:05:19+0200",
   "repeat_runs_identical": 2,
   "seconds_per_run": [
    {
     "census_cold": 5.3,
-    "census_warm": 332.2,
-    "gnu_suite": 192.8
+    "census_warm": 341.7,
+    "gnu_suite": 191.0
    },
    {
-    "census_cold": 5.3,
-    "census_warm": 351.8,
-    "gnu_suite": 195.8
+    "census_cold": 5.5,
+    "census_warm": 366.2,
+    "gnu_suite": 192.2
    }
   ],
-  "seconds_total": 1496.6,
-  "tree": "081d7cb8e9289d9b83a5826ab7b843eb131eb081"
+  "seconds_total": 1517.4,
+  "tree": "dafe0ab68152360455330333f573d4ba37c7d554"
  },
  "schema": 2
 }
