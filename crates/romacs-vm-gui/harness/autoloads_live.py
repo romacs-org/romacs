@@ -2,8 +2,11 @@
 """Bundled package autoloads in a native --loadup session, in a private compositor.
 
 A private init.el records, when init runs, whether `hermes' and
-`gnosis-dashboard' are still unloaded autoloads; then real keys run
-M-x gnosis-dashboard, which must load the package and show its buffer.
+`gnosis-dashboard' are still unloaded autoloads, and points hermes at a
+loopback port nothing listens on, attaching rather than spawning.  Real keys
+then run M-x gnosis-dashboard, which must load the package and show its
+buffer, and M-x hermes, which must load hermes and show its dashboard
+without reaching any service.  The echo area after each command is recorded.
 labwc, wlr-randr, wtype and grim come from PATH (the gate's headless tools).
 """
 import argparse
@@ -26,7 +29,20 @@ INIT = '''(write-region
             (list name (autoloadp (symbol-function name)) (commandp name) (featurep name)))
           '(hermes gnosis-dashboard)))
  nil {state})
+(setq hermes-dashboard-transport-url "http://127.0.0.1:9"
+      hermes-dashboard-transport-start-mode 'remote
+      hermes-dashboard-transport-command "/nonexistent/hermes")
 '''
+
+
+def scene_rows(text, role):
+    """Rows of the last submitted scene's glyphs in ROLE (Text or ModeLine)."""
+    scene = fio.last_scene(text)
+    by_y = {}
+    for glyph in (scene or {}).get('glyphs', []):
+        if glyph['role'] == role:
+            by_y.setdefault(glyph['y'], []).append((glyph['x'], glyph['char']))
+    return [''.join(c for _, c in sorted(row)) for _, row in sorted(by_y.items())]
 
 
 def main():
@@ -85,8 +101,26 @@ def main():
                     subprocess.run(['wtype', '-d', '40', *parts], env=env, check=True, timeout=20)
                     time.sleep(.15)
 
-                def visible(text):
-                    fio.wait(lambda: any(text in row for row in rows()), args.timeout, text, process)
+                def mode_lines():
+                    return scene_rows(log_path.read_text(errors='replace'), 'ModeLine')
+
+                def shown(buffer, text):
+                    """BUFFER names a window's mode line and TEXT is in a window."""
+                    fio.wait(lambda: any(buffer in row for row in mode_lines()) and any(text in row for row in rows()),
+                             args.timeout, f'{buffer} showing {text}', process)
+
+                def run(command, buffer, text):
+                    keys('-M', 'alt', 'x', '-m', 'alt')
+                    fio.wait(lambda: rows()[:1] == ['M-x '], args.timeout, 'M-x prompt', process)
+                    keys(command, '-k', 'Return')
+                    try:
+                        shown(buffer, text)
+                    finally:
+                        time.sleep(1)
+                        report['captures'].append({'name': command, 'rows': rows(), 'mode_lines': mode_lines()})
+                        fio.shot(output / f'{command}.png', env, report)
+                    echo = scene_rows(log_path.read_text(errors='replace'), 'Text')[-1:]
+                    report['checks'].append({'command': command, 'shown': buffer, 'echo': echo})
 
                 fio.wait(state.exists, args.timeout, 'init.el after --loadup', process)
                 at_init = state.read_text()
@@ -97,15 +131,8 @@ def main():
                 fio.wait(rows, args.timeout, 'first frame', process)
                 fio.shot(output / 'started.png', env, report)
                 report['captures'].append({'name': 'started', 'rows': rows()})
-                keys('-M', 'alt', 'x', '-m', 'alt')
-                fio.wait(lambda: rows()[:1] == ['M-x '], args.timeout, 'M-x prompt', process)
-                keys('gnosis-dashboard', '-k', 'Return')
-                try:
-                    visible('*Gnosis Dashboard*')
-                finally:
-                    report['captures'].append({'name': 'after-command', 'rows': rows()})
-                    fio.shot(output / 'after-command.png', env, report)
-                report['checks'].append({'gnosis_dashboard_visible': True})
+                run('gnosis-dashboard', '*Gnosis Dashboard*', 'Gnosis Dashboard')
+                run('hermes', '*Hermes Dashboard*', 'Hermes')
                 report['status'] = 'PASS'
     except Exception as error:  # noqa: BLE001
         report['error'] = repr(error)

@@ -1,14 +1,17 @@
-//! Launch: VM2's own workspace by default; `--loadup` runs GNU's loadup.el
+//! Launch: VM2's own workspace by default; `--loadup` runs the GNU-loadup
+//! chain the batch package runner preloads (rlisp/romacs-loadup-bootstrap.el),
 //! with romacs stand-ins only where GNU's own command did not load, and
-//! `--gnu-lisp` runs loadup.el alone. All visible results come from this VM.
+//! `--gnu-lisp` runs GNU's loadup.el alone. All visible results come from this VM.
 use romacs_vm::Vm;
 
 /// How the GUI starts.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Launch {
-    /// `--loadup`: GNU's `loadup.el` in its own order ([`crate::loadup`]), then
-    /// a romacs stand-in for each journey key whose GNU command loadup did not
-    /// define, then the Rum workspace. Not the default: see main.rs.
+    /// `--loadup`: the batch package runner's GNU-loadup chain
+    /// ([`drive_loadup`]), the bundled packages' autoloads, the interactive
+    /// session (rlisp/romacs-gui-loadup.el), then a romacs stand-in for each
+    /// journey key whose GNU command the chain did not define, then the Rum
+    /// workspace. Not the default: see main.rs.
     Loadup,
     /// `--gnu-lisp`: GNU's `loadup.el` and nothing romacs adds: no stand-ins,
     /// no Rum faces, no workspace. Shows what GNU's Lisp alone gives today.
@@ -198,6 +201,34 @@ fn bundled_layout() -> Result<serde_json::Value, String> {
     serde_json::from_str(include_str!("../../../LISP-BUNDLED.json")).map_err(|e| format!("LISP-BUNDLED.json: {e}"))
 }
 
+/// The GNU-loadup chain `--loadup` shares with the batch package runner,
+/// beside the GNU Lisp directory `dir`.
+pub fn loadup_bootstrap(dir: &std::path::Path) -> std::path::PathBuf {
+    dir.parent().unwrap_or(dir).join("rlisp/romacs-loadup-bootstrap.el")
+}
+
+/// `--loadup`'s GNU Lisp (and `--loadup-report`'s): the batch package
+/// runner's chain, one file for both, on the path that runner gives it:
+/// GNU's installed load-path, then the bundled Lisp the chain's own Romacs
+/// layers come from.
+pub fn drive_loadup(vm: &mut Vm, dir: &std::path::Path) -> Result<crate::loadup::Loadup, String> {
+    let dir = &dir.canonicalize().map_err(|e| format!("GNU lisp directory {}: {e}", dir.display()))?;
+    let path: Vec<_> = crate::loadup::installed_load_path(dir)?.into_iter().chain(bundled_load_path(dir)?).collect();
+    // GNU preloads in batch (`temacs --batch -l loadup`), and so does the
+    // batch runner: files.el, startup.el and others decide by
+    // `noninteractive' while they load.  The interactive session begins
+    // after the chain (rlisp/romacs-gui-loadup.el).
+    vm.eval_source("(setq noninteractive t)")?;
+    crate::loadup::drive_bootstrap(vm, &loadup_bootstrap(dir), &path)
+}
+
+/// romacs' bundled Lisp (rlisp/, beside gnu-lisp/): it follows GNU's own
+/// load-path, so it stays loadable by name and cannot be found in place of a
+/// GNU file on that path.
+fn bundled_load_path(dir: &std::path::Path) -> Result<Vec<std::path::PathBuf>, String> {
+    Ok(runtime_load_path(dir)?.into_iter().filter(|p| !p.starts_with(dir)).collect())
+}
+
 /// The bundled packages' autoloads beside the GNU Lisp directory `dir`, when present.
 pub fn bundled_autoloads(dir: &std::path::Path) -> Result<Option<std::path::PathBuf>, String> {
     let file = bundled_layout()?["autoloads"].as_str().ok_or("LISP-BUNDLED.json: no autoloads path")?.to_owned();
@@ -340,9 +371,11 @@ fn initialize_files_with_sources(vm: &mut Vm, files: &[std::path::PathBuf], root
     Ok(started)
 }
 
-/// `--loadup` and `--gnu-lisp`: run GNU's loadup.el. `font` is the
-/// launch font's native `defface default` source. GNU Custom and face files
-/// are excluded by the loadup driver so native declarations remain authoritative.
+/// `--loadup` and `--gnu-lisp`: run GNU's Lisp (the shared chain, or
+/// loadup.el). `font` is the launch font's native `defface default` source,
+/// declared before GNU's Lisp, so GNU's own `defface` leaves it, and the Rum
+/// faces, alone. `--gnu-lisp`'s loadup.el drive excludes GNU's Custom and face
+/// files instead (loadup.rs, deviation 2).
 pub fn initialize_loadup(vm: &mut Vm, launch: Launch, font: Option<&str>) -> Result<Started, String> {
     initialize_loadup_from(vm, launch, font, &lisp_dir())
 }
@@ -363,16 +396,16 @@ pub fn initialize_loadup_from(vm: &mut Vm, launch: Launch, font: Option<&str>, d
     }
     if let Some(font) = font { vm.eval_source(font)?; }
     snapshot_gnu_commands(vm)?;
-    let loadup = crate::loadup::drive(vm, dir)?;
-    // loadup.el and GNU's subdirs.el step (done by the drive) compute GNU's
-    // own load-path; romacs' bundled Lisp (rlisp/, beside gnu-lisp/) goes
-    // after it, so it stays loadable by name and cannot be found in place of
-    // a GNU file on that path.
-    let bundled: Vec<String> = runtime_load_path(dir)?.into_iter().filter(|p| !p.starts_with(dir))
-        .map(|p| lisp_string(&p.to_string_lossy())).collect();
-    if !bundled.is_empty() {
-        vm.eval_source(&format!("(setq load-path (append load-path (list {})))", bundled.join(" ")))?;
-    }
+    let loadup = if launch == Launch::Loadup { drive_loadup(vm, dir)? } else {
+        // loadup.el and GNU's subdirs.el step (done by the drive) compute
+        // GNU's own load-path; the bundled Lisp follows it.
+        let loadup = crate::loadup::drive(vm, dir)?;
+        let bundled: Vec<String> = bundled_load_path(dir)?.iter().map(|p| lisp_string(&p.to_string_lossy())).collect();
+        if !bundled.is_empty() {
+            vm.eval_source(&format!("(setq load-path (append load-path (list {})))", bundled.join(" ")))?;
+        }
+        loadup
+    };
     // The bundled packages are installed, not preloaded: their autoloads
     // come next, as `package-activate-all' runs before site and user init.
     // --gnu-lisp, like `emacs -Q', activates no packages.
@@ -380,6 +413,9 @@ pub fn initialize_loadup_from(vm: &mut Vm, launch: Launch, font: Option<&str>, d
         if let Some(autoloads) = bundled_autoloads(dir)? {
             vm.load_file(&autoloads).map_err(|e| format!("{}: {e}", autoloads.display()))?;
         }
+        // What an interactive session on this display adds to the batch chain.
+        let session = loadup_bootstrap(dir).with_file_name("romacs-gui-loadup.el");
+        vm.load_file(&session).map_err(|e| format!("{}: {e}", session.display()))?;
     }
     let gnu_mode_line = vm.eval_source("(default-boundp 'mode-line-format)")? != romacs_vm::Fixed::NIL;
     if launch == Launch::GnuOnly {
@@ -1480,6 +1516,20 @@ mod tests {
         dir
     }
 
+    /// A runtime root for `--loadup`: `gnu-lisp/` holding FILES and, beside
+    /// it, `rlisp/` holding BOOTSTRAP as the shared chain and an interactive
+    /// session file that only clears `noninteractive`. Returns `gnu-lisp/`.
+    fn scratch_runtime(name: &str, bootstrap: &str, files: &[(&str, &str)]) -> std::path::PathBuf {
+        let root = scratch_lisp(name, &[]);
+        let gnu = root.join("gnu-lisp");
+        std::fs::create_dir_all(&gnu).unwrap();
+        std::fs::create_dir_all(root.join("rlisp")).unwrap();
+        for (file, text) in files { std::fs::write(gnu.join(file), text).unwrap(); }
+        std::fs::write(loadup_bootstrap(&gnu), bootstrap).unwrap();
+        std::fs::write(root.join("rlisp/romacs-gui-loadup.el"), "(setq noninteractive nil)\n").unwrap();
+        gnu
+    }
+
     #[test]
     fn installed_runtime_root_selects_its_gnu_lisp() {
         // The Nix wrapper sets only ROMACS_RUNTIME_ROOT=$out/share/romacs. The
@@ -1685,13 +1735,12 @@ mod tests {
             && path[first..].iter().all(|p| p.starts_with(&bundled)), "{path:?}");
     }
 
-    /// `--loadup`: GNU's command takes a key only when loadup's GNU
+    /// `--loadup`: GNU's command takes a key only when the chain's GNU
     /// files DEFINED it; a GNU name VM2 already had is not GNU's Lisp, and a
     /// key whose GNU command did not load keeps romacs's self-naming stand-in.
     #[test]
     fn gnu_commands_take_over_only_where_loadup_defined_them() {
-        let dir = scratch_lisp("takeover", &[
-            ("loadup.el", "(load \"defs\")\n(load \"broken\")\n"),
+        let dir = scratch_runtime("takeover", "(load \"defs\")\n(load \"broken\")\n", &[
             ("defs.el", ";;; -*- lexical-binding: t -*-\n(defun next-line () (interactive) (forward-line 1))\n"),
             // Signals at form 1, so its split-window-below never exists.
             ("broken.el", "(car 1)\n(defun split-window-below () (interactive) nil)\n"),
@@ -1719,11 +1768,11 @@ mod tests {
         assert!(status.contains("journey keys: 2 GNU, 11 romacs stand-in"), "{status}");
     }
 
-    /// Mode lines after `--loadup`, from a loadup.el whose files are known:
+    /// Mode lines after `--loadup`, from a chain whose files are known:
     /// (painted bands, each workspace buffer's own `mode-line-format` or
     /// `GLOBAL` when it has none, the default value, `gnu_mode_line`).
     fn loadup_mode_lines(name: &str, loadup: &'static str) -> (Vec<String>, Vec<String>, String, bool) {
-        let dir = scratch_lisp(name, &[("loadup.el", loadup)]);
+        let dir = scratch_runtime(name, loadup, &[]);
         on_evaluator(move || {
             let mut vm = Vm::new();
             vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
@@ -1770,7 +1819,7 @@ mod tests {
     #[test]
     fn workspace_preserves_unchanged_bound_mode_line_defaults() {
         for initial in ["nil", "'(\"PREBOUND %b\")"] {
-            let dir = scratch_lisp("ml-prebound", &[("loadup.el", "(set-default 'mode-line-format (default-value 'mode-line-format))\n")]);
+            let dir = scratch_runtime("ml-prebound", "(set-default 'mode-line-format (default-value 'mode-line-format))\n", &[]);
             let setup = format!("(setq romacs-test-mode-line {initial}) (set-default 'mode-line-format romacs-test-mode-line)");
             on_evaluator(move || {
                 let mut vm = Vm::new();
@@ -1805,19 +1854,21 @@ mod tests {
         assert!(bands.iter().all(|b| !b.contains("stand-in")), "{bands:?}");
     }
 
-    /// `--loadup` on this tree: every load site of lisp/loadup.el is
-    /// accounted for in order, the drive goes past the old 17-file chain, and
-    /// the window keeps a mode line and a cursor.
+    /// `--loadup` on this tree: it runs the batch package runner's chain,
+    /// every load site of rlisp/romacs-loadup-bootstrap.el in order and each
+    /// complete, then the interactive session; the window keeps a mode line
+    /// and a cursor, and GNU's commands run the journey keys.
     #[test]
-    fn loadup_launch_runs_all_of_loadup_and_keeps_a_cursor() {
-        let (rows, attempted, sites, mode_line, keys, live, ran, bundled) = on_evaluator(|| {
+    fn loadup_launch_runs_the_shared_chain_and_keeps_a_cursor() {
+        let (rows, complete, sites, mode_line, keys, live, ran, bundled) = on_evaluator(|| {
             let mut vm = Vm::new();
             vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
+            vm.set_echo_area_host(true);
             let started = initialize_loadup(&mut vm, Launch::Loadup, None).unwrap();
             let loadup = started.loadup.as_ref().unwrap();
             let rows: Vec<String> = loadup.rows.iter().map(|r| r.site.name.clone()).collect();
-            let attempted = loadup.rows.iter().filter(|r| !matches!(r.outcome, crate::loadup::Outcome::NotReached { .. })).count();
-            let text = std::fs::read_to_string(lisp_dir().join("loadup.el")).unwrap();
+            let complete = (loadup.complete(), loadup.form_failures.len(), printed(&mut vm, "(list noninteractive (featurep 'romacs-loadup-bootstrap) (display-graphic-p))"));
+            let text = std::fs::read_to_string(loadup_bootstrap(&lisp_dir())).unwrap();
             let sites: Vec<String> = crate::loadup::load_sites(&text).unwrap().1.into_iter().map(|s| s.name).collect();
             let snapshot = vm.frame_snapshot(1200, 800).unwrap();
             let mode_line = snapshot.windows[0].snapshot.mode_line.is_some();
@@ -1850,21 +1901,20 @@ mod tests {
             live.push(ask(&mut vm, "(let ((old (current-buffer))) (set-buffer (window-buffer (minibuffer-window))) (prog1 (buffer-string) (set-buffer old)))"));
             vm.collect_garbage();
             live.push(ask(&mut vm, SELECTED_TAIL));
-            (rows, attempted, sites, mode_line, keys, live, ran, bundled)
+            (rows, complete, sites, mode_line, keys, live, ran, bundled)
         });
         assert_eq!(rows, sites);
-        assert!(attempted > GNU_BOOTSTRAP_CHAIN.len(), "loadup stopped inside the old chain: {attempted} sites attempted");
+        assert_eq!(complete, (sites.len(), 0, "(nil t t)".to_owned()), "every site complete, no form failed, an interactive graphical session");
         assert!(mode_line, "the default window has no mode line, so layout would draw no cursor");
         for (gnu, command) in keys {
             assert_eq!(gnu, !command.starts_with("romacs-"), "{command}");
         }
         // Two windows, selected first; C-x 2, C-x 3 split, C-x o moves, C-x 1
-        // leaves one; C-x C-e still evaluates; all after GNU's window.el
-        // replaced `window-child` with Lisp the VM cannot run.
-        // romacs' bundled Lisp is on the load-path after loadup.el set GNU's.
+        // leaves one; C-x C-e evaluates; all with GNU's window.el loaded.
+        // romacs' bundled Lisp follows GNU's installed load-path.
         assert_eq!(bundled, "t", "rlisp/hermes not on load-path after loadup");
-        assert_eq!(live, ["2", "3", "4", "4", "1", "\"3\"", "1"], "{ran:?}");
+        assert_eq!(live, ["2", "3", "4", "4", "1", r#""3 (#o3, #x3, ?\\C-c)""#, "1"], "{ran:?}");
         assert!(ran.iter().all(|r| !r.contains("SIGNAL")), "{ran:?}");
-        assert!(ran.contains(&"romacs-gui-eval-last-sexp".to_owned()), "{ran:?}");
+        assert!(ran.contains(&"eval-last-sexp".to_owned()), "{ran:?}");
     }
 }

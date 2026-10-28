@@ -129,6 +129,8 @@ pub struct Loadup {
     pub load_path_len: usize,
     /// Exact GNU command definitions loaded independently of unrelated bootstrap failures.
     pub command_definitions: Vec<(String, usize)>,
+    /// `load-path` when loadup.el reached `(eval top-level t)`, for [`drive`]'s subdirs step.
+    before_startup: Option<Vec<String>>,
 }
 
 impl Loadup {
@@ -146,16 +148,21 @@ impl Loadup {
     pub fn gnu_would_stop(&self) -> Option<String> {
         let site = self.rows.iter().find(|r| matches!(r.outcome, Outcome::Partial { .. }));
         let form = self.form_failures.first();
+        let file = self.file_name();
         match (site, form) {
-            (Some(r), Some(f)) if f.form < r.site.form => Some(format!("loadup.el form {} (line {})", f.form + 1, f.line)),
-            (Some(r), _) => Some(format!("load site {} \"{}\" (loadup.el line {})", r.site.index, r.site.name, r.site.line)),
-            (None, Some(f)) => Some(format!("loadup.el form {} (line {})", f.form + 1, f.line)),
+            (Some(r), Some(f)) if f.form < r.site.form => Some(format!("{file} form {} (line {})", f.form + 1, f.line)),
+            (Some(r), _) => Some(format!("load site {} \"{}\" ({file} line {})", r.site.index, r.site.name, r.site.line)),
+            (None, Some(f)) => Some(format!("{file} form {} (line {})", f.form + 1, f.line)),
             (None, None) => None,
         }
     }
+    /// The driven file's name: `loadup.el`, or the shared bootstrap's.
+    pub fn file_name(&self) -> String {
+        self.loadup.file_name().map_or_else(|| self.loadup.display().to_string(), |n| n.to_string_lossy().into_owned())
+    }
     pub fn status(&self) -> String {
         format!(
-            "GNU {} ({} top-level forms): {} load sites; {} complete, {} partial, {} missing, {} absent, {} native, {} never reached; {} top-level loadup forms signalled; {}",
+            "{} ({} top-level forms): {} load sites; {} complete, {} partial, {} missing, {} absent, {} native, {} never reached; {} top-level loadup forms signalled; {}",
             self.loadup.display(), self.forms, self.rows.len(), self.complete(), self.partial(), self.missing(), self.absent(), self.native(), self.not_reached(), self.form_failures.len(),
             match &self.subdirs {
                 Some(dirs) => format!("subdirs.el applied by romacs for {} director{}, load-path {} entries{}", dirs.len(), if dirs.len() == 1 { "y" } else { "ies" }, self.load_path_len,
@@ -197,8 +204,8 @@ impl Loadup {
             out.push_str(&format!("{}\t{}\t{}\t{status}\t{forms}\t{detail}{nested}\n", s.index, s.line, s.name));
         }
         for f in &self.form_failures {
-            out.push_str(&format!("form{}\t{}\t(loadup.el)\tFORM-SIGNALLED\t-\t{} => {}\n",
-                f.form + 1, f.line, one_line(&f.source, 90), one_line(&f.error, 240)));
+            out.push_str(&format!("form{}\t{}\t({})\tFORM-SIGNALLED\t-\t{} => {}\n",
+                f.form + 1, f.line, self.file_name(), one_line(&f.source, 90), one_line(&f.error, 240)));
         }
         for (name, line) in &self.command_definitions {
             out.push_str(&format!("command\t{line}\tsimple.el\tDEFINITION\t1\t{name}; scoped source load, not whole-file completion\n"));
@@ -313,13 +320,15 @@ fn scan_forms(source: &str, collect_loads: bool) -> Result<(Vec<(usize, usize, u
 /// The wrapper every rewritten load site calls. Plain functions only, defined
 /// before GNU's byte-run.el replaces `defun`. Each site appends one entry to
 /// `romacs-loadup--log`: (SITE . ok), (SITE . absent) or (SITE error DATA).
+/// `romacs-loadup--adapt` enables raw loadup.el's two adaptations (deviation
+/// 2); the shared bootstrap states its own, so it runs every site as written.
 const WRAPPER: &str = r#"
 (setq romacs-loadup--log nil)
 (defun romacs-loadup--load (site file &optional noerror nomessage nosuffix must-suffix)
   (condition-case romacs-loadup--error
-      (if (member file '("custom" "cus-face" "faces"))
+      (if (and romacs-loadup--adapt (member file '("custom" "cus-face" "faces")))
           (progn (setq romacs-loadup--log (cons (cons site 'native) romacs-loadup--log)) nil)
-        (when (equal file "simple")
+        (when (and romacs-loadup--adapt (equal file "simple"))
           (load "emacs-lisp/inline")
           (load "emacs-lisp/derived"))
         (if (load file noerror nomessage nosuffix must-suffix)
@@ -354,13 +363,69 @@ fn rewrite(form_text: &str, offset: usize, sites: &[Site]) -> String {
 pub fn drive(vm: &mut Vm, dir: &Path) -> Result<Loadup, String> {
     let begun = std::time::Instant::now();
     let dir = dir.canonicalize().map_err(|e| format!("GNU lisp directory {}: {e}", dir.display()))?;
-    let loadup = dir.join("loadup.el");
+    vm.set_load_path(std::slice::from_ref(&dir))?;
+    let mut loadup = run(vm, &dir.join("loadup.el"), std::slice::from_ref(&dir), true)?;
+    let current_path = load_path(vm)?;
+    let initial_path = loadup.before_startup.take().unwrap_or_else(|| current_path.clone());
+    let (path, applied, mut subdirs_skipped) = apply_subdirs(initial_path.clone(), &dir);
+    // A defined normal-top-level is not evidence that its subdirs loop ran.
+    // Compare the whole ordered result: replaying a completed loop duplicates
+    // entries, while accepting the unexpanded prefix hides GNU libraries.
+    loadup.subdirs = if current_path == path {
+        None
+    } else if current_path == initial_path {
+        vm.set_load_path(&path.iter().map(PathBuf::from).collect::<Vec<_>>())?;
+        Some(applied)
+    } else {
+        subdirs_skipped.push(("load-path".into(),
+            "startup left neither its initial path nor the completed subdirs path".into()));
+        Some(vec![])
+    };
+    loadup.subdirs_skipped = subdirs_skipped;
+    loadup.load_path_len = load_path(vm)?.len();
+    if loadup.rows.iter().any(|row| row.site.name == "simple" && matches!(row.outcome, Outcome::Partial { .. })) {
+        let source = std::fs::read_to_string(dir.join("simple.el")).map_err(|e| e.to_string())?;
+        loadup.command_definitions = load_line_command_definitions(vm, &source)?;
+    }
+    loadup.seconds = begun.elapsed().as_secs_f64();
+    Ok(loadup)
+}
+
+/// GNU's installed `load-path` for the Lisp directory `dir`: `(DIR)` grown by
+/// `normal-top-level`'s subdirs loop ([`apply_subdirs`]), as a dumped GNU
+/// Emacs starts with it.
+pub fn installed_load_path(dir: &Path) -> Result<Vec<PathBuf>, String> {
+    let dir = dir.canonicalize().map_err(|e| format!("GNU lisp directory {}: {e}", dir.display()))?;
+    let (path, _, skipped) = apply_subdirs(vec![dir.to_string_lossy().into_owned()], &dir);
+    if let Some((entry, why)) = skipped.first() { return Err(format!("subdirs.el of {entry}: {why}")); }
+    Ok(path.into_iter().map(PathBuf::from).collect())
+}
+
+/// Run `bootstrap` (rlisp/romacs-loadup-bootstrap.el, the chain the batch
+/// package runner preloads) on `load_path`, as that runner does: the path is
+/// already GNU's installed one, so the drive adds no subdirs step and no
+/// adaptation of its own; the file's adaptations are its forms. Deviation 1
+/// still holds: a failing site is recorded and the next form runs.
+pub fn drive_bootstrap(vm: &mut Vm, bootstrap: &Path, load_path: &[PathBuf]) -> Result<Loadup, String> {
+    let begun = std::time::Instant::now();
+    vm.set_load_path(load_path)?;
+    let mut loadup = run(vm, bootstrap, load_path, false)?;
+    loadup.load_path_len = load_path.len();
+    loadup.seconds = begun.elapsed().as_secs_f64();
+    Ok(loadup)
+}
+
+/// Every top-level form of `file` in order, its load sites through the
+/// wrapper; each site's file is found on `search` as `load` finds it.
+fn run(vm: &mut Vm, file: &Path, search: &[PathBuf], adapt: bool) -> Result<Loadup, String> {
+    let loadup = file.canonicalize().map_err(|e| format!("{}: {e}", file.display()))?;
     let source = std::fs::read_to_string(&loadup).map_err(|e| format!("{}: {e}", loadup.display()))?;
     let (spans, sites) = load_sites(&source)?;
-    vm.set_load_path(std::slice::from_ref(&dir))?;
+    let file_name = loadup.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     // VM2's own runtime (its Lisp-written primitives), as every GUI path installs.
     vm.install_lisp_prelude()?;
     vm.eval_source(WRAPPER)?;
+    vm.eval_source(&format!("(setq romacs-loadup--adapt {})", if adapt { "t" } else { "nil" }))?;
     let mut form_failures = vec![];
     let mut form_errors: Vec<Option<String>> = vec![None; spans.len()];
     // Steps of the VM's loader, per site invocation: (site, from, to).
@@ -380,7 +445,7 @@ pub fn drive(vm: &mut Vm, dir: &Path) -> Result<Loadup, String> {
         // Attribute this form's loader steps to the sites it invoked, in order.
         let mut cursor = from;
         for site in &invoked {
-            let path = resolve(&dir, &sites[site - 1].name);
+            let path = resolve(search, &sites[site - 1].name);
             match first_step(vm, cursor, to, path.as_deref()) {
                 Some(begin) => { windows.push((*site, begin, to)); cursor = begin + 1; }
                 // No step of its own (missing file, or stopped before form 1).
@@ -403,14 +468,14 @@ pub fn drive(vm: &mut Vm, dir: &Path) -> Result<Loadup, String> {
     let mut rows = vec![];
     for site in &sites {
         let entry = log_entry(vm, site.index)?;
-        let path = resolve(&dir, &site.name);
+        let path = resolve(search, &site.name);
         let window = windows.iter().find(|w| w.0 == site.index).map(|w| (w.1, w.2));
         let (own, nested) = match (window, path.as_ref()) {
             (Some((from, to)), Some(path)) => split_steps(&steps[from.min(steps.len())..to.min(steps.len())], path),
             _ => (vec![], vec![]),
         };
         let outcome = match entry.as_deref() {
-            None => NotReachedWhy::explain(&form_errors, site),
+            None => NotReachedWhy::explain(&form_errors, site, &file_name),
             Some("ok") => Outcome::Complete { forms: own.iter().filter(|s| s["status"] == "ok").count() },
             Some("absent") => Outcome::Absent,
             Some("native") => Outcome::Native,
@@ -438,28 +503,8 @@ pub fn drive(vm: &mut Vm, dir: &Path) -> Result<Loadup, String> {
         };
         rows.push(Row { site: site.clone(), outcome, nested });
     }
-    let current_path = load_path(vm)?;
-    let initial_path = before_startup.unwrap_or_else(|| current_path.clone());
-    let (path, applied, mut subdirs_skipped) = apply_subdirs(initial_path.clone(), &dir);
-    // A defined normal-top-level is not evidence that its subdirs loop ran.
-    // Compare the whole ordered result: replaying a completed loop duplicates
-    // entries, while accepting the unexpanded prefix hides GNU libraries.
-    let subdirs = if current_path == path {
-        None
-    } else if current_path == initial_path {
-        vm.set_load_path(&path.iter().map(PathBuf::from).collect::<Vec<_>>())?;
-        Some(applied)
-    } else {
-        subdirs_skipped.push(("load-path".into(),
-            "startup left neither its initial path nor the completed subdirs path".into()));
-        Some(vec![])
-    };
-    let load_path_len = load_path(vm)?.len();
-    let command_definitions = if rows.iter().any(|row| row.site.name == "simple" && matches!(row.outcome, Outcome::Partial { .. })) {
-        let source = std::fs::read_to_string(dir.join("simple.el")).map_err(|e| e.to_string())?;
-        load_line_command_definitions(vm, &source)?
-    } else { vec![] };
-    Ok(Loadup { loadup, forms: spans.len(), rows, form_failures, seconds: begun.elapsed().as_secs_f64(), subdirs, subdirs_skipped, load_path_len, command_definitions })
+    Ok(Loadup { loadup, forms: spans.len(), rows, form_failures, seconds: 0.0, subdirs: None, subdirs_skipped: vec![],
+                load_path_len: 0, command_definitions: vec![], before_startup })
 }
 
 fn load_line_command_definitions(vm: &mut Vm, source: &str) -> Result<Vec<(String, usize)>, String> {
@@ -629,10 +674,10 @@ pub fn apply_subdirs(mut load_path: Vec<String>, lisp: &Path) -> (Vec<String>, V
 
 struct NotReachedWhy;
 impl NotReachedWhy {
-    fn explain(form_errors: &[Option<String>], site: &Site) -> Outcome {
+    fn explain(form_errors: &[Option<String>], site: &Site, file: &str) -> Outcome {
         let why = match &form_errors[site.form] {
-            Some(error) => format!("loadup.el form {} signalled before this call: {}", site.form + 1, one_line(error, 200)),
-            None => format!("loadup.el form {} completed without calling it (its condition was false in the VM)", site.form + 1),
+            Some(error) => format!("{file} form {} signalled before this call: {}", site.form + 1, one_line(error, 200)),
+            None => format!("{file} form {} completed without calling it (its condition was false in the VM)", site.form + 1),
         };
         Outcome::NotReached { why }
     }
@@ -675,9 +720,9 @@ fn log_entry(vm: &mut Vm, site: usize) -> Result<Option<String>, String> {
     Ok(Some(serde_json::from_str::<String>(&printed).unwrap_or(printed)))
 }
 
-/// Where `(load NAME)` finds NAME with load-path `(DIR)`: NAME.el, then NAME.
-fn resolve(dir: &Path, name: &str) -> Option<PathBuf> {
-    [dir.join(format!("{name}.el")), dir.join(name)].into_iter()
+/// Where `(load NAME)` finds NAME on `search`: per directory, NAME.el, then NAME.
+fn resolve(search: &[PathBuf], name: &str) -> Option<PathBuf> {
+    search.iter().flat_map(|dir| [dir.join(format!("{name}.el")), dir.join(name)])
         .find(|p| p.is_file()).and_then(|p| p.canonicalize().ok())
 }
 
