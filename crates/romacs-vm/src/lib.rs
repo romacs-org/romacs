@@ -496,6 +496,7 @@ enum Primitive {
     // Engine control like `load': waits for a host key, redisplaying in a
     // nested engine first (host_input.rs).
     ReadHostEvent,
+    FormatModeLine,
     Macroexpand,
     ClosureMetadata,
     ClosureDocument,
@@ -758,6 +759,7 @@ const PRIMITIVES: &[(&str, Primitive)] = &[
     // Table index must equal the enum discriminant: append only.
     ("autoload-do-load", Primitive::AutoloadDoLoad),
     ("romacs--read-host-event", Primitive::ReadHostEvent),
+    ("format-mode-line", Primitive::FormatModeLine),
     ("macroexpand", Primitive::Macroexpand),
     ("#:vm2-closure-metadata", Primitive::ClosureMetadata),
     ("#:vm2-closure-document", Primitive::ClosureDocument),
@@ -2609,7 +2611,7 @@ impl Vm {
         if matches!(p, CacheStats | CacheClear | CacheEntries) {
             return self.cache_primitive(p, n);
         }
-        if matches!(p, Load | Require | Provide | Featurep | Eval | Macroexpand | AutoloadDoLoad | ReadHostEvent) {
+        if matches!(p, Load | Require | Provide | Featurep | Eval | Macroexpand | AutoloadDoLoad | ReadHostEvent | FormatModeLine) {
             let args = self.stack[start..start + n].to_vec();
             let result = self.loader_primitive(p, &args);
             // Only the reentrant engine path can re-raise an eval escape.
