@@ -53,7 +53,7 @@ fn flush_standard_output(cx) {
 fn written(_: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next { Ok(Step::Done(saved[0])) }
 /// Printing with change hooks to run: the insertion's bracket, in Lisp.
 fn print_hooked(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
-    let insert = crate::prim::subr_named("insert").expect("insert subr");
+    let insert = crate::prim::subr_named("romacs--insert-printed").expect("print_finish subr");
     let args = vec![saved[2], saved[1], insert];
     Ok(Step::Call { f: cx.intern("romacs--print-insert"), args, then: written, saved: vec![saved[0]] })
 }

@@ -116,10 +116,11 @@ moved it, as GNU's preserve_ptr, and the overlays' hooks found, as
 
 (defun romacs--print-insert (stream text insert)
   "Insert TEXT printed to STREAM, a buffer or marker, as print_finish does.
-INSERT, the `insert' subr, prepares, inserts and signals a nonempty TEXT;
-an empty one still signals its after-change at point.  Output to a
-marker inserts at it with point there, then moves the marker past the
-text and point back, past the text if it was at or after the marker."
+INSERT, the `romacs--insert-printed' subr, prepares, inserts and signals
+a nonempty TEXT from point less its length; an empty one still signals
+its after-change at point.  Output to a marker inserts at it with point
+there, then moves the marker past the text and point back, past the
+text if it was at or after the marker."
   (save-current-buffer
     (set-buffer (if (markerp stream) (marker-buffer stream) stream))
     (let ((old (point))

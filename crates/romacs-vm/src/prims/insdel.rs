@@ -28,11 +28,13 @@ pub(crate) fn install_half(cx: &mut Leaf<'_>, then: Then, saved: Vec<Value>) -> 
 
 // Registers of an insertion between its steps:
 //   [KIND, NEXT, OPOINT, INHIBITED, BEHIND, IN-FRONT, OVERLAYS, ARGS...]
-// KIND bit 0 is inherit and bit 1 before-markers; NEXT indexes the argument
-// being inserted, each one a change of its own as general_insert_function
-// makes it; OPOINT is point before its hooks, where GNU's after-change
-// starts; INHIBITED whether modification hooks were inhibited when it was
-// prepared; BEHIND and IN-FRONT the text's insert hooks; OVERLAYS the
+// KIND bit 0 is inherit, bit 1 before-markers and bit 2 printed output;
+// NEXT indexes the argument being inserted, each one a change of its own as
+// general_insert_function makes it; OPOINT is point before its hooks, where
+// insert_from_string's after-change starts (a character's, as insdel.c
+// insert's, and printed output's, as print_finish's, start at point less
+// the inserted length after the edit); INHIBITED whether modification
+// hooks were inhibited when it was prepared; BEHIND and IN-FRONT the text's insert hooks; OVERLAYS the
 // (PROP . OVERLAY) hooks `romacs--before-change' found. The registers are
 // traced across the Lisp calls.
 const ARGS: usize = 7;
@@ -96,14 +98,19 @@ fn insert_prepared(cx: &mut Leaf<'_>, before: Value, saved: &[Value]) -> Next {
 fn insert_edit(cx: &mut Leaf<'_>, saved: &mut Vec<Value>) -> std::result::Result<Option<Step>, Fault> {
     let kind = saved[0].integer_value().expect("insert kind");
     let next = saved[1].integer_value().expect("argument index");
+    let arg = saved[ARGS + next as usize];
     cx.change_deactivates_mark(saved[3] != Value::NIL)?;
-    cx.insert_change(saved[ARGS + next as usize], kind & 1 != 0, kind & 2 != 0)?;
+    cx.insert_change(arg, kind & 1 != 0, kind & 2 != 0)?;
     saved[1] = fixnum(next + 1);
     let (behind, in_front, overlays) = (saved[4], saved[5], saved[6]);
     if !cx.after_change_runs(overlays != Value::NIL, behind != Value::NIL || in_front != Value::NIL)? { return Ok(None); }
     let point = cx.point_char()?;
+    let start = match cx.string_chars(arg) {
+        Some(_) if kind & 4 == 0 => saved[2],
+        length => fixnum(point - length.unwrap_or(1) as i64),
+    };
     let buffer = cx.current_buffer()?;
-    let args = vec![buffer, saved[2], fixnum(point), fixnum(0), behind, in_front, overlays];
+    let args = vec![buffer, start, fixnum(point), fixnum(0), behind, in_front, overlays];
     Ok(Some(Step::Call { f: cx.intern("romacs--after-change"), args, then: inserted, saved: saved.clone() }))
 }
 
@@ -129,6 +136,11 @@ fn insert_before_markers(cx; rest args) -> Step {
 defsubr! { name = "insert-before-markers-and-inherit", gnu = "editfns.c:1422", effect = Global,
 fn insert_before_markers_and_inherit(cx; rest args) -> Step {
     insert_family(cx, 3, args)
+}}
+
+defsubr! { name = "romacs--insert-printed", gnu = "print.c:202", effect = Global,
+fn insert_printed(cx, text: Value) -> Step {
+    insert_family(cx, 4, &[text])
 }}
 
 // Registers of a deletion waiting on its before hooks:

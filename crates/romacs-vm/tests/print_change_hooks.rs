@@ -1,6 +1,7 @@
 //! Printing into a buffer or at a marker runs the insertion's change hooks
 //! as GNU print_finish does: insert_1_both prepares the text (before-change
-//! hooks), signal_after_change follows even for empty output, and point is
+//! hooks), signal_after_change follows even for empty output, from point
+//! less the printed length as `insert' signals a character, and point is
 //! at the insertion while they run. Compared against pinned GNU.
 use romacs_vm::Vm;
 use std::path::Path;
@@ -21,6 +22,9 @@ const CASES: &str = r##"
 (let ((other (current-buffer))) (set-buffer (get-buffer-create "*other*")) (list (princ "o" other) (buffer-name) (with-current-buffer other (buffer-string)) (reverse log)))
 (progn (setq after-change-functions (list (lambda (&rest _) (error "boom")))) (list (condition-case e (princ "e" (current-buffer)) (error e)) (buffer-string) after-change-functions))
 (progn (setq before-change-functions (list (lambda (&rest _) (error "hook-must-run")))) (list (condition-case e (princ "x" (current-buffer)) (error e)) (buffer-string) (point)))
+(progn (setq before-change-functions (list (lambda (&rest _) (goto-char (point-max))))) (list (princ "XY" (current-buffer)) (buffer-string) (point) (reverse log)))
+(let ((m (copy-marker 1))) (setq before-change-functions (list (lambda (&rest _) (goto-char 3)))) (list (prin1 'q m) (buffer-string) (point) (marker-position m) (reverse log)))
+(progn (setq before-change-functions (list (lambda (&rest _) (goto-char (point-max))))) (insert ?Y) (goto-char 2) (insert-before-markers ?Z) (goto-char 2) (insert-and-inherit "W") (goto-char 2) (insert "V" ?U) (list (buffer-string) (reverse log)))
 (let ((m (copy-marker 3))) (setq buffer-read-only t) (list (condition-case e (princ "x" m) (error (car e))) (point) (buffer-string)))
 "##;
 

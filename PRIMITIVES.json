@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "df8805d947dd6659089c8ac3889b8784f77459e9d016e1fd176858d4c0eff6b0",
+  "source_fingerprint": "510ec9018ce3b0e1c7edc4e833955214b484f9f4eea4dc007d273f43dbd75601",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 980,
-  "parsed_vm2_only": 980
+  "parsed_total": 981,
+  "parsed_vm2_only": 981
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -1177,17 +1177,17 @@
   "delete-and-extract-region": {
    "name": "delete-and-extract-region",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/insdel.rs:190"
+   "registered_at": "crates/romacs-vm/src/prims/insdel.rs:202"
   },
   "delete-backward-char": {
    "name": "delete-backward-char",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/insdel.rs:237"
+   "registered_at": "crates/romacs-vm/src/prims/insdel.rs:249"
   },
   "delete-char": {
    "name": "delete-char",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/insdel.rs:212"
+   "registered_at": "crates/romacs-vm/src/prims/insdel.rs:224"
   },
   "delete-directory-internal": {
    "name": "delete-directory-internal",
@@ -1218,7 +1218,7 @@
   "delete-region": {
    "name": "delete-region",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/insdel.rs:183"
+   "registered_at": "crates/romacs-vm/src/prims/insdel.rs:195"
   },
   "delete-window-internal": {
    "name": "delete-window-internal",
@@ -1353,7 +1353,7 @@
   "erase-buffer": {
    "name": "erase-buffer",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/insdel.rs:198"
+   "registered_at": "crates/romacs-vm/src/prims/insdel.rs:210"
   },
   "error": {
    "name": "error",
@@ -2007,22 +2007,22 @@
   "insert": {
    "name": "insert",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/insdel.rs:114"
+   "registered_at": "crates/romacs-vm/src/prims/insdel.rs:121"
   },
   "insert-and-inherit": {
    "name": "insert-and-inherit",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/insdel.rs:119"
+   "registered_at": "crates/romacs-vm/src/prims/insdel.rs:126"
   },
   "insert-before-markers": {
    "name": "insert-before-markers",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/insdel.rs:124"
+   "registered_at": "crates/romacs-vm/src/prims/insdel.rs:131"
   },
   "insert-before-markers-and-inherit": {
    "name": "insert-before-markers-and-inherit",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/insdel.rs:129"
+   "registered_at": "crates/romacs-vm/src/prims/insdel.rs:136"
   },
   "insert-char": {
    "name": "insert-char",
@@ -3423,7 +3423,7 @@
   "replace-region-contents": {
    "name": "replace-region-contents",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/insdel.rs:277"
+   "registered_at": "crates/romacs-vm/src/prims/insdel.rs:289"
   },
   "require": {
    "name": "require",
@@ -3496,6 +3496,11 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/insert_coding.rs:391"
   },
+  "romacs--insert-printed": {
+   "name": "romacs--insert-printed",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/insdel.rs:141"
+  },
   "romacs--keymap-at-point": {
    "name": "romacs--keymap-at-point",
    "implementation": "vm2",
@@ -3519,12 +3524,12 @@
   "romacs--overlay-change-hooks": {
    "name": "romacs--overlay-change-hooks",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/insdel.rs:262"
+   "registered_at": "crates/romacs-vm/src/prims/insdel.rs:274"
   },
   "romacs--prepare-change": {
    "name": "romacs--prepare-change",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/insdel.rs:303"
+   "registered_at": "crates/romacs-vm/src/prims/insdel.rs:315"
   },
   "romacs--proc-accept": {
    "name": "romacs--proc-accept",
@@ -3690,12 +3695,12 @@
   "romacs--replace-range": {
    "name": "romacs--replace-range",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/insdel.rs:336"
+   "registered_at": "crates/romacs-vm/src/prims/insdel.rs:348"
   },
   "romacs--replace-runs": {
    "name": "romacs--replace-runs",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/insdel.rs:403"
+   "registered_at": "crates/romacs-vm/src/prims/insdel.rs:415"
   },
   "romacs--restore-excursion": {
    "name": "romacs--restore-excursion",
@@ -3765,7 +3770,7 @@
   "romacs--validate-region": {
    "name": "romacs--validate-region",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/insdel.rs:294"
+   "registered_at": "crates/romacs-vm/src/prims/insdel.rs:306"
   },
   "romacs--wait-status": {
    "name": "romacs--wait-status",
@@ -3895,7 +3900,7 @@
   "self-insert-command": {
    "name": "self-insert-command",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/insdel.rs:246"
+   "registered_at": "crates/romacs-vm/src/prims/insdel.rs:258"
   },
   "sequencep": {
    "name": "sequencep",
