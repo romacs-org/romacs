@@ -154,10 +154,15 @@
 ;; startup.el command-line (startup.el:1479): variables whose standard value
 ;; depends on the runtime (user-mail-address and friends) get it once the
 ;; preloaded files are in.  Romacs does not run command-line in this
-;; bootstrap, so it takes this one step itself.
+;; bootstrap, so it takes this one step itself, in batch.  A session that
+;; starts in another context evaluates the same list again in its own
+;; (rlisp/romacs-gui-loadup.el).
+(defvar romacs-loadup-delayed-init-variables
+  (and (listp custom-delayed-init-variables) (reverse custom-delayed-init-variables))
+  "The preloaded variables whose standard value depends on the runtime, in load order.
+These are `custom-delayed-init-variables' as the preloaded files left it.")
 (let ((user-emacs-directory-warning nil))
-  (when (listp custom-delayed-init-variables)
-    (mapc #'custom-reevaluate-setting (reverse custom-delayed-init-variables))))
+  (mapc #'custom-reevaluate-setting romacs-loadup-delayed-init-variables))
 (setq custom-delayed-init-variables t)
 ;; startup.el command-line (startup.el:843): the initial frame's faces for
 ;; its background mode and display type.

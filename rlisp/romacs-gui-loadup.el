@@ -39,6 +39,15 @@
         :planes 24 :color-cells 16777216 :visual-class true-color
         :color t :grayscale nil :display-type color :background-mode dark
         :palette nil))
+;; startup.el command-line (startup.el:1479): the delayed settings take
+;; their standard values in this session's context, as GNU computes them at
+;; startup: `global-font-lock-mode', `abbrev-file-name',
+;; `auto-save-list-file-prefix' and the rest of the list the chain computed
+;; for batch.  GNU computes them on its initial terminal, which in a UTF-8
+;; locale shows what this display shows (`mode-line-collapse-minor-modes-to');
+;; the headless record does not, so they follow the display record.
+(let ((user-emacs-directory-warning nil))
+  (mapc #'custom-reevaluate-setting romacs-loadup-delayed-init-variables))
 ;; faces.el face-set-after-frame-default, by way of `frame-initialize':
 ;; the frame's faces for this display.  A face declared before the chain
 ;; (the Rum palette, the launch font) keeps its own spec.

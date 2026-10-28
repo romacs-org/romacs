@@ -1516,6 +1516,17 @@ mod tests {
         dir
     }
 
+    /// A private HOME and XDG_CONFIG_HOME for `vm`'s session: the interactive
+    /// session's user directory, which GNU's startup creates, is never the
+    /// owner's.
+    fn private_home(vm: &mut Vm, name: &str) -> std::path::PathBuf {
+        let home = scratch_lisp(&format!("{name}-home"), &[]);
+        let entries = [format!("HOME={}", home.display()), format!("XDG_CONFIG_HOME={}", home.join("config").display())];
+        vm.eval_source(&format!("(setq process-environment (append (list {} {}) process-environment))",
+                                lisp_string(&entries[0]), lisp_string(&entries[1]))).unwrap();
+        home
+    }
+
     /// A runtime root for `--loadup`: `gnu-lisp/` holding FILES and, beside
     /// it, `rlisp/` holding BOOTSTRAP as the shared chain and an interactive
     /// session file that only clears `noninteractive`. Returns `gnu-lisp/`.
@@ -1672,6 +1683,7 @@ mod tests {
             let gnu_only = query(&mut vm, "(list (fboundp 'hermes) (featurep 'romacs-bundled-autoloads))");
             let mut vm = Vm::new();
             vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
+            private_home(&mut vm, "autoloads");
             initialize_loadup_from(&mut vm, Launch::Loadup, None, &in_vm).unwrap();
             let loadup = [("gnosis-dashboard", "gnosis/gnosis-dashboard.el"), ("hermes", "hermes/hermes.el")].map(|(name, file)| {
                 let file = lisp_string(&owned.join("rlisp").join(file).to_string_lossy());
@@ -1864,6 +1876,7 @@ mod tests {
             let mut vm = Vm::new();
             vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
             vm.set_echo_area_host(true);
+            private_home(&mut vm, "shared-chain");
             let started = initialize_loadup(&mut vm, Launch::Loadup, None).unwrap();
             let loadup = started.loadup.as_ref().unwrap();
             let rows: Vec<String> = loadup.rows.iter().map(|r| r.site.name.clone()).collect();
@@ -1916,5 +1929,31 @@ mod tests {
         assert_eq!(live, ["2", "3", "4", "4", "1", r#""3 (#o3, #x3, ?\\C-c)""#, "1"], "{ran:?}");
         assert!(ran.iter().all(|r| !r.contains("SIGNAL")), "{ran:?}");
         assert!(ran.contains(&"eval-last-sexp".to_owned()), "{ran:?}");
+    }
+
+    /// `--loadup` with no launch font: the default face keeps the frame's
+    /// own size through the chain's headless faces and the graphical session,
+    /// and the delayed settings are an interactive session's, under its user
+    /// directory, as GNU's startup computes them.
+    #[test]
+    fn loadup_session_keeps_the_frame_font_and_takes_interactive_settings() {
+        let (launch, session, settings, values) = on_evaluator(|| {
+            let mut vm = Vm::new();
+            vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
+            let home = private_home(&mut vm, "session");
+            let launch = vm.display_default_face().unwrap();
+            initialize_loadup(&mut vm, Launch::Loadup, None).unwrap();
+            let session = vm.display_default_face().unwrap();
+            let config = lisp_string(&format!("{}/config/romacs/", home.display()));
+            let settings = printed(&mut vm, &format!(
+                "(list global-font-lock-mode blink-cursor-mode
+                       (equal (expand-file-name abbrev-file-name) (concat {config} \"abbrev_defs\"))
+                       (equal auto-save-list-file-prefix (concat {config} \"auto-save-list/.saves-\")))"));
+            let values = printed(&mut vm, "(format \"%s %s\" abbrev-file-name auto-save-list-file-prefix)");
+            (launch, session, settings, values)
+        });
+        assert_eq!(session.pixel_size, launch.pixel_size, "{launch:?} at launch, {session:?} in the session");
+        assert!(session.pixel_size >= 10.0, "{session:?}");
+        assert_eq!(settings, "(t t t t)", "{values}");
     }
 }
