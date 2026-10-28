@@ -539,6 +539,12 @@ impl Vm {
         if from == to && inserted == 0 {
             return Ok(None);
         }
+        // A unibyte buffer takes the text as bytes, refused before undo
+        // records anything.
+        let bytes = match self.objects[index] {
+            Object::ByteBuffer(_) => Some(self.unibyte_text(text).map_err(Fault::Error)?),
+            _ => None,
+        };
         if self.undo_list_of(index) != Value::TRUE {
             let unmodified = !self.buffer_state(buffer).map_err(Fault::Error)?.modified();
             let deletion = self.buffer_text(buffer, from, to)?;
@@ -546,8 +552,27 @@ impl Vm {
             self.record_delete(index, from, deletion, false).map_err(Fault::Error)?;
         }
         let modification = self.buffer_state(buffer).map_err(Fault::Error)?.modification;
-        // Inserting at TO before its markers, then deleting FROM..TO, moves
-        // markers and overlay ends as adjust_markers_for_replace does.
+        if let Some(bytes) = bytes {
+            // ByteBuffer::replace moves the saved positions as
+            // adjust_markers_for_replace does.
+            let (a, z) = (self.change_byte(buffer, from)?, self.change_byte(buffer, to)?);
+            let Object::ByteBuffer(b) = &mut self.objects[index] else { unreachable!("unibyte buffer") };
+            b.replace(a..z, &bytes).map_err(Fault::Error)?;
+            self.display_state.version += 1;
+        } else {
+            self.replace_text(buffer, from, to, text, inserted)?;
+        }
+        let state = self.buffer_state_mut(buffer).map_err(Fault::Error)?;
+        state.modification = modification;
+        state.modification.changed((to - from + inserted) as usize, true);
+        let point = if from < point || point == to { point + from + inserted - point.min(to) } else { point };
+        self.set_change_point(buffer, point)?;
+        Ok(Some((from, to, inserted)))
+    }
+
+    /// Inserting TEXT at TO before its markers, then deleting FROM..TO,
+    /// moves markers and overlay ends as adjust_markers_for_replace does.
+    fn replace_text(&mut self, buffer: Value, from: i64, to: i64, text: Value, inserted: i64) -> Faulty<()> {
         self.set_change_point(buffer, to)?;
         if inserted > 0 {
             if from < to {
@@ -560,12 +585,7 @@ impl Vm {
             let (from_v, to_v) = (Value::integer(from).map_err(Fault::Error)?, Value::integer(to).map_err(Fault::Error)?);
             self.edit_kernel(&[from_v, to_v], |vm, n| vm.buffer_primitive(Primitive::DeleteRegion, 0, n))?;
         }
-        let state = self.buffer_state_mut(buffer).map_err(Fault::Error)?;
-        state.modification = modification;
-        state.modification.changed((to - from + inserted) as usize, true);
-        let point = if from < point || point == to { point + from + inserted - point.min(to) } else { point };
-        self.set_change_point(buffer, point)?;
-        Ok(Some((from, to, inserted)))
+        Ok(())
     }
 
     fn set_change_point(&mut self, buffer: Value, position: i64) -> Faulty<()> {

@@ -62,6 +62,7 @@ const CASES: &str = r###"
 (with-temp-buffer (insert "0123456789") (let ((a (make-overlay 2 4)) (b (make-overlay 5 6)) (c (make-overlay 3 9)) (d (make-overlay 9 9)) (e (make-overlay 4 5))) (overlay-put e 'evaporate t) (list (replace-region-contents 1 11 "01ab45x789") (buffer-string) (list (overlay-start a) (overlay-end a) (overlay-start b) (overlay-end b) (overlay-start c) (overlay-end c) (overlay-start d) (overlay-end d) (overlay-start e) (overlay-end e)))))
 (list (commandp 'replace-region-contents) (car (cdr (interactive-form 'replace-region-contents))))
 (with-temp-buffer (insert "0123456789") (let ((f (make-overlay 4 6)) (g (make-overlay 4 6))) (overlay-put f 'evaporate t) (list (replace-region-contents 1 11 "012xy6789") (buffer-string) (overlay-buffer f) (overlay-start f) (overlay-end f) (overlay-start g) (overlay-end g) (replace-region-contents 1 10 "012x6789") (overlay-buffer f) (overlay-start g) (overlay-end g) (replace-region-contents 3 5 "" 0) (overlay-buffer f) (overlay-start g))))
+(with-temp-buffer (set-buffer-multibyte nil) (buffer-enable-undo) (insert "abc") (undo-boundary) (goto-char 3) (list (replace-region-contents 1 4 "XYZ") (buffer-string) (point) (multibyte-string-p (buffer-string)) buffer-undo-list (save-excursion (goto-char 4) (replace-region-contents 2 4 "MNO" 0) (point)) (buffer-string) (point) (save-restriction (narrow-to-region 2 5) (replace-region-contents 3 5 (string-to-unibyte "\377") 0) (list (point-min) (point-max))) (append (buffer-string) nil) (point-max)))
 "###;
 
 /// Cases whose change hooks run Lisp, which needs the Lisp prelude.
@@ -111,4 +112,13 @@ fn base64_decode_region_refuses_raw_bytes_in_a_multibyte_buffer() {
     let source = "(with-temp-buffer (insert \"x_-8\") (goto-char 2) (list (condition-case e (base64-decode-region 2 5 t) (error e)) (buffer-string) (point) buffer-undo-list))";
     let actual = Vm::new().eval_source(source).and_then(|v| v.display()).unwrap();
     assert_eq!(actual, "((error \"VM2 base64-decode-region of raw bytes into a multibyte buffer is unsupported\") \"x_-8\" 2 t)");
+}
+
+/// A unibyte buffer refuses non-ASCII text as `insert' there refuses it,
+/// before the replacement records undo.
+#[test]
+fn replace_region_contents_refuses_text_into_a_unibyte_buffer_before_undo() {
+    let source = "(with-temp-buffer (set-buffer-multibyte nil) (buffer-enable-undo) (insert \"abc\") (undo-boundary) (list (condition-case e (replace-region-contents 1 4 \"\u{e9}\" 0) (error e)) (buffer-string) buffer-undo-list (buffer-modified-tick)))";
+    let actual = Vm::new().eval_source(source).and_then(|v| v.display()).unwrap();
+    assert_eq!(actual, "((error \"bytes required; encode text explicitly\") #u8(97 98 99) (nil (1 . 4) (t . 0)) 3)");
 }

@@ -772,6 +772,19 @@ impl Vm {
         }
         Ok(if text { Value::TRUE } else { Value::NIL })
     }
+    /// The bytes TEXT, an octet or a string, puts in a unibyte buffer: a
+    /// unibyte string's bytes and ASCII text as they are; other text
+    /// requires an explicit encoder.
+    pub(crate) fn unibyte_text(&self, text: Value) -> Result<Vec<u8>> {
+        if let Some(i) = text.integer_value() {
+            return Ok(vec![u8::try_from(i).map_err(|_| "invalid octet")?]);
+        }
+        match self.object(text)? {
+            Object::Bytes(b) => Ok(b.clone()),
+            Object::String(s) | Object::RawString(s) if !s.is_multibyte() || s.bytes().is_ascii() => Ok(s.bytes().to_vec()),
+            _ => Err("bytes required; encode text explicitly".into()),
+        }
+    }
     fn byte_buffer_primitive(
         &mut self,
         p: Primitive,
@@ -784,19 +797,7 @@ impl Vm {
         let inserted = if p == Insert {
             let mut out = vec![];
             for &v in &self.stack[start..start + n] {
-                if let Some(i) = v.integer_value() {
-                    out.push(u8::try_from(i).map_err(|_| "invalid octet")?);
-                } else {
-                    match self.object(v)? {
-                        Object::Bytes(b) => out.extend_from_slice(b),
-                        // A unibyte string's bytes and ASCII text are copied as
-                        // they are; other text requires an explicit encoder.
-                        Object::String(s) | Object::RawString(s) if !s.is_multibyte() || s.bytes().is_ascii() => {
-                            out.extend_from_slice(s.bytes())
-                        }
-                        _ => return Err("bytes required; encode text explicitly".into()),
-                    }
-                }
+                out.extend(self.unibyte_text(v)?);
             }
             out
         } else if p == InsertFileBytes {
