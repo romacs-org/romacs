@@ -1378,12 +1378,15 @@ fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Va
 }
 fn lower_function(
     vm: &mut Vm,
-    code: &mut [Vec<Inst>],
+    code: &mut Vec<Vec<Inst>>,
     entries: &mut Vec<EntryCache>,
     inline_bodies: &mut Vec<Option<InlineBody>>,
     free_entries: &mut Vec<usize>,
     id: usize,
 ) -> Result<()> {
+    // A variable watcher can compile functions while this engine is
+    // suspended at a write, with no resize after it.
+    if id >= code.len() { code.resize_with(vm.functions.len().max(id + 1), Vec::new); }
     if code[id].is_empty() {
         vm.materialize_image_function(id)?;
         code[id] = vm.functions[id]

@@ -219,13 +219,20 @@ mod leaf {
         /// notify_variable_watchers from a leaf; a watcher's signal is the fault.
         pub(crate) fn notify(&mut self, slot: usize, value: Value, operation: &str, place: Option<Value>) -> std::result::Result<(), Fault> {
             if self.vm.trapped.is_empty() { return Ok(()); }
-            self.vm.notify_watchers_at(slot, value, operation, place).map_err(|text| match self.vm.propagated_escape.take() {
-                Some(crate::threaded::Escape::Signal(condition, data)) => Fault::Signal(condition, data),
-                _ => Fault::Error(text),
-            })
+            self.vm.notify_watchers_at(slot, value, operation, place).map_err(|text| self.watcher_fault(text))
         }
-        pub(crate) fn variable_watchable(&self, watcher: Value) -> bool {
-            super::native_watcher(self.vm, watcher).is_some()
+        /// A write's failure as a fault: a watcher's signal as itself. A
+        /// leaf cannot carry a `throw' out, so one is refused by name.
+        fn watcher_fault(&mut self, text: String) -> Fault {
+            match self.vm.propagated_escape.take() {
+                Some(crate::threaded::Escape::Signal(condition, data)) => Fault::Signal(condition, data),
+                Some(crate::threaded::Escape::Error { condition, object, .. }) => {
+                    let (_, data) = self.vm.cons_pair(object).expect("normalized signal object");
+                    Fault::Signal(condition, data)
+                }
+                Some(crate::threaded::Escape::Throw(..)) => Fault::Error("VM2 throw out of a variable watcher of a native write is unsupported".into()),
+                _ => Fault::Error(text),
+            }
         }
         pub(crate) fn put_symbol_property(&mut self, symbol: Value, key: Value, value: Value) -> std::result::Result<(), Fault> {
             self.vm.put_symbol_property(symbol, key, value).map(|_| ()).map_err(Fault::Error)
@@ -1025,16 +1032,15 @@ mod leaf {
                 return Err(Fault::SettingConstant(v));
             }
             let slot = self.symbol_slot(v)?;
-            self.vm.set_variable_value(slot, value).map_err(|text| match self.vm.propagated_escape.take() {
-                Some(crate::threaded::Escape::Signal(condition, data)) => Fault::Signal(condition, data),
-                _ => Fault::Error(text),
-            })
+            self.vm.set_variable_value(slot, value).map_err(|text| self.watcher_fault(text))
         }
         /// Publish NEW as an alias of BASE once `defvaralias` has validated
         /// it. nil and t are immediates in VM2, so an alias of either targets
         /// the named slot, holding its own constant value.
         pub fn make_variable_alias(&mut self, new: Value, base: Value) -> std::result::Result<(), Fault> {
             let new = self.symbol_slot(new)?;
+            // eval.c:713: NEW's watchers see the alias before it is made.
+            self.notify(new, base, "defvaralias", Some(Value::NIL))?;
             let base = if base == Value::NIL || base == Value::TRUE {
                 let slot = self.vm.slot(if base == Value::NIL { "nil" } else { "t" });
                 self.vm.slots[slot].value = base;

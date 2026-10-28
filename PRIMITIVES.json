@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "abc71c783fb34ff50c9c863b88c7c2874c243b7b9e673286ec4c690123970364",
+  "source_fingerprint": "ec8fa61124b44900767d71da2e0d3c89764b3625898cfd3cdebf803f577ef265",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -253,7 +253,7 @@
   "add-variable-watcher": {
    "name": "add-variable-watcher",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/watchers.rs:33"
+   "registered_at": "crates/romacs-vm/src/prims/watchers.rs:34"
   },
   "all-completions": {
    "name": "all-completions",
@@ -1880,7 +1880,7 @@
   "get-variable-watchers": {
    "name": "get-variable-watchers",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/watchers.rs:58"
+   "registered_at": "crates/romacs-vm/src/prims/watchers.rs:56"
   },
   "getenv-internal": {
    "name": "getenv-internal",
@@ -3403,7 +3403,7 @@
   "remove-variable-watcher": {
    "name": "remove-variable-watcher",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/watchers.rs:47"
+   "registered_at": "crates/romacs-vm/src/prims/watchers.rs:45"
   },
   "rename-buffer": {
    "name": "rename-buffer",
@@ -3939,7 +3939,7 @@
   "set-buffer-redisplay": {
    "name": "set-buffer-redisplay",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/watchers.rs:66"
+   "registered_at": "crates/romacs-vm/src/prims/watchers.rs:64"
   },
   "set-case-table": {
    "name": "set-case-table",

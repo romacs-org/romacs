@@ -1,7 +1,7 @@
 //! GNU data.c variable watchers: the SYMBOL_TRAPPED_WRITE check and
 //! notify_variable_watchers. Watchers run before the write they observe.
-//! Only native leaf subrs are accepted as watchers so far; see the
-//! daily-driver campaign's design/variable-watchers.md.
+//! A native leaf subr runs in place, as GNU calls a subr directly; any other
+//! watcher is funcalled, from whatever write point reached it.
 use crate::*;
 
 impl Vm {
@@ -31,10 +31,11 @@ impl Vm {
         }
         let place = match place {
             Some(place) => place,
-            None => {
-                let local = self.variable_binding_slot(base, false)?;
-                if local != base { self.slots[self.buffer_slot].value } else { Value::NIL }
+            None if self.local_if_set(base)? => {
+                self.buffer_index()?;
+                self.slots[self.buffer_slot].value
             }
+            None => Value::NIL,
         };
         let newval = if newval == Value::UNBOUND { Value::NIL } else { newval };
         let operation = self.intern(operation);
@@ -42,10 +43,43 @@ impl Vm {
         self.trapped.remove(&base);
         let mut result = Ok(());
         for watcher in watchers {
-            result = prim::call_native_watcher(self, watcher, &[symbol, newval, operation, place]);
+            let args = [symbol, newval, operation, place];
+            result = if prim::native_watcher(self, watcher).is_some() {
+                prim::call_native_watcher(self, watcher, &args)
+            } else {
+                self.call_lisp_watcher(watcher, &args)
+            };
             if result.is_err() { break; }
         }
         self.trapped.insert(base);
         result
+    }
+    /// Flocal_variable_if_set_p for the current buffer: a local binding, an
+    /// automatically buffer-local variable, or a per-buffer C variable.
+    fn local_if_set(&mut self, base: usize) -> Result<bool> {
+        if matches!(self.forwarding(base), Some(crate::forwarded::Fwd::Buffer(_))) { return Ok(true); }
+        if self.variable_binding_slot(base, false)? != base { return Ok(true); }
+        Ok(self.local_table(base)?.is_some() && !self.slots[base].explicit_local)
+    }
+    /// calln (WATCHER, ARGS...) at a write point. The writer's Values (an
+    /// engine's registers, a leaf's locals) are not rooted there, so
+    /// collection is inhibited until the watcher returns, as GNU's is in
+    /// compilation and loading here; the engine grows its code cache for
+    /// functions the watcher compiled (`lower_function'). A non-local exit
+    /// is left in `propagated_escape' for the writer; an escape already
+    /// pending there survives a watcher that returns.
+    fn call_lisp_watcher(&mut self, watcher: Value, args: &[Value]) -> Result<()> {
+        let pending = self.propagated_escape.take();
+        let hooked = std::mem::take(&mut self.propagated_escape_hooked);
+        let depth = self.propagated_eval_depth.take();
+        let threshold = std::mem::replace(&mut self.gc_threshold, usize::MAX);
+        let result = self.reader_call(watcher, args);
+        self.gc_threshold = threshold;
+        if result.is_ok() {
+            self.propagated_escape = pending;
+            self.propagated_escape_hooked = hooked;
+            self.propagated_eval_depth = depth;
+        }
+        result.map(|_| ())
     }
 }

@@ -1,6 +1,7 @@
 //! GNU data.c add-variable-watcher, remove-variable-watcher and
 //! get-variable-watchers. Watchers are a list on the base variable's
-//! `watchers' property; the VM traps writes while it is non-empty.
+//! `watchers' property; the VM traps writes while it is non-empty and calls
+//! them through notify_variable_watchers (watchers.rs).
 use super::*;
 
 fn base_variable(cx: &mut Leaf<'_>, symbol: Value) -> Out {
@@ -33,9 +34,6 @@ fn store(cx: &mut Leaf<'_>, symbol: Value, list: &[Value]) -> std::result::Resul
 defsubr! { name = "add-variable-watcher", gnu = "data.c:1857", effect = Global,
 fn add_variable_watcher(cx, symbol: Value, watch_function: Value) {
     let symbol = base_variable(cx, symbol)?;
-    if !cx.variable_watchable(watch_function) {
-        return Err(super::fileio::refuse("add-variable-watcher with a Lisp watch function"));
-    }
     let mut list = watchers(cx, symbol)?;
     let mut present = false;
     for &w in &list { if cx.equal(w, watch_function).map_err(|_| Fault::Circular(w))? { present = true; } }

@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "241dd842e168e1d40902e2ab597b77d4090887aaa2cd5e44da7f5b47b1bb531c",
+  "input_hash": "c51abc8917cba0686b20c121035fc7600a73730d5012a8f0c43560d5b7ea5def",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -5897,7 +5897,7 @@
    "planned": false,
    "mechanism": "`defvaralias` state VM2 does not model",
    "gnu": "`Fdefvaralias` (`src/eval.c:631-726`) refuses `SYMBOL_FORWARDED` built-in C variables (`Cannot make a built-in variable an alias`), runs variable watchers (`notify_variable_watchers`) and records the alias in `load-history` (`LOADHIST_ATTACH`); the alias is part of the dumped/pdumped image",
-   "romacs": "VM2 forwards only the built-in variables it defines (VM2-CVAR1): aliasing one of those, e.g. `fill-column`, now signals exactly as GNU does; aliasing any other GNU built-in still succeeds (`(defvaralias 'tab-width 'y)` => `y`, GNU signals `Cannot make a built-in variable an alias: tab-width`). `defvaralias` does not notify variable watchers (VM2-WATCH1) and VM2 has no `load-history`, so neither is updated; a code image does not persist aliases (image load rebuilds `variable_redirects` without them). `indirect-variable` follows the chain as GNU's does; `internal-delete-indirect-variable` is absent (void-function). Every other check and effect is GNU's, in GNU's order, and 910 of 958 harness rows match exactly (48 PRINTER pins, all circular-list rows)",
+   "romacs": "VM2 forwards only the built-in variables it defines (VM2-CVAR1): aliasing one of those, e.g. `fill-column`, now signals exactly as GNU does; aliasing any other GNU built-in still succeeds (`(defvaralias 'tab-width 'y)` => `y`, GNU signals `Cannot make a built-in variable an alias: tab-width`). `defvaralias` notifies the alias's variable watchers before it makes the alias, as GNU does; VM2 has no `load-history`, so that is not updated; a code image does not persist aliases (image load rebuilds `variable_redirects` without them). `indirect-variable` follows the chain as GNU's does; `internal-delete-indirect-variable` is absent (void-function). Every other check and effect is GNU's, in GNU's order, and 910 of 958 harness rows match exactly (48 PRINTER pins, all circular-list rows)",
    "why": "**Package-observable** only for code that aliases a C built-in VM2 does not define, watches variables, inspects `load-history`, or calls `indirect-variable`; ordinary `define-obsolete-variable-alias` and `defvaralias` of Lisp variables behave as in GNU",
    "symbols": [
     "defvaralias",
@@ -5914,10 +5914,10 @@
    "section": "Detail",
    "observable": false,
    "planned": false,
-   "mechanism": "Variable watchers are native subrs only",
+   "mechanism": "Variable watchers run with collection inhibited",
    "gnu": "`add-variable-watcher` (`src/data.c:1857`) accepts any function; `notify_variable_watchers` calls it before every `set`, `let`, `unlet`, `makunbound` and `defvaralias` of the variable, with WHERE the buffer of a buffer-local binding",
-   "romacs": "VM2 keeps GNU's `watchers` property and `get-variable-watchers`/`remove-variable-watcher`, and calls a native leaf subr watcher synchronously at `set`, `set-default`, `let`, `unlet`, `makunbound` and `kill-local-variable`, propagating its signal. A Lisp-function watcher is refused at `add-variable-watcher` with a VM2 error (calling Lisp from inside an engine write needs the write routed through a T2 call). `defvaralias` and a `let` of a default value do not notify; a code image of a world with watchers is refused",
-   "why": "**Package-observable** for code registering a Lisp watcher (debug-watch, some modes); GNU's own preloaded watchers (frame.el's `set-buffer-redisplay`) work",
+   "romacs": "VM2 keeps GNU's `watchers` property and `get-variable-watchers`/`remove-variable-watcher`, and calls every watcher before `set`, `set-default` (as `set`), `let`, `unlet`, `makunbound`, `kill-local-variable` and `defvaralias`, with WHERE the current buffer when the variable is local if set there (`local-variable-if-set-p`), and the variable untrapped while they run. A native leaf subr runs in place; any other watcher is funcalled at the write point with collection inhibited until it returns, because the writer's registers and locals are not rooted there (`tests/variable_watchers.rs`). A watcher's signal aborts the write; its `throw` leaves `setq`, `let` and `set` but is refused with a VM2 error when a native primitive (`set-default`, `defvaralias`, `kill-local-variable`) made the write. A `let` of a default value does not notify; a code image of a world with watchers is refused",
+   "why": "**Package-observable**: memory a long-running Lisp watcher allocates is not reclaimed until it returns; a `throw` out of a watcher of a native write signals instead",
    "symbols": [
     "add-variable-watcher",
     "remove-variable-watcher",
