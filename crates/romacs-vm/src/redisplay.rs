@@ -140,9 +140,11 @@ impl Vm {
 
     /// The character positions `window`, showing the current buffer, spans
     /// with a `text_height`-pixel text area: from its start through the end
-    /// of its last displayed row. None when it shows no text.
+    /// of its last displayed row, counting the rows layout paints from
+    /// -vscroll. None when it shows no text.
     pub(crate) fn displayed_range(&self, window: Value, text_height: u32) -> Result<Option<(usize, usize)>> {
-        let (rows, start) = (self.window_rows(text_height).1, self.window(window)?.start);
+        let w = self.window(window)?;
+        let (rows, start) = (self.window_rows(text_height.saturating_add(w.vscroll_px)).1, w.start);
         let start = self.marker_position_value(start)?.integer_value().unwrap_or(1).max(1) as usize;
         let Object::Buffer(b) = self.object(self.slots[self.buffer_slot].value)? else {
             return Ok(None);

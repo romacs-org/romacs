@@ -685,14 +685,14 @@ impl Vm {
     /// stretches and the calls are Lisp (`romacs--redisplay-fontify`,
     /// rlisp/vm/prelude.el), so nothing is held across them; a signal is
     /// logged there and never ends redisplay, and any other failure becomes
-    /// a display diagnostic.
-    fn fontify_displayed(&mut self, window: Value, text_height: u32) -> Result<()> {
+    /// a display diagnostic. False when no Lisp ran.
+    fn fontify_displayed(&mut self, window: Value, text_height: u32) -> Result<bool> {
         let functions = self.slot("fontification-functions");
         if self.variable_value(functions)? == Value::NIL {
-            return Ok(());
+            return Ok(false);
         }
         let Some((start, end)) = self.displayed_range(window, text_height)? else {
-            return Ok(());
+            return Ok(false);
         };
         let call = Form::List(vec![
             Form::Sym("romacs--redisplay-fontify".into()),
@@ -702,22 +702,37 @@ impl Vm {
         if let Err(error) = self.eval_form_raw(&call) {
             self.display_state.diagnostics.push(format!("fontification: {error}"));
         }
-        Ok(())
+        Ok(true)
     }
     /// Fontify the rows the window shows, then re-derive what that Lisp may
     /// have changed: the window's buffer, which becomes current again as GNU
-    /// restores it after `fontification-functions`. False if Lisp deleted
-    /// the window.
+    /// restores it after `fontification-functions`. Text or a window start
+    /// the Lisp changed can bring other rows into view, so fontify again,
+    /// a bounded number of times as GNU's redisplay retries. False if Lisp
+    /// deleted the window.
     fn redisplay_window_fontify(&mut self, root: usize, buffer_slot: usize, text_height: u32) -> Result<bool> {
-        self.fontify_displayed(self.slots[root].value, text_height)?;
-        let w = self.window(self.slots[root].value)?;
-        if !w.live() {
-            return Ok(false);
+        for _ in 0..3 {
+            let shown = self.window_text_state(root)?;
+            let ran = self.fontify_displayed(self.slots[root].value, text_height)?;
+            let w = self.window(self.slots[root].value)?;
+            if !w.live() {
+                return Ok(false);
+            }
+            let buffer = w.buffer;
+            self.slots[buffer_slot].value = buffer;
+            self.slots[self.buffer_slot].value = buffer;
+            if !ran || self.window_text_state(root)? == shown {
+                break;
+            }
         }
-        let buffer = w.buffer;
-        self.slots[buffer_slot].value = buffer;
-        self.slots[self.buffer_slot].value = buffer;
         Ok(true)
+    }
+    /// What decides the rows a live window shows: its buffer's character
+    /// edits (CHARS_MODIFF) and its start.
+    fn window_text_state(&self, root: usize) -> Result<(u64, Value)> {
+        let w = self.window(self.slots[root].value)?;
+        let start = self.marker_position_value(w.start)?;
+        Ok((self.buffer_state(w.buffer)?.chars_modiff, start))
     }
     /// The window and buffer facts `decode_mode_spec` reads, after scrolling.
     fn mode_line_state(&mut self, root: usize, buffer_slot: usize, text_height: u32) -> Result<mode_line::SpecState> {

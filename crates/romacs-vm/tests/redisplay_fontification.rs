@@ -154,15 +154,16 @@ fn a_function_that_never_fontifies_runs_once_per_stretch() {
     assert_eq!(printed(&mut vm, "(reverse romacs-fl-log)"), "(196 320 196 320)");
 }
 
-/// Text a function inserts cannot keep the walk going: it ends at the end
-/// the window had before Lisp ran. Each call inserts two characters and
-/// fontifies the one after them, so the walk advances one original
-/// character in three per call over the 390 the window showed.
+/// Text a function inserts cannot keep the walk going: a walk ends at the
+/// end the window had before it ran, and changed text starts at most three.
+/// Each call inserts two characters and fontifies the one after them, so a
+/// walk advances one original character in three per call: 130 calls over
+/// the 390 the window first showed, then the lines they lengthened.
 #[test]
 fn a_function_that_grows_the_text_ends() {
     let mut vm = romacs_vm("(setq fontification-functions (list (lambda (pos) (romacs-fl-log pos) (save-excursion (goto-char pos) (insert \"++\")) (put-text-property (+ pos 2) (+ pos 3) 'fontified t))))");
     vm.display_snapshot(400, 200).unwrap();
-    assert_eq!(printed(&mut vm, "(length romacs-fl-log)"), "130");
+    assert_eq!(printed(&mut vm, "(length romacs-fl-log)"), "589");
 }
 
 #[test]
@@ -200,4 +201,35 @@ fn a_failing_walk_is_a_diagnostic() {
     let snapshot = vm.display_snapshot(400, 200).unwrap();
     assert!(snapshot.text.utf8.starts_with("line 00"));
     assert_eq!(vm.take_display_diagnostics(), ["fontification: walk 196 586"]);
+}
+
+/// One line per call: the position of each line redisplay fontifies.
+const LINE_PER_CALL: &str = "(defun romacs-fl-line (pos) (romacs-fl-log pos) (put-text-property pos (save-excursion (goto-char pos) (forward-line 1) (point)) 'fontified t))";
+
+/// No `fontified` nil in the ROWS lines from window start.
+const ROWS_FONTIFIED: &str = "(lambda (rows) (not (text-property-any (window-start) (save-excursion (goto-char (window-start)) (forward-line rows) (point)) 'fontified nil)))";
+
+/// Layout paints from -vscroll: a 7-pixel vscroll over ten 20-pixel rows
+/// shows part of an eleventh, which redisplay fontifies too.
+#[test]
+fn a_vscrolled_window_fontifies_its_partial_last_row() {
+    let mut vm = romacs_vm(&format!("(progn {LINE_PER_CALL} (setq fontification-functions (list 'romacs-fl-line)) (set-window-vscroll nil 7 t))"));
+    let snapshot = vm.display_snapshot(400, 200).unwrap();
+    assert_eq!(snapshot.vscroll_px, 7);
+    assert_eq!(printed(&mut vm, "(length romacs-fl-log)"), "11");
+    assert_eq!(printed(&mut vm, &format!("(funcall {ROWS_FONTIFIED} 11)")), "t");
+}
+
+/// Four short lines a function deletes bring four long ones into the
+/// window: redisplay fontifies the rows it then shows, not the shorter range
+/// it began with.
+#[test]
+fn rows_brought_into_view_by_a_deletion_are_fontified() {
+    let mut vm = romacs_vm(&format!("(progn {LINE_PER_CALL} \
+        (save-excursion (goto-char romacs-fl-start) (insert \"s\\ns\\ns\\ns\\n\")) \
+        (setq fontification-functions (list (lambda (pos) (unless romacs-fl-log (delete-region pos (+ pos 8))) (romacs-fl-line pos)))))"));
+    let snapshot = vm.display_snapshot(400, 200).unwrap();
+    assert_eq!(snapshot.text.utf8[snapshot.start_byte..].lines().next(), Some(format!("line 05 {}", "x".repeat(30)).as_str()));
+    assert_eq!(printed(&mut vm, &format!("(funcall {ROWS_FONTIFIED} 10)")), "t");
+    assert_eq!(printed(&mut vm, "(length romacs-fl-log)"), "10");
 }
