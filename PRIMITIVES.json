@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "a2779ed621d090d502ee4b65496de1fd9197a9a969261081ffb6a5fb36bdf18c",
+  "source_fingerprint": "bdc3ffec19d7d7f65e4448db065594d22cfa39bc629b6e2f8cc4dcafcdd08c7b",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -243,7 +243,7 @@
   "add-name-to-file": {
    "name": "add-name-to-file",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:588"
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:587"
   },
   "add-text-properties": {
    "name": "add-text-properties",
@@ -888,7 +888,7 @@
   "copy-file": {
    "name": "copy-file",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:495"
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:494"
   },
   "copy-hash-table": {
    "name": "copy-hash-table",
@@ -1152,7 +1152,7 @@
   "delete-directory-internal": {
    "name": "delete-directory-internal",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:424"
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:423"
   },
   "delete-file": {
    "name": "delete-file",
@@ -1162,7 +1162,7 @@
   "delete-file-internal": {
    "name": "delete-file-internal",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:409"
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:408"
   },
   "delete-other-windows-internal": {
    "name": "delete-other-windows-internal",
@@ -1416,22 +1416,22 @@
   "file-directory-p": {
    "name": "file-directory-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:341"
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:340"
   },
   "file-executable-p": {
    "name": "file-executable-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:323"
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:322"
   },
   "file-exists-p": {
    "name": "file-exists-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:320"
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:319"
   },
   "file-locked-p": {
    "name": "file-locked-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filelock.rs:249"
+   "registered_at": "crates/romacs-vm/src/prims/filelock.rs:247"
   },
   "file-modes": {
    "name": "file-modes",
@@ -1471,12 +1471,12 @@
   "file-readable-p": {
    "name": "file-readable-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:326"
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:325"
   },
   "file-regular-p": {
    "name": "file-regular-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:329"
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:328"
   },
   "file-symlink-p": {
    "name": "file-symlink-p",
@@ -2298,7 +2298,7 @@
   "lock-buffer": {
    "name": "lock-buffer",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filelock.rs:234"
+   "registered_at": "crates/romacs-vm/src/prims/filelock.rs:232"
   },
   "log": {
    "name": "log",
@@ -2468,12 +2468,12 @@
   "make-symbolic-link": {
    "name": "make-symbolic-link",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:603"
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:602"
   },
   "make-temp-file-internal": {
    "name": "make-temp-file-internal",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:367"
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:366"
   },
   "make-temp-name": {
    "name": "make-temp-name",
@@ -3909,7 +3909,7 @@
   "set-file-times": {
    "name": "set-file-times",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:632"
+   "registered_at": "crates/romacs-vm/src/prims/filesave.rs:631"
   },
   "set-frame-selected-window": {
    "name": "set-frame-selected-window",
@@ -4645,7 +4645,7 @@
   "unlock-buffer": {
    "name": "unlock-buffer",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/filelock.rs:241"
+   "registered_at": "crates/romacs-vm/src/prims/filelock.rs:239"
   },
   "unwind-protect": {
    "name": "unwind-protect",

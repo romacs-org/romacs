@@ -305,7 +305,7 @@ fn insert_file_contents(cx, filename: Value; optional visit: Value, beg: Value, 
             return insert_coding::start(cx, read(None, modtime, error.raw_os_error().unwrap_or(libc::EIO), None));
         }
     };
-    let meta = crate::host::file_metadata(&file).map_err(|e| file_errno(cx, "Input file status", orig, &e))?;
+    let meta = file.stat().map_err(|e| file_errno(cx, "Input file status", orig, &e))?;
     if meta.file_type().is_dir() {
         let error = std::io::Error::from_raw_os_error(21); // EISDIR, fileio.c:4234
         return Err(file_errno(cx, "Read error", orig, &error));
@@ -321,13 +321,13 @@ fn insert_file_contents(cx, filename: Value; optional visit: Value, beg: Value, 
         || var(cx, "first-change-hook")? != Value::NIL || cx.fileio_has_insertion_hooks()?) {
         return Err(refuse("insert-file-contents with change hooks"));
     }
-    let mut bytes = vec![];
-    {
-        use std::io::{Read as _, Seek, SeekFrom};
+    // BEG..END through the boundary, which sees the bytes consumed; a seek
+    // or read error discards what was read.
+    let bytes = {
         let mut file = file;
-        file.seek(SeekFrom::Start(beg_offset)).map_err(|e| file_errno(cx, "Read error", orig, &e))?;
-        file.take(end_offset - beg_offset).read_to_end(&mut bytes).map_err(|e| file_errno(cx, "Read error", orig, &e))?;
-    }
+        file.read_range(beg_offset, end_offset - beg_offset)
+            .map_err(|e| file_errno(cx, "Read error", orig, &e))?
+    };
     // Every refusal below precedes the first change to the buffer.
     let truename = var(cx, "buffer-file-truename")?;
     if !bytes.is_empty() && truename != Value::NIL
@@ -356,9 +356,9 @@ fn insert_file_contents(cx, filename: Value; optional visit: Value, beg: Value, 
 /// writer (or a device) opens at once and reaches the non-regular refusal
 /// instead of blocking in open(2); the flag does not affect the regular files
 /// that are read.
-fn open_for_reading(path: &str) -> std::io::Result<std::fs::File> {
-    use std::os::unix::fs::OpenOptionsExt as _;
-    crate::host::open(path, crate::host::OpenOptions::new().read(true).custom_flags(libc::O_NONBLOCK))
+fn open_for_reading(path: &str) -> std::io::Result<crate::host::Input> {
+    let flags = libc::O_NONBLOCK;
+    crate::host::open_input(path, flags)
 }
 
 // File name handler selection, shared by every primitive here: VM2 calls
@@ -584,7 +584,7 @@ pub(super) fn write_chosen(cx: &mut Leaf<'_>, r: &[Value]) -> Next {
         use std::os::unix::fs::OpenOptionsExt as _;
         options.custom_flags(libc::O_NONBLOCK);
     }
-    let mut file = crate::host::open(&path, &options).map_err(|e| file_errno(cx, "Opening output file", name, &e))?;
+    let mut file = crate::host::open_output(&path, &options).map_err(|e| file_errno(cx, "Opening output file", name, &e))?;
     {
         use std::io::{Seek, SeekFrom};
         if let Some(offset) = offset {

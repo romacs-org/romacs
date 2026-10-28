@@ -269,14 +269,13 @@ fn rename_file(cx, file: Value, newname: Value; optional overwrite: Value) -> St
 
 defsubr! { name = "make-temp-name", gnu = "fileio.c:830", effect = Global,
 fn make_temp_name(cx, prefix: Value) {
-    use std::io::Read;
     let bytes = cx.string_bytes(prefix)?;
     if bytes.contains(&0) { return Err(Fault::Wrong("filenamep", prefix)); }
     let text = cx.string_text(prefix)?;
     native_encoding(cx)?;
     // GNU GT_NOCREATE neither expands PREFIX nor dispatches name handlers.
     // Randomness is read from the kernel without creating any path.
-    let mut random = host::open_read("/dev/urandom").map_err(|e| errno(cx, "Creating file name with prefix", &[prefix], e))?;
+    let mut random = host::random_source().map_err(|e| errno(cx, "Creating file name with prefix", &[prefix], e))?;
     const ALPHABET: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
     for _ in 0..238328 {
         let mut suffix = Vec::with_capacity(6);
@@ -374,7 +373,7 @@ fn make_temp_file_internal(cx, prefix: Value, dir_flag: Value, suffix: Value, te
     let path = loop {
         let path = format!("{head}{}{tail}", temp_name_letters());
         let made = match kind {
-            0 => host::open(&path, host::OpenOptions::new().write(true).create_new(true).mode(0o600)).map(drop),
+            0 => host::open_output(&path, host::OpenOptions::new().write(true).create_new(true).mode(0o600)).map(drop),
             1 => host::create_dir(&path, 0o700),
             _ => match host::symlink_metadata(&path) {
                 Ok(_) => Err(std::io::Error::from_raw_os_error(libc::EEXIST)),
@@ -495,7 +494,7 @@ fn umask() -> std::result::Result<u32, Fault> {
 defsubr! { name = "copy-file", gnu = "fileio.c:2252", effect = Global,
 fn copy_file(cx, file: Value, newname: Value; optional ok_if_already_exists: Value, keep_time: Value,
              preserve_uid_gid: Value, preserve_permissions: Value) -> Step {
-    use std::io::{Read, Write};
+    use std::io::Write;
     use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
     let (source, file) = name(cx, file)?;
     let (target, newname) = cp_target(cx, file, newname)?;
@@ -503,23 +502,23 @@ fn copy_file(cx, file: Value, newname: Value; optional ok_if_already_exists: Val
     if let Some(call) = handler(cx, file, "copy-file", args.clone())? { return call; }
     if let Some(call) = handler(cx, newname, "copy-file", args)? { return call; }
     native_encoding(cx)?;
-    let mut input = host::open(&source, host::OpenOptions::new().read(true).custom_flags(libc::O_NONBLOCK))
+    let mut input = host::open_input(&source, libc::O_NONBLOCK)
         .map_err(|e| errno(cx, "Opening input file", &[file], e))?;
-    let status = host::file_metadata(&input).map_err(|e| errno(cx, "Input file status", &[file], e))?;
+    let status = input.stat().map_err(|e| errno(cx, "Input file status", &[file], e))?;
     if !status.file_type().is_file() {
         let code = if status.file_type().is_dir() { libc::EISDIR } else { libc::EINVAL };
         return Err(errno(cx, "Non-regular file", &[file], std::io::Error::from_raw_os_error(code)));
     }
-    if preserve_permissions != Value::NIL && cx.filesave_has_acl(&input) {
+    if preserve_permissions != Value::NIL && input.has_acl() {
         return Err(refusal("copy-file ACL preservation"));
     }
     let new_mask = status.mode() & if preserve_uid_gid != Value::NIL { 0o700 } else { 0o777 };
-    let created = host::open(&target, host::OpenOptions::new().write(true).create_new(true).mode(new_mask));
+    let created = host::open_output(&target, host::OpenOptions::new().write(true).create_new(true).mode(new_mask));
     let (mut output, already_exists) = match created {
         Ok(output) => (output, false),
         Err(e) if e.raw_os_error() == Some(libc::EEXIST) => {
             may_replace(cx, ok_if_already_exists, newname, "copy-file")?;
-            let output = host::open(&target, host::OpenOptions::new().write(true).truncate(true))
+            let output = host::open_output(&target, host::OpenOptions::new().write(true).truncate(true))
                 .map_err(|e| errno(cx, "Opening output file", &[newname], e))?;
             (output, true)
         }
@@ -533,7 +532,7 @@ fn copy_file(cx, file: Value, newname: Value; optional ok_if_already_exists: Val
             return Err(errno(cx, "Input and output files are the same", &[file, newname], same));
         }
     }
-    if !cx.filesave_clone(&output, &input) {
+    if !host::clone_file(&output, &input) {
         // Read and write the rest, whatever copy_file_range did, as GNU does.
         let mut buffer = vec![0; 1 << 16];
         loop {

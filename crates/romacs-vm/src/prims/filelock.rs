@@ -2,9 +2,9 @@
 //! See evidence/filelock-save/REPORT.md for platform/representation boundaries.
 use super::*;
 use crate::forwarded::VisitedModtime;
-use std::io::{Read, Write};
+use std::io::Write;
 use crate::host;
-use std::os::unix::{ffi::OsStrExt, fs::{OpenOptionsExt, PermissionsExt}};
+use std::os::unix::{ffi::OsStrExt, fs::PermissionsExt};
 use std::path::Path;
 
 fn variable(cx: &mut Leaf<'_>, name: &str) -> Out {
@@ -49,20 +49,18 @@ fn identity(cx: &mut Leaf<'_>) -> std::result::Result<Vec<u8>, Fault> {
 }
 #[derive(Debug)]
 enum Owner { Free, Ours, Other { user: Vec<u8>, diagnostic: Vec<u8> } }
-fn read_lock(cx: &Leaf<'_>, path: &Path) -> std::io::Result<Vec<u8>> {
+fn read_lock(path: &Path) -> std::io::Result<Vec<u8>> {
     loop {
         match host::read_link(path) {
             Ok(target) => return Ok(target.as_os_str().as_bytes().to_vec()),
             Err(e) if e.raw_os_error() == Some(libc::EINVAL) => {
-                match host::open(path, host::OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)) {
+                match host::open_input(path, libc::O_NOFOLLOW | libc::O_NONBLOCK) {
                     Ok(mut file) => {
                         // GNU can block on a FIFO. Refuse nonregular lock files.
-                        if !host::file_metadata(&file)?.file_type().is_file() { return Err(errno(libc::EINVAL)); }
-                        let mut bytes = Vec::new();
-                        let read = (&mut file).take(8193).read_to_end(&mut bytes);
-                        cx.fileio_close_output(file)?;
-                        read?;
-                        return Ok(bytes);
+                        if !file.stat()?.file_type().is_file() { return Err(errno(libc::EINVAL)); }
+                        let read = file.read_range(0, 8193);
+                        file.close()?;
+                        return read;
                     }
                     Err(e) if e.raw_os_error() == Some(libc::ELOOP) => continue,
                     Err(e) => return Err(e),
@@ -79,7 +77,7 @@ fn decimal(bytes: &[u8]) -> Option<(i64, usize)> {
     Some((std::str::from_utf8(&bytes[..end]).ok()?.parse().unwrap_or(if start == 1 { i64::MIN } else { i64::MAX }), end))
 }
 fn owner(cx: &Leaf<'_>, path: &Path, local_host: &[u8]) -> std::io::Result<Owner> {
-    let bytes = match read_lock(cx, path) {
+    let bytes = match read_lock(path) {
         Ok(bytes) => bytes,
         Err(e) if matches!(e.raw_os_error(), Some(libc::ENOENT | libc::ENOTDIR)) => return Ok(Owner::Free),
         Err(e) => return Err(e),

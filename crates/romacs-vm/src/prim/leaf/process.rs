@@ -699,7 +699,7 @@ impl Leaf<'_> {
             return Ok(());
         }
         let network = self.process_type_is(proc, "network");
-        let null = crate::host::open("/dev/null", crate::host::OpenOptions::new().write(true))
+        let null = crate::host::open_output("/dev/null", crate::host::OpenOptions::new().write(true))
             .map_err(|e| self.file_errno("Opening null device", &e))?;
         if let Some(channel) = self.channel_mut(proc) {
             if let Some(fd) = &channel.outfd
@@ -1066,15 +1066,15 @@ impl Leaf<'_> {
                                    output: CallOutput, error: CallOutput, wait: bool) -> Out {
         use std::os::unix::ffi::OsStrExt;
         let path = |b: &[u8]| std::path::PathBuf::from(std::ffi::OsStr::from_bytes(b));
-        let input = crate::host::open_read(path(infile)).map_err(|e| {
+        let input = crate::host::open_child_input(path(infile)).map_err(|e| {
             let name = self.make_string(infile.to_vec(), false);
             self.file_errno_value("Opening process input file", &e, name)
         })?;
         let open_out = |cx: &mut Self, spec: &CallOutput, what: &str| -> Result<Option<OwnedFd>> {
             Ok(match spec {
-                CallOutput::Discard => Some(crate::host::open("/dev/null", crate::host::OpenOptions::new().write(true))
+                CallOutput::Discard => Some(crate::host::open_output("/dev/null", crate::host::OpenOptions::new().write(true))
                     .map_err(|e| cx.file_errno("Opening null device", &e))?.into()),
-                CallOutput::File(name) => Some(crate::host::open(path(name), crate::host::OpenOptions::new().write(true).create(true).truncate(true))
+                CallOutput::File(name) => Some(crate::host::open_output(path(name), crate::host::OpenOptions::new().write(true).create(true).truncate(true))
                     .map_err(|e| { let file = cx.make_string(name.clone(), false); cx.file_errno_value(what, &e, file) })?.into()),
                 CallOutput::Pipe | CallOutput::Same => None,
             })

@@ -7,8 +7,9 @@
 //! it returns exactly what the host call returns.
 use std::cell::Cell;
 use std::ffi::{CStr, OsString};
-use std::fs::{File, Metadata, ReadDir};
+use std::fs::{File, FileType, Metadata};
 use std::io;
+use std::os::fd::OwnedFd;
 use std::path::{Path, PathBuf};
 use std::time::{Instant, SystemTime};
 
@@ -91,9 +92,75 @@ pub fn symlink_metadata(path: impl AsRef<Path>) -> io::Result<Metadata> {
     std::fs::symlink_metadata(path)
 }
 
-/// fstat on a file this module opened.
+/// fstat on an output file this module opened.
 pub fn file_metadata(file: &File) -> io::Result<Metadata> {
     file.metadata()
+}
+
+/// A file opened for reading. Its reads and queries go through this module,
+/// so a recorder sees the bytes a caller consumes and each error; the
+/// descriptor never leaves it.
+pub struct Input(File);
+
+/// open(2) of PATH for reading, with FLAGS (`O_NONBLOCK`, `O_NOFOLLOW` …).
+pub fn open_input(path: impl AsRef<Path>, flags: i32) -> io::Result<Input> {
+    use std::os::unix::fs::OpenOptionsExt;
+    OpenOptions::new().read(true).custom_flags(flags).open(path).map(Input)
+}
+
+/// The kernel's random source, `/dev/urandom`.
+pub fn random_source() -> io::Result<Input> {
+    File::open("/dev/urandom").map(Input)
+}
+
+impl Input {
+    /// fstat.
+    pub fn stat(&self) -> io::Result<Metadata> {
+        self.0.metadata()
+    }
+
+    /// At most LIMIT bytes from OFFSET: a seek, then reads until LIMIT or the
+    /// end. An error from either discards what was read.
+    pub fn read_range(&mut self, offset: u64, limit: u64) -> io::Result<Vec<u8>> {
+        use std::io::{Read, Seek, SeekFrom};
+        self.0.seek(SeekFrom::Start(offset))?;
+        let mut bytes = Vec::new();
+        (&mut self.0).take(limit).read_to_end(&mut bytes)?;
+        Ok(bytes)
+    }
+
+    /// One read into BUFFER: the count, 0 at the end.
+    pub fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        io::Read::read(&mut self.0, buffer)
+    }
+
+    pub fn read_exact(&mut self, buffer: &mut [u8]) -> io::Result<()> {
+        io::Read::read_exact(&mut self.0, buffer)
+    }
+
+    /// Whether the file carries an extended (POSIX or NFSv4) ACL.
+    pub fn has_acl(&self) -> bool {
+        use std::os::fd::AsRawFd;
+        [c"system.posix_acl_access", c"system.nfs4_acl"].iter().any(|attribute| {
+            let size = unsafe { libc::fgetxattr(self.0.as_raw_fd(), attribute.as_ptr(), std::ptr::null_mut(), 0) };
+            size >= 0
+        })
+    }
+
+    /// close(2), with its error.
+    pub fn close(self) -> io::Result<()> {
+        use std::os::fd::IntoRawFd;
+        if unsafe { libc::close(self.0.into_raw_fd()) } < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(())
+    }
+}
+
+/// A file a child process reads as its standard input: this process reads
+/// none of it.
+pub fn open_child_input(path: impl AsRef<Path>) -> io::Result<OwnedFd> {
+    File::open(path).map(OwnedFd::from)
 }
 
 pub fn read_link(path: impl AsRef<Path>) -> io::Result<PathBuf> {
@@ -102,7 +169,34 @@ pub fn read_link(path: impl AsRef<Path>) -> io::Result<PathBuf> {
 
 /// The entries of PATH, as the host yields them.
 pub fn read_dir(path: impl AsRef<Path>) -> io::Result<ReadDir> {
-    std::fs::read_dir(path)
+    std::fs::read_dir(path).map(ReadDir)
+}
+
+/// A directory listing whose entries answer their queries here.
+pub struct ReadDir(std::fs::ReadDir);
+
+impl Iterator for ReadDir {
+    type Item = io::Result<DirEntry>;
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next().map(|entry| entry.map(DirEntry))
+    }
+}
+
+pub struct DirEntry(std::fs::DirEntry);
+
+impl DirEntry {
+    pub fn file_name(&self) -> OsString {
+        self.0.file_name()
+    }
+
+    pub fn path(&self) -> PathBuf {
+        self.0.path()
+    }
+
+    /// The type the listing gave, else an lstat's.
+    pub fn file_type(&self) -> io::Result<FileType> {
+        self.0.file_type()
+    }
 }
 
 pub fn canonicalize(path: impl AsRef<Path>) -> io::Result<PathBuf> {
@@ -253,18 +347,26 @@ pub fn monotonic() -> Instant {
 
 /// Four bytes of kernel entropy.
 pub fn random_seed() -> io::Result<[u8; 4]> {
-    use std::io::Read;
     let mut bytes = [0u8; 4];
-    File::open("/dev/urandom").and_then(|mut f| f.read_exact(&mut bytes))?;
+    random_source()?.read_exact(&mut bytes)?;
     Ok(bytes)
 }
 
-pub fn open(path: impl AsRef<Path>, options: &OpenOptions) -> io::Result<File> {
-    options.open(path)
+/// PATH opened with OPTIONS for writing only: reads go through `Input`.
+pub fn open_output(path: impl AsRef<Path>, options: &OpenOptions) -> io::Result<File> {
+    options.clone().read(false).write(true).open(path)
 }
 
-pub fn open_read(path: impl AsRef<Path>) -> io::Result<File> {
-    File::open(path)
+/// GNU copy-file's fast paths: share SOURCE's extents with DEST, else
+/// copy_file_range until it stops. False leaves the rest to read+write.
+pub fn clone_file(dest: &File, source: &Input) -> bool {
+    use std::os::fd::AsRawFd;
+    if unsafe { libc::ioctl(dest.as_raw_fd(), libc::FICLONE, source.0.as_raw_fd()) } == 0 {
+        return true;
+    }
+    const COPY_MAX: usize = (isize::MAX as usize) >> 30 << 30;
+    while unsafe { libc::copy_file_range(source.0.as_raw_fd(), std::ptr::null_mut(), dest.as_raw_fd(), std::ptr::null_mut(), COPY_MAX, 0) } > 0 {}
+    false
 }
 
 pub fn write(path: impl AsRef<Path>, bytes: impl AsRef<[u8]>) -> io::Result<()> {
