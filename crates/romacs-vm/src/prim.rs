@@ -463,6 +463,19 @@ mod leaf {
                 .map(|view| view.to_owned())
                 .ok_or(Fault::Wrong("stringp", v))
         }
+        /// GNU string-lessp's order, compared in place: a symbol orders by
+        /// its name, a string by its characters.
+        pub(crate) fn string_order(&self, a: Value, b: Value) -> std::result::Result<std::cmp::Ordering, Fault> {
+            self.with_name_chars(a, |a| self.with_name_chars(b, |b| a.cmp(b)))?
+        }
+        fn with_name_chars<R>(&self, v: Value, f: impl FnOnce(&mut dyn Iterator<Item = u32>) -> R)
+            -> std::result::Result<R, Fault> {
+            let name = if v == Value::NIL { Some("nil") } else if v == Value::TRUE { Some("t") }
+                else { self.symbol_slot(v).ok().map(|slot| self.vm.symbol_names[slot].as_str()) };
+            if let Some(name) = name { return Ok(f(&mut name.chars().map(u32::from))); }
+            let view = self.vm.str_view(v).ok_or(Fault::Wrong("stringp", v))?;
+            Ok(f(&mut view.chars()))
+        }
         pub(crate) fn casing_multibyte(&mut self) -> std::result::Result<bool, Fault> {
             let i = self.vm.buffer_index().map_err(Fault::Error)?;
             Ok(matches!(self.vm.objects[i], data::Object::Buffer(_)))

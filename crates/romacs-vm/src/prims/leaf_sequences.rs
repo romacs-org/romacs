@@ -97,8 +97,8 @@ fn map_called(cx: &mut Leaf<'_>, value: Value, saved: &[Value]) -> Next {
     map_next(cx, state)
 }
 
-// State: original, lessp, key, reverse, inplace, items, keys, i, j.
-// Small inputs append phase, descending, binary low and binary high.
+// State: original, lessp, key, reverse, inplace, items, keys, i, j. Small
+// inputs append phase, descending, binary low/high; larger ones sort_merge's.
 defsubr! { name = "sort", gnu = "fns.c:2447", effect = Global,
 fn sort(cx, sequence: Value; rest options) -> Step {
     let (mut lessp, mut key, mut reverse, mut inplace) = (Value::NIL, Value::NIL, Value::NIL, Value::NIL);
@@ -140,9 +140,9 @@ fn sort(cx, sequence: Value; rest options) -> Step {
     } else { cx.vector_values(sequence).map_err(|_| Fault::Wrong("list-or-vector-p", sequence))? };
     if values.is_empty() { return Ok(Step::Done(sequence)); }
     // GNU sort.c reverses the input before computing keys, then reverses
-    // the sorted result. For lengths below 64 minrun is the whole input.
+    // the sorted result, which keeps a reversed sort stable.
     let mut values = values;
-    if values.len() < 64 && reverse != Value::NIL { values.reverse(); }
+    if reverse != Value::NIL { values.reverse(); }
     let items = cx.vector(&values);
     let keys = cx.vector(&values);
     if lessp == Value::NIL { lessp = cx.intern("value<"); }
@@ -154,6 +154,7 @@ fn sort_key(cx: &mut Leaf<'_>, mut state: Vec<Value>) -> Next {
     let n = cx.vector_len(state[5])?;
     let i = index(state[7]);
     if state[2] == Value::NIL || state[2] == cx.intern("identity") || i == n {
+        if sort_native(cx, &state)? { return sort_finish(cx, &state); }
         state[7] = number(1);
         state[8] = number(1);
         if n < 64 {
@@ -161,7 +162,11 @@ fn sort_key(cx: &mut Leaf<'_>, mut state: Vec<Value>) -> Next {
             state.extend([number(0), Value::NIL, number(0), number(0)]);
             return sort_small_compare(cx, state);
         }
-        return sort_compare(cx, state);
+        let destination = [cx.vector(&vec![Value::NIL; n]), cx.vector(&vec![Value::NIL; n])];
+        state[8] = number(0);
+        state.extend([number(1), number(0)]);
+        state.extend(destination);
+        return sort_merge(cx, state);
     }
     let element = cx.vector_get(state[5], number(i))?;
     Ok(Step::Call {
@@ -177,51 +182,95 @@ fn sort_keyed(cx: &mut Leaf<'_>, value: Value, saved: &[Value]) -> Next {
     state[7] = number(index(state[7]) + 1);
     sort_key(cx, state)
 }
-fn sort_compare(cx: &mut Leaf<'_>, mut state: Vec<Value>) -> Next {
-    let n = cx.vector_len(state[5])?;
-    let (i, j) = (index(state[7]), index(state[8]));
-    if i >= n {
-        return sort_finish(cx, &state);
+/// The native order of a predicate that resolves to a builtin subr, when
+/// every key is of a type it compares without signaling. GNU sort.c marks
+/// this point as where keys would be checked for faster comparison.
+fn sort_native(cx: &mut Leaf<'_>, state: &[Value]) -> std::result::Result<bool, Fault> {
+    let mut f = state[1];
+    let mut name = None;
+    for _ in 0..64 {
+        if let Some(found) = crate::prim::name(f) { name = Some(found); break; }
+        match cx.symbol_function(f) { Ok(next) if next != Value::NIL => f = next, _ => return Ok(false) }
     }
-    if j == 0 {
-        state[7] = number(i + 1);
-        state[8] = number(i + 1);
-        return sort_compare(cx, state);
-    }
-    let mut args = vec![
-        cx.vector_get(state[6], number(j))?,
-        cx.vector_get(state[6], number(j - 1))?,
-    ];
-    if state[3] != Value::NIL {
-        args.swap(0, 1);
-    }
-    Ok(Step::Call {
-        f: state[1],
-        args,
-        then: sort_compared,
-        saved: state,
-    })
-}
-fn sort_compared(cx: &mut Leaf<'_>, before: Value, saved: &[Value]) -> Next {
-    let mut state = saved.to_vec();
-    let (i, j) = (index(state[7]), index(state[8]));
-    if before != Value::NIL {
-        for slot in [5, 6] {
-            let a = cx.vector_get(state[slot], number(j))?;
-            let b = cx.vector_get(state[slot], number(j - 1))?;
-            cx.vector_set(state[slot], number(j - 1), a)?;
-            cx.vector_set(state[slot], number(j), b)?;
-        }
-        state[8] = number(j - 1);
+    let keys = cx.vector_values(state[6])?;
+    let fixnums = || keys.iter().all(|k| k.integer_value().is_some());
+    let strings = |symbols: bool| keys.iter().all(|&k| {
+        matches!(cx.kind(k), leaf::Kind::String | leaf::Kind::Bytes)
+            || symbols && matches!(cx.kind(k), leaf::Kind::Symbol)
+    });
+    let by_string = match name {
+        Some("string-lessp") if strings(true) => true,
+        Some("value<") if strings(false) => true,
+        Some("<" | "value<") if fixnums() => false,
+        _ => return Ok(false),
+    };
+    let mut order: Vec<usize> = (0..keys.len()).collect();
+    if by_string {
+        // Validated above, so the comparison cannot fail.
+        order.sort_by(|&a, &b| cx.string_order(keys[a], keys[b]).unwrap_or(std::cmp::Ordering::Equal));
     } else {
-        state[7] = number(i + 1);
-        state[8] = number(i + 1);
+        order.sort_by_key(|&i| keys[i].integer_value());
     }
-    sort_compare(cx, state)
+    let items = cx.vector_values(state[5])?;
+    for (to, &from) in order.iter().enumerate() {
+        cx.vector_set(state[5], number(to), items[from])?;
+        cx.vector_set(state[6], number(to), keys[from])?;
+    }
+    Ok(true)
+}
+// A stable bottom-up merge sort for Lisp predicates on inputs past GNU's
+// single minrun: O(n log n) calls, where GNU's timsort also gallops.
+// State 7..12: width, left cursor, right cursor, output cursor, and the
+// destination items and keys, swapped with the source after each pass.
+fn sort_merge(cx: &mut Leaf<'_>, mut state: Vec<Value>) -> Next {
+    let n = cx.vector_len(state[5])?;
+    loop {
+        let width = index(state[7]);
+        if width >= n { return sort_finish(cx, &state); }
+        let out = index(state[10]);
+        if out == n {
+            state.swap(5, 11);
+            state.swap(6, 12);
+            state[7] = number(2 * width);
+            state[8] = number(0);
+            state[9] = number((2 * width).min(n));
+            state[10] = number(0);
+            continue;
+        }
+        let low = out - out % (2 * width);
+        let (mid, high) = ((low + width).min(n), (low + 2 * width).min(n));
+        let (left, right) = (index(state[8]), index(state[9]));
+        if left < mid && right < high {
+            let args = vec![cx.vector_get(state[6], number(right))?, cx.vector_get(state[6], number(left))?];
+            return Ok(Step::Call { f: state[1], args, then: sort_merged, saved: state });
+        }
+        let (from, to) = if left < mid { (left, mid) } else { (right, high) };
+        for (at, i) in (out..).zip(from..to) { sort_move(cx, &state, i, at)?; }
+        state[8] = number(high);
+        state[9] = number((high + width).min(n));
+        state[10] = number(high);
+    }
+}
+fn sort_merged(cx: &mut Leaf<'_>, before: Value, saved: &[Value]) -> Next {
+    let mut state = saved.to_vec();
+    // Only a strictly earlier right element moves first, keeping ties stable.
+    let side = if before != Value::NIL { 9 } else { 8 };
+    let (from, at) = (index(state[side]), index(state[10]));
+    sort_move(cx, &state, from, at)?;
+    state[side] = number(from + 1);
+    state[10] = number(at + 1);
+    sort_merge(cx, state)
+}
+fn sort_move(cx: &mut Leaf<'_>, state: &[Value], from: usize, at: usize) -> std::result::Result<(), Fault> {
+    for (source, destination) in [(5, 11), (6, 12)] {
+        let value = cx.vector_get(state[source], number(from))?;
+        cx.vector_set(state[destination], number(at), value)?;
+    }
+    Ok(())
 }
 // GNU sort.c count_run + binarysort, restricted to one-minrun inputs.
 // All callback-visible values remain in traced state; no heap indices are
-// retained in Rust across calls. Large inputs retain the partial fallback.
+// retained in Rust across calls.
 fn sort_small_compare(cx: &mut Leaf<'_>, state: Vec<Value>) -> Next {
     let i = index(state[7]);
     let other = if index(state[9]) < 2 {
@@ -292,7 +341,7 @@ fn sort_small_compared(cx: &mut Leaf<'_>, before: Value, saved: &[Value]) -> Nex
 }
 fn sort_finish(cx: &mut Leaf<'_>, state: &[Value]) -> Next {
     let mut values = cx.vector_values(state[5])?;
-    if values.len() < 64 && state[3] != Value::NIL {
+    if state[3] != Value::NIL {
         values.reverse();
         for (i, &value) in values.iter().enumerate() {
             cx.vector_set(state[5], number(i), value)?;

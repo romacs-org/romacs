@@ -103,3 +103,39 @@ fn mapconcat_mapping_separator_and_sequence_contract() {
         ("mapconcat_dotted_preflight", "(condition-case e (mapconcat 'invalid '(1 . bad)) (error e))", "(wrong-type-argument listp bad)"),
     ] { check(name, source, expected); }
 }
+
+// GNU sort.c runs a timsort past one minrun (64). Natively ordered keys sort
+// without calling Lisp; other predicates merge in O(n log n) stable calls.
+const PAIRS: &str = "(let ((s 7) (i 0) l) (while (< i 300) (setq s (% (+ (* s 75) 74) 65537) i (1+ i)) (setq l (cons (cons (% s 7) i) l))) l)";
+const WORDS: &str = "(let ((s 7) (i 0) l) (while (< i 300) (setq s (% (+ (* s 75) 74) 65537) i (1+ i)) (setq l (cons (concat (number-to-string (% s 13)) (if (= 0 (% s 3)) \"\" \"x\")) l))) l)";
+
+#[test]
+fn sort_large_inputs_stay_stable_and_agree_with_lisp_predicates() {
+    let stable = format!(
+        "(let* ((tail (sort {PAIRS} :key #'car :lessp (lambda (a b) (< a b)))) (ok t))
+           (while (cdr tail)
+             (let ((a (car tail)) (b (car (cdr tail))))
+               (unless (or (< (car a) (car b)) (and (= (car a) (car b)) (> (cdr a) (cdr b)))) (setq ok nil)))
+             (setq tail (cdr tail)))
+           ok)"
+    );
+    check("sort_large_stable_lisp", &stable, "t");
+    for (name, native, lisp) in [
+        ("fixnum_key", format!("(sort {PAIRS} :key #'car :lessp #'<)"), format!("(sort {PAIRS} :key #'car :lessp (lambda (a b) (< a b)))")),
+        ("fixnum_reverse", format!("(sort {PAIRS} :key #'car :lessp #'< :reverse t)"), format!("(sort {PAIRS} :key #'car :lessp (lambda (a b) (< a b)) :reverse t)")),
+        ("value_less_default", format!("(sort {PAIRS} :key #'car)"), format!("(sort {PAIRS} :key #'car :lessp (lambda (a b) (< a b)))")),
+        ("strings", format!("(sort {WORDS} 'string-lessp)"), format!("(sort {WORDS} (lambda (a b) (string-lessp a b)))")),
+        ("strings_reverse_vector", format!("(sort (vconcat {WORDS}) :lessp #'string-lessp :reverse t)"), format!("(sort (vconcat {WORDS}) :lessp (lambda (a b) (string-lessp a b)) :reverse t)")),
+        ("alias_chain", format!("(progn (defalias 'romacs-test-less 'string-lessp) (sort {WORDS} 'romacs-test-less))"), format!("(sort {WORDS} (lambda (a b) (string-lessp a b)))")),
+    ] {
+        check(name, &format!("(equal {native} {lisp})"), "t");
+    }
+}
+
+#[test]
+fn sort_large_lisp_predicates_are_called_n_log_n_times_and_signal() {
+    check("sort_large_calls", &format!("(let ((n 0)) (sort {PAIRS} :key #'car :lessp (lambda (a b) (setq n (1+ n)) (< a b))) (< n 3000))"), "t");
+    check("sort_large_predicate_error", &format!("(condition-case e (sort {PAIRS} :key #'car :lessp (lambda (a b) (if (= a 3) (error \"boom %d\" a) (< a b)))) (error e))"), "(error \"boom 3\")");
+    check("sort_large_mixed_types_signal", &format!("(condition-case e (sort (cons 1 {WORDS}) #'string-lessp) (error (car e)))"), "wrong-type-argument");
+    check("sort_redefined_predicate_is_called", &format!("(progn (defalias 'romacs-test-order 'string-lessp) (defalias 'romacs-test-order (lambda (a b) (string-lessp b a))) (equal (sort {WORDS} 'romacs-test-order) (sort {WORDS} :lessp #'string-lessp :reverse t)))"), "t");
+}

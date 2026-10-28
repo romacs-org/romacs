@@ -134,14 +134,6 @@ fn char_equal(cx, first: Value, second: Value) {
     Ok(if equal { Value::TRUE } else { Value::NIL })
 }}
 
-fn name_or_string(cx: &Leaf<'_>, value: Value) -> Result<Vec<u32>, Fault> {
-    if let Ok(name) = cx.symbol_name(value) {
-        Ok(name.chars().map(u32::from).collect())
-    } else {
-        string_chars(cx, value)
-    }
-}
-
 defsubr! { name = "substring-no-properties", gnu = "fns.c:1619", effect = Pure,
 fn substring_no_properties(cx, string: Value; optional from: Value, to: Value) {
     let view = cx.string_view(string)?;
@@ -180,9 +172,7 @@ fn string_equal(cx, first: Value, second: Value) {
 
 defsubr! { name = "string-lessp", gnu = "fns.c:559", effect = Pure,
 fn string_lessp(cx, first: Value, second: Value) {
-    let first = name_or_string(cx, first)?;
-    let second = name_or_string(cx, second)?;
-    Ok(if first < second { Value::TRUE } else { Value::NIL })
+    Ok(if cx.string_order(first, second)?.is_lt() { Value::TRUE } else { Value::NIL })
 }}
 
 defsubr! { name = "string-to-char", gnu = "editfns.c:176", effect = Pure,
