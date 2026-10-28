@@ -53,11 +53,7 @@ pub(crate) fn capitalized(cx: &mut Leaf<'_>, object: Value, initials: bool) -> O
 /// INITIALS: what each character becomes. In a buffer, a character with
 /// the syntax prefix flag (PREFIXES) starts no word.
 pub(crate) fn capitalized_chars(cx: &mut Leaf<'_>, chars: &[u32], prefixes: Option<&[bool]>, initials: bool) -> std::result::Result<Vec<Vec<u32>>, Fault> {
-    let defaults: Vec<u8> = chars.iter().map(|&code| {
-        let i = WORD_RANGES.partition_point(|row| row.1 < code);
-        WORD_RANGES[i].2
-    }).collect();
-    let words = cx.casing_word_flags(chars, &defaults)?;
+    let words = word_flags(cx, chars)?;
     let mut inword = false;
     let mut cased = Vec::with_capacity(chars.len());
     for (i, &code) in chars.iter().enumerate() {
@@ -74,6 +70,16 @@ pub(crate) fn capitalized_chars(cx: &mut Leaf<'_>, chars: &[u32], prefixes: Opti
         inword = words[i] && (inword || !prefixes.is_some_and(|p| p[i]));
     }
     Ok(cased)
+}
+
+/// Whether each of CHARS is a word character to casefiddle.c: the
+/// current syntax table, else GNU's standard syntax.
+pub(crate) fn word_flags(cx: &mut Leaf<'_>, chars: &[u32]) -> std::result::Result<Vec<bool>, Fault> {
+    let defaults: Vec<u8> = chars.iter().map(|&code| {
+        let i = WORD_RANGES.partition_point(|row| row.1 < code);
+        WORD_RANGES[i].2
+    }).collect();
+    cx.casing_word_flags(chars, &defaults)
 }
 
 defsubr! { name = "capitalize", gnu = "casefiddle.c:400", effect = Reads,

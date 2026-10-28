@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "20d6eddeb644cf367c01cd279e4d29f0e0c0c48cf387b92b2b6817f732c36a97",
+  "source_fingerprint": "ed8fc47474212ebf1ebccb66984f5d2c3fedccc0f21b18cb52acde4796696ef7",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -616,7 +616,7 @@
   "capitalize": {
    "name": "capitalize",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/capitalize.rs:79"
+   "registered_at": "crates/romacs-vm/src/prims/capitalize.rs:85"
   },
   "car": {
    "name": "car",
@@ -4750,7 +4750,7 @@
   "upcase-initials": {
    "name": "upcase-initials",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/capitalize.rs:84"
+   "registered_at": "crates/romacs-vm/src/prims/capitalize.rs:90"
   },
   "upcase-initials-region": {
    "name": "upcase-initials-region",

@@ -148,6 +148,19 @@ const BUFFER_CASES: &str = r###"
 (list (commandp 'upcase-region) (commandp 'upcase-initials-region) (interactive-form 'upcase-region) (interactive-form 'upcase-initials-region))
 "###;
 
+/// casefiddle.c's case_character: special casing before the case table,
+/// and GNU's final sigma rule. CASE-TABLE upcases `ß' to `X'.
+const SPECIAL_CASING_CASES: &str = r###"
+(let* ((d (copy-sequence (standard-case-table))) (u (copy-sequence (char-table-extra-slot d 0)))) (aset u ?ß ?X) (set-char-table-extra-slot d 0 u) (set-case-table d) (list (upcase "ßa") (upcase ?ß) (capitalize "ßa") (upcase-initials "ßa") (with-temp-buffer (set-case-table d) (insert "ßa") (upcase-region 1 3) (buffer-string)) (with-temp-buffer (set-case-table d) (insert "x XX y") (goto-char 1) (re-search-forward "XX") (replace-match "ßa") (buffer-string)) (progn (string-match "XX" "XX") (replace-match "ßa" nil t "XX"))))
+(let ((d (copy-sequence (standard-case-table)))) (aset d ?İ ?İ) (set-case-table d) (list (downcase ?İ) (downcase "İA")))
+(list (downcase "AΣ́ AΣ́A AΣ' AΣ'A 1Σ Σ ΑΣΣ") (upcase "ΑΣ") (capitalize "ΑΣ 1Σ") (with-temp-buffer (insert "ΑΣ 1Σ") (upcase-region 1 (point-max)) (buffer-string)))
+"###;
+
+#[test]
+fn special_casing_precedes_case_tables_as_in_gnu() {
+    matches_gnu(SPECIAL_CASING_CASES);
+}
+
 /// Buffer cases whose change hooks run Lisp, which needs the Lisp prelude.
 const BUFFER_HOOK_CASES: &str = r###"
 (with-temp-buffer (insert "abc Def ghi") (goto-char 1) (re-search-forward "Def") (let ((log nil)) (set (make-local-variable 'before-change-functions) (list (lambda (b e) (setq log (cons (list 'before b e (buffer-string)) log))))) (set (make-local-variable 'after-change-functions) (list (lambda (b e l) (setq log (cons (list 'after b e l (buffer-string)) log))))) (list (replace-match "xyz") (reverse log) (progn (setq log nil) (goto-char 1) (re-search-forward "abc") (replace-match "QQ" t t)) (reverse log) (point))))

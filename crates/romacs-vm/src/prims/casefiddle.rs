@@ -98,7 +98,7 @@ mod tests {
     fn native_case_context_and_no_normalization() {
         check(
             "(list (downcase \"AΣ́ AΣ́A AΣ' AΣ'A\") (upcase \"é é\") (downcase \"ẞ\"))",
-            "(\"aς́ aσ́a aς' aσ'a\" \"É É\" \"ß\")",
+            "(\"aσ́ aσ́a aς' aς'a\" \"É É\" \"ß\")",
         );
     }
 
@@ -116,13 +116,16 @@ mod tests {
 
     #[test]
     fn native_case_buffer_overrides_and_identity() {
+        // Special casing precedes the case table, as in GNU. `A', which the
+        // table has no entry for, takes the Unicode default; GNU leaves it
+        // as it is and gives "Aς".
         check(
             "(let ((d (make-char-table 'case-table)) (u (make-char-table 'case-table))) (aset d 931 120) (aset u 223 223) (aset u 233 81) (set-char-table-extra-slot d 0 u) (set-char-table-extra-slot d 1 (make-char-table 'case-table)) (set-case-table d) (list (upcase 223) (upcase \"ßéﬃ\") (downcase \"AΣ\") (with-temp-buffer (upcase \"ßé\"))))",
-            "(223 \"ßQFFI\" \"ax\" \"SSÉ\")",
+            "(223 \"SSQFFI\" \"aς\" \"SSÉ\")",
         );
         check(
             "(let ((d (copy-sequence (standard-case-table)))) (aset d 304 304) (set-case-table d) (list (downcase 304) (downcase \"İA\")))",
-            "(304 \"İa\")",
+            "(304 \"i̇a\")",
         );
     }
 
@@ -173,7 +176,7 @@ mod tests {
             "the collection must actually move the case roots"
         );
         let got = vm.eval_source_raw("(list (upcase \"ßé\") (append (upcase saved-case-string) nil) (eq saved-prop (get-text-property 0 'p saved-case-result)) (eq saved-prop (get-text-property 1 'p (upcase saved-case-string))))").unwrap();
-        assert_eq!(vm.display(got).unwrap(), "(\"ßÉ\" (65 233) t t)");
+        assert_eq!(vm.display(got).unwrap(), "(\"SSÉ\" (65 233) t t)");
     }
 
     #[test]

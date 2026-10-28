@@ -27,49 +27,14 @@ fn full(text: &str, down: bool) -> String {
     }
 }
 
-// Map complete Unicode runs, never one scalar at a time: final sigma needs
-// context. Non-Unicode GNU character codes are preserved and separate runs.
-// In the root locale, contextual casing changes values, not expansion lengths.
-// Derive those lengths from the SAME provider (not handwritten Unicode tables).
-fn full_mappings(codes: &[u32], down: bool) -> std::result::Result<Vec<Vec<u32>>, Fault> {
-    let mut result = Vec::with_capacity(codes.len());
-    let mut start = 0;
-    while start < codes.len() {
-        if char::from_u32(codes[start]).is_none() {
-            result.push(vec![codes[start]]);
-            start += 1;
-            continue;
-        }
-        let mut end = start;
-        let mut text = String::new();
-        while end < codes.len() {
-            let Some(c) = char::from_u32(codes[end]) else {
-                break;
-            };
-            text.push(c);
-            end += 1;
-        }
-        let mapped = full(&text, down);
-        let mut output = mapped.chars();
-        for c in text.chars() {
-            let mut buf = [0; 4];
-            let count = full(c.encode_utf8(&mut buf), down).chars().count();
-            let piece: Vec<_> = output.by_ref().take(count).map(u32::from).collect();
-            if piece.len() != count {
-                return Err(Fault::Error(
-                    "Unicode casing expansion length mismatch".into(),
-                ));
-            }
-            result.push(piece);
-        }
-        if output.next().is_some() {
-            return Err(Fault::Error(
-                "Unicode casing expansion length mismatch".into(),
-            ));
-        }
-        start = end;
-    }
-    Ok(result)
+/// GNU's unconditional special casing of CODE (uni-special-uppercase.el,
+/// uni-special-lowercase.el): its full Unicode mapping when that is not
+/// one character, and fits case_character_impl's six-byte buffer.
+fn special(code: u32, down: bool) -> Option<Vec<u32>> {
+    let c = char::from_u32(code)?;
+    let mapped = full(c.encode_utf8(&mut [0; 4]), down);
+    let chars: Vec<u32> = mapped.chars().map(u32::from).collect();
+    (chars.len() != 1 && mapped.len() <= 6).then_some(chars)
 }
 
 fn byte_code(code: u32, unibyte: bool) -> u32 {
@@ -114,18 +79,34 @@ impl Leaf<'_> {
         Ok(Some(mapped as u32))
     }
 
-    /// Each of CODES cased as a string of them is: the case table's
-    /// override, else the Unicode default, full in a multibyte string.
-    pub(crate) fn case_mappings(&mut self, codes: &[u32], multibyte: bool, down: bool) -> std::result::Result<Vec<Vec<u32>>, Fault> {
+    /// Each of CODES as casefiddle.c's case_character cases it for upcase
+    /// or downcase: in multibyte text the special casing first, then the
+    /// case table's mapping, else the Unicode default, and a capital sigma
+    /// changed after a word character and before none becomes final sigma.
+    /// IN_BUFFER, a character with the syntax prefix flag starts no word.
+    pub(crate) fn case_mappings(&mut self, codes: &[u32], multibyte: bool, down: bool, in_buffer: bool) -> std::result::Result<Vec<Vec<u32>>, Fault> {
+        const SIGMA: u32 = 0x3a3;
         let table = self.current_case_mapping(down)?;
-        let defaults = if multibyte {
-            full_mappings(codes, down)?
-        } else {
-            codes.iter().map(|&c| vec![if c < 128 { simple(c, down) } else { c }]).collect()
-        };
-        codes.iter().zip(defaults).map(|(&code, default)| {
-            Ok(self.case_override(table, byte_code(code, !multibyte))?.map_or(default, |c| vec![c]))
-        }).collect()
+        // Only a capital sigma reads word syntax.
+        let (words, prefixes) = if multibyte && codes.contains(&SIGMA) {
+            let prefixes = if in_buffer { self.casing_prefix_flags(codes)? } else { vec![false; codes.len()] };
+            (crate::prim::prims::capitalize::word_flags(self, codes)?, prefixes)
+        } else { (Vec::new(), Vec::new()) };
+        let mut inword = false;
+        let mut mappings = Vec::with_capacity(codes.len());
+        for (i, &code) in codes.iter().enumerate() {
+            let was_inword = inword;
+            inword = words.get(i).is_some_and(|&word| word && (was_inword || !prefixes[i]));
+            if let Some(special) = multibyte.then(|| special(code, down)).flatten() {
+                mappings.push(special);
+                continue;
+            }
+            let default = if multibyte || code < 128 { simple(code, down) } else { code };
+            let cased = self.case_override(table, byte_code(code, !multibyte))?.unwrap_or(default);
+            let last = !words.get(i + 1).copied().unwrap_or(false);
+            mappings.push(vec![if was_inword && code == SIGMA && cased != code && last { 0x3c2 } else { cased }]);
+        }
+        Ok(mappings)
     }
 
     pub fn case_convert(&mut self, value: Value, down: bool) -> super::super::Out {
@@ -157,7 +138,7 @@ impl Leaf<'_> {
             return Ok(value);
         }
         let codes: Vec<_> = source.chars().collect();
-        let mappings = self.case_mappings(&codes, source.multibyte, down)?;
+        let mappings = self.case_mappings(&codes, source.multibyte, down, false)?;
         let mut bytes = Vec::with_capacity(source.bytes.len());
         for (code, mapped) in codes.into_iter().zip(mappings) {
             for &c in &mapped {
@@ -212,7 +193,7 @@ impl Leaf<'_> {
             _ => return Err(Fault::Error("buffer required".into())),
         };
         let cased = match case {
-            RegionCase::Up => self.case_mappings(&codes, multibyte, false)?,
+            RegionCase::Up => self.case_mappings(&codes, multibyte, false, true)?,
             RegionCase::InitialsUp => {
                 let chars: Vec<u32> = codes.iter().map(|&c| byte_code(c, !multibyte)).collect();
                 let prefixes = self.casing_prefix_flags(&chars)?;
