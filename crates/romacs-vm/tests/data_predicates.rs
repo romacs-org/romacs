@@ -62,13 +62,13 @@ fn sequencep_gnu_objects() {
 }
 
 #[test]
-fn data_predicates_preserve_exact_construction_refusals() {
+fn data_predicates_construct_the_first_bignum() {
     let mut vm = Vm::new();
     for (source, expected) in [
         ("(condition-case e (read-from-string \"2305843009213693952\") (error e))", "(2305843009213693952 . 19)"),
-        ("(condition-case e (string-to-number \"2305843009213693952\") (error e))", "(error \"string-to-number: bignum results are not supported\")"),
+        ("(condition-case e (string-to-number \"2305843009213693952\") (error e))", "2305843009213693952"),
     ] {
-        assert_eq!(vm.eval_source(source).unwrap().display().unwrap(), expected, "exact boundary refusal: {source}");
+        assert_eq!(vm.eval_source(source).unwrap().display().unwrap(), expected, "first bignum: {source}");
     }
 }
 

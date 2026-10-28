@@ -14,7 +14,7 @@ mutants = [
     ('float-disabled', 'if trailing || (leading && exponent) {', 'if false && (trailing || (leading && exponent)) {', False),
     ('range-wrong-condition', 'return Err(Fault::Range1(base));', 'return Err(Fault::Wrong("fixnump", base));', False),
     ('sign-lost', 'if negative { -(magnitude as i64) } else { magnitude as i64 }', 'if negative { magnitude as i64 } else { magnitude as i64 }', False),
-    ('overflow-silent-zero', 'return Err(Fault::Error("string-to-number: bignum results are not supported".into()));', 'return Ok(Value::integer(0).unwrap());', False),
+    ('overflow-silent-zero', 'return Ok(cx.bigint(if negative { -n } else { n }));', 'return Ok(Value::integer(0).unwrap());', False),
     ('nan-payload-lost', '(payload & 0x0007_ffff_ffff_ffff)', '(payload & 0)', True),
     ('nan-dot-sentinel-lost', 'let payload = if leading { magnitude } else { u64::MAX - 1 };', 'let payload = magnitude;', True),
 ]

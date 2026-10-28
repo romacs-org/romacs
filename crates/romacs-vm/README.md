@@ -154,9 +154,9 @@ the dynamically bound `max-lisp-eval-depth`; register storage and native
 reentry stacks grow at guarded boundaries, and activations and the compiler
 refuse recoverably on low remaining native stack. There are signed 62-bit
 fixnums, plus arbitrary-precision integers read from radix and decimal
-constants but not yet produced by arithmetic or accepted by every consumer
-(see `GNU-DIVERGENCES.md` VM2-TIME1 and the root ledger's RADIX1, VM2-NUMPARSE1
-and VM2-FMT1 rows). There is no JIT, no general tail-call
+constants and returned by `string-to-number`, but not yet produced by arithmetic
+or accepted by every consumer (see `GNU-DIVERGENCES.md` VM2-TIME1 and the root
+ledger's RADIX1 and VM2-FMT1 rows). There is no JIT, no general tail-call
 promise, no full `error-conditions` hierarchy, no `unwind-protect`, and no shared
 concurrent mutator heap. The lexical-only language policy remains in effect.
 

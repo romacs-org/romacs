@@ -1,2664 +1,2532 @@
 {
-  "protocol": "primh-v1",
-  "primitive": "eql",
-  "spec_sha256": "5b9774f5f1158ddf9e09bef2c6cabdd1197387932e5a6c11d13059c2f464f0c1",
-  "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
- "recording_generator_sha256": "0ea1bcdc101951a290d4daed58107094f634644e5fc5356458b69f0f9af66412",
- "generator_portability_note": "Only GNU source discovery changed; original observations and cases retained, not re-recorded.",
-  "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
-  "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
-  "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
-  "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
-  "gnu": {
-    "version": "32.0.50",
-    "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
-    "subrs": [
-      [
-        "eql",
-        "subr",
-        2,
-        2
-      ]
-    ]
+ "protocol": "primh-v1",
+ "primitive": "eql",
+ "spec_sha256": "5b9774f5f1158ddf9e09bef2c6cabdd1197387932e5a6c11d13059c2f464f0c1",
+ "generator_sha256": "63c52520a7ee55ee6748453e9b1c580a2e2ad8a9bebd2175e6c83f1989760ac4",
+ "domains_sha256": "d17e11236955bf25abb0457e48dc8279fa943f9b545d815ba37d78669193ef3f",
+ "replay_sha256": "2d1a75a8e47763ca293a134182c4fdf2f4892091dc59aacff5dceadbd846d64e",
+ "driver_sha256": "589bce76e5c0548249480d401c58e6c221188ee4a1794fa8f9b08f7c5eef02fd",
+ "gnu_binary_sha256": "a31ba7aa12a7e4bbdda6ab9e19dab8338340f81f8100c33ac3843d10e176c8d8",
+ "gnu": {
+  "version": "32.0.50",
+  "revision": "45b0f7699df36b3849edc3bdef37d4cb9e75b9ea",
+  "subrs": [
+   [
+    "eql",
+    "subr",
+    2,
+    2
+   ]
+  ]
+ },
+ "gnu_sources": {
+  "fns.c": "db81c235d7c63f312128ad84c11d55ae4665a2599099be1229dbaa329afdb3bf"
+ },
+ "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
+ "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
+ "cases": [
+  {
+   "id": "eql/0000",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql nil nil)) (error (list 'sig e))))",
+   "expected": "(ok t)"
   },
-  "gnu_sources": {
-    "fns.c": "db81c235d7c63f312128ad84c11d55ae4665a2599099be1229dbaa329afdb3bf"
+  {
+   "id": "eql/0001",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql nil t)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
   },
-  "regime": "GNU byte-compiled, one process per primitive iff effect=pure; VM2 compiled",
-  "gc": "VM2 replay --gc-floor 1 (collection at every safepoint); no timing claim",
-  "cases": [
-    {
-      "id": "eql/0000",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql nil nil)) (error (list 'sig e))))",
-      "expected": "(ok t)"
-    },
-    {
-      "id": "eql/0001",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql nil t)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0002",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql nil 0)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0003",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql nil 1)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0004",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql nil -1)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0005",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql nil 1.0)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0006",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql nil 0.0)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0007",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql nil -0.0)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0008",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql nil 0.0e+NaN)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0009",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql nil 1.0e+INF)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0010",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql nil (string-to-number \"2305843009213693952\"))) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0011",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql nil (string-to-number \"2305843009213693953\"))) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0012",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql nil (string-to-number \"-2305843009213693953\"))) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0013",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql nil \"\u03bb\ud83d\ude42\")) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0014",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql nil 'symbol)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0015",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql nil '(1))) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0016",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql nil [1])) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0017",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql t nil)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0018",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql t t)) (error (list 'sig e))))",
-      "expected": "(ok t)"
-    },
-    {
-      "id": "eql/0019",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql t 0)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0020",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql t 1)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0021",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql t -1)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0022",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql t 1.0)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0023",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql t 0.0)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0024",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql t -0.0)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0025",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql t 0.0e+NaN)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0026",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql t 1.0e+INF)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0027",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql t (string-to-number \"2305843009213693952\"))) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0028",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql t (string-to-number \"2305843009213693953\"))) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0029",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql t (string-to-number \"-2305843009213693953\"))) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0030",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql t \"\u03bb\ud83d\ude42\")) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0031",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql t 'symbol)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0032",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql t '(1))) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0033",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql t [1])) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0034",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 0 nil)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0035",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 0 t)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0036",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 0 0)) (error (list 'sig e))))",
-      "expected": "(ok t)"
-    },
-    {
-      "id": "eql/0037",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 0 1)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0038",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 0 -1)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0039",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 0 1.0)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0040",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 0 0.0)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0041",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 0 -0.0)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0042",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 0 0.0e+NaN)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0043",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 0 1.0e+INF)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0044",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 0 (string-to-number \"2305843009213693952\"))) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0045",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 0 (string-to-number \"2305843009213693953\"))) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0046",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 0 (string-to-number \"-2305843009213693953\"))) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0047",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 0 \"\u03bb\ud83d\ude42\")) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0048",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 0 'symbol)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0049",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 0 '(1))) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0050",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 0 [1])) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0051",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 1 nil)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0052",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 1 t)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0053",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 1 0)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0054",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 1 1)) (error (list 'sig e))))",
-      "expected": "(ok t)"
-    },
-    {
-      "id": "eql/0055",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 1 -1)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0056",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 1 1.0)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0057",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 1 0.0)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0058",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 1 -0.0)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0059",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 1 0.0e+NaN)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0060",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 1 1.0e+INF)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0061",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 1 (string-to-number \"2305843009213693952\"))) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0062",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 1 (string-to-number \"2305843009213693953\"))) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0063",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 1 (string-to-number \"-2305843009213693953\"))) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0064",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 1 \"\u03bb\ud83d\ude42\")) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0065",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 1 'symbol)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0066",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 1 '(1))) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0067",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 1 [1])) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0068",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql -1 nil)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0069",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql -1 t)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0070",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql -1 0)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0071",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql -1 1)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0072",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql -1 -1)) (error (list 'sig e))))",
-      "expected": "(ok t)"
-    },
-    {
-      "id": "eql/0073",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql -1 1.0)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0074",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql -1 0.0)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0075",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql -1 -0.0)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0076",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql -1 0.0e+NaN)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0077",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql -1 1.0e+INF)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0078",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql -1 (string-to-number \"2305843009213693952\"))) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0079",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql -1 (string-to-number \"2305843009213693953\"))) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0080",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql -1 (string-to-number \"-2305843009213693953\"))) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0081",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql -1 \"\u03bb\ud83d\ude42\")) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0082",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql -1 'symbol)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0083",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql -1 '(1))) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0084",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql -1 [1])) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0085",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 1.0 nil)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0086",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 1.0 t)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0087",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 1.0 0)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0088",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 1.0 1)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0089",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 1.0 -1)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0090",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 1.0 1.0)) (error (list 'sig e))))",
-      "expected": "(ok t)"
-    },
-    {
-      "id": "eql/0091",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 1.0 0.0)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0092",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 1.0 -0.0)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0093",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 1.0 0.0e+NaN)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0094",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 1.0 1.0e+INF)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0095",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 1.0 (string-to-number \"2305843009213693952\"))) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0096",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 1.0 (string-to-number \"2305843009213693953\"))) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0097",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 1.0 (string-to-number \"-2305843009213693953\"))) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0098",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 1.0 \"\u03bb\ud83d\ude42\")) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0099",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 1.0 'symbol)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0100",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 1.0 '(1))) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0101",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 1.0 [1])) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0102",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 0.0 nil)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0103",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 0.0 t)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0104",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 0.0 0)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0105",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 0.0 1)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0106",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 0.0 -1)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0107",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 0.0 1.0)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0108",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 0.0 0.0)) (error (list 'sig e))))",
-      "expected": "(ok t)"
-    },
-    {
-      "id": "eql/0109",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 0.0 -0.0)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0110",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 0.0 0.0e+NaN)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0111",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 0.0 1.0e+INF)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0112",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 0.0 (string-to-number \"2305843009213693952\"))) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0113",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 0.0 (string-to-number \"2305843009213693953\"))) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0114",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 0.0 (string-to-number \"-2305843009213693953\"))) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0115",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 0.0 \"\u03bb\ud83d\ude42\")) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0116",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 0.0 'symbol)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0117",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 0.0 '(1))) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0118",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 0.0 [1])) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0119",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql -0.0 nil)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0120",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql -0.0 t)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0121",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql -0.0 0)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0122",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql -0.0 1)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0123",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql -0.0 -1)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0124",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql -0.0 1.0)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0125",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql -0.0 0.0)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0126",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql -0.0 -0.0)) (error (list 'sig e))))",
-      "expected": "(ok t)"
-    },
-    {
-      "id": "eql/0127",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql -0.0 0.0e+NaN)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0128",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql -0.0 1.0e+INF)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0129",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql -0.0 (string-to-number \"2305843009213693952\"))) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0130",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql -0.0 (string-to-number \"2305843009213693953\"))) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0131",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql -0.0 (string-to-number \"-2305843009213693953\"))) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0132",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql -0.0 \"\u03bb\ud83d\ude42\")) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0133",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql -0.0 'symbol)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0134",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql -0.0 '(1))) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0135",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql -0.0 [1])) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0136",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 0.0e+NaN nil)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0137",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 0.0e+NaN t)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0138",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 0.0e+NaN 0)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0139",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 0.0e+NaN 1)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0140",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 0.0e+NaN -1)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0141",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 0.0e+NaN 1.0)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0142",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 0.0e+NaN 0.0)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0143",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 0.0e+NaN -0.0)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0144",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 0.0e+NaN 0.0e+NaN)) (error (list 'sig e))))",
-      "expected": "(ok t)"
-    },
-    {
-      "id": "eql/0145",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 0.0e+NaN 1.0e+INF)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0146",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 0.0e+NaN (string-to-number \"2305843009213693952\"))) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0147",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 0.0e+NaN (string-to-number \"2305843009213693953\"))) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0148",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 0.0e+NaN (string-to-number \"-2305843009213693953\"))) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0149",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 0.0e+NaN \"\u03bb\ud83d\ude42\")) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0150",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 0.0e+NaN 'symbol)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0151",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 0.0e+NaN '(1))) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0152",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 0.0e+NaN [1])) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0153",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 1.0e+INF nil)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0154",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 1.0e+INF t)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0155",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 1.0e+INF 0)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0156",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 1.0e+INF 1)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0157",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 1.0e+INF -1)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0158",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 1.0e+INF 1.0)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0159",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 1.0e+INF 0.0)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0160",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 1.0e+INF -0.0)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0161",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 1.0e+INF 0.0e+NaN)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0162",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 1.0e+INF 1.0e+INF)) (error (list 'sig e))))",
-      "expected": "(ok t)"
-    },
-    {
-      "id": "eql/0163",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 1.0e+INF (string-to-number \"2305843009213693952\"))) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0164",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 1.0e+INF (string-to-number \"2305843009213693953\"))) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0165",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 1.0e+INF (string-to-number \"-2305843009213693953\"))) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0166",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 1.0e+INF \"\u03bb\ud83d\ude42\")) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0167",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 1.0e+INF 'symbol)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0168",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 1.0e+INF '(1))) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0169",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 1.0e+INF [1])) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0170",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"2305843009213693952\") nil)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0171",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"2305843009213693952\") t)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0172",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"2305843009213693952\") 0)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0173",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"2305843009213693952\") 1)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0174",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"2305843009213693952\") -1)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0175",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"2305843009213693952\") 1.0)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0176",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"2305843009213693952\") 0.0)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0177",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"2305843009213693952\") -0.0)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0178",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"2305843009213693952\") 0.0e+NaN)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0179",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"2305843009213693952\") 1.0e+INF)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0180",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"2305843009213693952\") (string-to-number \"2305843009213693952\"))) (error (list 'sig e))))",
-      "expected": "(ok t)"
-    },
-    {
-      "id": "eql/0181",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"2305843009213693952\") (string-to-number \"2305843009213693953\"))) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0182",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"2305843009213693952\") (string-to-number \"-2305843009213693953\"))) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0183",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"2305843009213693952\") \"\u03bb\ud83d\ude42\")) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0184",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"2305843009213693952\") 'symbol)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0185",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"2305843009213693952\") '(1))) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0186",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"2305843009213693952\") [1])) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0187",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"2305843009213693953\") nil)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0188",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"2305843009213693953\") t)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0189",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"2305843009213693953\") 0)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0190",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"2305843009213693953\") 1)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0191",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"2305843009213693953\") -1)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0192",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"2305843009213693953\") 1.0)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0193",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"2305843009213693953\") 0.0)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0194",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"2305843009213693953\") -0.0)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0195",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"2305843009213693953\") 0.0e+NaN)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0196",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"2305843009213693953\") 1.0e+INF)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0197",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"2305843009213693953\") (string-to-number \"2305843009213693952\"))) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0198",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"2305843009213693953\") (string-to-number \"2305843009213693953\"))) (error (list 'sig e))))",
-      "expected": "(ok t)"
-    },
-    {
-      "id": "eql/0199",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"2305843009213693953\") (string-to-number \"-2305843009213693953\"))) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0200",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"2305843009213693953\") \"\u03bb\ud83d\ude42\")) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0201",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"2305843009213693953\") 'symbol)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0202",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"2305843009213693953\") '(1))) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0203",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"2305843009213693953\") [1])) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0204",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"-2305843009213693953\") nil)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0205",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"-2305843009213693953\") t)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0206",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"-2305843009213693953\") 0)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0207",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"-2305843009213693953\") 1)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0208",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"-2305843009213693953\") -1)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0209",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"-2305843009213693953\") 1.0)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0210",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"-2305843009213693953\") 0.0)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0211",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"-2305843009213693953\") -0.0)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0212",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"-2305843009213693953\") 0.0e+NaN)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0213",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"-2305843009213693953\") 1.0e+INF)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0214",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"-2305843009213693953\") (string-to-number \"2305843009213693952\"))) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0215",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"-2305843009213693953\") (string-to-number \"2305843009213693953\"))) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0216",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"-2305843009213693953\") (string-to-number \"-2305843009213693953\"))) (error (list 'sig e))))",
-      "expected": "(ok t)"
-    },
-    {
-      "id": "eql/0217",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"-2305843009213693953\") \"\u03bb\ud83d\ude42\")) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0218",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"-2305843009213693953\") 'symbol)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0219",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"-2305843009213693953\") '(1))) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0220",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"-2305843009213693953\") [1])) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0221",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql \"\u03bb\ud83d\ude42\" nil)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0222",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql \"\u03bb\ud83d\ude42\" t)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0223",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql \"\u03bb\ud83d\ude42\" 0)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0224",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql \"\u03bb\ud83d\ude42\" 1)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0225",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql \"\u03bb\ud83d\ude42\" -1)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0226",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql \"\u03bb\ud83d\ude42\" 1.0)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0227",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql \"\u03bb\ud83d\ude42\" 0.0)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0228",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql \"\u03bb\ud83d\ude42\" -0.0)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0229",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql \"\u03bb\ud83d\ude42\" 0.0e+NaN)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0230",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql \"\u03bb\ud83d\ude42\" 1.0e+INF)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0231",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql \"\u03bb\ud83d\ude42\" (string-to-number \"2305843009213693952\"))) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0232",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql \"\u03bb\ud83d\ude42\" (string-to-number \"2305843009213693953\"))) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0233",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql \"\u03bb\ud83d\ude42\" (string-to-number \"-2305843009213693953\"))) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0234",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql \"\u03bb\ud83d\ude42\" \"\u03bb\ud83d\ude42\")) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0235",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql \"\u03bb\ud83d\ude42\" 'symbol)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0236",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql \"\u03bb\ud83d\ude42\" '(1))) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0237",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql \"\u03bb\ud83d\ude42\" [1])) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0238",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 'symbol nil)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0239",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 'symbol t)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0240",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 'symbol 0)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0241",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 'symbol 1)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0242",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 'symbol -1)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0243",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 'symbol 1.0)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0244",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 'symbol 0.0)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0245",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 'symbol -0.0)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0246",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 'symbol 0.0e+NaN)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0247",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 'symbol 1.0e+INF)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0248",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 'symbol (string-to-number \"2305843009213693952\"))) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0249",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 'symbol (string-to-number \"2305843009213693953\"))) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0250",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 'symbol (string-to-number \"-2305843009213693953\"))) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0251",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 'symbol \"\u03bb\ud83d\ude42\")) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0252",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 'symbol 'symbol)) (error (list 'sig e))))",
-      "expected": "(ok t)"
-    },
-    {
-      "id": "eql/0253",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 'symbol '(1))) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0254",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql 'symbol [1])) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0255",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql '(1) nil)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0256",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql '(1) t)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0257",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql '(1) 0)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0258",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql '(1) 1)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0259",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql '(1) -1)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0260",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql '(1) 1.0)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0261",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql '(1) 0.0)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0262",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql '(1) -0.0)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0263",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql '(1) 0.0e+NaN)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0264",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql '(1) 1.0e+INF)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0265",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql '(1) (string-to-number \"2305843009213693952\"))) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0266",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql '(1) (string-to-number \"2305843009213693953\"))) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0267",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql '(1) (string-to-number \"-2305843009213693953\"))) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0268",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql '(1) \"\u03bb\ud83d\ude42\")) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0269",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql '(1) 'symbol)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0270",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql '(1) '(1))) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0271",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql '(1) [1])) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0272",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql [1] nil)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0273",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql [1] t)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0274",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql [1] 0)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0275",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql [1] 1)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0276",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql [1] -1)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0277",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql [1] 1.0)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0278",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql [1] 0.0)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0279",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql [1] -0.0)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0280",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql [1] 0.0e+NaN)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0281",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql [1] 1.0e+INF)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0282",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql [1] (string-to-number \"2305843009213693952\"))) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0283",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql [1] (string-to-number \"2305843009213693953\"))) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0284",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql [1] (string-to-number \"-2305843009213693953\"))) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0285",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql [1] \"\u03bb\ud83d\ude42\")) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0286",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql [1] 'symbol)) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0287",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql [1] '(1))) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0288",
-      "family": "dom",
-      "source": "(prin1-to-string (condition-case e (list 'ok (eql [1] [1])) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0289",
-      "family": "arity",
-      "source": "(prin1-to-string (condition-case e (list 'ok (apply #'eql '(1))) (error (list 'sig e))))",
-      "expected": "(sig (wrong-number-of-arguments #<subr eql> 1))"
-    },
-    {
-      "id": "eql/0290",
-      "family": "arity",
-      "source": "(prin1-to-string (condition-case e (list 'ok (apply #'eql '(1 1 1))) (error (list 'sig e))))",
-      "expected": "(sig (wrong-number-of-arguments #<subr eql> 3))"
-    },
-    {
-      "id": "eql/0291",
-      "family": "gc",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 nil)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (eql a0 a1))) (error (list 'sig e))))",
-      "expected": "(ok t)"
-    },
-    {
-      "id": "eql/0292",
-      "family": "gc",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0) (a1 1)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (eql a0 a1))) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0293",
-      "family": "gc",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1) (a1 0.0)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (eql a0 a1))) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0294",
-      "family": "gc",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0.0) (a1 1.0e+INF)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (eql a0 a1))) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0295",
-      "family": "gc",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0.0e+NaN) (a1 (string-to-number \"-2305843009213693953\"))) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (eql a0 a1))) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0296",
-      "family": "gc",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (string-to-number \"2305843009213693952\")) (a1 '(1))) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (eql a0 a1))) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0297",
-      "family": "gc",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 \"\u03bb\ud83d\ude42\") (a1 t)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (eql a0 a1))) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0298",
-      "family": "gc",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 '(1)) (a1 -1)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (eql a0 a1))) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0299",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 nil)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0300",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 1)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (t nil))"
-    },
-    {
-      "id": "eql/0301",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 0.0)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (t nil))"
-    },
-    {
-      "id": "eql/0302",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 1.0e+INF)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (t nil))"
-    },
-    {
-      "id": "eql/0303",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 (string-to-number \"-2305843009213693953\"))) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (t nil))"
-    },
-    {
-      "id": "eql/0304",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 '(1))) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (t nil))"
-    },
-    {
-      "id": "eql/0305",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 t)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (t t))"
-    },
-    {
-      "id": "eql/0306",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 -1)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0307",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 -0.0)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0308",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 (string-to-number \"2305843009213693952\"))) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0309",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 \"\u03bb\ud83d\ude42\")) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0310",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 [1])) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0311",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0) (a1 0)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0312",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0) (a1 1.0)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0313",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0) (a1 0.0e+NaN)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0314",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0) (a1 (string-to-number \"2305843009213693953\"))) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0315",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0) (a1 'symbol)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0316",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 nil)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil t))"
-    },
-    {
-      "id": "eql/0317",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 1)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0318",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 0.0)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0319",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 1.0e+INF)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0320",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 (string-to-number \"-2305843009213693953\"))) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0321",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 '(1))) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0322",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1) (a1 t)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0323",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1) (a1 -1)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0324",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1) (a1 -0.0)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0325",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1) (a1 (string-to-number \"2305843009213693952\"))) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0326",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1) (a1 \"\u03bb\ud83d\ude42\")) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0327",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1) (a1 [1])) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0328",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.0) (a1 0)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0329",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.0) (a1 1.0)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0330",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.0) (a1 0.0e+NaN)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0331",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.0) (a1 (string-to-number \"2305843009213693953\"))) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0332",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.0) (a1 'symbol)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0333",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0.0) (a1 nil)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil t))"
-    },
-    {
-      "id": "eql/0334",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0.0) (a1 1)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0335",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0.0) (a1 0.0)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0336",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0.0) (a1 1.0e+INF)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0337",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0.0) (a1 (string-to-number \"-2305843009213693953\"))) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0338",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0.0) (a1 '(1))) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0339",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -0.0) (a1 t)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0340",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -0.0) (a1 -1)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0341",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -0.0) (a1 -0.0)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0342",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -0.0) (a1 (string-to-number \"2305843009213693952\"))) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0343",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -0.0) (a1 \"\u03bb\ud83d\ude42\")) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0344",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -0.0) (a1 [1])) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0345",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0.0e+NaN) (a1 0)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0346",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0.0e+NaN) (a1 1.0)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0347",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0.0e+NaN) (a1 0.0e+NaN)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0348",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0.0e+NaN) (a1 (string-to-number \"2305843009213693953\"))) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0349",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0.0e+NaN) (a1 'symbol)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0350",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.0e+INF) (a1 nil)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil t))"
-    },
-    {
-      "id": "eql/0351",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.0e+INF) (a1 1)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0352",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.0e+INF) (a1 0.0)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0353",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.0e+INF) (a1 1.0e+INF)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0354",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.0e+INF) (a1 (string-to-number \"-2305843009213693953\"))) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0355",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.0e+INF) (a1 '(1))) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0356",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (string-to-number \"2305843009213693952\")) (a1 t)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0357",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (string-to-number \"2305843009213693952\")) (a1 -1)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0358",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (string-to-number \"2305843009213693952\")) (a1 -0.0)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0359",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (string-to-number \"2305843009213693952\")) (a1 (string-to-number \"2305843009213693952\"))) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0360",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (string-to-number \"2305843009213693952\")) (a1 \"\u03bb\ud83d\ude42\")) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0361",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (string-to-number \"2305843009213693952\")) (a1 [1])) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0362",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (string-to-number \"2305843009213693953\")) (a1 0)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0363",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (string-to-number \"2305843009213693953\")) (a1 1.0)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0364",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (string-to-number \"2305843009213693953\")) (a1 0.0e+NaN)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0365",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (string-to-number \"2305843009213693953\")) (a1 (string-to-number \"2305843009213693953\"))) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0366",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (string-to-number \"2305843009213693953\")) (a1 'symbol)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0367",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (string-to-number \"-2305843009213693953\")) (a1 nil)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil t))"
-    },
-    {
-      "id": "eql/0368",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (string-to-number \"-2305843009213693953\")) (a1 1)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0369",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (string-to-number \"-2305843009213693953\")) (a1 0.0)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0370",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (string-to-number \"-2305843009213693953\")) (a1 1.0e+INF)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0371",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (string-to-number \"-2305843009213693953\")) (a1 (string-to-number \"-2305843009213693953\"))) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0372",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (string-to-number \"-2305843009213693953\")) (a1 '(1))) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0373",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 \"\u03bb\ud83d\ude42\") (a1 t)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0374",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 \"\u03bb\ud83d\ude42\") (a1 -1)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0375",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 \"\u03bb\ud83d\ude42\") (a1 -0.0)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0376",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 \"\u03bb\ud83d\ude42\") (a1 (string-to-number \"2305843009213693952\"))) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0377",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 \"\u03bb\ud83d\ude42\") (a1 \"\u03bb\ud83d\ude42\")) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0378",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 \"\u03bb\ud83d\ude42\") (a1 [1])) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0379",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'symbol) (a1 0)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0380",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'symbol) (a1 1.0)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0381",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'symbol) (a1 0.0e+NaN)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0382",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'symbol) (a1 (string-to-number \"2305843009213693953\"))) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0383",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'symbol) (a1 'symbol)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0384",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 '(1)) (a1 nil)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil t))"
-    },
-    {
-      "id": "eql/0385",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 '(1)) (a1 1)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0386",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 '(1)) (a1 0.0)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0387",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 '(1)) (a1 1.0e+INF)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0388",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 '(1)) (a1 (string-to-number \"-2305843009213693953\"))) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0389",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 '(1)) (a1 '(1))) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0390",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 [1]) (a1 t)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0391",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 [1]) (a1 -1)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0392",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 [1]) (a1 -0.0)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0393",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 [1]) (a1 (string-to-number \"2305843009213693952\"))) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0394",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 [1]) (a1 \"\u03bb\ud83d\ude42\")) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0395",
-      "family": "alias",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 [1]) (a1 [1])) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
-      "expected": "(ok (nil nil))"
-    },
-    {
-      "id": "eql/0396",
-      "family": "probe",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((x (list 1))) (eql x x))) (error (list 'sig e))))",
-      "expected": "(ok t)"
-    },
-    {
-      "id": "eql/0397",
-      "family": "probe",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((x (vector \"\u03bb\"))) (eql x x))) (error (list 'sig e))))",
-      "expected": "(ok t)"
-    },
-    {
-      "id": "eql/0398",
-      "family": "probe",
-      "source": "(prin1-to-string (condition-case e (list 'ok (let ((x (copy-sequence \"\u03bb\"))) (eql x x))) (error (list 'sig e))))",
-      "expected": "(ok t)"
-    },
-    {
-      "id": "eql/0399",
-      "family": "probe",
-      "source": "(prin1-to-string (condition-case e (list 'ok (funcall #'eql 1.0 1.0)) (error (list 'sig e))))",
-      "expected": "(ok t)"
-    },
-    {
-      "id": "eql/0400",
-      "family": "printer",
-      "source": "(prin1-to-string (condition-case e (list 'ok \"\u03bb\ud83d\ude42\") (error (list 'sig e))))",
-      "expected": "(ok \"\u03bb\ud83d\ude42\")"
-    },
-    {
-      "id": "eql/0401",
-      "family": "printer",
-      "source": "(prin1-to-string (condition-case e (list 'ok '(1)) (error (list 'sig e))))",
-      "expected": "(ok (1))"
-    },
-    {
-      "id": "eql/0402",
-      "family": "printer",
-      "source": "(prin1-to-string (condition-case e (list 'ok 'symbol) (error (list 'sig e))))",
-      "expected": "(ok symbol)"
-    },
-    {
-      "id": "eql/0403",
-      "family": "printer",
-      "source": "(prin1-to-string (condition-case e (list 'ok (string-to-number \"-2305843009213693953\")) (error (list 'sig e))))",
-      "expected": "(ok -2305843009213693953)"
-    },
-    {
-      "id": "eql/0404",
-      "family": "printer",
-      "source": "(prin1-to-string (condition-case e (list 'ok (string-to-number \"2305843009213693952\")) (error (list 'sig e))))",
-      "expected": "(ok 2305843009213693952)"
-    },
-    {
-      "id": "eql/0405",
-      "family": "printer",
-      "source": "(prin1-to-string (condition-case e (list 'ok (string-to-number \"2305843009213693953\")) (error (list 'sig e))))",
-      "expected": "(ok 2305843009213693953)"
-    },
-    {
-      "id": "eql/0406",
-      "family": "printer",
-      "source": "(prin1-to-string (condition-case e (list 'ok -0.0) (error (list 'sig e))))",
-      "expected": "(ok -0.0)"
-    },
-    {
-      "id": "eql/0407",
-      "family": "printer",
-      "source": "(prin1-to-string (condition-case e (list 'ok -1) (error (list 'sig e))))",
-      "expected": "(ok -1)"
-    },
-    {
-      "id": "eql/0408",
-      "family": "printer",
-      "source": "(prin1-to-string (condition-case e (list 'ok 0) (error (list 'sig e))))",
-      "expected": "(ok 0)"
-    },
-    {
-      "id": "eql/0409",
-      "family": "printer",
-      "source": "(prin1-to-string (condition-case e (list 'ok 0.0) (error (list 'sig e))))",
-      "expected": "(ok 0.0)"
-    },
-    {
-      "id": "eql/0410",
-      "family": "printer",
-      "source": "(prin1-to-string (condition-case e (list 'ok 0.0e+NaN) (error (list 'sig e))))",
-      "expected": "(ok 0.0e+NaN)"
-    },
-    {
-      "id": "eql/0411",
-      "family": "printer",
-      "source": "(prin1-to-string (condition-case e (list 'ok 1) (error (list 'sig e))))",
-      "expected": "(ok 1)"
-    },
-    {
-      "id": "eql/0412",
-      "family": "printer",
-      "source": "(prin1-to-string (condition-case e (list 'ok 1.0) (error (list 'sig e))))",
-      "expected": "(ok 1.0)"
-    },
-    {
-      "id": "eql/0413",
-      "family": "printer",
-      "source": "(prin1-to-string (condition-case e (list 'ok 1.0e+INF) (error (list 'sig e))))",
-      "expected": "(ok 1.0e+INF)"
-    },
-    {
-      "id": "eql/0414",
-      "family": "printer",
-      "source": "(prin1-to-string (condition-case e (list 'ok [1]) (error (list 'sig e))))",
-      "expected": "(ok [1])"
-    },
-    {
-      "id": "eql/0415",
-      "family": "printer",
-      "source": "(prin1-to-string (condition-case e (list 'ok nil) (error (list 'sig e))))",
-      "expected": "(ok nil)"
-    },
-    {
-      "id": "eql/0416",
-      "family": "printer",
-      "source": "(prin1-to-string (condition-case e (list 'ok t) (error (list 'sig e))))",
-      "expected": "(ok t)"
-    }
-  ],
-  "pinned": {
-    "eql/0010": "SIGNAL-VS-VALUE",
-    "eql/0011": "SIGNAL-VS-VALUE",
-    "eql/0012": "SIGNAL-VS-VALUE",
-    "eql/0027": "SIGNAL-VS-VALUE",
-    "eql/0028": "SIGNAL-VS-VALUE",
-    "eql/0029": "SIGNAL-VS-VALUE",
-    "eql/0044": "SIGNAL-VS-VALUE",
-    "eql/0045": "SIGNAL-VS-VALUE",
-    "eql/0046": "SIGNAL-VS-VALUE",
-    "eql/0061": "SIGNAL-VS-VALUE",
-    "eql/0062": "SIGNAL-VS-VALUE",
-    "eql/0063": "SIGNAL-VS-VALUE",
-    "eql/0078": "SIGNAL-VS-VALUE",
-    "eql/0079": "SIGNAL-VS-VALUE",
-    "eql/0080": "SIGNAL-VS-VALUE",
-    "eql/0095": "SIGNAL-VS-VALUE",
-    "eql/0096": "SIGNAL-VS-VALUE",
-    "eql/0097": "SIGNAL-VS-VALUE",
-    "eql/0112": "SIGNAL-VS-VALUE",
-    "eql/0113": "SIGNAL-VS-VALUE",
-    "eql/0114": "SIGNAL-VS-VALUE",
-    "eql/0129": "SIGNAL-VS-VALUE",
-    "eql/0130": "SIGNAL-VS-VALUE",
-    "eql/0131": "SIGNAL-VS-VALUE",
-    "eql/0146": "SIGNAL-VS-VALUE",
-    "eql/0147": "SIGNAL-VS-VALUE",
-    "eql/0148": "SIGNAL-VS-VALUE",
-    "eql/0163": "SIGNAL-VS-VALUE",
-    "eql/0164": "SIGNAL-VS-VALUE",
-    "eql/0165": "SIGNAL-VS-VALUE",
-    "eql/0170": "SIGNAL-VS-VALUE",
-    "eql/0171": "SIGNAL-VS-VALUE",
-    "eql/0172": "SIGNAL-VS-VALUE",
-    "eql/0173": "SIGNAL-VS-VALUE",
-    "eql/0174": "SIGNAL-VS-VALUE",
-    "eql/0175": "SIGNAL-VS-VALUE",
-    "eql/0176": "SIGNAL-VS-VALUE",
-    "eql/0177": "SIGNAL-VS-VALUE",
-    "eql/0178": "SIGNAL-VS-VALUE",
-    "eql/0179": "SIGNAL-VS-VALUE",
-    "eql/0180": "SIGNAL-VS-VALUE",
-    "eql/0181": "SIGNAL-VS-VALUE",
-    "eql/0182": "SIGNAL-VS-VALUE",
-    "eql/0183": "SIGNAL-VS-VALUE",
-    "eql/0184": "SIGNAL-VS-VALUE",
-    "eql/0185": "SIGNAL-VS-VALUE",
-    "eql/0186": "SIGNAL-VS-VALUE",
-    "eql/0187": "SIGNAL-VS-VALUE",
-    "eql/0188": "SIGNAL-VS-VALUE",
-    "eql/0189": "SIGNAL-VS-VALUE",
-    "eql/0190": "SIGNAL-VS-VALUE",
-    "eql/0191": "SIGNAL-VS-VALUE",
-    "eql/0192": "SIGNAL-VS-VALUE",
-    "eql/0193": "SIGNAL-VS-VALUE",
-    "eql/0194": "SIGNAL-VS-VALUE",
-    "eql/0195": "SIGNAL-VS-VALUE",
-    "eql/0196": "SIGNAL-VS-VALUE",
-    "eql/0197": "SIGNAL-VS-VALUE",
-    "eql/0198": "SIGNAL-VS-VALUE",
-    "eql/0199": "SIGNAL-VS-VALUE",
-    "eql/0200": "SIGNAL-VS-VALUE",
-    "eql/0201": "SIGNAL-VS-VALUE",
-    "eql/0202": "SIGNAL-VS-VALUE",
-    "eql/0203": "SIGNAL-VS-VALUE",
-    "eql/0204": "SIGNAL-VS-VALUE",
-    "eql/0205": "SIGNAL-VS-VALUE",
-    "eql/0206": "SIGNAL-VS-VALUE",
-    "eql/0207": "SIGNAL-VS-VALUE",
-    "eql/0208": "SIGNAL-VS-VALUE",
-    "eql/0209": "SIGNAL-VS-VALUE",
-    "eql/0210": "SIGNAL-VS-VALUE",
-    "eql/0211": "SIGNAL-VS-VALUE",
-    "eql/0212": "SIGNAL-VS-VALUE",
-    "eql/0213": "SIGNAL-VS-VALUE",
-    "eql/0214": "SIGNAL-VS-VALUE",
-    "eql/0215": "SIGNAL-VS-VALUE",
-    "eql/0216": "SIGNAL-VS-VALUE",
-    "eql/0217": "SIGNAL-VS-VALUE",
-    "eql/0218": "SIGNAL-VS-VALUE",
-    "eql/0219": "SIGNAL-VS-VALUE",
-    "eql/0220": "SIGNAL-VS-VALUE",
-    "eql/0231": "SIGNAL-VS-VALUE",
-    "eql/0232": "SIGNAL-VS-VALUE",
-    "eql/0233": "SIGNAL-VS-VALUE",
-    "eql/0248": "SIGNAL-VS-VALUE",
-    "eql/0249": "SIGNAL-VS-VALUE",
-    "eql/0250": "SIGNAL-VS-VALUE",
-    "eql/0265": "SIGNAL-VS-VALUE",
-    "eql/0266": "SIGNAL-VS-VALUE",
-    "eql/0267": "SIGNAL-VS-VALUE",
-    "eql/0282": "SIGNAL-VS-VALUE",
-    "eql/0283": "SIGNAL-VS-VALUE",
-    "eql/0284": "SIGNAL-VS-VALUE",
-    "eql/0295": "SIGNAL-VS-VALUE",
-    "eql/0296": "SIGNAL-VS-VALUE",
-    "eql/0303": "SIGNAL-VS-VALUE",
-    "eql/0308": "SIGNAL-VS-VALUE",
-    "eql/0314": "SIGNAL-VS-VALUE",
-    "eql/0320": "SIGNAL-VS-VALUE",
-    "eql/0325": "SIGNAL-VS-VALUE",
-    "eql/0331": "SIGNAL-VS-VALUE",
-    "eql/0337": "SIGNAL-VS-VALUE",
-    "eql/0342": "SIGNAL-VS-VALUE",
-    "eql/0348": "SIGNAL-VS-VALUE",
-    "eql/0354": "SIGNAL-VS-VALUE",
-    "eql/0356": "SIGNAL-VS-VALUE",
-    "eql/0357": "SIGNAL-VS-VALUE",
-    "eql/0358": "SIGNAL-VS-VALUE",
-    "eql/0359": "SIGNAL-VS-VALUE",
-    "eql/0360": "SIGNAL-VS-VALUE",
-    "eql/0361": "SIGNAL-VS-VALUE",
-    "eql/0362": "SIGNAL-VS-VALUE",
-    "eql/0363": "SIGNAL-VS-VALUE",
-    "eql/0364": "SIGNAL-VS-VALUE",
-    "eql/0365": "SIGNAL-VS-VALUE",
-    "eql/0366": "SIGNAL-VS-VALUE",
-    "eql/0367": "SIGNAL-VS-VALUE",
-    "eql/0368": "SIGNAL-VS-VALUE",
-    "eql/0369": "SIGNAL-VS-VALUE",
-    "eql/0370": "SIGNAL-VS-VALUE",
-    "eql/0371": "SIGNAL-VS-VALUE",
-    "eql/0372": "SIGNAL-VS-VALUE",
-    "eql/0376": "SIGNAL-VS-VALUE",
-    "eql/0382": "SIGNAL-VS-VALUE",
-    "eql/0388": "SIGNAL-VS-VALUE",
-    "eql/0393": "SIGNAL-VS-VALUE",
-    "eql/0403": "SIGNAL-VS-VALUE",
-    "eql/0404": "SIGNAL-VS-VALUE",
-    "eql/0405": "SIGNAL-VS-VALUE"
+  {
+   "id": "eql/0002",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql nil 0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0003",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql nil 1)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0004",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql nil -1)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0005",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql nil 1.0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0006",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql nil 0.0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0007",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql nil -0.0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0008",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql nil 0.0e+NaN)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0009",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql nil 1.0e+INF)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0010",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql nil (string-to-number \"2305843009213693952\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0011",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql nil (string-to-number \"2305843009213693953\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0012",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql nil (string-to-number \"-2305843009213693953\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0013",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql nil \"λ🙂\")) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0014",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql nil 'symbol)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0015",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql nil '(1))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0016",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql nil [1])) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0017",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql t nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0018",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql t t)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "eql/0019",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql t 0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0020",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql t 1)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0021",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql t -1)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0022",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql t 1.0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0023",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql t 0.0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0024",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql t -0.0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0025",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql t 0.0e+NaN)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0026",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql t 1.0e+INF)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0027",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql t (string-to-number \"2305843009213693952\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0028",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql t (string-to-number \"2305843009213693953\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0029",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql t (string-to-number \"-2305843009213693953\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0030",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql t \"λ🙂\")) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0031",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql t 'symbol)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0032",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql t '(1))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0033",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql t [1])) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0034",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 0 nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0035",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 0 t)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0036",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 0 0)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "eql/0037",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 0 1)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0038",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 0 -1)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0039",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 0 1.0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0040",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 0 0.0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0041",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 0 -0.0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0042",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 0 0.0e+NaN)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0043",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 0 1.0e+INF)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0044",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 0 (string-to-number \"2305843009213693952\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0045",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 0 (string-to-number \"2305843009213693953\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0046",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 0 (string-to-number \"-2305843009213693953\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0047",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 0 \"λ🙂\")) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0048",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 0 'symbol)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0049",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 0 '(1))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0050",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 0 [1])) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0051",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 1 nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0052",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 1 t)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0053",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 1 0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0054",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 1 1)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "eql/0055",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 1 -1)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0056",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 1 1.0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0057",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 1 0.0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0058",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 1 -0.0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0059",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 1 0.0e+NaN)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0060",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 1 1.0e+INF)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0061",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 1 (string-to-number \"2305843009213693952\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0062",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 1 (string-to-number \"2305843009213693953\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0063",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 1 (string-to-number \"-2305843009213693953\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0064",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 1 \"λ🙂\")) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0065",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 1 'symbol)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0066",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 1 '(1))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0067",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 1 [1])) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0068",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql -1 nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0069",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql -1 t)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0070",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql -1 0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0071",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql -1 1)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0072",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql -1 -1)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "eql/0073",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql -1 1.0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0074",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql -1 0.0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0075",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql -1 -0.0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0076",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql -1 0.0e+NaN)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0077",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql -1 1.0e+INF)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0078",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql -1 (string-to-number \"2305843009213693952\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0079",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql -1 (string-to-number \"2305843009213693953\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0080",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql -1 (string-to-number \"-2305843009213693953\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0081",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql -1 \"λ🙂\")) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0082",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql -1 'symbol)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0083",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql -1 '(1))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0084",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql -1 [1])) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0085",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 1.0 nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0086",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 1.0 t)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0087",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 1.0 0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0088",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 1.0 1)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0089",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 1.0 -1)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0090",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 1.0 1.0)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "eql/0091",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 1.0 0.0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0092",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 1.0 -0.0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0093",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 1.0 0.0e+NaN)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0094",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 1.0 1.0e+INF)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0095",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 1.0 (string-to-number \"2305843009213693952\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0096",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 1.0 (string-to-number \"2305843009213693953\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0097",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 1.0 (string-to-number \"-2305843009213693953\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0098",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 1.0 \"λ🙂\")) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0099",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 1.0 'symbol)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0100",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 1.0 '(1))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0101",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 1.0 [1])) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0102",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 0.0 nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0103",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 0.0 t)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0104",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 0.0 0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0105",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 0.0 1)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0106",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 0.0 -1)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0107",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 0.0 1.0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0108",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 0.0 0.0)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "eql/0109",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 0.0 -0.0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0110",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 0.0 0.0e+NaN)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0111",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 0.0 1.0e+INF)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0112",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 0.0 (string-to-number \"2305843009213693952\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0113",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 0.0 (string-to-number \"2305843009213693953\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0114",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 0.0 (string-to-number \"-2305843009213693953\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0115",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 0.0 \"λ🙂\")) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0116",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 0.0 'symbol)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0117",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 0.0 '(1))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0118",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 0.0 [1])) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0119",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql -0.0 nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0120",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql -0.0 t)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0121",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql -0.0 0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0122",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql -0.0 1)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0123",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql -0.0 -1)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0124",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql -0.0 1.0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0125",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql -0.0 0.0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0126",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql -0.0 -0.0)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "eql/0127",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql -0.0 0.0e+NaN)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0128",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql -0.0 1.0e+INF)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0129",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql -0.0 (string-to-number \"2305843009213693952\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0130",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql -0.0 (string-to-number \"2305843009213693953\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0131",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql -0.0 (string-to-number \"-2305843009213693953\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0132",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql -0.0 \"λ🙂\")) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0133",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql -0.0 'symbol)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0134",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql -0.0 '(1))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0135",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql -0.0 [1])) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0136",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 0.0e+NaN nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0137",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 0.0e+NaN t)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0138",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 0.0e+NaN 0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0139",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 0.0e+NaN 1)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0140",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 0.0e+NaN -1)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0141",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 0.0e+NaN 1.0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0142",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 0.0e+NaN 0.0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0143",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 0.0e+NaN -0.0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0144",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 0.0e+NaN 0.0e+NaN)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "eql/0145",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 0.0e+NaN 1.0e+INF)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0146",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 0.0e+NaN (string-to-number \"2305843009213693952\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0147",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 0.0e+NaN (string-to-number \"2305843009213693953\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0148",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 0.0e+NaN (string-to-number \"-2305843009213693953\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0149",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 0.0e+NaN \"λ🙂\")) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0150",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 0.0e+NaN 'symbol)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0151",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 0.0e+NaN '(1))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0152",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 0.0e+NaN [1])) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0153",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 1.0e+INF nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0154",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 1.0e+INF t)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0155",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 1.0e+INF 0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0156",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 1.0e+INF 1)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0157",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 1.0e+INF -1)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0158",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 1.0e+INF 1.0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0159",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 1.0e+INF 0.0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0160",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 1.0e+INF -0.0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0161",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 1.0e+INF 0.0e+NaN)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0162",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 1.0e+INF 1.0e+INF)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "eql/0163",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 1.0e+INF (string-to-number \"2305843009213693952\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0164",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 1.0e+INF (string-to-number \"2305843009213693953\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0165",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 1.0e+INF (string-to-number \"-2305843009213693953\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0166",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 1.0e+INF \"λ🙂\")) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0167",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 1.0e+INF 'symbol)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0168",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 1.0e+INF '(1))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0169",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 1.0e+INF [1])) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0170",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"2305843009213693952\") nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0171",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"2305843009213693952\") t)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0172",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"2305843009213693952\") 0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0173",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"2305843009213693952\") 1)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0174",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"2305843009213693952\") -1)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0175",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"2305843009213693952\") 1.0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0176",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"2305843009213693952\") 0.0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0177",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"2305843009213693952\") -0.0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0178",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"2305843009213693952\") 0.0e+NaN)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0179",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"2305843009213693952\") 1.0e+INF)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0180",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"2305843009213693952\") (string-to-number \"2305843009213693952\"))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "eql/0181",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"2305843009213693952\") (string-to-number \"2305843009213693953\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0182",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"2305843009213693952\") (string-to-number \"-2305843009213693953\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0183",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"2305843009213693952\") \"λ🙂\")) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0184",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"2305843009213693952\") 'symbol)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0185",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"2305843009213693952\") '(1))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0186",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"2305843009213693952\") [1])) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0187",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"2305843009213693953\") nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0188",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"2305843009213693953\") t)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0189",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"2305843009213693953\") 0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0190",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"2305843009213693953\") 1)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0191",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"2305843009213693953\") -1)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0192",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"2305843009213693953\") 1.0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0193",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"2305843009213693953\") 0.0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0194",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"2305843009213693953\") -0.0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0195",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"2305843009213693953\") 0.0e+NaN)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0196",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"2305843009213693953\") 1.0e+INF)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0197",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"2305843009213693953\") (string-to-number \"2305843009213693952\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0198",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"2305843009213693953\") (string-to-number \"2305843009213693953\"))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "eql/0199",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"2305843009213693953\") (string-to-number \"-2305843009213693953\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0200",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"2305843009213693953\") \"λ🙂\")) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0201",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"2305843009213693953\") 'symbol)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0202",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"2305843009213693953\") '(1))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0203",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"2305843009213693953\") [1])) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0204",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"-2305843009213693953\") nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0205",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"-2305843009213693953\") t)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0206",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"-2305843009213693953\") 0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0207",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"-2305843009213693953\") 1)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0208",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"-2305843009213693953\") -1)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0209",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"-2305843009213693953\") 1.0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0210",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"-2305843009213693953\") 0.0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0211",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"-2305843009213693953\") -0.0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0212",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"-2305843009213693953\") 0.0e+NaN)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0213",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"-2305843009213693953\") 1.0e+INF)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0214",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"-2305843009213693953\") (string-to-number \"2305843009213693952\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0215",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"-2305843009213693953\") (string-to-number \"2305843009213693953\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0216",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"-2305843009213693953\") (string-to-number \"-2305843009213693953\"))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "eql/0217",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"-2305843009213693953\") \"λ🙂\")) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0218",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"-2305843009213693953\") 'symbol)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0219",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"-2305843009213693953\") '(1))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0220",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql (string-to-number \"-2305843009213693953\") [1])) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0221",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql \"λ🙂\" nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0222",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql \"λ🙂\" t)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0223",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql \"λ🙂\" 0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0224",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql \"λ🙂\" 1)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0225",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql \"λ🙂\" -1)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0226",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql \"λ🙂\" 1.0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0227",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql \"λ🙂\" 0.0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0228",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql \"λ🙂\" -0.0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0229",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql \"λ🙂\" 0.0e+NaN)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0230",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql \"λ🙂\" 1.0e+INF)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0231",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql \"λ🙂\" (string-to-number \"2305843009213693952\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0232",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql \"λ🙂\" (string-to-number \"2305843009213693953\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0233",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql \"λ🙂\" (string-to-number \"-2305843009213693953\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0234",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql \"λ🙂\" \"λ🙂\")) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0235",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql \"λ🙂\" 'symbol)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0236",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql \"λ🙂\" '(1))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0237",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql \"λ🙂\" [1])) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0238",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 'symbol nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0239",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 'symbol t)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0240",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 'symbol 0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0241",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 'symbol 1)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0242",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 'symbol -1)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0243",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 'symbol 1.0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0244",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 'symbol 0.0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0245",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 'symbol -0.0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0246",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 'symbol 0.0e+NaN)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0247",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 'symbol 1.0e+INF)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0248",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 'symbol (string-to-number \"2305843009213693952\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0249",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 'symbol (string-to-number \"2305843009213693953\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0250",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 'symbol (string-to-number \"-2305843009213693953\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0251",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 'symbol \"λ🙂\")) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0252",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 'symbol 'symbol)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "eql/0253",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 'symbol '(1))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0254",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql 'symbol [1])) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0255",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql '(1) nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0256",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql '(1) t)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0257",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql '(1) 0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0258",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql '(1) 1)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0259",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql '(1) -1)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0260",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql '(1) 1.0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0261",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql '(1) 0.0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0262",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql '(1) -0.0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0263",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql '(1) 0.0e+NaN)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0264",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql '(1) 1.0e+INF)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0265",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql '(1) (string-to-number \"2305843009213693952\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0266",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql '(1) (string-to-number \"2305843009213693953\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0267",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql '(1) (string-to-number \"-2305843009213693953\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0268",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql '(1) \"λ🙂\")) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0269",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql '(1) 'symbol)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0270",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql '(1) '(1))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0271",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql '(1) [1])) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0272",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql [1] nil)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0273",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql [1] t)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0274",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql [1] 0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0275",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql [1] 1)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0276",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql [1] -1)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0277",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql [1] 1.0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0278",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql [1] 0.0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0279",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql [1] -0.0)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0280",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql [1] 0.0e+NaN)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0281",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql [1] 1.0e+INF)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0282",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql [1] (string-to-number \"2305843009213693952\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0283",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql [1] (string-to-number \"2305843009213693953\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0284",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql [1] (string-to-number \"-2305843009213693953\"))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0285",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql [1] \"λ🙂\")) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0286",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql [1] 'symbol)) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0287",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql [1] '(1))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0288",
+   "family": "dom",
+   "source": "(prin1-to-string (condition-case e (list 'ok (eql [1] [1])) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0289",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'eql '(1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr eql> 1))"
+  },
+  {
+   "id": "eql/0290",
+   "family": "arity",
+   "source": "(prin1-to-string (condition-case e (list 'ok (apply #'eql '(1 1 1))) (error (list 'sig e))))",
+   "expected": "(sig (wrong-number-of-arguments #<subr eql> 3))"
+  },
+  {
+   "id": "eql/0291",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 nil)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (eql a0 a1))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "eql/0292",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0) (a1 1)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (eql a0 a1))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0293",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1) (a1 0.0)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (eql a0 a1))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0294",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0.0) (a1 1.0e+INF)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (eql a0 a1))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0295",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0.0e+NaN) (a1 (string-to-number \"-2305843009213693953\"))) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (eql a0 a1))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0296",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (string-to-number \"2305843009213693952\")) (a1 '(1))) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (eql a0 a1))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0297",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 \"λ🙂\") (a1 t)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (eql a0 a1))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0298",
+   "family": "gc",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 '(1)) (a1 -1)) (let ((i 0)) (while (< i 3000) (list i i) (setq i (1+ i)))) (eql a0 a1))) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0299",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 nil)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0300",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 1)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (t nil))"
+  },
+  {
+   "id": "eql/0301",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 0.0)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (t nil))"
+  },
+  {
+   "id": "eql/0302",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 1.0e+INF)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (t nil))"
+  },
+  {
+   "id": "eql/0303",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 (string-to-number \"-2305843009213693953\"))) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (t nil))"
+  },
+  {
+   "id": "eql/0304",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 nil) (a1 '(1))) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (t nil))"
+  },
+  {
+   "id": "eql/0305",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 t)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (t t))"
+  },
+  {
+   "id": "eql/0306",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 -1)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0307",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 -0.0)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0308",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 (string-to-number \"2305843009213693952\"))) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0309",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 \"λ🙂\")) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0310",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 t) (a1 [1])) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0311",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0) (a1 0)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0312",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0) (a1 1.0)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0313",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0) (a1 0.0e+NaN)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0314",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0) (a1 (string-to-number \"2305843009213693953\"))) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0315",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0) (a1 'symbol)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0316",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 nil)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "eql/0317",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 1)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0318",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 0.0)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0319",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 1.0e+INF)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0320",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 (string-to-number \"-2305843009213693953\"))) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0321",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1) (a1 '(1))) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0322",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1) (a1 t)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0323",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1) (a1 -1)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0324",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1) (a1 -0.0)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0325",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1) (a1 (string-to-number \"2305843009213693952\"))) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0326",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1) (a1 \"λ🙂\")) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0327",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -1) (a1 [1])) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0328",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.0) (a1 0)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0329",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.0) (a1 1.0)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0330",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.0) (a1 0.0e+NaN)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0331",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.0) (a1 (string-to-number \"2305843009213693953\"))) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0332",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.0) (a1 'symbol)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0333",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0.0) (a1 nil)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "eql/0334",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0.0) (a1 1)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0335",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0.0) (a1 0.0)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0336",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0.0) (a1 1.0e+INF)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0337",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0.0) (a1 (string-to-number \"-2305843009213693953\"))) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0338",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0.0) (a1 '(1))) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0339",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -0.0) (a1 t)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0340",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -0.0) (a1 -1)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0341",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -0.0) (a1 -0.0)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0342",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -0.0) (a1 (string-to-number \"2305843009213693952\"))) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0343",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -0.0) (a1 \"λ🙂\")) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0344",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 -0.0) (a1 [1])) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0345",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0.0e+NaN) (a1 0)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0346",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0.0e+NaN) (a1 1.0)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0347",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0.0e+NaN) (a1 0.0e+NaN)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0348",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0.0e+NaN) (a1 (string-to-number \"2305843009213693953\"))) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0349",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 0.0e+NaN) (a1 'symbol)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0350",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.0e+INF) (a1 nil)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "eql/0351",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.0e+INF) (a1 1)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0352",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.0e+INF) (a1 0.0)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0353",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.0e+INF) (a1 1.0e+INF)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0354",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.0e+INF) (a1 (string-to-number \"-2305843009213693953\"))) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0355",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 1.0e+INF) (a1 '(1))) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0356",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (string-to-number \"2305843009213693952\")) (a1 t)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0357",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (string-to-number \"2305843009213693952\")) (a1 -1)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0358",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (string-to-number \"2305843009213693952\")) (a1 -0.0)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0359",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (string-to-number \"2305843009213693952\")) (a1 (string-to-number \"2305843009213693952\"))) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0360",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (string-to-number \"2305843009213693952\")) (a1 \"λ🙂\")) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0361",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (string-to-number \"2305843009213693952\")) (a1 [1])) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0362",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (string-to-number \"2305843009213693953\")) (a1 0)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0363",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (string-to-number \"2305843009213693953\")) (a1 1.0)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0364",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (string-to-number \"2305843009213693953\")) (a1 0.0e+NaN)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0365",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (string-to-number \"2305843009213693953\")) (a1 (string-to-number \"2305843009213693953\"))) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0366",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (string-to-number \"2305843009213693953\")) (a1 'symbol)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0367",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (string-to-number \"-2305843009213693953\")) (a1 nil)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "eql/0368",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (string-to-number \"-2305843009213693953\")) (a1 1)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0369",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (string-to-number \"-2305843009213693953\")) (a1 0.0)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0370",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (string-to-number \"-2305843009213693953\")) (a1 1.0e+INF)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0371",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (string-to-number \"-2305843009213693953\")) (a1 (string-to-number \"-2305843009213693953\"))) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0372",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 (string-to-number \"-2305843009213693953\")) (a1 '(1))) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0373",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 \"λ🙂\") (a1 t)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0374",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 \"λ🙂\") (a1 -1)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0375",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 \"λ🙂\") (a1 -0.0)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0376",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 \"λ🙂\") (a1 (string-to-number \"2305843009213693952\"))) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0377",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 \"λ🙂\") (a1 \"λ🙂\")) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0378",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 \"λ🙂\") (a1 [1])) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0379",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'symbol) (a1 0)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0380",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'symbol) (a1 1.0)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0381",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'symbol) (a1 0.0e+NaN)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0382",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'symbol) (a1 (string-to-number \"2305843009213693953\"))) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0383",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 'symbol) (a1 'symbol)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0384",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 '(1)) (a1 nil)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil t))"
+  },
+  {
+   "id": "eql/0385",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 '(1)) (a1 1)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0386",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 '(1)) (a1 0.0)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0387",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 '(1)) (a1 1.0e+INF)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0388",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 '(1)) (a1 (string-to-number \"-2305843009213693953\"))) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0389",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 '(1)) (a1 '(1))) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0390",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 [1]) (a1 t)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0391",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 [1]) (a1 -1)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0392",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 [1]) (a1 -0.0)) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0393",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 [1]) (a1 (string-to-number \"2305843009213693952\"))) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0394",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 [1]) (a1 \"λ🙂\")) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0395",
+   "family": "alias",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((a0 [1]) (a1 [1])) (let ((r (eql a0 a1))) (list (eq r a0) (eq r a1))))) (error (list 'sig e))))",
+   "expected": "(ok (nil nil))"
+  },
+  {
+   "id": "eql/0396",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((x (list 1))) (eql x x))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "eql/0397",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((x (vector \"λ\"))) (eql x x))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "eql/0398",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (let ((x (copy-sequence \"λ\"))) (eql x x))) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "eql/0399",
+   "family": "probe",
+   "source": "(prin1-to-string (condition-case e (list 'ok (funcall #'eql 1.0 1.0)) (error (list 'sig e))))",
+   "expected": "(ok t)"
+  },
+  {
+   "id": "eql/0400",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok \"λ🙂\") (error (list 'sig e))))",
+   "expected": "(ok \"λ🙂\")"
+  },
+  {
+   "id": "eql/0401",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok '(1)) (error (list 'sig e))))",
+   "expected": "(ok (1))"
+  },
+  {
+   "id": "eql/0402",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 'symbol) (error (list 'sig e))))",
+   "expected": "(ok symbol)"
+  },
+  {
+   "id": "eql/0403",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-to-number \"-2305843009213693953\")) (error (list 'sig e))))",
+   "expected": "(ok -2305843009213693953)"
+  },
+  {
+   "id": "eql/0404",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-to-number \"2305843009213693952\")) (error (list 'sig e))))",
+   "expected": "(ok 2305843009213693952)"
+  },
+  {
+   "id": "eql/0405",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok (string-to-number \"2305843009213693953\")) (error (list 'sig e))))",
+   "expected": "(ok 2305843009213693953)"
+  },
+  {
+   "id": "eql/0406",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok -0.0) (error (list 'sig e))))",
+   "expected": "(ok -0.0)"
+  },
+  {
+   "id": "eql/0407",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok -1) (error (list 'sig e))))",
+   "expected": "(ok -1)"
+  },
+  {
+   "id": "eql/0408",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 0) (error (list 'sig e))))",
+   "expected": "(ok 0)"
+  },
+  {
+   "id": "eql/0409",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 0.0) (error (list 'sig e))))",
+   "expected": "(ok 0.0)"
+  },
+  {
+   "id": "eql/0410",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 0.0e+NaN) (error (list 'sig e))))",
+   "expected": "(ok 0.0e+NaN)"
+  },
+  {
+   "id": "eql/0411",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1) (error (list 'sig e))))",
+   "expected": "(ok 1)"
+  },
+  {
+   "id": "eql/0412",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1.0) (error (list 'sig e))))",
+   "expected": "(ok 1.0)"
+  },
+  {
+   "id": "eql/0413",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok 1.0e+INF) (error (list 'sig e))))",
+   "expected": "(ok 1.0e+INF)"
+  },
+  {
+   "id": "eql/0414",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok [1]) (error (list 'sig e))))",
+   "expected": "(ok [1])"
+  },
+  {
+   "id": "eql/0415",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok nil) (error (list 'sig e))))",
+   "expected": "(ok nil)"
+  },
+  {
+   "id": "eql/0416",
+   "family": "printer",
+   "source": "(prin1-to-string (condition-case e (list 'ok t) (error (list 'sig e))))",
+   "expected": "(ok t)"
   }
+ ],
+ "pinned": {}
 }

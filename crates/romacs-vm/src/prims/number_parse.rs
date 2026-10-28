@@ -1,5 +1,5 @@
 //! GNU `string-to-number`: data.c:3092 and lread.c:4500.
-//! Integer results outside VM2's fixnum range require the absent bignum substrate.
+//! An integer outside the fixnum range is a bignum, as make_bignum_str makes it.
 use crate::prim::Fault;
 use crate::Value;
 
@@ -37,6 +37,7 @@ defsubr! { name = "string-to-number", gnu = "data.c:3092", effect = Pure,
             p += 1;
         }
         let leading = p > start;
+        let digits_end = p;
         if radix == 10 {
             if bytes.get(p) == Some(&b'.') { p += 1; }
             let fraction_start = p;
@@ -77,7 +78,8 @@ defsubr! { name = "string-to-number", gnu = "data.c:3092", effect = Pure,
         if !leading { return Ok(Value::integer(0).unwrap()); }
         let limit = if negative { Value::MIN_FIXNUM.unsigned_abs() } else { Value::MAX_FIXNUM as u64 };
         if overflow || magnitude > limit {
-            return Err(Fault::Error("string-to-number: bignum results are not supported".into()));
+            let n = num_bigint::BigInt::parse_bytes(&bytes[start..digits_end], radix).expect("radix digits");
+            return Ok(cx.bigint(if negative { -n } else { n }));
         }
         let n = if negative { -(magnitude as i64) } else { magnitude as i64 };
         Ok(Value::integer(n).unwrap())
