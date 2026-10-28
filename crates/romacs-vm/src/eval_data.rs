@@ -68,6 +68,7 @@ impl Vm {
                 let quoted = n == 1 || self.stack[start + 1] == Value::NIL;
                 let overrides = if n == 3 { self.stack[start + 2] } else { Value::NIL };
                 let text = self.print_render(self.stack[start], quoted, overrides, true)?;
+                if text.contains(crate::symkey::ESC) { return Ok(self.printed_value(&text)); }
                 self.literal(&Form::String(text))
             }
             _ => unreachable!("eval data dispatch"),
@@ -430,6 +431,8 @@ impl Vm {
                             let width = if code > 63 || codes.get(i+1).is_some_and(|c| (48..=55).contains(c)) { 3 } else if code > 7 { 2 } else { 1 };
                             write!(out, "\\{code:0width$o}").unwrap();
                         }
+                        // Printed text is decoded as a symbol key (symkey.rs).
+                        crate::symkey::ESC => { out.push(c); out.push(c); }
                         _ => out.push(c),
                     }
                 } else { return Err("not-unicode-string: printer extended character".into()); }

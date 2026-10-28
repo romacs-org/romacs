@@ -1361,7 +1361,11 @@ mod leaf {
                 if let Some(&name) = self.vm.obarray_symbol_names.get(&slot) { return Ok(name); }
             }
             let name = self.symbol_name(symbol)?;
-            let value = if name.is_ascii() { self.byte_string(name.as_bytes()) } else { self.string(&name) };
+            let value = match crate::symkey::to_internal(&name) {
+                Some(internal) => self.make_string(internal, true),
+                None if name.is_ascii() => self.byte_string(name.as_bytes()),
+                None => self.string(&name),
+            };
             self.vm.permanent_symbol_names.insert(symbol.0, value);
             Ok(value)
         }

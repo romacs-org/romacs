@@ -150,3 +150,23 @@ fn source_coding_is_explicit_and_invalid_utf8_is_not_replaced() {
     );
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+/// D2 for symbols: a raw byte in a symbol read from explicit UTF-8 source is
+/// a raw-byte character of its name, as in a string; the symbol interns,
+/// prints and compares as GNU's. A genuine U+FDD0 (VM2's internal key
+/// escape, symkey.rs) is an ordinary name character. Pinned GNU 32.0.50.
+#[test]
+fn raw_bytes_in_source_symbols_keep_their_characters() {
+    let dir = scratch("raw-symbols");
+    std::fs::write(dir.join("s2.el"), b";; -*- coding: utf-8; lexical-binding: t -*-\n(defvar s2-sym (quote raw\xff))\n(defvar s2-list (list (quote raw\xff) \"r\xff\" (quote \xef\xb7\x90x)))\n").unwrap();
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    vm.load_file(&dir.join("s2.el")).unwrap();
+    let form = "(list (append (symbol-name s2-sym) nil) (eq s2-sym (intern (string ?r ?a ?w #x3fffff))) (eq s2-sym (car s2-list))
+      (eq s2-sym (intern-soft (string ?r ?a ?w #x3fffff))) (append (prin1-to-string s2-sym) nil) (append (prin1-to-string s2-list) nil)
+      (append (format \"%s\" s2-sym) nil) (append (symbol-name (nth 2 s2-list)) nil) (eq (nth 2 s2-list) (intern (string #xfdd0 ?x)))
+      (append (symbol-name (make-symbol (string ?a #x3fffff))) nil) (eq (make-symbol \"raw\") (intern \"raw\")) (multibyte-string-p (symbol-name s2-sym)))";
+    assert_eq!(vm.eval_source(form).unwrap().display().unwrap(),
+        "((114 97 119 4194303) t t t (114 97 119 4194303) (40 114 97 119 4194303 32 34 114 92 51 55 55 34 32 64976 120 41) (114 97 119 4194303) (64976 120) t (97 4194303) nil t)");
+    std::fs::remove_dir_all(dir).unwrap();
+}

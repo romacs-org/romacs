@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "a8c15c6d3e4568eaa5d0bbd53214ee8459a6bbf48dc5ff7f5fd043c21042754f",
+  "input_hash": "f3adabf0e0d5346f8ad69e7cc7ce9b295f8126d5564b93dfbd5cbac2cf2eea04",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -3825,7 +3825,7 @@
    "planned": false,
    "mechanism": "Source file coding in `load`",
    "gnu": "`load` of a `.el` file goes through `load-source-file-function` (`load-with-code-conversion`, `lisp/international/mule.el`): `insert-file-contents` decodes it by the `coding:` cookie or, without one, by `set-auto-coding` and the detection walk over `coding-system-priority-list` (pinned GNU batch: a file of valid UTF-8 is `utf-8`, `caf\\xe9` is `iso-latin-1`, `x\\x85y` is `japanese-shift-jis`, and `leim/quail/Punct.el`, whose comment holds two stray GB2312 bytes, is `raw-text`, so its strings read as unibyte bytes). GNU's `utf-8` and `utf-8-emacs` share `decode_coding_utf_8` (`src/coding.c:1270`): characters beyond Unicode up to MAX_CHAR decode (`quick-cns.el`'s U+114019), and a byte that starts no character is a raw-byte character",
-   "romacs": "The loader decodes source itself (`crates/romacs-vm/src/loader.rs` `decode_source`), from a cookie in the first two lines: `utf-8` and `utf-8-emacs` through a transcription of `decode_coding_utf_8`, Latin-1, US-ASCII, and the `-unix`/`-dos`/`-mac` EOL variants; any other named system is refused. Without a cookie it applies the outcome of GNU's walk only where that is UTF-8, i.e. where the bytes decode with no raw byte; any other file is refused (`source is not valid UTF-8 and names no coding system`), since VM2 implements neither the ISO-2022, SJIS, Big5 and emacs-mule detectors nor the rest of the walk (`tests/loader.rs` `source_coding_is_explicit_and_invalid_utf8_is_not_replaced`)",
+   "romacs": "The loader decodes source itself (`crates/romacs-vm/src/loader.rs` `decode_source`), from a cookie in the first two lines: `utf-8` and `utf-8-emacs` through a transcription of `decode_coding_utf_8`, Latin-1, US-ASCII, and the `-unix`/`-dos`/`-mac` EOL variants; any other named system is refused. Without a cookie it applies the outcome of GNU's walk only where that is UTF-8, i.e. where the bytes decode with no raw byte; any other file is refused (`source is not valid UTF-8 and names no coding system`), since VM2 implements neither the ISO-2022, SJIS, Big5 and emacs-mule detectors nor the rest of the walk (`tests/loader.rs` `source_coding_is_explicit_and_invalid_utf8_is_not_replaced`). Raw-byte and beyond-Unicode characters keep their codes in symbol names as in strings: VM2's Rust-side symbol keys carry them through an injective escape (`crates/romacs-vm/src/symkey.rs`) that `symbol-name`, `intern`, `intern-soft`, `make-symbol`, the printer and `format` decode, so Lisp sees GNU's names and identity (`raw_bytes_in_source_symbols_keep_their_characters`); `intern` of a unibyte name with bytes above 127 is still refused (`not-unicode-string`)",
    "why": "**Package-observable:** a cookie-less source file in Latin-1, Shift-JIS or with stray 8-bit bytes fails to load where GNU loads it under the detected system; in the GNU tree only `leim/quail/Punct.el` and `py-punct.el` (which loads it)",
    "symbols": [
     "load",

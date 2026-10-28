@@ -68,6 +68,7 @@ pub mod coordinates;
 mod data;
 mod bool_vector;
 mod lstring;
+mod symkey;
 mod display;
 mod overlay_order;
 mod window;
