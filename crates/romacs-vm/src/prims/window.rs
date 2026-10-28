@@ -194,11 +194,6 @@ fn frame_char_width(cx; optional frame: Value) {
     cx.windows().frame_char_size(frame, true)
 }}
 
-defsubr! { name = "frame-internal-border-width", gnu = "frame.c:4524", effect = Reads,
-fn frame_internal_border_width(cx; optional frame: Value) {
-    cx.windows().frame_absent_width(frame)
-}}
-
 defsubr! { name = "frame-right-divider-width", gnu = "frame.c:4531", effect = Reads,
 fn frame_right_divider_width(cx; optional frame: Value) {
     cx.windows().frame_absent_width(frame)
@@ -408,4 +403,9 @@ fn window_left_column(cx; optional window: Value) {
 defsubr! { name = "window-top-line", gnu = "window.c:1029", effect = Reads,
 fn window_top_line(cx; optional window: Value) {
     cx.windows().window_char_edge(window, true)
+}}
+
+defsubr! { name = "frame-internal-border-width", gnu = "frame.c:4524", effect = Reads,
+fn frame_internal_border_width(cx; optional frame: Value) {
+    cx.windows().frame_absent_width(frame)
 }}
