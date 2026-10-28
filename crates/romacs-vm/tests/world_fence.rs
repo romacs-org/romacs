@@ -233,6 +233,35 @@ fn listed(trace: &Json) -> Vec<(String, u64, String, String, String)> {
 }
 
 #[test]
+fn the_content_check_sees_char_tables_and_text_properties() {
+    let bootstrap = "\
+(defvar custom-delayed-init-variables nil)
+(defvar fence-table (make-char-table 'test))
+(defvar fence-text (copy-sequence \"abc\"))
+(defvar fence-same (make-char-table 'test 'v))
+(defvar fence-buffer (get-buffer-create \" fence\"))
+(unwind-protect
+    (progn (romacs--startup-phase t)
+           (setq seen (list fence-table fence-text fence-same fence-buffer)))
+  (romacs--startup-phase nil))
+";
+    let preload = "\
+(set-char-table-range fence-table '(?a . ?c) 'x)
+(put-text-property 0 1 'face 'bold fence-text)
+(set-char-table-range fence-same '(?a . ?c) 'v)
+";
+    let (mut vm, trace) = run_with("content", bootstrap, preload, true);
+    let trace = trace.unwrap();
+    // A buffer's state cannot be digested: it refuses as startup ends.
+    assert_eq!(listed(&trace), [("undigestable".into(), 6, "fence-buffer".into(), String::new(), "buffer".into())], "{trace}");
+    host::enter_build(PINNED);
+    vm.world_check_inputs();
+    let trace = host::leave_build().unwrap();
+    let changed: Vec<_> = listed(&trace).into_iter().map(|(kind, _, symbol, access, _)| (kind, symbol, access)).collect();
+    assert_eq!(changed, [("fence".into(), "fence-table".into(), "changed".into()), ("fence".into(), "fence-text".into(), "changed".into())], "{trace}");
+}
+
+#[test]
 fn a_binding_across_startups_end_stays_fenced_in_backtraces() {
     let bootstrap = "\
 (defvar custom-delayed-init-variables '(fence-a transient-mark-mode))

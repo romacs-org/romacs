@@ -74,8 +74,9 @@ pub(crate) struct Fence {
     /// The inputs in first-read order, each once.
     inputs: Vec<Input>,
     seen: rustc_hash::FxHashSet<Input>,
-    /// Each input's content digest as startup ended.
-    digests: Vec<String>,
+    /// Each input's content digest as startup ended, or the kind of object
+    /// that made it undigestable.
+    digests: Vec<Result<String, &'static str>>,
 }
 
 /// A fenced variable: its root, the redirect the fence keeps, and the
@@ -161,11 +162,20 @@ impl Vm {
                 self.fence_variable(slot, Root::Input);
             }
         }
-        let digests: Vec<String> = inputs.iter().map(|&input| self.input_digest(input)).collect();
+        let digests: Vec<_> = inputs.iter().map(|&input| self.input_digest(input)).collect();
         for (&input, digest) in inputs.iter().zip(&digests) {
             let mut item = self.input_json(input);
-            item["digest"] = json!(digest);
-            host::record("input", item);
+            match digest {
+                Ok(digest) => {
+                    item["digest"] = json!(digest);
+                    host::record("input", item);
+                }
+                // Its later changes could not be found.
+                Err(kind) => {
+                    item["object"] = json!(kind);
+                    host::refuse("undigestable", item);
+                }
+            }
         }
         self.fence_mut().digests = digests;
     }
@@ -285,6 +295,7 @@ impl Vm {
             self.fence_access(slot, access, Value::NIL);
         }
     }
+
     /// The fenced variable at SLOT lost its innermost binding, the dynamic
     /// entry past the stack's end.
     pub(crate) fn fence_unbound(&mut self, slot: usize) {
@@ -302,7 +313,6 @@ impl Vm {
             self.fence_access(slot, Access::SavedRead, owner);
         }
     }
-
 
     fn observe(&mut self, input: Input) {
         let fence = self.fence_mut();
@@ -358,9 +368,10 @@ impl Vm {
     /// place (`setcar`, `puthash`) has no write site; this finds it.
     pub fn world_check_inputs(&mut self) {
         let Some(fence) = self.fence.as_ref() else { return };
-        let checks: Vec<(Input, String)> = fence.inputs.iter().copied().zip(fence.digests.iter().cloned()).collect();
+        let checks: Vec<(Input, String)> = fence.inputs.iter().copied().zip(fence.digests.iter().cloned())
+            .filter_map(|(input, digest)| Some((input, digest.ok()?))).collect();
         for (input, digest) in checks {
-            if self.input_digest(input) != digest {
+            if self.input_digest(input).as_ref() != Ok(&digest) {
                 let mut item = self.input_json(input);
                 item["access"] = json!("changed");
                 item["root"] = json!(Root::Input as u8);
@@ -379,7 +390,7 @@ impl Vm {
         }
     }
 
-    fn input_digest(&mut self, input: Input) -> String {
+    fn input_digest(&mut self, input: Input) -> Result<String, &'static str> {
         let value = match input {
             Input::Variable(slot) => self.unfenced(slot, |vm| vm.default_value(slot)).unwrap_or(Value::UNBOUND),
             Input::Property(slot, key) => self.plist_lookup(self.slots[slot].plist, Value::reference(key + 1, 7)),
@@ -390,10 +401,12 @@ impl Vm {
     }
 
     /// SHA-256 of VALUE's content: the structure and bytes of the conses,
-    /// strings, vectors, records, hash tables, closures and cells it reaches,
-    /// each once, and the kind of every other object. Nothing depends on an
-    /// arena index, which a collection moves.
-    fn content_digest(&self, value: Value) -> String {
+    /// strings with their text properties, vectors, records, bool vectors,
+    /// char tables, syntax tables, hash tables, closures and cells it
+    /// reaches, each once. Nothing depends on an arena index, which a
+    /// collection moves. An object whose observable state this cannot read,
+    /// such as a buffer, a marker or a process, is an error naming its kind.
+    fn content_digest(&self, value: Value) -> Result<String, &'static str> {
         use sha2::Digest;
         let mut hasher = sha2::Sha256::new();
         let mut seen = rustc_hash::FxHashSet::default();
@@ -423,7 +436,12 @@ impl Vm {
                         hasher.update(v.0.to_le_bytes());
                     }
                 }
-                (_, Some(Object::String(_) | Object::RawString(_))) => hasher.update(self.str_view(v).expect("a string").bytes),
+                (_, Some(Object::String(text) | Object::RawString(text))) => {
+                    hasher.update([u8::from(text.is_multibyte())]);
+                    hasher.update(text.bytes().len().to_le_bytes());
+                    hasher.update(text.bytes());
+                    stack.extend(property_runs(&text.properties, text.bytes().len(), &mut hasher));
+                }
                 (_, Some(Object::Bytes(bytes))) => hasher.update(bytes),
                 (_, Some(Object::Float(f))) => hasher.update(f.to_bits().to_le_bytes()),
                 (_, Some(Object::Bignum(n))) => hasher.update(n.to_signed_bytes_le()),
@@ -431,16 +449,24 @@ impl Vm {
                     hasher.update(items.len().to_le_bytes());
                     stack.extend(items.iter().rev());
                 }
+                (_, Some(Object::BoolVector(bits))) => hasher.update(bits.printed()),
+                (_, Some(Object::CharTable(table))) => stack.extend(char_table_content(table, &mut hasher)?),
+                (_, Some(Object::SyntaxTable(entries))) => {
+                    for (&at, &class) in entries {
+                        hasher.update(at.to_le_bytes());
+                        hasher.update([class as u8]);
+                    }
+                }
                 (_, Some(Object::HashTable(table))) => {
                     for (_, key, value) in table.entries() {
                         stack.extend([value, key]);
                     }
                 }
-                (_, Some(object)) => hasher.update(format!("{:?}", std::mem::discriminant(object))),
+                (_, Some(object)) => return Err(object_kind(object)),
                 _ => hasher.update(v.0.to_le_bytes()),
             }
         }
-        hasher.finalize().iter().map(|b| format!("{b:02x}")).collect()
+        Ok(hasher.finalize().iter().map(|b| format!("{b:02x}")).collect())
     }
 
     /// A use of the random state (root 5).
@@ -448,5 +474,70 @@ impl Vm {
         if self.fence.as_ref().is_some_and(|fence| fence.random) && !host::in_startup() {
             host::refuse("fence", json!({"root": Root::Random as u8, "access": "read", "symbol": "random state"}));
         }
+    }
+}
+
+/// TEXT's property runs as Lisp sees them, each run's bounds and keys into
+/// HASHER: the property values, for the caller to digest.
+fn property_runs(properties: &crate::properties::Properties, len: usize, hasher: &mut sha2::Sha256) -> Vec<Value> {
+    use crate::coordinates::ByteOffset;
+    use sha2::Digest;
+    let mut values = Vec::new();
+    let mut at = 0;
+    while at < len && !properties.is_empty() {
+        let end = properties.next_change(ByteOffset(at), ByteOffset(len)).0;
+        hasher.update([at, end].map(usize::to_le_bytes).concat());
+        for (key, value) in properties.properties_at(ByteOffset(at)) {
+            hasher.update(key.as_bytes());
+            hasher.update([0]);
+            values.push(value);
+        }
+        at = end;
+    }
+    values.reverse();
+    values
+}
+
+/// TABLE's mapping, as `char-table-range` reads it: each run of characters
+/// that share a value, and the purpose, default, parent and extras, into
+/// HASHER; the values, for the caller to digest.
+fn char_table_content(table: &crate::char_table::CharTable, hasher: &mut sha2::Sha256) -> Result<Vec<Value>, &'static str> {
+    use sha2::Digest;
+    let mut values = vec![table.purpose, table.default, table.parent];
+    values.extend(&table.extras);
+    let span = |at| table.span(at).map_err(|_| "char-table");
+    let (mut from, (mut value, _, mut to)) = (0, span(0)?);
+    while to + 1 < crate::char_table::CharTable::LEN {
+        let (next, start, end) = span(to + 1)?;
+        if next != value {
+            hasher.update([from, to].map(usize::to_le_bytes).concat());
+            values.push(value);
+            (from, value) = (start, next);
+        }
+        to = end;
+    }
+    hasher.update([from, to].map(usize::to_le_bytes).concat());
+    values.push(value);
+    values.reverse();
+    Ok(values)
+}
+
+/// The kind of an object whose content `content_digest` cannot read.
+fn object_kind(object: &Object) -> &'static str {
+    match object {
+        Object::Window(_) => "window",
+        Object::Frame(_) => "frame",
+        Object::Terminal(_) => "terminal",
+        Object::WindowConfiguration(_) => "window-configuration",
+        Object::Sqlite(_) => "sqlite",
+        Object::Process(_) => "process",
+        Object::SubCharTable(_) => "sub-char-table",
+        Object::MapKeymapCursor(_) => "keymap cursor",
+        Object::Buffer(_) => "buffer",
+        Object::Marker(_) => "marker",
+        Object::Overlay(_) => "overlay",
+        Object::ByteBuffer(_) => "byte buffer",
+        Object::Obarray(_) => "obarray",
+        _ => "object",
     }
 }

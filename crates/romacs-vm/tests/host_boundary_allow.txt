@@ -67,11 +67,11 @@ crates/romacs-vm/src/variable_runtime.rs:330 dynamic:saved reads saved values of
 crates/romacs-vm/src/variable_runtime.rs:355 dynamic:saved specbind: pushes a new binding, saving the value it shadows
 crates/romacs-vm/src/variable_runtime.rs:466 dynamic:saved saved-binding accessor: defvar's boundp; variable_primitive checks a fenced variable first (F2)
 crates/romacs-vm/src/variable_runtime.rs:471 dynamic:saved saved-binding accessor: defvar's set-default; variable_primitive checks a fenced variable first (F2)
-crates/romacs-vm/src/world/mod.rs:98 slot:exec-path fences the environment lists by name; reads no slot
-crates/romacs-vm/src/world/mod.rs:98 slot:initial-environment fences the environment lists by name; reads no slot
-crates/romacs-vm/src/world/mod.rs:98 slot:process-environment fences the environment lists by name; reads no slot
-crates/romacs-vm/src/world/mod.rs:186 dynamic:saved reads the bound variable, not the saved value
-crates/romacs-vm/src/world/mod.rs:272 dynamic:saved reads the bound variable, owner or flag, not the saved value
+crates/romacs-vm/src/world/mod.rs:99 slot:exec-path fences the environment lists by name; reads no slot
+crates/romacs-vm/src/world/mod.rs:99 slot:initial-environment fences the environment lists by name; reads no slot
+crates/romacs-vm/src/world/mod.rs:99 slot:process-environment fences the environment lists by name; reads no slot
+crates/romacs-vm/src/world/mod.rs:196 dynamic:saved reads the bound variable, not the saved value
+crates/romacs-vm/src/world/mod.rs:282 dynamic:saved reads the bound variable, owner or flag, not the saved value
 crates/romacs-vm/src/world/sandbox.rs:41 libc::process the Landlock syscalls of a world build: confine this thread; query and effect nothing
 crates/romacs-vm/src/world/sandbox.rs:47 libc::process the Landlock syscalls of a world build: confine this thread; query and effect nothing
 crates/romacs-vm/src/world/sandbox.rs:62 libc::process the Landlock syscalls of a world build: confine this thread; query and effect nothing
