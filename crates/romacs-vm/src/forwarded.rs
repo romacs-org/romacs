@@ -84,6 +84,8 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     // DEFVAR_KBOARD; VM2's single keyboard is the initial terminal's (VM2-WIN5).
     CVariable { name: "window-system", gnu: "dispnew.c:7522", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "initial-window-system", gnu: "dispnew.c:7507", kind: Kind::Lisp(Init::Nil) },
+    // command-line sets it once initialization is done; package.el reads it.
+    CVariable { name: "after-init-time", gnu: "emacs.c:3591", kind: Kind::Lisp(Init::Nil) },
     // C variables that GNU's preloaded Lisp and the Gnosis/emacs-hermes load
     // closure reference, with their DEFVAR site and C initial value. Each is
     // listed only when that value equals pinned GNU's batch value, so no
@@ -459,6 +461,8 @@ pub(crate) static C_VARIABLES: &[CVariable] = &[
     CVariable { name: "inhibit-modification-hooks", gnu: "insdel.c:2575", kind: Kind::Bool(false) },
     CVariable { name: "overriding-plist-environment", gnu: "fns.c:6809", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "selective-display", gnu: "buffer.c:5475", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
+    // No Lisp sets its default; gnosis's dashboard and source choices set it.
+    CVariable { name: "header-line-format", gnu: "buffer.c:5158", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
     CVariable { name: "inhibit-field-text-motion", gnu: "editfns.c:4830", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "buffer-invisibility-spec", gnu: "buffer.c:5849", kind: Kind::PerBuffer { default: Init::True, predicate: None } },
     CVariable { name: "overlay-arrow-variable-list", gnu: "xdisp.c:38716", kind: Kind::Lisp(Init::List(&[Init::Symbol("overlay-arrow-position")])) },

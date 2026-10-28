@@ -511,6 +511,7 @@ fn cus_start_built_ins_start_as_gnus_c_values() {
     compare(&[
         "(list gc-cons-threshold report-emacs-bug-address max-mini-window-height alter-fullscreen-frames auto-save-timeout polling-period (default-value 'parse-sexp-ignore-comments) maximum-scroll-margin hourglass-delay (stringp shell-file-name))",
         "(list (default-value 'abbrev-mode) (default-value 'ctl-arrow) (default-value 'bidi-paragraph-direction) (default-value 'word-wrap) (default-value 'selective-display-ellipses) (default-value 'indicate-empty-lines) (default-value 'indicate-buffer-boundaries) (default-value 'scroll-up-aggressively) (default-value 'scroll-down-aggressively) (default-value 'cursor-type) (default-value 'line-spacing) (default-value 'cursor-in-non-selected-windows) (local-variable-if-set-p 'cursor-type) (with-temp-buffer (setq word-wrap t) (list word-wrap (local-variable-p 'word-wrap))) word-wrap)",
+        "(list header-line-format (default-value 'header-line-format) (local-variable-if-set-p 'header-line-format) (local-variable-p 'header-line-format) (with-temp-buffer (setq header-line-format \"x\") (list header-line-format (local-variable-p 'header-line-format))) header-line-format (special-variable-p 'header-line-format))",
     ]);
 }
 
