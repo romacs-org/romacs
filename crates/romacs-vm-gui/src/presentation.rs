@@ -32,19 +32,37 @@ impl Presentation {
         self.ready().then(submit)
     }
 
+    /// Keys one at a time (`Commands::dispatch'), for tests.
     pub fn command(
         &mut self,
         vm: &mut romacs_vm::Vm,
         commands: &mut crate::command::Commands,
         event: romacs_vm::CommandEvent,
     ) -> Result<Option<romacs_vm::CommandOutcome>, String> {
+        let in_prefix = commands.in_prefix();
+        let first = event.clone();
+        self.around(vm, in_prefix, Some(&first), |vm| commands.dispatch(vm, event))
+    }
+
+    /// One command whose keys the Lisp command loop reads (`command::run'),
+    /// FIRST being the host key that starts it, if one does.
+    pub fn host_command(&mut self, vm: &mut romacs_vm::Vm, first: Option<&romacs_vm::CommandEvent>) -> Result<Option<romacs_vm::CommandOutcome>, String> {
+        self.around(vm, false, first, |vm| crate::command::run(vm).map(Some))
+    }
+
+    fn around(
+        &mut self,
+        vm: &mut romacs_vm::Vm,
+        in_prefix: bool,
+        first: Option<&romacs_vm::CommandEvent>,
+        run: impl FnOnce(&mut romacs_vm::Vm) -> Result<Option<romacs_vm::CommandOutcome>, String>,
+    ) -> Result<Option<romacs_vm::CommandOutcome>, String> {
         self.changed();
         vm.eval_source("(set-buffer (window-buffer (selected-window)))")?;
         // A confirmation belongs only to the next answer in its original buffer.
         // Unlike GNU's reprompt, other input cancels before ordinary dispatch;
         // clearing the echo area must never leave invisible discard consent.
-        let answer = matches!(&event, romacs_vm::CommandEvent::Character(121 | 110 | 7))
-            && !commands.in_prefix();
+        let answer = matches!(first, Some(romacs_vm::CommandEvent::Character(121 | 110 | 7))) && !in_prefix;
         vm.eval_source(&format!(
             "(when (and (boundp 'romacs-gui-pending) romacs-gui-pending
                         (not (and {} (eq (current-buffer) (car (cdr romacs-gui-pending))))))
@@ -53,8 +71,8 @@ impl Presentation {
         ))?;
         // GNU's command loop clears the previous message when a new command
         // starts, not on each key of a prefix sequence.
-        if !commands.in_prefix() { crate::echo::clear(vm)?; }
-        let outcome = commands.dispatch(vm, event);
+        if !in_prefix { crate::echo::clear(vm)?; }
+        let outcome = run(vm);
         if let Ok(Some(romacs_vm::CommandOutcome { signal: Some(signal), .. })) = &outcome {
             let message = crate::echo::signal_message(vm, signal)?;
             crate::echo::show(vm, &message)?;

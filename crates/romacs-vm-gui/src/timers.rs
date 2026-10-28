@@ -32,44 +32,6 @@ pub fn idle(vm: &mut Vm) -> Result<Idle, String> {
     Ok(Idle { ran, message, delay })
 }
 
-/// What read_char takes from `unread-command-events' before host input.
-#[derive(Debug, PartialEq)]
-pub enum Unread {
-    /// Nothing is queued.
-    Empty,
-    /// A key or function key, which runs through the command path.
-    Key(romacs_vm::CommandEvent),
-    /// An event the GUI's command path cannot express (a mouse event):
-    /// taken, as read_char takes it, and not run.
-    Other(String),
-}
-
-/// read_char's first source (keyboard.c): the head of
-/// `unread-command-events', a (t . EVENT) or (no-record . EVENT) read as
-/// its EVENT. Lisp that read a key and pushed it back (sit-for's
-/// read-event in a timer, a dwell probe) has it run as the next command.
-pub fn take_unread(vm: &mut Vm) -> Result<Unread, String> {
-    // An integer is a key, a symbol a function key, a one-element list
-    // holds another event.
-    let taken = vm.eval_source(
-        "(and (consp unread-command-events)
-              (let ((event (car unread-command-events)))
-                (setq unread-command-events (cdr unread-command-events))
-                (when (memq (car-safe event) '(t no-record)) (setq event (cdr event)))
-                (if (or (integerp event) (symbolp event)) (list event 'key) (list event))))",
-    )?;
-    if taken.is_nil() { return Ok(Unread::Empty); }
-    let (event, kind) = taken.cons_pair()?;
-    if kind.is_nil() { return Ok(Unread::Other(event.display()?)); }
-    if let Ok(code) = event.as_integer() { return Ok(Unread::Key(romacs_vm::CommandEvent::Character(code))); }
-    let name = event.display()?;
-    Ok(if !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || "-_".contains(c)) {
-        Unread::Key(romacs_vm::CommandEvent::Named(name))
-    } else {
-        Unread::Other(name)
-    })
-}
-
 /// Whether EVENT is input that ends idleness: a key press that is an event
 /// (not a lone modifier). Releases, resizes and focus changes are not, as GNU
 /// resumes idling after such events. By reference: a tracked event's receipt
@@ -95,7 +57,6 @@ pub fn sooner(a: Option<Duration>, b: Option<Duration>) -> Option<Duration> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use romacs_vm::CommandEvent;
 
     /// GNU's timer.el, after GNU's loadup on the evaluator's stack.
     #[test]
@@ -176,28 +137,22 @@ mod tests {
         assert_eq!(printed(&mut vm, "(list (read-event nil nil 1) (< (- (float-time) start) 0.5) unread-command-events)"),
                    "(97 t nil)");
         // sit-for in a timer reads a key typed during it and pushes it back
-        // as (t . KEY) (subr.el); read_char's first source then makes it the
-        // next command, though no other key follows. As simple.el's M-x
-        // suggestion timer does in a session (`interactive' sit-for).
+        // as (t . KEY) (subr.el); the command loop, which reads Lisp's
+        // unread queues first, then runs it as the next command, though no
+        // other key follows. As simple.el's M-x suggestion timer does in a
+        // session (`interactive' sit-for).
         vm.set_host_input(Some(Box::new(Paced([Step::Pause(Duration::from_millis(30)), Step::Key('x')].into()))));
         printed(&mut vm, "(setq timer-list nil timer-idle-list nil unread-command-events nil probe 'unset)
             (run-with-timer 0 nil (lambda () (let ((noninteractive nil)) (setq probe (sit-for 5)))))
-            (set-buffer (get-buffer-create \"unread\")) (erase-buffer)");
+            (set-buffer (get-buffer-create \"unread\")) (erase-buffer) (set-window-buffer nil (current-buffer))");
         vm.timer_stop_idle();
         assert!(idle(&mut vm).unwrap().ran);
         assert_eq!(printed(&mut vm, "(list probe unread-command-events)"), "(nil ((t . 120)))");
-        assert_eq!(take_unread(&mut vm).unwrap(), Unread::Key(CommandEvent::Character(120)));
-        let outcome = crate::command::Commands::default().dispatch(&mut vm, CommandEvent::Character(120)).unwrap().unwrap();
+        assert!(crate::command::unread_pending(&mut vm).unwrap());
+        let outcome = crate::command::run(&mut vm).unwrap();
         assert_eq!(outcome.command.as_deref(), Some("self-insert-command"));
-        assert_eq!(printed(&mut vm, "(buffer-string)"), "\"x\"");
-        assert_eq!(take_unread(&mut vm).unwrap(), Unread::Empty);
-        // The other forms read_char takes: (no-record . EVENT), a function
-        // key, and an event the command path cannot run, taken all the same.
-        printed(&mut vm, "(setq unread-command-events (list '(no-record . return) 'f1 '(mouse-1 nil)))");
-        assert_eq!(take_unread(&mut vm).unwrap(), Unread::Key(CommandEvent::Named("return".into())));
-        assert_eq!(take_unread(&mut vm).unwrap(), Unread::Key(CommandEvent::Named("f1".into())));
-        assert_eq!(take_unread(&mut vm).unwrap(), Unread::Other("(mouse-1 nil)".into()));
-        assert_eq!(take_unread(&mut vm).unwrap(), Unread::Empty);
+        assert_eq!(printed(&mut vm, "(list (buffer-string) unread-command-events)"), "(\"x\" nil)");
+        assert!(!crate::command::unread_pending(&mut vm).unwrap());
     }
 
     enum Step { Pause(Duration), Key(char) }

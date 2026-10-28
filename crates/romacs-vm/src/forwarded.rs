@@ -345,6 +345,7 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "unibyte-display-via-language-environment", gnu: "xdisp.c:39025", kind: Kind::Bool(false) },
     CVariable { name: "unicode-category-table", gnu: "character.c:1159", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "unread-post-input-method-events", gnu: "keyboard.c:13786", kind: Kind::Lisp(Init::Nil) },
+    CVariable { name: "unread-input-method-events", gnu: "keyboard.c:13792", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "use-dialog-box", gnu: "fns.c:6843", kind: Kind::Bool(true) },
     CVariable { name: "use-file-dialog", gnu: "fns.c:6852", kind: Kind::Bool(true) },
     CVariable { name: "use-short-answers", gnu: "fns.c:6860", kind: Kind::Bool(false) },

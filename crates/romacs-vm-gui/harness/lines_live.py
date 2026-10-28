@@ -20,6 +20,10 @@ typed during it, which sit-for reads and pushes back onto
 Then Return in *scratch* runs what RET is bound to there (GNU's
 `newline'), as the function key `return' that `local-function-key-map'
 translates to RET; C-j runs its own binding.  Both insert a newline.
+Last, F8 runs a command that fills read_char's three unread queues: their
+events run next, in GNU's order (post-input-method, command, input-method),
+each between `pre-command-hook' and `post-command-hook', and the
+(no-record . EVENT) one stays out of `recent-keys'.
 
 Every process gets a private HOME/XDG tree and the private compositor's
 WAYLAND_DISPLAY; DISPLAY is never set and no ROMACS_GUI_FONT is passed.
@@ -317,6 +321,12 @@ def check_motion(args, report, check, file=MIXED_FILE, keys=KEYS, name='motion')
 RETURN_INIT = INIT + '''(run-with-timer 1 nil (lambda () (lines-live-record
   (list 'bindings (with-current-buffer (window-buffer) (list (key-binding [13]) (key-binding [10])))
         (lookup-key local-function-key-map [return])))))
+(add-hook 'pre-command-hook (lambda () (lines-live-record (list 'pre this-command))))
+(add-hook 'post-command-hook (lambda () (lines-live-record
+  (list 'post this-command last-command-event (and (memq ?b (append (recent-keys) nil)) t)))))
+(global-set-key [f8] (lambda () (interactive)
+  (setq unread-input-method-events (list ?c) unread-command-events (list '(no-record . ?b))
+        unread-post-input-method-events (list ?a))))
 (run-with-timer 3 nil (lambda ()
   (lines-live-record '(sit-start))
   (lines-live-record (list 'sit-end (sit-for 6)))))
@@ -348,8 +358,21 @@ def check_return(args, report, check):
             subprocess.run(['wtype', *key], env=env, check=True, timeout=20)
             fio.wait(lambda: len(replies()) >= count, 10, f'command {count}', process)
         time.sleep(.5)
-        fio.shot(args.output / 'keys.png', env, report)
         shown = replies()[1:]
+        start = len(records(state))
+        subprocess.run(['wtype', '-k', 'F8'], env=env, check=True, timeout=20)
+        try:
+            fio.wait(lambda: any(r.startswith('(post self-insert-command 99') for r in records(state)[start:]), 5, 'the queued events', process)
+        except AssertionError:
+            pass
+        later = records(state)[start:]
+        posts = [r for r in later if r.startswith('(post self-insert-command')]
+        report['keys_queued_records'] = later
+        # F8's command and the three it queued, each between the hooks.
+        hooked = len(later) == 8 and all(later[i].startswith('(pre') and later[i + 1].startswith('(post') for i in range(0, 8, 2))
+        queued = {'posts': posts, 'hooked': bool(later) and hooked}
+        time.sleep(.5)
+        fio.shot(args.output / 'keys.png', env, report)
         # The selected window's point before the keys and after each.
         points, selected = [], None
         for line in log.read_text(errors='replace').split('\n'):
@@ -359,8 +382,12 @@ def check_return(args, report, check):
                 points.append((record['presentation'], next(p['point_byte'] for p in record['points'] if p['id'] == selected)))
         before = [b for presentation, b in points if presentation < shown[0]['presentation']][-1]
         after = [next(b for presentation, b in points if presentation > r['presentation']) for r in shown]
-    report['keys'] = {'bindings': bindings, 'replies': shown, 'point_bytes': [before, *after]}
+    report['keys'] = {'bindings': bindings, 'replies': shown, 'point_bytes': [before, *after], 'queued': queued}
     check('each inserted one newline at point', [after[0] - before, after[1] - after[0]] == [1, 1], [before, *after])
+    queued = report['keys'].get('queued')
+    check('F8\'s unread events run next, a b c, between the command hooks, b unrecorded', queued == {
+        'posts': ['(post self-insert-command 97 nil)', '(post self-insert-command 98 nil)', '(post self-insert-command 99 nil)'],
+        'hooked': True}, queued)
     check(f'RET is bound to newline and C-j elsewhere in *scratch* ({bindings})', ret == 'newline' and cj not in ('newline', 'nil')
           and bindings.endswith('[13])'), bindings)
     check('Return runs RET\'s binding, C-j its own, neither signalling',

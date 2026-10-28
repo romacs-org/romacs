@@ -555,7 +555,6 @@ fn evaluate(
     } else {
         vm.eval_source(if g1 { include_str!("../g1.el") } else { SCENE })?;
     }
-    let mut commands = command::Commands::default();
     let mut presentation = 1;
     // A live GUI has a keyboard: prompts read it mid-command (prompt.rs).
     let host = std::rc::Rc::new(std::cell::RefCell::new(prompt::Shared::default()));
@@ -583,26 +582,19 @@ fn evaluate(
         let available = sender.input().len();
         let mut batch: std::collections::VecDeque<_> = presentation::take_batch(&mut pending, sender.input().try_iter(), available).collect();
         loop {
-            // read_char takes `unread-command-events' before host input:
-            // a key Lisp read and pushed back (sit-for in a timer) is the
-            // next command's.
-            let unread = if live { timers::take_unread(&mut vm)? } else { timers::Unread::Empty };
-            let (event, unread) = match unread {
-                timers::Unread::Key(key) => (None, Some(key)),
-                timers::Unread::Other(event) => {
-                    eprintln!("{}", json!({"diagnostic":"unread-event-not-run","event":event}));
-                    continue;
-                }
-                timers::Unread::Empty => match batch.pop_front() {
-                    Some(event) => (Some(event), None),
-                    None => break,
-                },
+            // read_char takes Lisp's unread queues before host input: a key
+            // Lisp read and pushed back (sit-for in a timer) starts the next
+            // command, which the Lisp command loop reads.
+            let unread = live && command::unread_pending(&mut vm)?;
+            let event = if unread { None } else {
+                match batch.pop_front() { Some(event) => Some(event), None => break }
             };
             let (received, command_start, gc_before);
-            let translated = if let Some(key) = unread {
+            // A command to run, and the host key starting it if one does.
+            let translated: Option<Option<romacs_vm::CommandEvent>> = if event.is_none() {
                 vm.timer_stop_idle();
                 (received, command_start, gc_before) = (None, Instant::now(), vm.heap_stats().collections);
-                Some(key)
+                Some(None)
             } else {
                 let event = event.expect("host input");
                 if matches!(event, InputEvent::WindowClose { .. }) {
@@ -632,7 +624,7 @@ fn evaluate(
                 }
                 if live && let Some((session, input)) = vm.selected_terminal()? {
                     let mode = if input { terminal_input::Mode::Terminal } else { terminal_input::Mode::Emacs };
-                    match terminal_input::route(&event, mode, commands.in_prefix() || terminal_modal) {
+                    match terminal_input::route(&event, mode, terminal_modal) {
                         terminal_input::Target::Terminal => {
                             let sent = vm.terminal_input_state(session).and_then(|state| {
                                 let bytes = terminal_input::encode(&event, state.application_cursor)?;
@@ -648,19 +640,28 @@ fn evaluate(
                         terminal_input::Target::Editor => {}
                     }
                 }
-                native::translate(event)
+                // The Lisp command loop reads the key itself, from the queue
+                // lent to the host keyboard.
+                let raw = match &event {
+                    &InputEvent::Key { ref key, modifiers, pressed, emacs_frame_id } if live =>
+                        Some(InputEvent::Key { key: key.clone(), modifiers, pressed, emacs_frame_id }),
+                    _ => None,
+                };
+                let key = native::translate(event);
+                if let (Some(_), Some(raw)) = (&key, raw) { batch.push_front(raw); }
+                key.map(Some)
             };
-            if let Some(event) = translated {
+            if let Some(first) = translated {
                 let outcome = if live {
                     let mut lent = Lent { queue: &mut batch, presentation: &mut presentation, live: &mut live_presentation, width: &mut width, height: &mut height };
-                    let (outcome, closed) = lent.run(&host, |live| live.command(&mut vm, &mut commands, event));
+                    let (outcome, closed) = lent.run(&host, |live| live.host_command(&mut vm, first.as_ref()));
                     if closed && live_presentation.window_close(&mut vm)? {
                         return shutdown_editor(&mut vm, sender);
                     }
                     outcome
                 } else {
                     vm.eval_source("(set-buffer (window-buffer (selected-window)))")?;
-                    vm.command_event(event).map(Some)
+                    vm.command_event(first.expect("a host key")).map(Some)
                 };
                 if live && vm.eval_source("romacs-gui-quit-requested")? != romacs_vm::Fixed::NIL {
                     return shutdown_editor(&mut vm, sender);
