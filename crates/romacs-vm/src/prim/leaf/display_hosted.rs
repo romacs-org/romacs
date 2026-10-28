@@ -1,12 +1,13 @@
 //! The display elements of a window a host lays out (VM2-WTPS1). The
 //! host paints a window's buffer characters one glyph each, in the faces
-//! its snapshot gives them, and breaks rows only at newlines. Where the
-//! iterator's elements are exactly those characters, each becomes a
-//! `Shape::Pixel` glyph with the advance and height the host's own layout
-//! gives it, so the motion measures in the host's pixels. Any other
+//! its snapshot gives them, a TAB as a stretch to its tab stop, and breaks
+//! rows only at newlines. Where the iterator's elements are exactly those
+//! characters, each becomes a `Shape::Pixel` glyph with the advance and
+//! height the host's own layout gives it, or a `Shape::PixelTab` from its
+//! face's space, so the motion measures in the host's pixels. Any other
 //! element (invisible or replaced text, overlay and prefix strings,
-//! display-table glyphs, tabs and other escapes) is refused: the host
-//! would not show what GNU shows there.
+//! display-table glyphs and escapes) is refused: the host would not show
+//! what GNU shows there.
 use super::*;
 use super::display_elements::Source;
 use super::display_motion::{Elem, Elements, Method, Shape, Slot, R};
@@ -80,7 +81,7 @@ impl<'l, 'a> Hosted<'l, 'a> {
     /// ELEM is the buffer's character at its position, the one after the
     /// element before INDEX's, as the host paints it.
     fn plain(&mut self, index: usize, e: &Elem) -> R<bool> {
-        let Shape::Glyph { c, .. } = e.shape else { return Ok(false) };
+        let c = match e.shape { Shape::Glyph { c, .. } => c, Shape::Tab => 9, _ => return Ok(false) };
         if e.method != Method::Buffer || !e.text_area || e.from_display || e.strpos.is_some() || e.object != Value::NIL
             || self.source.char_after(e.charpos)? != Some(c) {
             return Ok(false);
@@ -105,9 +106,12 @@ impl Elements for Hosted<'_, '_> {
             return Ok(slot);
         };
         if !self.plain(index, &e)? { return Err(unsupported("of text the host does not lay out as GNU displays it")); }
-        let Shape::Glyph { c, .. } = e.shape else { unreachable!() };
         let (width, height) = self.glyph(e.charpos)?;
-        let shape = Shape::Pixel { c, width, height: height.max(self.default_height) };
+        let height = height.max(self.default_height);
+        let shape = match e.shape {
+            Shape::Glyph { c, .. } => Shape::Pixel { c, width, height },
+            _ => Shape::PixelTab { space: width, height },
+        };
         Ok(Slot { pre: slot.pre, elem: Some(Elem { shape, ..e }) })
     }
     fn prefix(&mut self, index: usize, loaded: bool, wrap: bool) -> R<Option<(usize, bool)>> {

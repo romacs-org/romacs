@@ -123,6 +123,20 @@ pub struct WindowSnapshot {
     pub vscroll_px: u32,
     /// FaceHandle indexes this owned table; entry zero is the default face.
     pub faces: Vec<Face>,
+    /// The buffer's `tab-width', GNU's SANE_TAB_WIDTH (1 to 1000, else 8).
+    pub tab_width: u32,
+}
+
+/// The stretch a TAB at X takes on a window-system frame (GNU xdisp.c
+/// `gui_produce_glyphs`): to the next multiple of TAB_WIDTH spaces of the
+/// tab's face, or to the one after when that is less than a space away. X
+/// counts from the start of the line, in pixels.
+pub fn tab_advance(x: f64, space: f64, tab_width: u32) -> f64 {
+    let tab = f64::from(tab_width) * space;
+    if tab <= 0.0 { return 0.0; }
+    let mut next = ((x + tab) / tab).floor() * tab;
+    if next - x < space { next += tab; }
+    next - x
 }
 
 /// One window's display input for a measurement: what the host would lay
@@ -138,9 +152,27 @@ pub struct MeasureInput {
 
 /// The host's geometry for a `MeasureInput`, in whole pixels: each
 /// character's advance and the row height its face gives it, in text
-/// order (a newline advances 0), and each face's row height.
+/// order (a newline advances 0, a TAB its face's space, from which
+/// `tab_advance` makes its stretch), and each face's row height.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Measured {
     pub glyphs: Vec<(u32, u32)>,
     pub face_heights: Vec<u32>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::tab_advance;
+
+    /// GNU's stops: the next multiple of TAB_WIDTH spaces, or the one
+    /// after when that is less than a space away.
+    #[test]
+    fn tab_advance_reaches_the_next_stop_a_space_or_more_away() {
+        assert_eq!(tab_advance(0.0, 10.0, 8), 80.0);
+        assert_eq!(tab_advance(10.0, 10.0, 8), 70.0);
+        assert_eq!(tab_advance(79.0, 10.0, 8), 81.0);
+        assert_eq!(tab_advance(70.0, 10.0, 8), 10.0);
+        assert_eq!(tab_advance(80.0, 10.0, 8), 80.0);
+        assert_eq!(tab_advance(3.0, 7.0, 1), 11.0);
+    }
 }

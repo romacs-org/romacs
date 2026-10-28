@@ -10,14 +10,14 @@ use romacs_display_protocol::{
     PresentationId, PresentedFramePlacement, Rect,
 };
 use romacs_font::{FontRequest, FontResolver, FontsetPolicy, publish_face_text};
-use romacs_layout_input::{TextSlice, WindowSnapshot, FrameSnapshot, Face, MeasureInput, Measured};
+use romacs_layout_input::{TextSlice, WindowSnapshot, FrameSnapshot, Face, MeasureInput, Measured, tab_advance};
 
 /// Resolve the actual default monospace geometry before window sizing.
 pub fn frame_metrics(face: &Face) -> Result<(u32, u32), String> {
     let snapshot = WindowSnapshot {
         id: 1, width: 1, height: 1, start_byte: 0, point_byte: 0, buffer_version: 0,
         text: TextSlice { utf8: String::new(), face_runs: vec![] }, mode_line: None,
-        mode_line_face: romacs_layout_input::FaceHandle(0), vscroll_px: 0, faces: vec![face.clone()],
+        mode_line_face: romacs_layout_input::FaceHandle(0), vscroll_px: 0, tab_width: 8, faces: vec![face.clone()],
     };
     let frame = layout(&snapshot, 1)?;
     Ok((frame.char_height.ceil() as u32, frame.char_width.ceil() as u32))
@@ -204,23 +204,33 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
             row_height = metrics[0].1;
             continue;
         }
-        if ch.is_control() {
-            return Err("G1a does not support control characters other than newline".into());
-        }
         let index = face_at(&snapshot.text, byte, 0);
         let id = FaceId::new(face_base + index as u32);
-        let (ascent, height, cell) = metrics[index];
+        let (ascent, height, cell, space) = metrics[index];
         row_height = row_height.max(height);
-        let advance = advance(frame, id, ch, cell);
-        if body_height > 0.0 && y < body_height && y + height > 0.0 && x < snapshot.width as f32 {
-            frame.add_char(ch, ox + x, oy + y, advance, height, ascent, false);
-            *frame
-                .glyphs
-                .last_mut()
-                .and_then(|g| g.face_id_mut())
-                .ok_or("missing character face")? = id;
-        }
-        if byte == snapshot.point_byte { point_rect = Some((x, y, advance, row_height, ascent)); }
+        let visible = body_height > 0.0 && y < body_height && y + height > 0.0 && x < snapshot.width as f32;
+        let (advance, cursor) = match shown(ch) {
+            Shown::Tab => {
+                let advance = tab_advance(f64::from(x), f64::from(space), snapshot.tab_width) as f32;
+                if visible { frame.add_stretch(ox + x, oy + y, advance, height, color(snapshot.faces[index].background), id, false); }
+                // GNU's cursor on a stretch is no wider than a column
+                // (`x-stretch-cursor' nil).
+                (advance, advance.min(metrics[0].2))
+            }
+            Shown::Glyphs(glyphs) => {
+                let mut at = x;
+                for glyph in glyphs.chars() {
+                    let advance = advance(frame, id, glyph, cell);
+                    if visible && at < snapshot.width as f32 {
+                        frame.add_char(glyph, ox + at, oy + y, advance, height, ascent, false);
+                        *frame.glyphs.last_mut().and_then(|g| g.face_id_mut()).ok_or("missing character face")? = id;
+                    }
+                    at += advance;
+                }
+                (at - x, advance(frame, id, glyphs.chars().next().unwrap_or(ch), cell))
+            }
+        };
+        if byte == snapshot.point_byte { point_rect = Some((x, y, cursor, row_height, ascent)); }
         x += advance;
     }
     if snapshot.point_byte == text.len() && end_byte == text.len() {
@@ -263,7 +273,7 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
         for (byte, ch) in band.utf8.char_indices() {
             let index = face_at(band, byte, default);
             let id = FaceId::new(face_base + offset + index as u32);
-            let (ascent, height, cell) = metrics[index];
+            let (ascent, height, cell, _) = metrics[index];
             let advance = advance(frame, id, ch, cell);
             if x < snapshot.width as f32 {
                 frame.add_char(ch, ox + x, bounds.y, advance, height, ascent, false);
@@ -279,6 +289,20 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
     Ok(end_byte)
 }
 
+/// How a buffer character other than newline is drawn: a TAB as a
+/// stretch, another control character as GNU's escape (`^X`, or `\NNN`
+/// for one beyond ASCII), anything else as itself.
+enum Shown { Tab, Glyphs(String) }
+
+fn shown(ch: char) -> Shown {
+    match ch {
+        '\t' => Shown::Tab,
+        '\u{0}'..='\u{1f}' | '\u{7f}' => Shown::Glyphs(format!("^{}", char::from((ch as u8) ^ 0x40))),
+        _ if ch.is_control() => Shown::Glyphs(format!("\\{:03o}", ch as u32)),
+        _ => Shown::Glyphs(ch.to_string()),
+    }
+}
+
 /// The face table index painting SLICE's character at BYTE.
 fn face_at(slice: &TextSlice, byte: usize, default: usize) -> usize {
     slice.face_runs.iter().find(|run| run.bytes.contains(&byte)).map_or(default, |run| run.face.0 as usize)
@@ -290,14 +314,21 @@ fn face_at(slice: &TextSlice, byte: usize, default: usize) -> usize {
 fn face_text(faces: usize, slices: &[(&TextSlice, usize)]) -> Vec<String> {
     let mut text = vec![String::new(); faces];
     for (slice, default) in slices {
-        for (byte, ch) in slice.utf8.char_indices() { text[face_at(slice, byte, *default)].push(ch); }
+        for (byte, ch) in slice.utf8.char_indices() {
+            let face = &mut text[face_at(slice, byte, *default)];
+            match shown(ch) {
+                Shown::Tab => face.push(' '),
+                Shown::Glyphs(glyphs) => face.push_str(&glyphs),
+            }
+        }
     }
     text
 }
 
 /// Publish FACES into FRAME from FACE_BASE on and resolve the fonts their
-/// characters need: each face's ascent, row height and nominal advance.
-fn realize_faces(faces: &[Face], face_text: &[String], frame: &mut FrameGlyphBuffer, resolver: &mut FontResolver, face_base: u32) -> Result<Vec<(f32, f32, f32)>, String> {
+/// characters need: each face's ascent, row height, nominal advance and
+/// space width.
+fn realize_faces(faces: &[Face], face_text: &[String], frame: &mut FrameGlyphBuffer, resolver: &mut FontResolver, face_base: u32) -> Result<Vec<(f32, f32, f32, f32)>, String> {
     let policy = FontsetPolicy::new();
     let mut metrics = Vec::new();
     for (index, face) in faces.iter().enumerate() {
@@ -337,6 +368,7 @@ fn realize_faces(faces: &[Face], face_text: &[String], frame: &mut FrameGlyphBuf
         let ascent = font.ascent_px;
         let height = (font.ascent_px + font.descent_px).ceil();
         let cell = font.glyph_advance.cell_advance_px().unwrap_or(font.space_advance_px);
+        let space = font.space_advance_px;
         let per_glyph = font.glyph_advance.cell_advance_px().is_none();
         if !cell.is_finite() || cell <= 0.0 { return Err("font has no positive nominal advance".into()); }
         if per_glyph {
@@ -352,7 +384,7 @@ fn realize_faces(faces: &[Face], face_text: &[String], frame: &mut FrameGlyphBuf
                 frame.char_fonts.entry(id).or_default().insert(ch, resolved.glyph);
             }
         }
-        metrics.push((ascent, height, cell));
+        metrics.push((ascent, height, cell, space));
     }
     Ok(metrics)
 }
@@ -365,8 +397,9 @@ fn advance(frame: &FrameGlyphBuffer, id: FaceId, ch: char, cell: f32) -> f32 {
 
 /// Lay INPUT out as `append_window` paints its text, without presenting
 /// it: the advance and face row height of each character, from the same
-/// face realization and advances. Painting truncates and draws newline,
-/// so a control character other than newline is refused here as there.
+/// face realization and advances. A TAB answers its face's space, from
+/// which the caller makes its stretch (`tab_advance`); another control
+/// character, its escape's glyphs.
 fn measure_inner(input: &MeasureInput, resolver: &mut FontResolver) -> Result<Measured, String> {
     resolver.set_selection_state(input.font_selection);
     resolver.set_alternative_state(input.font_alternatives.clone());
@@ -381,11 +414,13 @@ fn measure_inner(input: &MeasureInput, resolver: &mut FontResolver) -> Result<Me
     let mut glyphs = Vec::with_capacity(input.text.utf8.len());
     for (byte, ch) in input.text.utf8.char_indices() {
         if ch == '\n' { glyphs.push((0, face_heights[0])); continue; }
-        if ch.is_control() {
-            return Err("G1a does not support control characters other than newline".into());
-        }
         let index = face_at(&input.text, byte, 0);
-        glyphs.push((pixels(advance(&frame, FaceId::new(index as u32), ch, metrics[index].2))?, face_heights[index]));
+        let (_, _, cell, space) = metrics[index];
+        let width = match shown(ch) {
+            Shown::Tab => space,
+            Shown::Glyphs(shown) => shown.chars().map(|glyph| advance(&frame, FaceId::new(index as u32), glyph, cell)).sum(),
+        };
+        glyphs.push((pixels(width)?, face_heights[index]));
     }
     Ok(Measured { glyphs, face_heights })
 }

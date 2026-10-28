@@ -190,6 +190,7 @@ impl Leaf<'_> {
         let glyph = if it.loaded { hosted.slot(it.index)?.elem } else { None };
         let (width, height) = match glyph.map(|e| e.shape) {
             Some(motion::Shape::Pixel { c, .. }) if c != 0x0a => hosted.glyph(pos)?,
+            Some(motion::Shape::PixelTab { space, .. }) => (motion::pixel_tab(&cx, &it, space), hosted.glyph(pos)?.1),
             _ => hosted.default_advance(' ')?,
         };
         Ok(Posn { pos, col: it.hpos, row: it.vpos, dx: x - it.current_x, dy: y - it.current_y, width, height })

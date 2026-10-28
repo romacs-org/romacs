@@ -28,6 +28,10 @@ pub(super) enum Shape {
     /// row at least HEIGHT pixels tall; a newline is zero wide.
     Pixel { c: u32, width: i64, height: i64 },
     Tab,
+    /// A TAB the host lays out as a stretch to the next tab stop in its
+    /// pixels, SPACE being its face's space width, in a row at least
+    /// HEIGHT pixels tall (romacs_layout_input::tab_advance).
+    PixelTab { space: i64, height: i64 },
     Stretch { width: i64, zero_ok: bool },
     /// `:align-to', TARGET columns from the text area's left edge.
     Align { target: i64 },
@@ -184,6 +188,7 @@ fn produce(cx: &Ctx, it: &mut It, e: &Elem) {
         Shape::Pixel { c, width, height: h } => { height = h; if c == 10 { (0, 0) } else { (width, 1) } }
         Shape::Glyph { width, .. } | Shape::Glyphless { width } => (width, width),
         Shape::Tab => { let spaces = tab_spaces(cx, it); (spaces, spaces) }
+        Shape::PixelTab { space, height: h } => { height = h; (pixel_tab(cx, it, space), 1) }
         Shape::TabStretch { factor } => stretch(cx, it, e, (factor * tab_spaces(cx, it) as f64) as i64, false),
         Shape::Stretch { width, zero_ok } => stretch(cx, it, e, width, zero_ok),
         Shape::Align { target } => {
@@ -203,10 +208,22 @@ fn produce(cx: &Ctx, it: &mut It, e: &Elem) {
 
 /// The spaces a TAB at the iterator's x takes to the next tab stop.
 fn tab_spaces(cx: &Ctx, it: &It) -> i64 {
-    let continued = if it.prefix.is_some() || it.continuation_lines_width == 0 { 0 }
-        else { it.continuation_lines_width - it.wrap_prefix_width };
-    let x = it.current_x + continued;
+    let x = it.current_x + continued_width(it);
     (x + cx.tab_width) / cx.tab_width * cx.tab_width - x
+}
+
+/// The pixels a host's TAB at the iterator's x stretches, SPACE being its
+/// face's space width.
+pub(super) fn pixel_tab(cx: &Ctx, it: &It, space: i64) -> i64 {
+    let x = it.current_x + continued_width(it);
+    romacs_layout_input::tab_advance(x as f64, space as f64, cx.tab_width as u32) as i64
+}
+
+/// The width of the screen lines before this one that a TAB's stop counts
+/// from, less a wrap prefix's.
+fn continued_width(it: &It) -> i64 {
+    if it.prefix.is_some() || it.continuation_lines_width == 0 { 0 }
+    else { it.continuation_lines_width - it.wrap_prefix_width }
 }
 
 fn stretch(cx: &Ctx, it: &It, e: &Elem, width: i64, zero_ok: bool) -> (i64, i64) {
@@ -475,7 +492,7 @@ pub(super) fn move_to<E: Elements>(src: &mut E, cx: &Ctx, it: &mut It, to: i64, 
             }
             Move::LineContinued => {
                 max_x = cx.last_visible_x;
-                if element(src, it)?.is_some_and(|e| e.shape == Shape::Tab) {
+                if element(src, it)?.is_some_and(|e| matches!(e.shape, Shape::Tab | Shape::PixelTab { .. })) {
                     it.continuation_lines_width += cx.last_visible_x;
                     if it.current_x != cx.last_visible_x && op.vpos && !op.x && !op.pos {
                         line_start_x = it.current_x + it.pixel_width - cx.last_visible_x;

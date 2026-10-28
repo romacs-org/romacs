@@ -10,7 +10,7 @@ fn scene() -> WindowSnapshot {
         buffer_version: 1,
         mode_line: None,
         mode_line_face: FaceHandle(0),
-        vscroll_px: 0,
+        vscroll_px: 0, tab_width: 8,
         text: TextSlice {
             utf8: "Ωμέγα Hello\nΔ".into(),
             face_runs: vec![FaceRun {
@@ -72,4 +72,21 @@ fn malformed_snapshot_is_rejected() {
     let mut s = scene();
     s.text.face_runs[0].bytes = 1..4;
     assert!(romacs_layout2::layout(&s, 1).is_err());
+}
+/// A TAB is a stretch to the next tab stop, a control character GNU's
+/// escape: `^L` and, beyond ASCII, octal.
+#[test]
+fn tabs_stretch_to_tab_stops_and_controls_show_escapes() {
+    let mut s = scene();
+    s.tab_width = 4;
+    s.text = TextSlice { utf8: "a\tb\u{c}\u{85}\n\tc".into(), face_runs: vec![] };
+    let frame = romacs_layout2::layout(&s, 1).unwrap();
+    let shown: Vec<_> = frame.glyphs.iter().filter_map(|g| match g {
+        FrameGlyph::Char { char, x, y, .. } => Some((*char, *x, *y)),
+        FrameGlyph::Stretch { x, y, width, .. } => Some(('\t', *x, *y + *width * 1000.0)),
+        _ => None,
+    }).collect();
+    // Liberation Mono at 20px: 12px columns, 23px rows; stops every 48px.
+    assert_eq!(shown, [('a', 0.0, 0.0), ('\t', 12.0, 36000.0), ('b', 48.0, 0.0), ('^', 60.0, 0.0), ('L', 72.0, 0.0),
+        ('\\', 84.0, 0.0), ('2', 96.0, 0.0), ('0', 108.0, 0.0), ('5', 120.0, 0.0), ('\t', 0.0, 23.0 + 48000.0), ('c', 48.0, 23.0)]);
 }

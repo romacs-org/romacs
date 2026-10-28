@@ -405,6 +405,15 @@ impl Vm {
         self.slots[slot].value = Value::UNBOUND;
         outcome
     }
+    /// BUFFER's `tab-width' as GNU's SANE_TAB_WIDTH: 1 to 1000, else 8.
+    fn buffer_tab_width(&mut self, buffer: Value) -> Result<u32> {
+        let saved = self.slots[self.buffer_slot].value;
+        self.slots[self.buffer_slot].value = buffer;
+        let slot = self.slot("tab-width");
+        let width = self.variable_value(slot);
+        self.slots[self.buffer_slot].value = saved;
+        Ok(width?.integer_value().filter(|w| (1..=1000).contains(w)).unwrap_or(8) as u32)
+    }
     fn snapshot_region(&mut self, window: Value, buffer: Value, point: i64) -> Result<Option<std::ops::Range<usize>>> {
         if window != self.selected_window_value()? { return Ok(None); }
         let saved = self.slots[self.buffer_slot].value;
@@ -472,6 +481,8 @@ impl Vm {
         let mut terminal_faces = std::collections::HashMap::new();
         let mut region_faces = std::collections::HashMap::new();
         let region_background = names.iter().position(|name| name == "region").map(|i| faces[i].background);
+        // A control character other than TAB and newline shows as an escape.
+        let escape = names.iter().position(|name| name == "escape-glyph").map(|i| FaceHandle(i as u32));
         let mut face_runs: Vec<FaceRun> = vec![];
         for (at, ch) in utf8.char_indices() {
             let value = b
@@ -479,6 +490,7 @@ impl Vm {
                 .get_property(ByteOffset(at), "face")
                 .unwrap_or(Value::NIL);
             let mut face = self.painted_face(&names, value)?.0;
+            if ch.is_control() && ch != '\n' && ch != '\t' && let Some(escape) = escape { face = escape; }
             while styles.get(style_index).is_some_and(|run| run.bytes.end <= at) { style_index += 1; }
             if let Some(run) = styles.get(style_index).filter(|run| run.bytes.contains(&at)) {
                 face = *terminal_faces.entry(run.style).or_insert_with(|| {
@@ -545,6 +557,7 @@ impl Vm {
             ),
             vscroll_px: self.window(window)?.vscroll_px,
             faces,
+            tab_width: self.buffer_tab_width(buffer)?,
         };
         // The owned last publication also covers mutation paths with specialised
         // fast dispatch (point moves, regexp, yank), without retaining GC handles.
@@ -892,9 +905,10 @@ impl Vm {
             let byte = ByteOffset(bytes.start + at);
             let value = b.properties.get_property(byte, "face").unwrap_or(Value::NIL);
             let (face, whole) = self.painted_face(&names, value)?;
-            // The host paints no control character but newline; a space
-            // stands in for one, inexact, and the iterator refuses it anyway.
-            let control = ch.is_control() && ch != '\n';
+            // The host paints a control character other than newline and
+            // TAB as an escape; a space stands in for one, inexact, and the
+            // iterator refuses it anyway.
+            let control = ch.is_control() && ch != '\n' && ch != '\t';
             exact.push(!control && whole && b.properties.get_property(byte, "font-lock-face").is_none_or(|v| v == Value::NIL)
                 && !faced.iter().any(|range| range.contains(&byte)));
             let start = text.len();

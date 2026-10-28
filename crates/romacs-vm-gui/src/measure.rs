@@ -66,9 +66,12 @@ mod tests {
             let color = romacs_display_protocol::Color::from_pixel(0xffffff);
             let (frame, ends) = self.engine.borrow_mut().layout_frame(&snapshot, 1, Some((id, color))).unwrap();
             self.vm.display_apply_layout(&ends).unwrap();
+            // A TAB's stretch stands for it as '\t'.
             let glyphs = frame.glyphs.iter().filter_map(|g| match g {
                 FrameGlyph::Char { window_id, char, x, y, width, height, row_role, .. } if window_id.get() == id as i64 =>
                     Some((*char, *x, *y, *width, *height, *row_role)),
+                FrameGlyph::Stretch { window_id, x, y, width, height, row_role, .. } if window_id.get() == id as i64 =>
+                    Some(('\t', *x, *y, *width, *height, *row_role)),
                 _ => None,
             }).collect();
             let cursor = frame.window_cursors.iter().find(|c| c.window_id.get() == id as i64).map(|c| (c.x, c.y, c.width, c.height));
@@ -135,7 +138,12 @@ mod tests {
             r#"(insert "a" (propertize "BIG" 'face 'hosted-big) "b\nplain\n" (propertize "tiny" 'face 'hosted-small) "\nx")"#,
             r#"(insert (propertize "Proportional iiii WWWW" 'face 'hosted-sans) "\nmono iiii WWWW")"#,
             r#"(insert (propertize "x" 'face '(hosted-big)) "\n" (propertize "日本" 'face 'hosted-big))"#,
-        ] { agree(&mut h, insert); }
+            // TABs stop at multiples of `tab-width' spaces of their face,
+            // counted from the line start in pixels.
+            r#"(insert "\ta\tbc\n12345678\tz\n1234567\tq\n\t\t")"#,
+            r#"(setq tab-width 3) (insert "ab\tc\t\td\nλ\t日本\tx")"#,
+            r#"(insert (propertize "iii\tW\tx" 'face 'hosted-sans) "\n" (propertize "a\tb" 'face 'hosted-big) "\tc")"#,
+        ] { agree(&mut h, &format!("(kill-local-variable 'tab-width) {insert}")); }
         // Not a cell grid: proportional advances differ per glyph, and a
         // taller face makes its row taller than the frame's line.
         h.eval(r#"(progn (erase-buffer) (insert (propertize "iW" 'face 'hosted-sans) "\n" (propertize "B" 'face 'hosted-big)))"#);
@@ -157,7 +165,7 @@ mod tests {
         for (refused, twin, what) in [
             (format!("(insert {long})"), "(insert (make-string (- (window-body-width) 2) ?x))".to_owned(), "of a continued or truncated line"),
             (format!("(setq truncate-lines t) (insert {long})"), "(setq truncate-lines t) (insert (make-string (- (window-body-width) 2) ?x))".to_owned(), "of a continued or truncated line"),
-            ("(insert \"a\\tb\")".into(), "(insert \"a b\")".into(), "of text the host does not lay out as GNU displays it"),
+            ("(insert \"a\\fb\")".into(), "(insert \"a b\")".into(), "of text the host does not lay out as GNU displays it"),
             ("(insert \"a\" (propertize \"b\" 'display \"D\") \"c\")".into(), "(insert \"abc\")".into(), "of text the host does not lay out as GNU displays it"),
             ("(insert \"a\" (propertize \"b\" 'invisible t) \"c\")".into(), "(insert \"abc\")".into(), "of text the host does not lay out as GNU displays it"),
             ("(insert \"abc\") (overlay-put (make-overlay 2 3) 'before-string \"S\")".into(), "(insert \"abc\") (make-overlay 2 3)".into(), "of text the host does not lay out as GNU displays it"),
@@ -173,7 +181,7 @@ mod tests {
             ("(insert \"a\\u0085b\")".into(), "(insert \"a b\")".into(), "of text the host does not lay out as GNU displays it"),
         ] {
             for (form, refuse) in [(refused.as_str(), true), (twin.as_str(), false)] {
-                // Hosted since setup's paint; the painter itself refuses a tab.
+                // Hosted since setup's paint.
                 h.eval(&format!("(progn (erase-buffer) (delete-all-overlays) (kill-all-local-variables) {form} (goto-char 1) (set-window-start nil 1))"));
                 for call in ["(window-text-pixel-size)", "(posn-at-point 2)", "(pos-visible-in-window-p 2)"] {
                     let answer = h.eval(&format!("(condition-case e {call} (error (car (cdr e))))"));
