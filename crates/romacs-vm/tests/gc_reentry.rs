@@ -112,3 +112,19 @@ fn a_prompt_entered_through_eval_collects_across_moving_collections() {
         ))));
     });
 }
+
+/// Refreshing a prepared call whose macro guard went stale runs Lisp to
+/// remake its lambda; a heap argument passed in survives that collection.
+#[test]
+fn a_refreshed_prepared_call_keeps_its_arguments_across_collection() {
+    let mut vm = vm(true);
+    vm.eval_source("(defmacro gr-pm (x) (list 'car x))").unwrap();
+    let handle = vm.prepare_source("(lambda (x) (list (gr-pm x) x))").unwrap();
+    let arg = vm.eval_source("(list (copy-sequence \"ppp\") (quote tail))").unwrap().root();
+    // Redefining the macro invalidates the prepared guard.
+    vm.eval_source("(defmacro gr-pm (x) (list 'cdr x))").unwrap();
+    let before = vm.heap_stats().collections;
+    let value = vm.invoke_prepared(handle, &[romacs_vm::Arg::Rooted(&arg)]).unwrap().display().unwrap();
+    assert!(vm.heap_stats().collections > before, "the refresh collected");
+    assert_eq!(value, "((tail) (\"ppp\" tail))");
+}

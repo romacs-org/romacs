@@ -126,8 +126,10 @@ source_cache.rs cached_source_form compile 1 held  # an open compiler builder ho
 source_cache.rs cached_source_form compile_request 1 held  # an open compiler builder holds collection
 source_cache.rs expand_macro autoload_do_load 1 clean  # ITEMS are forms; the macro is looked up again after the load
 source_cache.rs expand_macro call_macro_expander 1 clean  # FUNCTION and the literal arguments are the call's own, rooted by it
-source_cache/prepared.rs invoke_prepared_raw execute_args 1 boundary  # ARGS become the engine's registers before it can collect
-source_cache/prepared.rs invoke_prepared_raw finish_request 1 collector  # the request's result is its root
+source_cache/prepared.rs call_prepared execute_args 1 boundary  # ARGS become the engine's registers before it can collect
+source_cache/prepared.rs call_prepared finish_request 1 collector  # the request's result is its root
+source_cache/prepared.rs invoke_prepared_raw prepared_function 1 rooted  # ARGS are a frame across the refresh, read back for the call
+source_cache/prepared.rs prepare_source prepared_function 1 clean  # no caller Values
 source_cache/prepared.rs prepared_function cached_source_form 1 held  # an open compiler builder holds collection
 source_cache/prepared.rs prepared_function execute_raw 1 clean  # FORM's objects are rooted
 terminal_host.rs set_terminal_host eval_source_raw 1 boundary  # host setup: no caller Values

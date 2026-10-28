@@ -18,7 +18,7 @@ const ENTRIES: &[&str] = &[
     "reentrant_load", "signal_hook", "handler_callback", "load_with_autoload_queue",
     "eval_load_toplevel", "compile", "compile_request", "compile_lazy_request", "cached_source_form",
     "finish_request", "poll_collect", "collect_garbage", "watched_write", "call_suspended",
-    "load_source_named", "variable_set", "notify",
+    "load_source_named", "variable_set", "notify", "prepared_function",
 ];
 
 const CLASSES: &[&str] = &["suspended", "rooted", "clean", "held", "boundary", "collector"];
