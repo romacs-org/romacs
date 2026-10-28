@@ -25,6 +25,7 @@ mod host_input;
 mod terminal_host;
 mod process_jobs;
 mod subprocess;
+pub mod host;
 mod environment;
 mod watchers;
 mod user_db;
