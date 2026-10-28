@@ -39,12 +39,25 @@ fn pinned_dir(out: &Path) -> PathBuf {
     PathBuf::from(dir)
 }
 
+/// The flags whose value names a file or directory.
+const PATH_FLAGS: [&str; 7] = ["--load-path", "--preload", "--harness", "--plan", "--reporter", "--audit", "--world-trace"];
+
+/// ARGS, flag and value pairs as `parse` reads them, with each relative
+/// path value resolved against CWD: the child runs elsewhere.
+fn absolute_args(args: &[OsString], cwd: &Path) -> Vec<OsString> {
+    args.chunks(2).flat_map(|pair| match pair {
+        [flag, value] if PATH_FLAGS.iter().any(|f| flag == f) => vec![flag.clone(), cwd.join(value).into_os_string()],
+        other => other.to_vec(),
+    }).collect()
+}
+
 /// The parent: make the pinned directories and OUT, run the child with the
 /// pinned environment in `p/cwd`, and exit as it does. The child creates no
 /// file: its effects refuse, and OUT exists.
 pub fn trace(out: &Path) -> ! {
-    let dir = pinned_dir(out);
-    let made = (|| {
+    let status = host::current_dir().and_then(|cwd| {
+        let out = cwd.join(out);
+        let dir = pinned_dir(&out);
         host::create_dir_all(dir.join("p"))?;
         for name in ["cwd", "tmp", "bin"] {
             let path = dir.join("p").join(name);
@@ -52,10 +65,8 @@ pub fn trace(out: &Path) -> ! {
                 host::create_dir(&path, 0o500)?;
             }
         }
-        host::write(out, b"")
-    })();
-    let status = made.and_then(|()| {
-        let mut args: Vec<OsString> = std::env::args_os().skip(1).collect();
+        host::write(&out, b"")?;
+        let mut args = absolute_args(&std::env::args_os().skip(1).collect::<Vec<_>>(), &cwd);
         args.extend([OsString::from("--world-trace-child"), dir.clone().into_os_string()]);
         host::command(host::current_exe()?)?
             .args(args).env_clear().envs(pinned_env(&host::env_snapshot(), &dir))
@@ -70,11 +81,11 @@ pub fn trace(out: &Path) -> ! {
     }
 }
 
-/// The child, before the VM is made: confine to READ and OUT, then record.
-pub fn begin(read: Vec<PathBuf>, out: &Path) {
-    let mut roots = read;
-    roots.extend(sandbox::runtime_roots());
-    if let Err(e) = sandbox::confine(&roots, &[out.to_owned()]) {
+/// The child, before the VM is made: confine to the RECIPE's roots, the
+/// pinned table under DIR and the binary's own, writing only OUT; then
+/// record.
+pub fn begin(recipe: Vec<PathBuf>, out: &Path, dir: &Path) {
+    if let Err(e) = sandbox::confine(&sandbox::build_roots(recipe, dir), &[out.to_owned()]) {
         crate::emit(json!({"event": "setup", "ok": false, "phase": "world-confine", "error": e.to_string()}));
         std::process::exit(3);
     }
@@ -110,5 +121,15 @@ mod tests {
             ("TEMP", "/s/out.json.d/p/tmp"), ("PATH", "/s/out.json.d/p/bin"), ("TERM", "dumb"),
         ]));
         assert_eq!(pinned_dir(Path::new("/s/out.json")), Path::new("/s/out.json.d"));
+    }
+
+    #[test]
+    fn relative_paths_resolve_against_the_invoking_directory() {
+        let args = |list: &[&str]| list.iter().map(OsString::from).collect::<Vec<_>>();
+        let invoked = args(&["--plan", "plan.json", "--selector", "--plan", "--preload", "../p.el", "--load-path", "/abs",
+                             "--harness", "h.el", "--world-trace", "out.json", "--harness-kind", "real"]);
+        assert_eq!(absolute_args(&invoked, Path::new("/w")), args(&[
+            "--plan", "/w/plan.json", "--selector", "--plan", "--preload", "/w/../p.el", "--load-path", "/abs",
+            "--harness", "/w/h.el", "--world-trace", "/w/out.json", "--harness-kind", "real"]));
     }
 }

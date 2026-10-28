@@ -51,8 +51,9 @@ struct Args {
     audit: Option<PathBuf>,
     /// `--world-trace OUT`: write the recipe's world-build trace to OUT.
     world_trace: Option<PathBuf>,
-    /// Set in the confined child that `--world-trace` runs.
-    world_child: bool,
+    /// `--world-trace-child DIR`: set in the confined child that
+    /// `--world-trace` runs, with the directory of its pinned table.
+    world_child: Option<PathBuf>,
 }
 
 fn usage() -> ! {
@@ -69,7 +70,7 @@ fn parse() -> Args {
     let mut it = std::env::args().skip(1);
     let (mut load_path, mut preload, mut skip, mut probe) = (vec![], vec![], vec![], vec![]);
     let (mut harness, mut plan, mut reporter, mut audit) = (None, None, None, None);
-    let (mut world_trace, mut world_child) = (None, false);
+    let (mut world_trace, mut world_child) = (None, None);
     let mut kind = HarnessKind::Mini;
     let mut measurement_regime = false;
     let mut ert_bootstrap = false;
@@ -99,7 +100,7 @@ fn parse() -> Args {
             "--skip-test" => skip.push(value),
             "--probe" => probe.push(value),
             "--world-trace" => world_trace = Some(PathBuf::from(value)),
-            "--world-trace-child" => world_child = true,
+            "--world-trace-child" => world_child = Some(PathBuf::from(value)),
             _ => usage(),
         }
     }
@@ -112,7 +113,7 @@ fn parse() -> Args {
         || (kind == HarnessKind::Mini && reporter.is_some())
         || (kind == HarnessKind::Real && audit.is_some())
         || (world_trace.is_some() && kind != HarnessKind::Real)
-        || (world_child && world_trace.is_none())
+        || (world_child.is_some() && world_trace.is_none())
     {
         usage();
     }
@@ -315,8 +316,8 @@ fn run_real(vm: &mut Vm, args: &Args, file: &str) -> ! {
 
 fn main() {
     let args = parse();
-    let world_out = args.world_trace.clone().filter(|_| args.world_child);
-    if let Some(out) = &args.world_trace && !args.world_child {
+    let world_out = args.world_trace.clone().zip(args.world_child.clone());
+    if let Some(out) = &args.world_trace && args.world_child.is_none() {
         world::trace(out);
     }
     if args.kind == HarnessKind::Real {
@@ -335,9 +336,9 @@ fn main() {
     let file = plan["file"].as_str().unwrap_or_else(|| usage()).to_owned();
     let forms = plan["forms"].as_array().cloned().unwrap_or_default();
 
-    if let Some(out) = &world_out {
+    if let Some((out, dir)) = &world_out {
         let recipe = args.load_path.iter().chain(&args.preload).chain([&args.harness, &args.plan]).chain(&args.reporter);
-        world::begin(recipe.cloned().collect(), out);
+        world::begin(recipe.cloned().collect(), out, dir);
     }
     let mut vm = Vm::new();
     vm.world_begin();
@@ -400,7 +401,7 @@ fn main() {
             }
         }
     }
-    if let Some(out) = &world_out {
+    if let Some((out, _)) = &world_out {
         world::finish(&mut vm, out);
     }
     if let Some(audit) = &args.audit {

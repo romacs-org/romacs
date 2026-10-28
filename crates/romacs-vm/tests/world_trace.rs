@@ -244,12 +244,18 @@ fn confinement_fails_and_lists_a_read_outside_the_roots() {
     let outside = write(&dir.join("outside/data.txt"), "x");
     let file = write(&dir.join("roots/read.el"), &format!(
         "(setq r (condition-case nil (with-temp-buffer (insert-file-contents {out}) 'read) (file-error 'failed)))\n", out = lisp(&outside)));
-    let mut roots = romacs_vm::world::sandbox::runtime_roots();
-    roots.push(dir.join("roots"));
+    // The pinned table's directories, empty and read-only, as the runner
+    // makes them: case sensitivity under cwd lists their parent.
+    let store = dir.join("out.json.d");
+    for name in ["cwd", "tmp", "bin"] {
+        std::fs::create_dir_all(store.join("p").join(name)).unwrap();
+    }
+    let probe = write(&dir.join("roots/probe.el"), &format!("(setq c (file-name-case-insensitive-p {}))\n", lisp(&store.join("p/cwd/x"))));
+    let roots = romacs_vm::world::sandbox::build_roots(vec![dir.join("roots")], &store);
     romacs_vm::world::sandbox::confine(&roots, &[]).expect("Landlock");
     assert_eq!(std::fs::read(&outside).map_err(|e| e.raw_os_error()), Err(Some(libc::EACCES)));
-    let (mut vm, trace) = build(&[file]);
-    assert_eq!(eval(&mut vm, "r"), "failed");
+    let (mut vm, trace) = build(&[file, probe]);
+    assert_eq!(eval(&mut vm, "(list r c)"), "(failed nil)");
     let confined: Vec<_> = items(&trace, "refusals", "confined").iter().map(|r| r["path"].as_str().unwrap().to_owned()).collect();
     assert_eq!(confined, [outside.to_string_lossy()], "{trace}");
 }
