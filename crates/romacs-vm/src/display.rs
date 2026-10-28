@@ -460,19 +460,7 @@ impl Vm {
         let start_byte = b
             .byte_of_char(crate::coordinates::CharOffset((start - 1) as usize))?
             .0;
-        let names: Vec<String> = std::iter::once("default")
-            .chain(
-                self.display_state
-                    .theme
-                    .face_names()
-                    .filter(|s| *s != "default"),
-            )
-            .map(str::to_owned)
-            .collect();
-        let mut faces = names
-            .iter()
-            .map(|n| self.snapshot_face(n))
-            .collect::<Result<Vec<_>>>()?;
+        let (names, mut faces) = self.display_faces()?;
         let terminal = self.terminal_bindings.iter().find(|binding| binding.buffer == buffer);
         if let Some(binding) = terminal {
             if let Some(color) = binding.default_colors[0] { faces[0].foreground = color; }
@@ -490,17 +478,7 @@ impl Vm {
                 .properties
                 .get_property(ByteOffset(at), "face")
                 .unwrap_or(Value::NIL);
-            let graph = Graph(self);
-            let resolved = if value.tag() == 3 {
-                self.cons_pair(value)?.0
-            } else {
-                value
-            };
-            let name = match graph.view(resolved.0) {
-                NodeView::Symbol(s) => s,
-                _ => "default",
-            };
-            let mut face = FaceHandle(names.iter().position(|n| n == name).unwrap_or(0) as u32);
+            let mut face = self.painted_face(&names, value)?.0;
             while styles.get(style_index).is_some_and(|run| run.bytes.end <= at) { style_index += 1; }
             if let Some(run) = styles.get(style_index).filter(|run| run.bytes.contains(&at)) {
                 face = *terminal_faces.entry(run.style).or_insert_with(|| {
@@ -751,6 +729,115 @@ impl Vm {
         let wanted = if selected || !distinguish { "mode-line-active" } else { "mode-line-inactive" };
         let defined = self.display_state.theme.face_names().any(|n| n == wanted);
         Ok(if defined { wanted } else { "mode-line" }.to_owned())
+    }
+    /// The face table a snapshot publishes: `default' first, then the
+    /// theme's other faces.
+    fn display_faces(&self) -> Result<(Vec<String>, Vec<Face>)> {
+        let names: Vec<String> = std::iter::once("default")
+            .chain(self.display_state.theme.face_names().filter(|s| *s != "default"))
+            .map(str::to_owned)
+            .collect();
+        let faces = names.iter().map(|n| self.snapshot_face(n)).collect::<Result<Vec<_>>>()?;
+        Ok((names, faces))
+    }
+    /// The face a snapshot paints a character whose `face' property is
+    /// VALUE with: a symbol, or a list's first element, by name in NAMES,
+    /// else the default. The second value says whether that is the whole
+    /// of VALUE: nil, a symbol or a one-element list of one.
+    fn painted_face(&self, names: &[String], value: Value) -> Result<(FaceHandle, bool)> {
+        let (resolved, whole) = if value.tag() == 3 {
+            let (head, tail) = self.cons_pair(value)?;
+            (head, tail == Value::NIL)
+        } else {
+            (value, true)
+        };
+        let graph = Graph(self);
+        let (name, symbol) = match graph.view(resolved.0) {
+            _ if resolved == Value::NIL => ("default", true),
+            NodeView::Symbol(s) => (s, true),
+            _ => ("default", false),
+        };
+        Ok((FaceHandle(names.iter().position(|n| n == name).unwrap_or(0) as u32), whole && symbol))
+    }
+    /// The host geometry of the characters at BYTES of the current
+    /// buffer, each in the face a snapshot paints it with (VM2-WTPS1),
+    /// with whether the host paints it so: not for a control character
+    /// other than newline, nor when its `face' is other than nil, a symbol
+    /// or a one-element list of one, it has `font-lock-face', or an
+    /// overlay's `face' covers it.
+    pub(crate) fn host_measure_buffer(&mut self, bytes: std::ops::Range<usize>) -> Result<(romacs_layout_input::Measured, Vec<bool>)> {
+        let (names, faces) = self.display_faces()?;
+        let buffer = self.slots[self.buffer_slot].value;
+        let mut covered = vec![];
+        self.visit_overlays_in(buffer, ByteOffset(bytes.start)..ByteOffset(bytes.end), |overlay, range| covered.push((overlay, range)))?;
+        let face = self.intern("face");
+        let mut faced = vec![];
+        for (overlay, range) in covered {
+            if self.overlay_get(overlay, face)? != Value::NIL { faced.push(range); }
+        }
+        let Object::Buffer(b) = self.object(buffer)? else { return Err("Unicode display buffer required".into()) };
+        // The host paints no control character but newline; one stands in
+        // for it as a space, inexact, and the iterator refuses it anyway.
+        let text: String = b.as_str().get(bytes.clone()).ok_or("measured range is not text")?
+            .chars().map(|c| if c.is_control() && c != '\n' { ' ' } else { c }).collect();
+        let mut face_runs: Vec<FaceRun> = vec![];
+        let mut exact = vec![];
+        for (at, ch) in text.char_indices() {
+            let byte = ByteOffset(bytes.start + at);
+            let value = b.properties.get_property(byte, "face").unwrap_or(Value::NIL);
+            let (face, whole) = self.painted_face(&names, value)?;
+            let original = b.as_str()[byte.0..].chars().next();
+            exact.push(original == Some(ch) && whole && b.properties.get_property(byte, "font-lock-face").is_none_or(|v| v == Value::NIL)
+                && !faced.iter().any(|range| range.contains(&byte)));
+            match face_runs.last_mut() {
+                Some(last) if last.face == face => last.bytes.end = at + ch.len_utf8(),
+                _ => face_runs.push(FaceRun { bytes: at..at + ch.len_utf8(), face }),
+            }
+        }
+        let input = romacs_layout_input::MeasureInput {
+            font_selection: self.display_state.font_selection_order,
+            font_alternatives: self.font_alternative_state()?,
+            faces,
+            text: TextSlice { utf8: text, face_runs },
+        };
+        Ok((self.host_layout(&input)?, exact))
+    }
+    /// The host advance of C in the default face, and that face's row height.
+    pub(crate) fn host_default_advance(&mut self, c: char) -> Result<(u32, u32)> {
+        let face = self.snapshot_face("default")?;
+        let input = romacs_layout_input::MeasureInput {
+            font_selection: self.display_state.font_selection_order,
+            font_alternatives: self.font_alternative_state()?,
+            faces: vec![face],
+            text: TextSlice { utf8: c.to_string(), face_runs: vec![] },
+        };
+        let measured = self.host_layout(&input)?;
+        Ok((measured.glyphs[0].0, measured.face_heights[0]))
+    }
+    /// The height the host gives WINDOW's mode line: GNU's
+    /// CURRENT_MODE_LINE_HEIGHT (dispextern.h), the last displayed band's,
+    /// else an estimate from the window's mode-line face.
+    pub(crate) fn host_mode_line_height(&mut self, window: Value) -> Result<u32> {
+        let id = self.window(window)?.id;
+        let shown = self.display_state.previous.get(&id).and_then(|snapshot| snapshot.mode_line.as_ref().map(|band| (snapshot, band)));
+        let (faces, runs) = match shown {
+            Some((snapshot, band)) => (snapshot.faces.clone(), std::iter::once(snapshot.mode_line_face.0 as usize)
+                .chain(band.face_runs.iter().map(|run| run.face.0 as usize)).collect::<Vec<_>>()),
+            None => {
+                let (names, faces) = self.display_faces()?;
+                let band = self.mode_line_face_name(window)?;
+                let index = names.iter().position(|n| *n == band).ok_or("mode-line face required")?;
+                (faces, vec![index])
+            }
+        };
+        let input = romacs_layout_input::MeasureInput {
+            font_selection: self.display_state.font_selection_order,
+            font_alternatives: self.font_alternative_state()?,
+            faces,
+            text: TextSlice { utf8: String::new(), face_runs: vec![] },
+        };
+        let heights = self.host_layout(&input)?.face_heights;
+        Ok(runs.into_iter().map(|i| heights[i]).max().unwrap_or(0))
     }
     fn snapshot_face(&self, name: &str) -> Result<Face> {
         let attrs = self

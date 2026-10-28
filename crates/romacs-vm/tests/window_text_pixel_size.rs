@@ -186,8 +186,10 @@ const SHARED_STARTS: &str = r###"
 (progn (insert "ab") (let ((x (make-overlay 2 2))) (overlay-put x 'before-string "\t") (dolist (s '("A" "BB")) (overlay-put (make-overlay 2 2) 'before-string s)) (delete-overlay x) (dolist (s '("\t" "C")) (overlay-put (make-overlay 2 2) 'before-string s))) (window-text-pixel-size))
 "###;
 
-/// A host's published layout cannot answer for the terminal frame model;
-/// before any layout the frame is like GNU's initial one.
+/// A host's published layout cannot answer for the terminal frame model,
+/// so without an attached host layout a displayed window refuses (the
+/// hosted answers are romacs-vm-gui's measure.rs); before any layout the
+/// frame is like GNU's initial one.
 #[test]
 fn displayed_window_refuses_after_a_host_layout() {
     let mut vm = Vm::new();

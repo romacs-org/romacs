@@ -1610,6 +1610,7 @@ mod leaf {
     mod coding_safe;
     mod display_motion;
     mod display_elements;
+    mod display_hosted;
     mod text_pixel_size;
     pub(crate) use text_pixel_size::TextSizeArgs;
 }

@@ -2,8 +2,8 @@
 //! initial frame, where pos_visible_p (xdisp.c:1703) sees nothing, so after
 //! GNU's argument checks the answer is nil, whatever `noninteractive' holds:
 //! compared against pinned GNU. Once a host has laid the frame out, a
-//! displayed window refuses (VM2-POSVIS1): the published layout cannot prove
-//! a row fully visible.
+//! displayed window refuses unless a host layout is attached to answer
+//! (VM2-POSVIS1); romacs-vm-gui's measure.rs tests the hosted answers.
 use romacs_vm::Vm;
 
 /// One expression per line.
