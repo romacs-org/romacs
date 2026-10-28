@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "03babb78ae40b323c9be9782b1d15eac3d682f3aa8acb6d53debf0f66ac74456",
+  "source_fingerprint": "df5649b2453f574400a2465f511376acb18e4ccff5ff035be5c476c3cb76e3f2",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 1011,
-  "parsed_vm2_only": 1011
+  "parsed_total": 1012,
+  "parsed_vm2_only": 1012
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -4678,6 +4678,11 @@
    "implementation": "vm2",
    "variant": "Primitive::SyntaxTable",
    "registered_at": "crates/romacs-vm/src/lib.rs:676"
+  },
+  "syntax-table-p": {
+   "name": "syntax-table-p",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/syntax.rs:6"
   },
   "system-name": {
    "name": "system-name",

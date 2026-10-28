@@ -48,3 +48,12 @@ fn load_time_display_terminal_face_and_file_name_primitives_match_gnu() {
         assert_eq!(got.as_deref(), Ok(expected), "{form}");
     }
 }
+
+/// syntax.c:984 syntax-table-p: a char-table whose purpose is syntax-table.
+#[test]
+fn syntax_table_p_matches_gnu() {
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    let source = "(list (syntax-table-p (standard-syntax-table)) (syntax-table-p (make-char-table 'syntax-table)) (syntax-table-p (make-char-table 'foo)) (syntax-table-p 5))";
+    assert_eq!(vm.eval_source(source).unwrap().display().unwrap(), "(t t nil nil)");
+}
