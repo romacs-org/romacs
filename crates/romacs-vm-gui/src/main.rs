@@ -182,6 +182,21 @@ mod frame_tests {
         let selected = frame(&mut vm);
         assert!(selected.selected != moved.selected && selected != moved, "selecting another window must repaint");
     }
+
+    /// A prompt read mid-command presents over the last paint; finishing it
+    /// without changing the editor (switching to the shown buffer) must still
+    /// repaint, or the prompt stays on screen.
+    #[test]
+    fn a_prompt_presented_since_the_last_paint_forces_the_next_one() {
+        let mut vm = romacs_vm::Vm::new();
+        vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
+        crate::startup::initialize(&mut vm).unwrap();
+        let shown = super::Shown { frame: super::frame(&mut vm, false, 1200, 800).unwrap(), presentation: 4 };
+        let same = super::frame(&mut vm, false, 1200, 800).unwrap();
+        assert!(super::changed_frame(&shown, same, 4).is_none(), "an unchanged frame still on screen repaints");
+        let same = super::frame(&mut vm, false, 1200, 800).unwrap();
+        assert!(super::changed_frame(&shown, same, 5).is_some(), "a prompt's presentation left the frame unrepainted");
+    }
 }
 
 /// What one paint shows: the windows and which of them has the cursor.
@@ -211,6 +226,20 @@ fn paints_alike(a: &romacs_layout_input::WindowSnapshot, b: &romacs_layout_input
     (*id, *width, *height, *start_byte, *point_byte, *mode_line_face, *vscroll_px)
         == (b.id, b.width, b.height, b.start_byte, b.point_byte, b.mode_line_face, b.vscroll_px)
         && *text == b.text && *mode_line == b.mode_line && *faces == b.faces
+}
+
+/// What the live loop last painted, and the presentation that showed it.
+struct Shown {
+    frame: Frame,
+    presentation: u64,
+}
+
+/// The frame to paint after a batch, or None when the paint on screen still
+/// shows it: equal, and still the latest presentation. A prompt read in the
+/// middle of a command presents over that paint and advances PRESENTATION,
+/// so the frame after the prompt is painted even when nothing else changed.
+fn changed_frame(shown: &Shown, next: Frame, presentation: u64) -> Option<Frame> {
+    (shown.presentation != presentation || shown.frame != next).then_some(next)
 }
 
 fn frame(vm: &mut Vm, g1: bool, width: u32, height: u32) -> Result<Frame, String> {
@@ -370,7 +399,7 @@ fn paint(
     pending: &mut std::collections::VecDeque<InputEvent>,
     synchronous: bool,
     timings: &mut Option<latency::Paint>,
-) -> Result<Frame, String> {
+) -> Result<Shown, String> {
     if force_gc {
         // Only this explicit root is retained. The snapshot has no heap handles.
         vm.set_collection_floor(1_000_000);
@@ -476,7 +505,7 @@ fn paint(
             diagnostic_ns: diagnostics_prepare_ns + diagnostics_write_ns + mode_line_start.unwrap().elapsed().as_nanos(),
             submit_ns, layout_apply_ns });
     }
-    Ok(shown)
+    Ok(Shown { frame: shown, presentation })
 }
 /// Lay out and submit a frame for a prompt waiting inside a command
 /// (prompt.rs). The same cursor policy as `paint`; no VM access, because the
@@ -747,7 +776,7 @@ fn evaluate(
                         for sample in trace.completed(in_flight, observed) { eprintln!("{sample}"); }
                     }
                     eprintln!("{}", json!({"diagnostic":"paint","presentation":diagnostic.presentation,
-                        "buffer_versions":previous.snapshot.windows.iter().map(|w|w.snapshot.buffer_version).collect::<Vec<_>>(),
+                        "buffer_versions":previous.frame.snapshot.windows.iter().map(|w|w.snapshot.buffer_version).collect::<Vec<_>>(),
                         "unresolved_face_text_total":diagnostic.unresolved_face_text_total}));
                     if tracing() {
                         eprintln!("{}", json!({"diagnostic":"latency-render","presentation":in_flight,
@@ -765,7 +794,7 @@ fn evaluate(
                 let snapshot_ns = snapshot_start.elapsed().as_nanos();
                 // GNU's redisplay draws nothing when nothing changed: a timer
                 // such as show-paren's runs after every key.
-                if next == previous { return Ok(None); }
+                let Some(next) = changed_frame(&previous, next, presentation) else { return Ok(None) };
                 presentation = presentation.checked_add(1).ok_or("presentation exhausted")?;
                 previous = paint(&mut engine.borrow_mut(), &mut vm, sender, presentation, force_gc, floor, next, &mut pending, false, &mut paint_timings)?;
                 Ok(Some((snapshot_start, snapshot_ns)))
@@ -822,7 +851,7 @@ fn evaluate(
             });
         // An evaluation may mutate before signalling; its error must not hide that paint.
         let next = frame(&mut vm, g1, width, height)?;
-        if next != previous {
+        if next != previous.frame {
             presentation = presentation
                 .checked_add(1)
                 .ok_or("presentation exhausted")?;
