@@ -986,7 +986,7 @@ impl Vm {
             SetWindowStart | SetWindowMargins | SetWindowNewPixel => n >= 2 && n <= 3,
             SetWindowParameter => n == 3,
             SplitWindowInternal => n == 4 || n == 5,
-            WindowEnd | WindowTotalHeight | WindowTotalWidth | WindowResizeApply => {
+            WindowTotalHeight | WindowTotalWidth | WindowResizeApply => {
                 n <= 2
             }
             WindowParameter => n == 2,
@@ -1056,7 +1056,6 @@ impl Vm {
                 | SetWindowStart
                 | WindowPoint
                 | WindowStart
-                | WindowEnd
                 | SetWindowMargins
                 | WindowMargins
         );
@@ -1099,19 +1098,6 @@ impl Vm {
                     w.force_start = true;
                 }
                 b
-            }
-            WindowEnd => {
-                let w = self.window(v)?;
-                let Object::Buffer(buffer) = self.object(w.buffer)? else {
-                    return Err("buffer required".into());
-                };
-                if b != Value::NIL {
-                    return Err(
-                        "VM2 window-end UPDATE requires synchronous layout, which is unsupported"
-                            .into(),
-                    );
-                }
-                Value::integer(buffer.len_chars() as i64 + 1 - w.end_distance as i64)?
             }
             WindowParent => self.window(v)?.parent,
             WindowChild => self
@@ -1507,6 +1493,22 @@ impl<'a> Windows<'a> {
         }
         if !self.vm.has_layout_host() { return Err(Self::displayed_window(caller)); }
         Ok(Some((w, posint.unwrap_or(-1), top)))
+    }
+    /// Fwindow_end (window.c:1782) for WINDOW: the live window, the end its
+    /// last layout recorded (Z less the distance left after its last row),
+    /// and its start clipped to the accessible region
+    /// (CLIP_TEXT_POS_FROM_MARKER).
+    pub(crate) fn window_end(&mut self, window: Value) -> std::result::Result<(Value, i64, i64), Fault> {
+        let w = self.live(window)?;
+        let (start, buffer, distance) = { let x = self.get(w)?; (x.start, x.buffer, x.end_distance as i64) };
+        let top = self.vm.marker_position_value(start).map_err(internal)?.as_integer().map_err(internal)?;
+        let Object::Buffer(b) = self.vm.object(buffer).map_err(internal)? else {
+            return Err(internal("buffer required".into()));
+        };
+        let accessible = b.accessible();
+        let char_at = |byte| b.char_of_byte(byte).map(|c| c.0 as i64 + 1).map_err(internal);
+        let (begv, zv) = (char_at(accessible.start)?, char_at(accessible.end)?);
+        Ok((w, b.len_chars() as i64 + 1 - distance, top.clamp(begv, zv)))
     }
     /// decode_live_window and what xdisp.c init_iterator reads of the
     /// window. The terminal frame model holds until a host lays the frame

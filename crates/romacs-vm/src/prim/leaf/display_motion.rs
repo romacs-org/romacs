@@ -637,3 +637,17 @@ pub(super) fn text_size<E: Elements>(src: &mut E, cx: &Ctx, mut it: It, m: &Meas
     let y = it.current_y + doff + if m.ignore_line_at_end { 0 } else { it.max_h };
     Ok((x, start_x, y))
 }
+
+/// Fwindow_end's motion (window.c:1782) from the origin, a window's start:
+/// move_it_vertically down the text area's height DY, then, when the row
+/// reached starts inside the window, move_it_past_eol over it.
+pub(super) fn window_end<E: Elements>(src: &mut E, cx: &Ctx, dy: i64) -> R<i64> {
+    let mut it = It::default();
+    move_to(src, cx, &mut it, cx.zv, -1, dy, -1, Op { pos: true, y: true, ..Op::default() })?;
+    let at = charpos(src, &it)?;
+    // At ZV, move_it_by_lines (IT, 0) and the move past its line's end
+    // come back to ZV.
+    if at == cx.zv || it.current_y >= dy { return Ok(at); }
+    if move_in_line(src, cx, &mut it, cx.zv, 0, POS)? == Move::NewlineOrCr { advance(src, &mut it); }
+    charpos(src, &it)
+}

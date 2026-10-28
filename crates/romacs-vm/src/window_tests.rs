@@ -213,11 +213,9 @@ fn g3a_margins_start_and_stale_end() {
         &mut vm,
         "(and (set-window-margins nil 2 3) (not (set-window-margins nil 2 3)) (not (set-window-margins nil 999 3)) (equal (window-margins) '(2 . 3)) (= (set-window-start nil 3) 3) (= (window-start) 3))",
     );
-    assert!(
-        vm.eval_source_raw("(window-end nil t)")
-            .unwrap_err()
-            .contains("layout")
-    );
+    // Before a host lays the frame out, UPDATE keeps the recorded end, as
+    // GNU's batch does.
+    yes(&mut vm, "(= (window-end nil t) (window-end))");
     // NOFORCE sets the start without forcing it on redisplay.
     yes(&mut vm, "(and (= (set-window-start nil 2 t) 2) (= (window-start) 2))");
     assert_eq!(run(&mut vm, "(set-window-start nil nil)"), Value::NIL);
@@ -576,17 +574,12 @@ fn g3a_geometry_and_layout_end_journal() {
     let snapshot = vm.display_snapshot(800, 576).unwrap();
     vm.display_apply_layout(&[(snapshot.id, 4)]).unwrap();
     yes(&mut vm, "(= (window-end nil) 4)");
-    assert!(
-        vm.eval_source_raw("(window-end nil t)")
-            .unwrap_err()
-            .contains("layout")
-    );
+    // A laid-out window lays itself out again for UPDATE, which needs the
+    // host's layout attached.
+    let refused = r#"(equal (condition-case e (window-end nil t) (error (car (cdr e)))) "VM2 window-end in a displayed window is unsupported")"#;
+    yes(&mut vm, refused);
     run(&mut vm, "(insert \"z\")");
-    assert!(
-        vm.eval_source_raw("(window-end nil t)")
-            .unwrap_err()
-            .contains("layout")
-    );
+    yes(&mut vm, refused);
     yes(&mut vm, "(= (window-end nil) 5)");
     assert!(vm.set_frame_geometry(1, 1, 24, 12).is_err());
 }

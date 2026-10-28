@@ -403,3 +403,8 @@ fn select_window(cx, window: Value; optional norecord: Value) -> Step {
     Ok(Step::Call { f: cx.intern("run-hooks"), args: vec![hook], then: selected, saved: vec![window] })
 }}
 fn selected(_: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next { Ok(Step::Done(saved[0])) }
+
+defsubr! { name = "window-end", gnu = "window.c:1782", effect = Reads,
+fn window_end(cx; optional window: Value, update: Value) {
+    cx.window_end(window, update)
+}}

@@ -163,6 +163,28 @@ mod tests {
                    "\"VM2 window-text-pixel-size of text the host does not lay out as GNU displays it in a displayed window is unsupported\"");
     }
 
+    /// `window-end' with UPDATE lays the window out from its start as
+    /// Fwindow_end (window.c:1782) does: the end the host's paint then
+    /// records, asked before that paint catches up with the edit.
+    #[test]
+    fn window_end_update_answers_the_end_the_host_paints() {
+        let mut h = hosted();
+        for insert in [
+            r#"(dotimes (i 40) (insert (format "line %d\n" i)))"#,
+            r#"(insert "short\nno newline")"#,
+            r#"(insert "short\n")"#,
+            r#"(insert "")"#,
+            r#"(dotimes (i 18) (insert "x\n")) (insert (propertize "BIG\n" 'face 'hosted-big) "after\nmore\n")"#,
+            r#"(dotimes (i 40) (insert (format "line %d\n" i))) (narrow-to-region 20 60)"#,
+        ] {
+            h.eval(&format!("(progn (widen) (erase-buffer) {insert} (goto-char (point-min)) (set-window-start nil (point-min)))"));
+            let update = h.eval("(window-end nil t)");
+            h.paint();
+            assert_eq!(update, h.eval("(window-end)"), "{insert}");
+        }
+        h.eval("(widen)");
+    }
+
     /// What the host does not lay out as GNU displays it refuses; its
     /// plain twin answers.
     #[test]

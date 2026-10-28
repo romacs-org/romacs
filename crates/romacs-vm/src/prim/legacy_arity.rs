@@ -154,7 +154,7 @@ pub(super) fn arity(primitive: Primitive) -> (usize, Option<usize>) {
         StringMatch => (2, Some(4)),
         MatchData => (0, Some(3)),
         ReSearchForward | ReSearchBackward | SearchForward | SearchBackward | KeyBinding | LocateLibrary => (1, Some(4)),
-        WindowVscroll | WindowEnd | WindowTotalHeight | WindowResizeApply | WindowTotalWidth => {
+        WindowVscroll | WindowTotalHeight | WindowResizeApply | WindowTotalWidth => {
             (0, Some(2))
         }
         ClosureMetadata => (6, Some(6)),

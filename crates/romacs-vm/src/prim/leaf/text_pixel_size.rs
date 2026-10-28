@@ -128,6 +128,22 @@ impl Leaf<'_> {
         Ok(self.vm.list_value(&items))
     }
 
+    /// Fwindow_end (window.c:1782). With UPDATE, a window a host lays out
+    /// answers by the motion from its start, as GNU recomputes an end its
+    /// display may not have caught up with; elsewhere, as GNU's batch, the
+    /// end the last layout recorded.
+    pub(crate) fn window_end(&mut self, window: Value, update: Value) -> super::super::Out {
+        let (w, recorded, top) = self.windows().window_end(window)?;
+        if update == Value::NIL || !self.vm.display_state.hosted { return Value::integer(recorded).map_err(Fault::Error); }
+        let area = self.windows().text_area(w, "window-end")?;
+        if area.vscroll != 0 { return Err(Fault::Error("VM2 window-end UPDATE of a vertically scrolled window is unsupported".into())); }
+        let end = self.with_buffer(area.buffer, |leaf| {
+            let (mut hosted, cx) = leaf.hosted_from(&area, top)?;
+            motion::window_end(&mut hosted, &cx, area.body_height)
+        })?;
+        Value::integer(end).map_err(Fault::Error)
+    }
+
     /// Fposn_at_point (keyboard.c:13054): pos-visible-in-window-p with
     /// PARTIALLY t, then posn-at-x-y at the coordinates it reports. The
     /// initial frame shows nothing, so the answer there is nil.
