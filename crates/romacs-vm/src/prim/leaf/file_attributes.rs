@@ -14,7 +14,7 @@ impl Leaf<'_> {
             let mut buffer = 1024;
             loop {
                 let name = if group { crate::host::group_by_gid(id, buffer) }
-                    else { crate::host::user_by_uid(id, buffer).map(|entry| entry.name) };
+                    else { crate::host::user_by_uid(id, buffer).and_then(|entry| entry.name.ok_or(0)) };
                 match name {
                     Err(libc::ERANGE) if buffer < 1_048_576 => buffer *= 2,
                     Ok(bytes) if std::str::from_utf8(&bytes).is_ok() => {

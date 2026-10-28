@@ -19,7 +19,7 @@ const BUFFER: usize = 16 * 1024;
 
 fn account(entry: crate::host::Passwd) -> Account {
     let text = |bytes: Vec<u8>| String::from_utf8_lossy(&bytes).into_owned();
-    Account { name: text(entry.name), gecos: text(entry.gecos), home: entry.dir.map(text) }
+    Account { name: entry.name.map(text).unwrap_or_default(), gecos: text(entry.gecos), home: entry.dir.map(text) }
 }
 
 pub(crate) fn by_uid(uid: u32) -> Option<Account> {

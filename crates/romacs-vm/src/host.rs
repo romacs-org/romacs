@@ -154,7 +154,8 @@ pub fn euid() -> u32 {
 
 /// A passwd entry's fields, as the C library's bytes.
 pub struct Passwd {
-    pub name: Vec<u8>,
+    /// pw_name, absent when the entry has none.
+    pub name: Option<Vec<u8>>,
     pub gecos: Vec<u8>,
     /// pw_dir, absent when the entry has none.
     pub dir: Option<Vec<u8>>,
@@ -171,8 +172,8 @@ fn passwd(buffer: usize, lookup: impl Fn(*mut libc::passwd, *mut libc::c_char, u
         return Err(status);
     }
     let bytes = |p: *const libc::c_char| if p.is_null() { Vec::new() } else { unsafe { CStr::from_ptr(p) }.to_bytes().to_vec() };
-    let dir = (!entry.pw_dir.is_null()).then(|| bytes(entry.pw_dir));
-    Ok(Passwd { name: bytes(entry.pw_name), gecos: bytes(entry.pw_gecos), dir })
+    let field = |p: *const libc::c_char| (!p.is_null()).then(|| bytes(p));
+    Ok(Passwd { name: field(entry.pw_name), gecos: bytes(entry.pw_gecos), dir: field(entry.pw_dir) })
 }
 
 pub fn user_by_uid(uid: u32, buffer: usize) -> Result<Passwd, i32> {
@@ -302,4 +303,24 @@ pub fn symlink(target: impl AsRef<Path>, link: impl AsRef<Path>) -> io::Result<(
 
 pub fn fchown(file: &File, uid: Option<u32>, gid: Option<u32>) -> io::Result<()> {
     std::os::unix::fs::fchown(file, uid, gid)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn passwd_keeps_absent_fields_absent() {
+        let gecos = c"Full Name";
+        let entry = passwd(16, |entry, _, _, found| {
+            unsafe {
+                (*entry).pw_name = std::ptr::null_mut();
+                (*entry).pw_gecos = gecos.as_ptr().cast_mut();
+                (*entry).pw_dir = std::ptr::null_mut();
+                *found = entry;
+            }
+            0
+        }).ok().unwrap();
+        assert_eq!((entry.name, entry.gecos, entry.dir), (None, b"Full Name".to_vec(), None));
+    }
 }

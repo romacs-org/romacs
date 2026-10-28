@@ -8,7 +8,7 @@ impl Leaf<'_> {
             || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
     }
     pub(crate) fn filelock_login_name(&self) -> Vec<u8> {
-        crate::host::user_by_uid(crate::host::euid(), 16384).map_or_else(|_| b"unknown".to_vec(), |entry| entry.name)
+        crate::host::user_by_uid(crate::host::euid(), 16384).map_or_else(|_| b"unknown".to_vec(), |entry| entry.name.unwrap_or_default())
     }
     pub(crate) fn filelock_create_nonce(&self, path: &std::path::Path) -> std::io::Result<(std::path::PathBuf, std::fs::File)> {
         use std::os::{fd::FromRawFd, unix::ffi::{OsStrExt, OsStringExt}};
