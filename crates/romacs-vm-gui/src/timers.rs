@@ -155,8 +155,6 @@ mod tests {
         assert!(!crate::command::unread_pending(&mut vm).unwrap());
     }
 
-    /// A pause, a key, or the wake a completed background command gives
-    /// after the time it takes to complete.
     /// Work that runs during a command-key wait and schedules a timer,
     /// a background command's callback or a mode-line :eval in the wait's
     /// redisplay, counts toward the wait's deadline: the timer fires on time
@@ -194,6 +192,32 @@ mod tests {
         assert_eq!(crate::command::run(&mut vm).unwrap().command.as_deref(), Some("mark-whole-buffer"));
         let fired = printed(&mut vm, "(list (reverse (mapcar (lambda (e) (if (consp e) (car e) e)) log)) (let ((timer (assq 'timer log))) (and timer (< (cadr timer) 1.0))))");
         assert_eq!(fired, "((eval timer) t)", "a redisplay's timer");
+    }
+
+    /// A timer that reschedules itself at once runs once per round of a
+    /// wait, which reads a queued key and ends at its time limit between
+    /// rounds. Pinned GNU 45b0f7699df, -nw: the key typed 0.3s in is read
+    /// then; its time limit waits for the rescheduling to stop
+    /// (DIVERGENCES.md VM2-KBD1).
+    #[test]
+    fn a_rescheduling_timer_never_starves_a_wait() {
+        std::thread::Builder::new().stack_size(64 << 20).spawn(rescheduling_body).unwrap().join().unwrap();
+    }
+    fn rescheduling_body() {
+        let mut vm = Vm::new();
+        vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
+        crate::startup::initialize_loadup(&mut vm, crate::startup::Launch::GnuOnly, None).unwrap();
+        let printed = |vm: &mut Vm, source: &str| vm.eval_source(source).unwrap().display().unwrap();
+        let rescheduling = "(setq timer-list nil timer-idle-list nil unread-command-events nil runs 0 start (float-time))
+            (defun rescheduling () (setq runs (1+ runs)) (when (< (- (float-time) start) 2) (run-with-timer 0 nil #'rescheduling)))
+            (run-with-timer 0 nil #'rescheduling)";
+        vm.set_host_input(Some(Box::new(Paced([Step::Key('a')].into()))));
+        printed(&mut vm, rescheduling);
+        let key = printed(&mut vm, "(list (read-event) (< (- (float-time) start) 0.5) (<= runs 2))");
+        vm.set_host_input(Some(Box::new(Paced([Step::Pause(Duration::from_secs(10))].into()))));
+        printed(&mut vm, rescheduling);
+        let limit = printed(&mut vm, "(list (read-event nil nil 0.1) (< (- (float-time) start) 0.5))");
+        assert_eq!((key.as_str(), limit.as_str()), ("(97 t t)", "(nil t)"), "a queued key, then the time limit");
     }
 
     /// A pause, a key, or the wake a completed background command gives

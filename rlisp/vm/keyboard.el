@@ -110,22 +110,26 @@ runs no timers."
     (and timers (null end) (romacs--timer-start-idle))
     (unwind-protect
         (while waiting
-          ;; Whatever may add a timer or requeue input runs before the
-          ;; deadline is computed: completed background commands' callbacks
-          ;; (before every block, not only after a completion's wake, which
-          ;; a minibuffer read may have used), then ripe timers, again while
-          ;; timers run (wait_reading_process_output's timer_check loop).
-          ;; The host redisplays only when that changed something or it has
-          ;; not yet, and a redisplay that schedules a timer or requeues
-          ;; input ends the wait (`romacs--wait-state').
-          (let ((dispatched (romacs--dispatch-background)) (delay nil) (run -1) left)
-            (while (and timers (/= run romacs--timers-run))
-              (setq run romacs--timers-run delay (romacs--timer-check)))
+          ;; Each round, as wait_reading_process_output's: completed
+          ;; background commands' callbacks (before every block, not only
+          ;; after a completion's wake, which a minibuffer read may have
+          ;; used), then one timer_check pass, which runs each ripe timer at
+          ;; most once.  Requeued input and the time limit come next, then
+          ;; the deadline, from the timers as they are now: one that a
+          ;; callback or timer added and is ripe already gives 0 and another
+          ;; round, so a timer that keeps rescheduling itself never starves
+          ;; the keyboard or the limit.  The host redisplays only when that
+          ;; changed something or it has not yet, and a redisplay that
+          ;; schedules a timer or requeues input ends the wait
+          ;; (`romacs--wait-state').
+          (let ((dispatched (romacs--dispatch-background)) left)
+            (and timers (romacs--timer-check))
             (setq left (and end (- end (float-time))))
             (if (or (romacs--unread-p) (and left (<= left 0)))
                 (setq waiting nil)
               ;; A VM without the process prelude runs no timers.
-              (let ((ran (if timers romacs--timers-run 0)))
+              (let ((ran (if timers romacs--timers-run 0))
+                    (delay (and timers (romacs--timer-delay))))
                 (setq c (romacs--read-host-event
                          (if (and delay left) (min delay left) (or delay left))
                          (and shown (not dispatched) (= shown ran)))

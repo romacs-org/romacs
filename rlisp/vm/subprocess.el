@@ -934,6 +934,27 @@ let a timer add itself again without running twice."
       (setq next (romacs--timer-check-2 timers idle-timers)))
     next))
 
+(defun romacs--timer-delay ()
+  "The seconds until the next valid timer in the current lists falls due,
+0 when one is ripe, or nil if none: what `romacs--timer-check' answers,
+without running a timer, so it counts timers added since that check.  Idle
+timers count only while Emacs is idle, from the start of idleness."
+  (let* ((now (float-time))
+         (idle (current-idle-time))
+         (lists (list (cons now timer-list)
+                      (and idle (cons (float-time idle) timer-idle-list))))
+         (delay nil))
+    (while lists
+      (let ((clock (car (car lists))) (timers (cdr (car lists))))
+        (while timers
+          (let ((time (romacs--timer-time (car timers))))
+            (if time
+                (let ((left (max 0 (- time clock))))
+                  (if (or (null delay) (< left delay)) (setq delay left)))))
+          (setq timers (cdr timers))))
+      (setq lists (cdr lists)))
+    delay))
+
 (defun romacs--timer-check-idle ()
   "What keyboard.c read_char does before it blocks for a command key with
 no time limit: start idling, then run ripe timers as its wait does.  Return
