@@ -191,11 +191,32 @@ mod frame_tests {
         let mut vm = romacs_vm::Vm::new();
         vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
         crate::startup::initialize(&mut vm).unwrap();
-        let shown = super::Shown { frame: super::frame(&mut vm, false, 1200, 800).unwrap(), presentation: 4 };
+        let shown = super::Shown { frame: super::frame(&mut vm, false, 1200, 800).unwrap(), ends: vec![], presentation: 4 };
         let same = super::frame(&mut vm, false, 1200, 800).unwrap();
-        assert!(super::changed_frame(&shown, same, 4).is_none(), "an unchanged frame still on screen repaints");
+        assert!(super::changed_frame(&mut vm, &shown, same, 4).unwrap().is_none(), "an unchanged frame still on screen repaints");
         let same = super::frame(&mut vm, false, 1200, 800).unwrap();
-        assert!(super::changed_frame(&shown, same, 5).is_some(), "a prompt's presentation left the frame unrepainted");
+        assert!(super::changed_frame(&mut vm, &shown, same, 5).unwrap().is_some(), "a prompt's presentation left the frame unrepainted");
+    }
+
+    /// Selecting the buffer a window already shows resets its end, though its
+    /// frame stays equal; keeping the paint must keep `window-end' too.
+    #[test]
+    fn a_kept_paint_keeps_its_window_ends() {
+        let mut vm = romacs_vm::Vm::new();
+        vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
+        crate::startup::initialize(&mut vm).unwrap();
+        vm.eval_source("(erase-buffer) (let ((i 0)) (while (< i 300) (insert \"a long line of text\\n\") (setq i (1+ i)))) (goto-char 1)").unwrap();
+        let painted = super::frame(&mut vm, false, 1200, 800).unwrap();
+        let cursor = painted.selected.map(|id| (id, romacs_display_protocol::Color::from_pixel(0x9099d9)));
+        let (_, ends) = romacs_layout2::LayoutEngine::new().unwrap().layout_frame(&painted.snapshot, 1, cursor).unwrap();
+        vm.display_apply_layout(&ends).unwrap();
+        let end = vm.eval_source("(window-end)").unwrap().display().unwrap();
+        assert_ne!(end, vm.eval_source("(point-max)").unwrap().display().unwrap(), "the window shows part of the buffer");
+        let shown = super::Shown { frame: painted, ends, presentation: 1 };
+        vm.eval_source("(romacs-select-buffer (current-buffer))").unwrap();
+        let next = super::frame(&mut vm, false, 1200, 800).unwrap();
+        assert!(super::changed_frame(&mut vm, &shown, next, 1).unwrap().is_none(), "the frame did not change");
+        assert_eq!(vm.eval_source("(window-end)").unwrap().display().unwrap(), end);
     }
 }
 
@@ -228,9 +249,11 @@ fn paints_alike(a: &romacs_layout_input::WindowSnapshot, b: &romacs_layout_input
         && *text == b.text && *mode_line == b.mode_line && *faces == b.faces
 }
 
-/// What the live loop last painted, and the presentation that showed it.
+/// What the live loop last painted: the frame, the window ends its layout
+/// reported, and the presentation that showed it.
 struct Shown {
     frame: Frame,
+    ends: Vec<(u64, usize)>,
     presentation: u64,
 }
 
@@ -238,8 +261,13 @@ struct Shown {
 /// shows it: equal, and still the latest presentation. A prompt read in the
 /// middle of a command presents over that paint and advances PRESENTATION,
 /// so the frame after the prompt is painted even when nothing else changed.
-fn changed_frame(shown: &Shown, next: Frame, presentation: u64) -> Option<Frame> {
-    (shown.presentation != presentation || shown.frame != next).then_some(next)
+/// A kept paint's window ends are applied again: a command can drop them
+/// without changing the frame (`set-window-buffer' to the buffer shown), and
+/// the same frame lays out to the same ends.
+fn changed_frame(vm: &mut Vm, shown: &Shown, next: Frame, presentation: u64) -> Result<Option<Frame>, String> {
+    if shown.presentation != presentation || shown.frame != next { return Ok(Some(next)); }
+    vm.display_apply_layout(&shown.ends)?;
+    Ok(None)
 }
 
 fn frame(vm: &mut Vm, g1: bool, width: u32, height: u32) -> Result<Frame, String> {
@@ -505,7 +533,7 @@ fn paint(
             diagnostic_ns: diagnostics_prepare_ns + diagnostics_write_ns + mode_line_start.unwrap().elapsed().as_nanos(),
             submit_ns, layout_apply_ns });
     }
-    Ok(Shown { frame: shown, presentation })
+    Ok(Shown { frame: shown, ends, presentation })
 }
 /// Lay out and submit a frame for a prompt waiting inside a command
 /// (prompt.rs). The same cursor policy as `paint`; no VM access, because the
@@ -794,7 +822,7 @@ fn evaluate(
                 let snapshot_ns = snapshot_start.elapsed().as_nanos();
                 // GNU's redisplay draws nothing when nothing changed: a timer
                 // such as show-paren's runs after every key.
-                let Some(next) = changed_frame(&previous, next, presentation) else { return Ok(None) };
+                let Some(next) = changed_frame(&mut vm, &previous, next, presentation)? else { return Ok(None) };
                 presentation = presentation.checked_add(1).ok_or("presentation exhausted")?;
                 previous = paint(&mut engine.borrow_mut(), &mut vm, sender, presentation, force_gc, floor, next, &mut pending, false, &mut paint_timings)?;
                 Ok(Some((snapshot_start, snapshot_ns)))
