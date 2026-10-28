@@ -187,15 +187,16 @@ impl Vm {
     }
 
     /// search.c update_search_regs: OLDSTART..OLDEND became OLDSTART..NEWEND.
-    /// Registers after the old text shift with it, those inside it go to
-    /// OLDSTART, whatever the last match searched.
+    /// Registers inside the old text go to OLDSTART, those after it shift
+    /// with it, whatever the last match searched. A start at OLDSTART stays
+    /// and an end at OLDEND moves, so a group the change touches encloses
+    /// the new text (an empty change is an insertion at both).
     pub(crate) fn regexp_update_search_regs(&mut self, oldstart: i64, oldend: i64, newend: i64) {
-        let moved = |at: usize| {
-            let at = at as i64;
-            (if at >= oldend { at + newend - oldend } else if at > oldstart { oldstart } else { at }) as usize
-        };
+        let change = newend - oldend;
+        let start_moved = |at: i64| if at <= oldstart { at } else if at >= oldend { at + change } else { oldstart };
+        let end_moved = |at: i64| if at >= oldend { at + change } else if at > oldstart { oldstart } else { at };
         for (start, end) in self.regexp.groups.iter_mut().flatten() {
-            (*start, *end) = (moved(*start), moved(*end));
+            (*start, *end) = (start_moved(*start as i64) as usize, end_moved(*end as i64) as usize);
         }
     }
 
