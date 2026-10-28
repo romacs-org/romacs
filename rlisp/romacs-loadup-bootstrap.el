@@ -3,7 +3,7 @@
 
 ;;; Commentary:
 ;; The files GNU's loadup.el preloads on GNU/Linux, as source, in loadup's
-;; order (of its window-system block, fringe.el so far), then the steps of
+;; order (of its window-system blocks, fringe.el and the PGTK one), then the steps of
 ;; startup.el's `command-line' a batch session depends on.  Romacs's own display and
 ;; keymap layers load where GNU's C would already be in place.  Each Romacs
 ;; adaptation is commented where it happens.
@@ -140,6 +140,16 @@
 ;; loadup.el's window-system block: Romacs is a graphical machine, and
 ;; pinned GNU, a graphical build, preloads fringe.el in batch too.
 (load "fringe.el" nil t t)
+;; loadup.el's PGTK block (loadup.el:357).  GNU's C provides `pgtk' in a
+;; pure-GTK build (pgtkterm.c:7550), which pinned GNU is; Romacs's
+;; Wayland-native display stands where that window system would.  Its
+;; display queries are Romacs's own and `window-system' stays nil, so no
+;; pgtk- primitive is reached (VM2-WINSYS1).
+(provide 'pgtk)
+(load "pgtk-dnd.el" nil t t)
+(load "touch-screen.el" nil t t)
+(load "term/common-win.el" nil t t)
+(load "term/pgtk-win.el" nil t t)
 (load "progmodes/elisp-mode.el" nil t t)
 (load "emacs-lisp/float-sup.el" nil t t)
 (load "vc/vc-hooks.el" nil t t)
