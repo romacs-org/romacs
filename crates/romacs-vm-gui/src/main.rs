@@ -94,11 +94,12 @@ mod lent_tests {
     #[test]
     fn a_read_inside_lisp_sees_and_returns_the_loops_presentation_state() {
         let host = std::rc::Rc::new(std::cell::RefCell::new(prompt::Shared::default()));
+        host.borrow_mut().presentation = 7;
         let mut live = presentation::Presentation::new();
         live.submitted(7, Instant::now());
-        let (mut queue, mut presentation, mut width, mut height) = (std::collections::VecDeque::new(), 7, 10, 20);
+        let (mut queue, mut width, mut height) = (std::collections::VecDeque::new(), 10, 20);
         queue.push_back(InputEvent::WindowClose { emacs_frame_id: 0 });
-        let mut lent = Lent { queue: &mut queue, presentation: &mut presentation, live: &mut live, width: &mut width, height: &mut height };
+        let lent = Lent { queue: &mut queue, live: &mut live, width: &mut width, height: &mut height };
         let (seen, closed) = lent.run(&host, |_| {
             let mut shared = host.borrow_mut();
             let seen = (shared.presentation, shared.in_flight, shared.pending.len());
@@ -111,9 +112,32 @@ mod lent_tests {
         });
         assert_eq!(seen, (7, Some(7), 1), "the read starts from the loop's state");
         assert!(closed);
-        assert_eq!((queue.len(), presentation, width, height), (1, 8, 30, 40));
+        assert_eq!((queue.len(), host.borrow().presentation, width, height), (1, 8, 30, 40));
         assert!(live.in_flight().is_none(), "the settled presentation is no longer in flight");
         assert_eq!(host.borrow().in_flight, None);
+    }
+
+    /// A prompt read inside any Lisp the loop runs (a timer, a background
+    /// callback) and dismissed without changing anything still covered the
+    /// last paint: the loop must repaint, and compare against the prompt's
+    /// presentation, not a copy taken before it.
+    #[test]
+    fn a_prompt_inside_any_entry_leaves_the_frame_to_repaint() {
+        let mut vm = romacs_vm::Vm::new();
+        vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
+        crate::startup::initialize(&mut vm).unwrap();
+        let host = std::rc::Rc::new(std::cell::RefCell::new(prompt::Shared::default()));
+        host.borrow_mut().presentation = 3;
+        let shown = Shown { frame: frame(&mut vm, false, 1200, 800).unwrap(), ends: vec![], presentation: 3 };
+        let mut live = presentation::Presentation::new();
+        let (mut queue, mut width, mut height) = (std::collections::VecDeque::new(), 10, 20);
+        let lent = Lent { queue: &mut queue, live: &mut live, width: &mut width, height: &mut height };
+        // The callback's prompt: one presentation, then a dismissal that changes nothing.
+        lent.run(&host, |_| host.borrow_mut().presentation += 1);
+        assert!(live.ready(), "the prompt's presentation left no repaint scheduled");
+        let next = frame(&mut vm, false, 1200, 800).unwrap();
+        assert!(changed_frame(&mut vm, &shown, next, host.borrow().presentation).unwrap().is_some(),
+            "the prompt-covered paint was kept");
     }
 }
 
@@ -679,9 +703,10 @@ fn evaluate(
     } else {
         vm.eval_source(if g1 { include_str!("../g1.el") } else { SCENE })?;
     }
-    let mut presentation = 1;
     // A live GUI has a keyboard: prompts read it mid-command (prompt.rs).
     let host = std::rc::Rc::new(std::cell::RefCell::new(prompt::Shared::default()));
+    host.borrow_mut().presentation = 1;
+    let last_presentation = || host.borrow().presentation;
     if live {
         vm.set_host_input(Some(Box::new(prompt::GuiHost { shared: host.clone(), sender: sender.clone(), engine: engine.clone(), terminal_ready: terminal_ready.clone() })));
     }
@@ -689,10 +714,10 @@ fn evaluate(
     let mut pending = std::collections::VecDeque::new();
     let mut paint_timings = None;
     let mut key_trace = tracing().then(latency::Trace::default);
-    let mut previous = paint(&mut engine.borrow_mut(), &mut vm, sender, presentation, force_gc, floor, initial, &mut pending, true, &mut paint_timings)?;
+    let mut previous = paint(&mut engine.borrow_mut(), &mut vm, sender, last_presentation(), force_gc, floor, initial, &mut pending, true, &mut paint_timings)?;
     let mut live_presentation = presentation::Presentation::new();
     let mut terminal_modal = false;
-    reply(json!({"ready":true,"presentation":presentation}))?;
+    reply(json!({"ready":true,"presentation":last_presentation()}))?;
     let (input_tx, input_rx) = std::sync::mpsc::sync_channel(1);
     if !live { std::thread::spawn(move || {
         for line in std::io::stdin().lock().lines() {
@@ -702,7 +727,15 @@ fn evaluate(
         }
     }); }
     loop {
-        if live && service_native(&mut vm)? { live_presentation.changed(); }
+        if live {
+            // Background callbacks are Lisp the loop runs, and may prompt.
+            let lent = Lent { queue: &mut pending, live: &mut live_presentation, width: &mut width, height: &mut height };
+            let (changed, closed) = lent.run(&host, |_| service_native(&mut vm));
+            if changed? { live_presentation.changed(); }
+            if closed && close_window(&mut vm, &host, Lent { queue: &mut pending, live: &mut live_presentation, width: &mut width, height: &mut height })? {
+                return shutdown_editor(&mut vm, sender);
+            }
+        }
         let available = sender.input().len();
         let mut batch: std::collections::VecDeque<_> = presentation::take_batch(&mut pending, sender.input().try_iter(), available).collect();
         loop {
@@ -722,7 +755,7 @@ fn evaluate(
             } else {
                 let event = event.expect("host input");
                 if matches!(event, InputEvent::WindowClose { .. }) {
-                    if !live || live_presentation.window_close(&mut vm)? {
+                    if !live || close_window(&mut vm, &host, Lent { queue: &mut batch, live: &mut live_presentation, width: &mut width, height: &mut height })? {
                         return shutdown_editor(&mut vm, sender);
                     }
                     terminal_modal = true;
@@ -776,9 +809,9 @@ fn evaluate(
             };
             if let Some(first) = translated {
                 let outcome = if live {
-                    let mut lent = Lent { queue: &mut batch, presentation: &mut presentation, live: &mut live_presentation, width: &mut width, height: &mut height };
+                    let lent = Lent { queue: &mut batch, live: &mut live_presentation, width: &mut width, height: &mut height };
                     let (outcome, closed) = lent.run(&host, |live| live.host_command(&mut vm, first.as_ref()));
-                    if closed && live_presentation.window_close(&mut vm)? {
+                    if closed && close_window(&mut vm, &host, Lent { queue: &mut batch, live: &mut live_presentation, width: &mut width, height: &mut height })? {
                         return shutdown_editor(&mut vm, sender);
                     }
                     outcome
@@ -798,12 +831,12 @@ fn evaluate(
                     let snapshot_start = Instant::now();
                     let next = frame(&mut vm, g1, width, height)?;
                     let snapshot_ns = snapshot_start.elapsed().as_nanos();
-                    presentation = presentation.checked_add(1).ok_or("presentation exhausted")?;
+                    let presentation = next_presentation(&host)?;
                     previous = paint(&mut engine.borrow_mut(), &mut vm, sender, presentation, force_gc, floor, next, &mut pending, true, &mut paint_timings)?;
                     Some(snapshot_ns)
                 } else { None };
                 if tracing() && !live {
-                    eprintln!("{}",json!({"diagnostic":"latency-key","presentation":presentation,"units":"ns",
+                    eprintln!("{}",json!({"diagnostic":"latency-key","presentation":last_presentation(),"units":"ns",
                         "queue_ns":received.map(|t| command_start.duration_since(t).as_nanos()),
                         "command_ns":command_ns,"snapshot_ns":snapshot_ns,
                         "key_to_paint_complete_ns":if live { None } else { received.map(|t| t.elapsed().as_nanos()) },
@@ -820,13 +853,13 @@ fn evaluate(
                         if let Some(message) = &outcome.message { eprintln!("{message}"); }
                         let reply_start = diagnostic_start.map(|_| Instant::now());
                         reply(json!({"native_command":outcome.command,"signal":outcome.signal.map(|s|json!({"condition":s.condition,"data":s.data})),
-                            "bell":outcome.bell,"message":outcome.message,"presentation":presentation}))?;
+                            "bell":outcome.bell,"message":outcome.message,"presentation":last_presentation()}))?;
                         reply_ns = reply_start.map(|start| start.elapsed().as_nanos()).unwrap_or(0);
                     }
                     Ok(None) => {},
                     Err(error) => {
                         let reply_start = diagnostic_start.map(|_| Instant::now());
-                        reply(json!({"native_error":error,"presentation":presentation}))?;
+                        reply(json!({"native_error":error,"presentation":last_presentation()}))?;
                         reply_ns = reply_start.map(|start| start.elapsed().as_nanos()).unwrap_or(0);
                     },
                 }
@@ -864,12 +897,12 @@ fn evaluate(
                 let snapshot_ns = snapshot_start.elapsed().as_nanos();
                 // GNU's redisplay draws nothing when nothing changed: a timer
                 // such as show-paren's runs after every key.
-                let Some(next) = changed_frame(&mut vm, &previous, next, presentation)? else { return Ok(None) };
-                presentation = presentation.checked_add(1).ok_or("presentation exhausted")?;
+                let Some(next) = changed_frame(&mut vm, &previous, next, last_presentation())? else { return Ok(None) };
+                let presentation = next_presentation(&host)?;
                 previous = paint(&mut engine.borrow_mut(), &mut vm, sender, presentation, force_gc, floor, next, &mut pending, false, &mut paint_timings)?;
-                Ok(Some((snapshot_start, snapshot_ns)))
+                Ok(Some((snapshot_start, snapshot_ns, presentation)))
             }) {
-                if let Some((snapshot_start, snapshot_ns)) = result? {
+                if let Some((snapshot_start, snapshot_ns, presentation)) = result? {
                     live_presentation.submitted(presentation, Instant::now());
                     if let Some(trace) = &mut key_trace {
                         trace.submitted(presentation, paint_timings.take().expect("traced paint"), snapshot_start, snapshot_ns);
@@ -890,9 +923,9 @@ fn evaluate(
                 // after any ran, redisplay and check again before blocking.
                 // A timer may read input (`read-event' with a timeout, a
                 // prompt) as a command may, so it gets the same handoff.
-                let mut lent = Lent { queue: &mut pending, presentation: &mut presentation, live: &mut live_presentation, width: &mut width, height: &mut height };
+                let lent = Lent { queue: &mut pending, live: &mut live_presentation, width: &mut width, height: &mut height };
                 let (idle, closed) = lent.run(&host, |_| timers::idle(&mut vm));
-                if closed && live_presentation.window_close(&mut vm)? {
+                if closed && close_window(&mut vm, &host, Lent { queue: &mut pending, live: &mut live_presentation, width: &mut width, height: &mut height })? {
                     return shutdown_editor(&mut vm, sender);
                 }
                 let idle = idle.unwrap_or_else(|error| {
@@ -929,29 +962,42 @@ fn evaluate(
         // An evaluation may mutate before signalling; its error must not hide that paint.
         let next = frame(&mut vm, g1, width, height)?;
         if next != previous.frame {
-            presentation = presentation
-                .checked_add(1)
-                .ok_or("presentation exhausted")?;
+            let presentation = next_presentation(&host)?;
             previous = paint(&mut engine.borrow_mut(), &mut vm, sender, presentation, force_gc, floor, next, &mut pending, true, &mut paint_timings)?;
         }
         match result {
-            Err(error) => reply(json!({"error":error,"presentation":presentation}))?,
-            Ok(result) => reply(json!({"result":result,"presentation":presentation}))?,
+            Err(error) => reply(json!({"error":error,"presentation":last_presentation()}))?,
+            Ok(result) => reply(json!({"result":result,"presentation":last_presentation()}))?,
         }
     }
     shutdown_editor(&mut vm, sender)
 }
 
-/// The outer loop's input and presentation state, lent to the prompt host
-/// (prompt.rs) while the loop runs Lisp that may read input mid-way: the
-/// keys queued ahead, the last presentation submitted and the one in flight.
-/// What the Lisp did not consume, and what its reads presented, settled or
-/// saw (a resize, a close), come back. A read that redisplays from stale
-/// state submits a presentation the renderer has already passed and waits
-/// for it in vain.
+/// Number the next presentation. The loop and every prompt read inside the
+/// Lisp it runs advance this one counter (prompt::Shared), so neither numbers
+/// or compares a paint from a stale copy.
+fn next_presentation(host: &std::rc::Rc<std::cell::RefCell<prompt::Shared>>) -> Result<u64, String> {
+    let mut shared = host.borrow_mut();
+    shared.presentation = shared.presentation.checked_add(1).ok_or("presentation exhausted")?;
+    Ok(shared.presentation)
+}
+
+/// A native close: GUI quit, lent like any Lisp the loop runs, whose
+/// confirmation may read input. Whether to shut down.
+fn close_window(vm: &mut Vm, host: &std::rc::Rc<std::cell::RefCell<prompt::Shared>>, lent: Lent<'_>) -> Result<bool, String> {
+    lent.run(host, |live| live.window_close(vm)).0
+}
+
+/// The outer loop's input state, lent to the prompt host (prompt.rs) for
+/// every piece of Lisp the loop runs (a command, a timer, a background
+/// callback, a close), since any of them may read input mid-way: the keys
+/// queued ahead and the presentation in flight. What the Lisp did not
+/// consume, and what its reads settled or saw (a resize, a close), come
+/// back; a read that presented a prompt leaves the frame to repaint, even
+/// when the Lisp changed nothing else. A read that redisplays without the
+/// in-flight presentation waits for one the renderer has already passed.
 struct Lent<'a> {
     queue: &'a mut std::collections::VecDeque<InputEvent>,
-    presentation: &'a mut u64,
     live: &'a mut presentation::Presentation,
     width: &'a mut u32,
     height: &'a mut u32,
@@ -959,17 +1005,17 @@ struct Lent<'a> {
 
 impl Lent<'_> {
     /// RUN's value, and whether a read inside it saw the frame close.
-    fn run<T>(&mut self, host: &std::rc::Rc<std::cell::RefCell<prompt::Shared>>, run: impl FnOnce(&mut presentation::Presentation) -> T) -> (T, bool) {
-        {
+    fn run<T>(self, host: &std::rc::Rc<std::cell::RefCell<prompt::Shared>>, run: impl FnOnce(&mut presentation::Presentation) -> T) -> (T, bool) {
+        let before = {
             let mut shared = host.borrow_mut();
             shared.pending = std::mem::take(self.queue);
-            shared.presentation = *self.presentation;
             shared.in_flight = self.live.in_flight().map(|(p, _)| p);
-        }
+            shared.presentation
+        };
         let value = run(self.live);
         let mut shared = host.borrow_mut();
         *self.queue = std::mem::take(&mut shared.pending);
-        *self.presentation = shared.presentation;
+        if shared.presentation != before { self.live.changed(); }
         if let Some(settled) = shared.settled.take() { self.live.completed(settled); }
         shared.in_flight = None;
         if let Some((w, h)) = shared.size.take() { (*self.width, *self.height) = (w, h); }
