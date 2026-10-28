@@ -229,6 +229,11 @@ fn window_next_buffers(cx; optional window: Value) {
     cx.windows().window_buffers(window, true)
 }}
 
+defsubr! { name = "window-discard-buffer-from-window", gnu = "window.c:3445", effect = Global,
+fn window_discard_buffer_from_window(cx, buffer: Value, window: Value; optional all: Value) {
+    cx.windows().discard_buffer(buffer, window, all != Value::NIL)
+}}
+
 defsubr! { name = "set-window-next-buffers", gnu = "window.c:2362", effect = Global,
 fn set_window_next_buffers(cx, window: Value, next_buffers: Value) {
     cx.windows().set_window_buffers(window, next_buffers, true)

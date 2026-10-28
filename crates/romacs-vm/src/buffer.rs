@@ -148,6 +148,14 @@ impl Vm {
         Ok(())
     }
     /// Fbury_buffer_internal: BUFFER moves to the end of the buffer list.
+    /// buffer.c record_buffer's list: BUFFER first.
+    pub(crate) fn record_buffer_model(&mut self, buffer: Value) {
+        let mut order = self.buffer_order();
+        if order.first() == Some(&buffer) || !order.contains(&buffer) { return; }
+        order.retain(|&b| b != buffer);
+        order.insert(0, buffer);
+        self.set_buffer_order(&order);
+    }
     pub(crate) fn bury_buffer_model(&mut self, buffer: Value) {
         let mut order = self.buffer_order();
         order.retain(|&b| b != buffer);

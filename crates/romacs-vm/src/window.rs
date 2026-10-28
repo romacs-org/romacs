@@ -408,7 +408,11 @@ impl Vm {
             self.set_buffer_point_for_window(v, new_point)?;
             self.put_window_root(SELECTED, v);
         }
-        self.slots[self.buffer_slot].value = self.window(v)?.buffer;
+        let buffer = self.window(v)?.buffer;
+        self.slots[self.buffer_slot].value = buffer;
+        // window.c select_window's record_and_return: record_buffer moves
+        // the buffer to the front of `buffer-list' (buffer.c:2120).
+        if record { self.record_buffer_model(buffer); }
         Ok(v)
     }
     fn prepared_check(&self, v: Value, horizontal: bool, omit: Value) -> Result<bool> {
@@ -1766,6 +1770,48 @@ impl<'a> Windows<'a> {
         let v = self.live(window)?;
         let w = self.get(v)?;
         Ok(if next { w.next_buffers } else { w.prev_buffers })
+    }
+    /// window.c window_discard_buffer_from_window: BUFFER leaves WINDOW's
+    /// previous buffers (an alist), its next buffers, and with ALL the
+    /// `quit-restore' parameters that name it (nth 3, or the car of nth 1).
+    pub(crate) fn discard_buffer(&mut self, buffer: Value, window: Value, all: bool) -> Out {
+        if !self.vm.buffer_state(buffer).is_ok_and(|s| s.live) { return Err(Fault::Error("Not a live buffer".into())); }
+        let v = match self.vm.object_if(window) {
+            Some(Object::Window(x)) if x.live() => window,
+            _ => return Err(Fault::Error("Not a live window".into())),
+        };
+        let keep = |vm: &mut Vm, list: Value, alist: bool| -> std::result::Result<Value, Fault> {
+            let items = vm.list_values(list).map_err(internal)?;
+            let kept: Vec<Value> = items.into_iter()
+                .filter(|&item| (if alist { vm.cons_pair(item).map(|(car, _)| car).unwrap_or(item) } else { item }) != buffer)
+                .collect();
+            Ok(vm.list_value(&kept))
+        };
+        let (prev, next) = { let w = self.get(v)?; (w.prev_buffers, w.next_buffers) };
+        let prev = keep(self.vm, prev, true)?;
+        let next = keep(self.vm, next, false)?;
+        { let w = self.get_mut(v)?; w.prev_buffers = prev; w.next_buffers = next; }
+        if !all { return Ok(Value::NIL); }
+        let names = [self.vm.intern("quit-restore"), self.vm.intern("quit-restore-prev")];
+        let mentions = |vm: &Vm, value: Value| -> bool {
+            let items = vm.list_values(value).unwrap_or_default();
+            items.get(3) == Some(&buffer)
+                || items.get(1).and_then(|&quint| vm.cons_pair(quint).ok()).is_some_and(|(car, _)| car == buffer)
+        };
+        let parameter = |w: &Window, key: Value| w.parameters.iter().find(|(k, _)| *k == key).map_or(Value::NIL, |(_, v)| *v);
+        let (restore, restore_prev) = { let w = self.get(v)?; (parameter(w, names[0]), parameter(w, names[1])) };
+        let set = |w: &mut Window, key: Value, value: Value| {
+            if let Some((_, slot)) = w.parameters.iter_mut().find(|(k, _)| *k == key) { *slot = value; }
+            else { w.parameters.insert(0, (key, value)); }
+        };
+        if mentions(self.vm, restore_prev) { set(self.get_mut(v)?, names[1], Value::NIL); }
+        let restore_prev = { let w = self.get(v)?; parameter(w, names[1]) };
+        if mentions(self.vm, restore) {
+            let w = self.get_mut(v)?;
+            set(w, names[0], restore_prev);
+            set(w, names[1], Value::NIL);
+        }
+        Ok(Value::NIL)
     }
     /// GNU `set-window-prev-buffers` (NEXT false) / `set-window-next-buffers`.
     pub(crate) fn set_window_buffers(&mut self, window: Value, buffers: Value, next: bool) -> Out {
