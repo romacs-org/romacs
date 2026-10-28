@@ -498,9 +498,9 @@ fn property_runs(properties: &crate::properties::Properties, len: usize, hasher:
     values
 }
 
-/// TABLE's mapping, as `char-table-range` reads it: each run of characters
-/// that share a value, and the purpose, default, parent and extras, into
-/// HASHER; the values, for the caller to digest.
+/// TABLE's mapping, as `aref` reads it, ASCII slot included: each run of
+/// characters that share a value, and the purpose, default, parent and
+/// extras, into HASHER; the values, for the caller to digest.
 fn char_table_content(table: &crate::char_table::CharTable, hasher: &mut sha2::Sha256) -> Result<Vec<Value>, &'static str> {
     use sha2::Digest;
     let mut values = vec![table.purpose, table.default, table.parent];

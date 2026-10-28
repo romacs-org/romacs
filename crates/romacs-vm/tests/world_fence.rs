@@ -261,6 +261,48 @@ fn the_content_check_sees_char_tables_and_text_properties() {
     assert_eq!(changed, [("fence".into(), "fence-table".into(), "changed".into()), ("fence".into(), "fence-text".into(), "changed".into())], "{trace}");
 }
 
+/// Each in-place write changes what `aref`, `char-table-range`, the parent
+/// or an extra slot reads; one table per field. A literal's ASCII slot is
+/// a node detached from the root, so `aset' below 128 writes only it.
+#[test]
+fn the_content_check_sees_every_char_table_field() {
+    let ascii = format!("#^[nil nil test #^^[3 0{}]{}]", " a".repeat(128), " b".repeat(64));
+    let bootstrap = format!("\
+(defvar custom-delayed-init-variables nil)
+(put 'fence-purpose 'char-table-extra-slots 1)
+(defvar fence-ascii {ascii})
+(defvar fence-default (make-char-table 'test 'v))
+(defvar fence-parent (make-char-table 'test))
+(defvar fence-child (make-char-table 'test))
+(set-char-table-parent fence-child fence-parent)
+(defvar fence-reparent (make-char-table 'test))
+(defvar fence-extra (make-char-table 'fence-purpose 'v))
+(unwind-protect
+    (progn (romacs--startup-phase t)
+           (setq seen (list fence-ascii fence-default fence-child fence-reparent fence-extra)))
+  (romacs--startup-phase nil))
+");
+    let preload = "\
+(aset fence-ascii 65 'z)
+(set-char-table-range fence-default nil 'w)
+(aset fence-parent 65 'q)
+(set-char-table-parent fence-reparent (make-char-table 'test 'w))
+(set-char-table-extra-slot fence-extra 0 'x)
+";
+    let (mut vm, trace) = run_with("char-table-fields", &bootstrap, preload, true);
+    assert_eq!(listed(&trace.unwrap()), []);
+    let probes = "(list (aref fence-ascii 65) (aref fence-ascii 128) (char-table-range fence-default nil) (aref fence-child 65))";
+    assert_eq!(vm.eval_source(probes).and_then(|v| v.display()).unwrap(), "(z b w q)");
+    host::enter_build(PINNED);
+    vm.world_check_inputs();
+    let trace = host::leave_build().unwrap();
+    let mut changed: Vec<_> = listed(&trace).into_iter().map(|(kind, _, symbol, access, _)| (kind, symbol, access)).collect();
+    changed.sort();
+    let expected = ["fence-ascii", "fence-child", "fence-default", "fence-extra", "fence-reparent"]
+        .map(|symbol| ("fence".to_owned(), symbol.to_owned(), "changed".to_owned()));
+    assert_eq!(changed, expected, "{trace}");
+}
+
 #[test]
 fn a_binding_across_startups_end_stays_fenced_in_backtraces() {
     let bootstrap = "\
