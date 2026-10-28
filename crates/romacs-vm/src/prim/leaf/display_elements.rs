@@ -570,17 +570,19 @@ impl<'l, 'a> Source<'l, 'a> {
             }
             if has_arg && (head == s.left_fringe || head == s.right_fringe) { return Ok(Some(Replacement::Nothing)); }
         }
-        let (value, margin) = match self.leaf.pair(spec) {
-            Some((head, rest)) if self.leaf.pair(head).is_some_and(|(h, _)| h == s.margin) => {
-                let location = self.leaf.pair(head).and_then(|(_, l)| self.leaf.pair(l)).map_or(Value::NIL, |(l, _)| l);
+        // `(margin LOCATION)': a nil or absent LOCATION is the text area.
+        let (value, location) = match self.leaf.pair(spec) {
+            Some((head, rest)) if let Some((h, tail)) = self.leaf.pair(head) && h == s.margin => {
+                let location = self.leaf.pair(tail).map_or(Value::NIL, |(l, _)| l);
                 if location == Value::NIL || location == s.left_margin || location == s.right_margin {
-                    (self.leaf.pair(rest).map_or(rest, |(v, _)| v), true)
-                } else { (spec, false) }
+                    (self.leaf.pair(rest).map_or(rest, |(v, _)| v), location)
+                } else { (spec, Value::NIL) }
             }
-            _ => (spec, false),
+            _ => (spec, Value::NIL),
         };
-        Ok(if self.leaf.vm.str_view(value).is_some() { Some(Replacement::String(value, !margin)) }
-            else if self.leaf.pair(value).is_some_and(|(h, _)| h == s.space) { Some(Replacement::Space(value, !margin)) }
+        let text_area = location == Value::NIL;
+        Ok(if self.leaf.vm.str_view(value).is_some() { Some(Replacement::String(value, text_area)) }
+            else if self.leaf.pair(value).is_some_and(|(h, _)| h == s.space) { Some(Replacement::Space(value, text_area)) }
             else { None })
     }
 
