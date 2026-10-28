@@ -192,4 +192,83 @@ call for an undo boundary, 1 when it might not have been simple."
           (if result (setq hairy 2))))
       (run-hooks 'post-self-insert-hook)
       hairy)))
+
+(defun romacs--replace-source (source)
+  "SOURCE of `replace-region-contents' as editfns.c reads it: a string as
+it is, else [BUFFER BEG END] for the accessible text of a buffer or the
+validated region of a vector [BUFFER BEG END]."
+  (cond
+   ((stringp source) source)
+   ((bufferp source)
+    (save-current-buffer
+      (set-buffer source)
+      (vector source (point-min) (point-max))))
+   ((vectorp source)
+    (let ((end (aref source 2))
+          (beg (aref source 1))
+          (buffer (aref source 0)))
+      (or (bufferp buffer) (signal 'wrong-type-argument (list 'bufferp buffer)))
+      (save-current-buffer
+        (set-buffer buffer)
+        (let ((region (romacs--validate-region beg end)))
+          (vector buffer (car region) (cdr region))))))
+   (t (signal 'wrong-type-argument (list '(or string buffer vector) source)))))
+
+(defun romacs--replace-region-contents (beg end source max-secs max-costs inherit)
+  "The rest of editfns.c `replace-region-contents' once BEG..END is valid.
+A function SOURCE is called with the buffer narrowed to BEG..END.  When
+either text is empty, or MAX-SECS or MAX-COSTS is 0, the region is
+replaced whole.  Otherwise the change runs GNU's comparison finds replace
+just what differs, last first, each a replace_range with modification
+hooks bound off, inside one undo boundary and one before- and
+after-change for the whole region; a comparison past MAX-SECS replaces
+the region whole and gives nil.  The pinned GNU passes INHERIT as
+replace_range's adjust-match-data flag, not its inherit flag: the
+replacement inherits no properties, and INHERIT moves the match data."
+  (if (functionp source)
+      (setq source (save-excursion
+                     (save-restriction
+                       (narrow-to-region beg end)
+                       (funcall source)))))
+  (setq source (romacs--replace-source source))
+  (let ((size-a (- end beg))
+        (size-b (if (stringp source) (length source)
+                  (- (aref source 2) (aref source 1)))))
+    (cond
+     ((and (= size-a 0) (= size-b 0)) t)
+     ((or (= size-a 0) (= size-b 0) (eq max-secs 0) (eq max-costs 0))
+      (romacs--replace-range beg end source inherit)
+      t)
+     (t
+      (if (and (vectorp source) (eq (aref source 0) (current-buffer)))
+          (error "Cannot replace a buffer with itself"))
+      (let* ((too-expensive
+              (cond ((null max-costs) 1000000)
+                    ((integerp max-costs)
+                     (max 0 (min max-costs most-positive-fixnum)))
+                    (t (signal 'wrong-type-argument (list 'integerp max-costs)))))
+             (runs (romacs--replace-runs beg end source too-expensive
+                                         (and max-secs (float-time max-secs)))))
+        (if (eq runs t)
+            (progn (romacs--replace-range beg end source inherit) nil)
+          (undo-boundary)
+          (let ((before (if (not inhibit-modification-hooks)
+                            (romacs--prepare-change beg end))))
+            (let ((inhibit-modification-hooks t))
+              (while runs
+                (let ((run (car runs)))
+                  (romacs--replace-range
+                   (car run) (nth 1 run)
+                   (if (stringp source)
+                       (substring source (nth 2 run) (nth 3 run))
+                     (vector (aref source 0) (nth 2 run) (nth 3 run)))
+                   inherit))
+                (setq runs (cdr runs))))
+            (when before
+              (romacs--after-change (current-buffer) beg (+ beg size-b) size-a
+                                    nil nil (cdr before))
+              (if (and (not (buffer-modified-p)) (stringp buffer-file-truename)
+                       (fboundp 'unlock-file))
+                  (unlock-file buffer-file-truename))))
+          t))))))
 )

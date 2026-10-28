@@ -15,3 +15,8 @@ defsubr! { name = "previous-overlay-change", gnu = "buffer.c:4014", effect = Rea
 fn previous_overlay_change(cx, position: Value) {
     cx.previous_overlay_change(position)
 }}
+
+defsubr! { name = "overlay-properties", gnu = "buffer.c:3898", effect = Reads,
+fn overlay_properties(cx, overlay: Value) {
+    cx.overlay_plist(overlay)
+}}

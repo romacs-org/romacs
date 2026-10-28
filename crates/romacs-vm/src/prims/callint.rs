@@ -220,8 +220,8 @@ fn subr_intspec(subr: Value) -> Option<Option<&'static str>> {
         "forward-char" | "backward-char" | "beginning-of-line" | "end-of-line" | "forward-line" => "^p",
         "delete-char" | "delete-backward-char" => "p\nP",
         "self-insert-command" => "(list (prefix-numeric-value current-prefix-arg) last-command-event)",
-        "goto-char" => "(goto-char--read-natnum-interactive \"Go to char: \")",
-        "delete-region" | "narrow-to-region" => "r",
+        "goto-char" => "(goto-char--read-natnum-interactive \"Go to char: \")", "replace-region-contents" => "(list (if (use-region-p) (region-beginning) (point-min)) (if (use-region-p) (region-end) (point-max)) (get-buffer (read-buffer-to-switch \"Source buffer: \")))",
+        "delete-region" | "narrow-to-region" | "base64-encode-region" | "base64url-encode-region" | "base64-decode-region" => "r",
         "widen" | "garbage-collect" | "recursive-edit" | "top-level" | "exit-recursive-edit" | "abort-recursive-edit" => "",
         "erase-buffer" => "*",
         "search-forward" => "MSearch: ",
@@ -749,3 +749,45 @@ pub(super) fn command_predicate(
         then(cx, Value::NIL, &saved)
     }
 }
+
+// ---------------------------------------------------------------------------
+// command-modes
+
+// GNU `Fcommand_modes` (data.c:1218-1278). VM2 subrs declare no modes.
+defsubr! { name = "command-modes", gnu = "data.c:1218", effect = Reads,
+fn command_modes(cx, command: Value) {
+    if indirect(cx, command)? == Value::NIL {
+        return Ok(Value::NIL);
+    }
+    // A `command-modes' property anywhere on the alias chain wins.
+    let property = cx.intern("command-modes");
+    let mut fun = command;
+    for _ in 0..=cx.list_limit() {
+        if !symbolp(cx, fun) {
+            break;
+        }
+        let modes = get(cx, fun, property)?;
+        if modes != Value::NIL {
+            return Ok(modes);
+        }
+        fun = cx.symbol_function(fun)?;
+    }
+    match cx.kind(fun) {
+        Kind::Closure => Ok(cx.interactive_modes(fun)),
+        Kind::Cons => {
+            let head = car(cx, fun)?;
+            if head == cx.intern("autoload") {
+                // (nth 3 FUN), the autoload's INTERACTIVE, when it is a list.
+                let modes = car(cx, cdr(cx, cdr(cx, cdr(cx, fun)?)?)?)?;
+                Ok(if cx.pair(modes).is_some() { modes } else { Value::NIL })
+            } else if head == cx.intern("lambda") {
+                let interactive = cx.intern("interactive");
+                let form = assq(cx, interactive, cdr(cx, cdr(cx, fun)?)?)?;
+                cdr(cx, cdr(cx, form)?)
+            } else {
+                Ok(Value::NIL)
+            }
+        }
+        _ => Ok(Value::NIL),
+    }
+}}

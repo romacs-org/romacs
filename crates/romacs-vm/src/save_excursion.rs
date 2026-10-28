@@ -8,7 +8,7 @@ impl Vm {
     fn excursion_call(b: &mut Builder, primitive: Primitive, args: &[usize]) -> usize {
         Self::native_call(b, Value::reference(primitive as usize, 6), args)
     }
-    fn native_call(b: &mut Builder, callable: Value, args: &[usize]) -> usize {
+    pub(super) fn native_call(b: &mut Builder, callable: Value, args: &[usize]) -> usize {
         let target = b.reg();
         b.emit(Op::Const(target, callable));
         let start = b.next;

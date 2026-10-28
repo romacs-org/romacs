@@ -408,13 +408,14 @@ impl Vm {
                     metadata.extend([Value::NIL, a[3]]);
                 }
                 if a[4] != Value::NIL {
+                    // eval.c:539-544: SPEC, or [SPEC MODES] when MODES is non-nil.
                     let (_, tail) = self.cons_pair(a[4])?;
-                    let spec = if tail == Value::NIL {
-                        Value::NIL
+                    let (spec, modes) = if tail == Value::NIL {
+                        (Value::NIL, Value::NIL)
                     } else {
-                        self.cons_pair(tail)?.0
+                        self.cons_pair(tail)?
                     };
-                    metadata.push(spec);
+                    metadata.push(if modes == Value::NIL { spec } else { self.allocate_object(data::Object::Vector(vec![spec, modes])) });
                 }
                 let result = Value::reference(self.closures.len(), 4);
                 self.closures.push(Closure {
@@ -424,7 +425,11 @@ impl Vm {
                     document: a[3],
                 });
                 if a[4] != Value::NIL {
-                    let spec = self.closures[result.index(4)?].metadata[5];
+                    let slot_value = self.closures[result.index(4)?].metadata[5];
+                    let spec = match self.object_if(slot_value) {
+                        Some(data::Object::Vector(v)) => v.first().copied().unwrap_or(slot_value),
+                        _ => slot_value,
+                    };
                     let thunk = if spec == Value::NIL || self.str_view(spec).is_some() {
                         Value::NIL
                     } else {
@@ -449,7 +454,7 @@ impl Vm {
                         ));
                     }
                     let table = self.slots[slot].value;
-                    let entry = self.keymap_cons(spec, thunk);
+                    let entry = self.keymap_cons(slot_value, thunk);
                     self.declaration_hash_put(table, result, entry)?;
                 }
                 Ok(result)

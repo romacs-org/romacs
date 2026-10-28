@@ -134,6 +134,25 @@ impl ByteBuffer {
         }
         Ok(())
     }
+    /// insert_before_markers: INSERTED at point, after the saved points
+    /// and bounds there, as adjust_markers_for_insert moves every marker at
+    /// point when BEFORE_MARKERS.
+    pub fn insert_before_markers(&mut self, inserted: &[u8]) -> Result<()> {
+        let at = self.point;
+        self.replace(at..at, inserted)?;
+        let end = ByteOffset(at.0 + inserted.len());
+        for (_, saved) in &mut self.saved_restrictions {
+            if saved.start == at {
+                saved.start = end;
+            }
+        }
+        for (_, saved) in &mut self.saved_points {
+            if *saved == at {
+                *saved = end;
+            }
+        }
+        Ok(())
+    }
     pub fn visit_values(&mut self, visit: &mut impl FnMut(&mut Value)) {
         visit(&mut self.syntax_table);
         visit(&mut self.category_table);

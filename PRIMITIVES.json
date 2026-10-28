@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "f9e97b25c504c62fffb2714c36089e87dd9829caa693709f01125e3071152a95",
+  "source_fingerprint": "97e280628ce27b33cac0890c8611acdca3dbd30e656dec02d108e9dc5c9cb75d",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 964,
-  "parsed_vm2_only": 964
+  "parsed_total": 975,
+  "parsed_vm2_only": 975
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -378,20 +378,35 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/buffer_state.rs:68"
   },
+  "base64-decode-region": {
+   "name": "base64-decode-region",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/base64.rs:182"
+  },
   "base64-decode-string": {
    "name": "base64-decode-string",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/base64.rs:108"
+   "registered_at": "crates/romacs-vm/src/prims/base64.rs:109"
+  },
+  "base64-encode-region": {
+   "name": "base64-encode-region",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/base64.rs:168"
   },
   "base64-encode-string": {
    "name": "base64-encode-string",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/base64.rs:96"
+   "registered_at": "crates/romacs-vm/src/prims/base64.rs:97"
+  },
+  "base64url-encode-region": {
+   "name": "base64url-encode-region",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/base64.rs:173"
   },
   "base64url-encode-string": {
    "name": "base64url-encode-string",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/base64.rs:102"
+   "registered_at": "crates/romacs-vm/src/prims/base64.rs:103"
   },
   "beginning-of-line": {
    "name": "beginning-of-line",
@@ -582,6 +597,11 @@
    "implementation": "vm2",
    "variant": "Primitive::ByteToChar",
    "registered_at": "crates/romacs-vm/src/lib.rs:551"
+  },
+  "byte-to-string": {
+   "name": "byte-to-string",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/str.rs:368"
   },
   "call-interactively": {
    "name": "call-interactively",
@@ -827,6 +847,11 @@
    "name": "color-values-from-color-spec",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/face.rs:476"
+  },
+  "command-modes": {
+   "name": "command-modes",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/callint.rs:757"
   },
   "command-remapping": {
    "name": "command-remapping",
@@ -2893,6 +2918,11 @@
    "variant": "Primitive::OverlayGet",
    "registered_at": "crates/romacs-vm/src/lib.rs:627"
   },
+  "overlay-properties": {
+   "name": "overlay-properties",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/overlays.rs:19"
+  },
   "overlay-put": {
    "name": "overlay-put",
    "implementation": "vm2",
@@ -3370,6 +3400,11 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/search.rs:11"
   },
+  "replace-region-contents": {
+   "name": "replace-region-contents",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/insdel.rs:277"
+  },
   "require": {
    "name": "require",
    "implementation": "vm2",
@@ -3465,6 +3500,11 @@
    "name": "romacs--overlay-change-hooks",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/insdel.rs:262"
+  },
+  "romacs--prepare-change": {
+   "name": "romacs--prepare-change",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/insdel.rs:303"
   },
   "romacs--proc-accept": {
    "name": "romacs--proc-accept",
@@ -3627,6 +3667,16 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:260"
   },
+  "romacs--replace-range": {
+   "name": "romacs--replace-range",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/insdel.rs:336"
+  },
+  "romacs--replace-runs": {
+   "name": "romacs--replace-runs",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/insdel.rs:403"
+  },
   "romacs--restore-excursion": {
    "name": "romacs--restore-excursion",
    "implementation": "vm2",
@@ -3691,6 +3741,11 @@
    "name": "romacs--term-send",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/terminal.rs:8"
+  },
+  "romacs--validate-region": {
+   "name": "romacs--validate-region",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/insdel.rs:294"
   },
   "romacs--wait-status": {
    "name": "romacs--wait-status",

@@ -49,7 +49,9 @@ impl Vm {
     /// an interpreted closure: after an optional docstring (a string with more
     /// body after it, or `(:documentation FORM)'), a leading `(interactive
     /// SPEC . MODES)' is taken out of the body and becomes the closure's
-    /// interactive spec; MODES are dropped, as `interactive-form' drops them.
+    /// interactive spec, `[SPEC MODES]' when MODES is non-nil, as
+    /// make-interpreted-closure makes CLOSURE_INTERACTIVE (`command-modes'
+    /// reads MODES; `interactive-form' gives SPEC alone).
     /// For a `defun' body, GNU's `defun' macro (byte-run.el) also lets the
     /// `declare' forms come before it. VM2 closures have no
     /// CLOSURE_INTERACTIVE slot, so the spec is registered against the closure
@@ -144,11 +146,17 @@ impl Vm {
             return Ok(if let Some(doc) = doc_register { self.closure_native_call(builder, Primitive::ClosureDocument, &[result, doc]) } else { result });
         }
         // make-interpreted-closure (eval.c:539-544): the spec is (car (cdr
-        // IFORM)); a non-nil cdr after it is MODES, which `interactive-form'
-        // drops; `(interactive . X)' with X not a list signals `listp'.
-        let spec = match &body[i] {
-            Form::List(items) => items.get(1).cloned().unwrap_or_else(|| sym("nil")),
-            Form::Dotted(items, _) if items.len() >= 2 => items[1].clone(),
+        // IFORM)); a non-nil cdr after it is MODES, kept with it as
+        // [SPEC MODES]; `(interactive . X)' with X not a list signals `listp'.
+        let (spec, modes) = match &body[i] {
+            Form::List(items) => (
+                items.get(1).cloned().unwrap_or_else(|| sym("nil")),
+                (items.len() > 2).then(|| Form::List(items[2..].to_vec())),
+            ),
+            Form::Dotted(items, tail) if items.len() >= 2 => (
+                items[1].clone(),
+                Some(if items.len() > 2 { Form::Dotted(items[2..].to_vec(), tail.clone()) } else { (**tail).clone() }),
+            ),
             Form::Dotted(_, tail) => {
                 return self.expr(builder, &call("car", vec![quote((**tail).clone())]));
             }
@@ -167,20 +175,29 @@ impl Vm {
             form => call("function", vec![Form::List(vec![sym("lambda"), Form::List(vec![]), form.clone()])]),
         };
         let executable = lambda[2..].to_vec();
-        let saved_captures = std::mem::replace(&mut self.keep_captures, exposed);
-        let result = self.expr(
-            builder,
-            &call(
-                "#:vm2-set-interactive-form",
-                vec![call("function", vec![Form::List(lambda)]), quote(spec.clone()), thunk],
-            ),
-        );
-        self.keep_captures = saved_captures;
-        let result = result?;
-        let result = if exposed { self.expose_closure(builder, args.list()?, &executable, result)? } else { result };
+        // One slot value, registered and in the closure's slot 5, as GNU's
+        // closure holds it once. [SPEC MODES] is a fresh vector for each
+        // closure, as make-interpreted-closure's Fvector makes it.
         let spec_value = self.literal(&spec)?;
         let spec_reg = builder.reg();
         builder.emit(Op::Const(spec_reg, spec_value));
+        let spec_reg = match modes {
+            Some(modes) => {
+                let modes_value = self.literal(&modes)?;
+                let modes_reg = builder.reg();
+                builder.emit(Op::Const(modes_reg, modes_value));
+                self.closure_native_call(builder, Primitive::Vector, &[spec_reg, modes_reg])
+            }
+            None => spec_reg,
+        };
+        let saved_captures = std::mem::replace(&mut self.keep_captures, exposed);
+        let parts = self.expr(builder, &call("function", vec![Form::List(lambda)]))
+            .and_then(|closure| Ok((closure, self.expr(builder, &thunk)?)));
+        self.keep_captures = saved_captures;
+        let (closure, thunk) = parts?;
+        let register = crate::prim::subr_named("#:vm2-set-interactive-form").expect("registration subr");
+        let result = Self::native_call(builder, register, &[closure, spec_reg, thunk]);
+        let result = if exposed { self.expose_closure(builder, args.list()?, &executable, result)? } else { result };
         let doc = match doc_register { Some(doc) => doc, None => { let doc = builder.reg(); builder.emit(Op::Const(doc, Value::NIL)); doc } };
         Ok(self.closure_native_call(builder, Primitive::ClosureDocument, &[result, doc, spec_reg]))
     }

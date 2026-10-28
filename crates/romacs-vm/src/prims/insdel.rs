@@ -267,3 +267,164 @@ fn overlay_change_hooks(cx, beg: Value, end: Value) {
     let pairs: Vec<Value> = hooks.iter().map(|&(prop, overlay)| cx.cons(prop, overlay)).collect();
     Ok(list(cx, &pairs))
 }}
+
+// Freplace_region_contents's region check; the rest is the Lisp half's
+// `romacs--replace-region-contents', over the substrate below: GNU's
+// comparison (`romacs--replace-runs'), one replace_range
+// (`romacs--replace-range') per change run with modification hooks bound
+// off, and one prepare (`romacs--prepare-change') and after-change for the
+// whole region.
+defsubr! { name = "replace-region-contents", gnu = "editfns.c:1922", effect = Global,
+fn replace_region_contents(cx, beg: Value, end: Value, source: Value; optional max_secs: Value, max_costs: Value, inherit: Value) -> Step {
+    let (from, to) = cx.validate_region(beg, end)?;
+    let saved = vec![fixnum(from), fixnum(to), source, max_secs, max_costs, inherit];
+    if half_missing(cx)? { return install_half(cx, replace_region, saved); }
+    replace_region(cx, Value::NIL, &saved)
+}}
+
+fn replace_region(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
+    Ok(Step::Call { f: cx.intern("romacs--replace-region-contents"), args: saved.to_vec(), then: done_value, saved: vec![] })
+}
+
+fn done_value(_: &mut Leaf<'_>, value: Value, _: &[Value]) -> Next {
+    Ok(Step::Done(value))
+}
+
+// validate_region for the Lisp half: (FROM . TO) of the current buffer.
+defsubr! { name = "romacs--validate-region", gnu = "buffer.c:2504", effect = Reads,
+fn validate_region_pair(cx, beg: Value, end: Value) {
+    let (from, to) = cx.validate_region(beg, end)?;
+    Ok(cx.cons(fixnum(from), fixnum(to)))
+}}
+
+// prepare_to_modify_buffer for BEG..END with no position to preserve: its
+// checks, then its hooks when any can run. The value is the before hooks'
+// (PRESERVE . OVERLAYS), whose overlays signal_after_change runs again.
+defsubr! { name = "romacs--prepare-change", gnu = "insdel.c:2196", effect = Global,
+fn prepare_change(cx, beg: Value, end: Value) -> Step {
+    let from = beg.integer_value().ok_or(Fault::Wrong("fixnump", beg))?;
+    let to = end.integer_value().ok_or(Fault::Wrong("fixnump", end))?;
+    let prepared = cx.prepare_change(from, to)?;
+    if !prepared.before {
+        cx.change_deactivates_mark(prepared.inhibited)?;
+        return Ok(Step::Done(cx.cons(Value::NIL, Value::NIL)));
+    }
+    if half_missing(cx)? { return install_half(cx, prepare_installed, vec![beg, end]); }
+    let buffer = cx.current_buffer()?;
+    let hooks = list(cx, &prepared.modification_hooks);
+    let args = vec![buffer, beg, end, hooks, flag(prepared.undoable), Value::NIL];
+    Ok(Step::Call { f: cx.intern("romacs--before-change"), args, then: change_prepared, saved: vec![flag(prepared.inhibited)] })
+}}
+
+fn prepare_installed(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
+    Ok(Step::Call { f: cx.intern("romacs--prepare-change"), args: saved.to_vec(), then: done_value, saved: vec![] })
+}
+
+fn change_prepared(cx: &mut Leaf<'_>, before: Value, saved: &[Value]) -> Next {
+    cx.change_deactivates_mark(saved[0] != Value::NIL)?;
+    Ok(Step::Done(before))
+}
+
+// Registers of a replacement between its steps:
+//   [FROM, LENGTH, SOURCE, ADJUST, INHIBITED, BEHIND, IN-FRONT]
+// SOURCE is a string or [BUFFER BEG END]; ADJUST moves the match data
+// with the change. The before hooks return FROM where they moved it, and
+// the replaced text is LENGTH characters from there.
+const REPLACE_WIDTH: usize = 7;
+
+// replace_range (insdel.c:1463) with its hooks, inheriting no properties.
+defsubr! { name = "romacs--replace-range", gnu = "insdel.c:1463", effect = Global,
+fn replace_range(cx, from: Value, to: Value, source: Value, adjust: Value) -> Step {
+    let start = from.integer_value().ok_or(Fault::Wrong("fixnump", from))?;
+    let end = to.integer_value().ok_or(Fault::Wrong("fixnump", to))?;
+    let prepared = cx.prepare_change(start, end)?;
+    let insert_hooks = prepared.behind != Value::NIL || prepared.in_front != Value::NIL;
+    if (prepared.before || cx.after_change_runs(false, insert_hooks)?) && half_missing(cx)? {
+        return install_half(cx, replace_installed, vec![from, to, source, adjust]);
+    }
+    let mut saved = vec![Value::NIL; REPLACE_WIDTH];
+    saved.copy_from_slice(&[from, fixnum(end - start), source, adjust, flag(prepared.inhibited), prepared.behind, prepared.in_front]);
+    if !prepared.before { return replace_edit(cx, start, &saved, Value::NIL); }
+    let buffer = cx.current_buffer()?;
+    let hooks = list(cx, &prepared.modification_hooks);
+    let args = vec![buffer, from, to, hooks, flag(prepared.undoable), from];
+    Ok(Step::Call { f: cx.intern("romacs--before-change"), args, then: replace_prepared, saved })
+}}
+
+fn replace_installed(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
+    Ok(Step::Call { f: cx.intern("romacs--replace-range"), args: saved.to_vec(), then: done_value, saved: vec![] })
+}
+
+fn replace_prepared(cx: &mut Leaf<'_>, before: Value, saved: &[Value]) -> Next {
+    let (preserved, overlays) = cx.pair(before).expect("romacs--before-change value");
+    replace_edit(cx, preserved.integer_value().expect("preserved position"), saved, overlays)
+}
+
+/// The text a replacement inserts: SOURCE itself, or BUFFER's BEG..END.
+fn replacement_text(cx: &mut Leaf<'_>, source: Value) -> std::result::Result<Value, Fault> {
+    if cx.string_chars(source).is_some() { return Ok(source); }
+    let field = |i: i64| cx.vector_get(source, fixnum(i));
+    let (buffer, beg, end) = (field(0)?, field(1)?, field(2)?);
+    let position = |v: Value| v.integer_value().ok_or(Fault::Wrong("fixnump", v));
+    cx.buffer_region_text(buffer, position(beg)?, position(end)?)
+}
+
+fn replace_edit(cx: &mut Leaf<'_>, from: i64, saved: &[Value], overlays: Value) -> Next {
+    let to = from + saved[1].integer_value().expect("replaced length");
+    cx.change_deactivates_mark(saved[4] != Value::NIL)?;
+    let text = replacement_text(cx, saved[2])?;
+    let Some((from, to, inserted)) = cx.replace_change(from, to, text)? else { return Ok(Step::Done(Value::NIL)) };
+    if saved[3] != Value::NIL { cx.update_search_regs(from, to, from + inserted); }
+    let (behind, in_front) = (saved[5], saved[6]);
+    if !cx.after_change_runs(overlays != Value::NIL, behind != Value::NIL || in_front != Value::NIL)? {
+        return Ok(Step::Done(Value::NIL));
+    }
+    let buffer = cx.current_buffer()?;
+    let args = vec![buffer, fixnum(from), fixnum(from + inserted), fixnum(to - from), behind, in_front, overlays];
+    Ok(Step::Call { f: cx.intern("romacs--after-change"), args, then: done, saved: vec![] })
+}
+
+/// Character codes as GNU compares them: a unibyte string's bytes above
+/// 127 as raw-byte characters (BUF_FETCH_CHAR_AS_MULTIBYTE).
+fn char_codes(cx: &Leaf<'_>, text: Value) -> std::result::Result<Vec<u32>, Fault> {
+    let view = cx.string_view(text)?;
+    Ok(if view.is_multibyte() {
+        view.chars().collect()
+    } else {
+        view.bytes().iter().map(|&b| if b < 128 { u32::from(b) } else { u32::from(b) + crate::lstring::BYTE8_OFFSET }).collect()
+    })
+}
+
+// editfns.c's comparison of BEG..END with SOURCE, a string or
+// [BUFFER SBEG SEND]: the change runs, last first, as
+// (BEG-A END-A BEG-B END-B) (B positions index a string from 0), or t
+// when it took longer than MAX-SECS seconds (nil for no limit) or more
+// memory than there is.
+defsubr! { name = "romacs--replace-runs", gnu = "editfns.c:2148", effect = Reads,
+fn replace_runs(cx, beg: Value, end: Value, source: Value, too_expensive: Value, max_secs: Value) {
+    let position = |v: Value| v.integer_value().ok_or(Fault::Wrong("fixnump", v));
+    let (min_a, end_a) = (position(beg)?, position(end)?);
+    let text = cx.region_text(min_a, end_a)?;
+    let a = char_codes(cx, text)?;
+    let (min_b, text) = if cx.string_chars(source).is_some() {
+        (0, source)
+    } else {
+        let (buffer, sbeg, send) = (cx.vector_get(source, fixnum(0))?, cx.vector_get(source, fixnum(1))?, cx.vector_get(source, fixnum(2))?);
+        (position(sbeg)?, cx.buffer_region_text(buffer, position(sbeg)?, position(send)?)?)
+    };
+    let b = char_codes(cx, text)?;
+    let deadline = if max_secs == Value::NIL { None } else {
+        let secs = cx.float_value(max_secs)?;
+        // A limit past what a time_t holds is no limit.
+        (secs < 9.2e18).then(|| std::time::Instant::now() + std::time::Duration::from_secs_f64(secs.max(0.0)))
+    };
+    let expensive = position(too_expensive)? as isize;
+    let Some((deletions, insertions)) = super::compareseq::compare(&a, &b, expensive, deadline) else {
+        return Ok(Value::TRUE);
+    };
+    let runs: Vec<Value> = super::compareseq::runs(&deletions, &insertions).into_iter().map(|(i, i_end, j, j_end)| {
+        let run = [min_a + i as i64, min_a + i_end as i64, min_b + j as i64, min_b + j_end as i64].map(fixnum);
+        list(cx, &run)
+    }).collect();
+    Ok(list(cx, &runs))
+}}

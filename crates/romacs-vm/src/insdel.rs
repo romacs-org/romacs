@@ -520,8 +520,87 @@ impl Vm {
         Ok(text)
     }
 
+    /// replace_range (insdel.c:1463) of FROM..TO of the current buffer by
+    /// TEXT after its hooks, inheriting no properties. The old text's
+    /// markers go to FROM and those at TO follow the new text, as
+    /// adjust_markers_for_replace moves them (an empty FROM..TO is an
+    /// insertion); point moves as such a marker would after FROM, and at TO
+    /// as for an insertion. Undo gets record_insert and record_delete
+    /// without marker adjustments, MODIFF one increment for the whole
+    /// change. Returns FROM, TO and the characters inserted as the change
+    /// used them, or None when nothing changed.
+    pub(crate) fn replace_change(&mut self, from: i64, to: i64, text: Value) -> Faulty<Option<(i64, i64, i64)>> {
+        let buffer = self.current_buffer_value()?;
+        let index = buffer.index(0).map_err(Fault::Error)? - 1;
+        let (point, begv, zv) = self.point_extent()?;
+        let from = from.max(begv);
+        let to = to.min(zv).max(from);
+        let inserted = self.str_view(text).ok_or(Fault::Wrong("stringp", text))?.chars().count() as i64;
+        if from == to && inserted == 0 {
+            return Ok(None);
+        }
+        // A unibyte buffer takes the text as bytes, refused before undo
+        // records anything.
+        let bytes = match self.objects[index] {
+            Object::ByteBuffer(_) => Some(self.unibyte_text(text).map_err(Fault::Error)?),
+            _ => None,
+        };
+        if self.undo_list_of(index) != Value::TRUE {
+            let unmodified = !self.buffer_state(buffer).map_err(Fault::Error)?.modified();
+            let deletion = self.buffer_text(buffer, from, to)?;
+            self.record_insert(index, to, inserted, unmodified).map_err(Fault::Error)?;
+            self.record_delete(index, from, deletion, false).map_err(Fault::Error)?;
+        }
+        let modification = self.buffer_state(buffer).map_err(Fault::Error)?.modification;
+        if let Some(bytes) = bytes {
+            // ByteBuffer::replace moves the saved positions as
+            // adjust_markers_for_replace does.
+            let (a, z) = (self.change_byte(buffer, from)?, self.change_byte(buffer, to)?);
+            let Object::ByteBuffer(b) = &mut self.objects[index] else { unreachable!("unibyte buffer") };
+            b.replace(a..z, &bytes).map_err(Fault::Error)?;
+            self.display_state.version += 1;
+        } else {
+            self.replace_text(buffer, from, to, text, inserted)?;
+        }
+        let state = self.buffer_state_mut(buffer).map_err(Fault::Error)?;
+        state.modification = modification;
+        state.modification.changed((to - from + inserted) as usize, true);
+        let point = if from < point || point == to { point + from + inserted - point.min(to) } else { point };
+        self.set_change_point(buffer, point)?;
+        Ok(Some((from, to, inserted)))
+    }
+
+    /// Inserting TEXT at TO before its markers, then deleting FROM..TO,
+    /// moves markers and overlay ends as adjust_markers_for_replace does.
+    fn replace_text(&mut self, buffer: Value, from: i64, to: i64, text: Value, inserted: i64) -> Faulty<()> {
+        self.set_change_point(buffer, to)?;
+        if inserted > 0 {
+            if from < to {
+                self.edit_kernel(&[text], |vm, n| vm.primitive(Primitive::InsertBeforeMarkers, 0, n))?;
+            } else {
+                self.edit_kernel(&[text], |vm, n| vm.buffer_primitive(Primitive::Insert, 0, n))?;
+            }
+        }
+        if from < to {
+            let (from_v, to_v) = (Value::integer(from).map_err(Fault::Error)?, Value::integer(to).map_err(Fault::Error)?);
+            self.edit_kernel(&[from_v, to_v], |vm, n| vm.buffer_primitive(Primitive::DeleteRegion, 0, n))?;
+        }
+        Ok(())
+    }
+
+    fn set_change_point(&mut self, buffer: Value, position: i64) -> Faulty<()> {
+        let at = self.change_byte(buffer, position)?;
+        let index = buffer.index(0).map_err(Fault::Error)? - 1;
+        match &mut self.objects[index] {
+            Object::Buffer(b) => b.point = at,
+            Object::ByteBuffer(b) => b.point = at,
+            _ => return Err(Fault::Error("buffer required".into())),
+        }
+        Ok(())
+    }
+
     /// make_buffer_string_both with properties: FROM..TO of BUFFER.
-    fn buffer_text(&mut self, buffer: Value, from: i64, to: i64) -> Faulty<Value> {
+    pub(crate) fn buffer_text(&mut self, buffer: Value, from: i64, to: i64) -> Faulty<Value> {
         let (a, b) = (self.change_byte(buffer, from)?, self.change_byte(buffer, to)?);
         let object = match self.object_if(buffer) {
             Some(Object::Buffer(t)) => {
