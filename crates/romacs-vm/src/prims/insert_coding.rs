@@ -625,7 +625,7 @@ fn decode_bytes(cx: &mut Leaf<'_>, r: &[Value]) -> std::result::Result<Option<(V
             if let Some(index) = cx.coding_ascii_eol(&octets, attrs)?.filter(|_| vector) {
                 coding = cx.vector_get(eols, fixnum(index as i64)?)?;
             }
-            let decoded = cx.coding_convert_string(bytes, coding, Value::TRUE, Value::NIL, false)?;
+            let decoded = decode_with(cx, bytes, coding)?;
             let name = var(cx, "last-coding-system-used")?;
             return Ok(Some((decoded, name)));
         }
@@ -659,9 +659,23 @@ fn decode_bytes(cx: &mut Leaf<'_>, r: &[Value]) -> std::result::Result<Option<(V
             found = cx.vector_get(found_eols, fixnum(index as i64)?)?;
         }
     }
-    let decoded = cx.coding_convert_string(bytes, found, Value::TRUE, Value::NIL, false)?;
+    let decoded = decode_with(cx, bytes, found)?;
     let name = var(cx, "last-coding-system-used")?;
     Ok(Some((decoded, name)))
+}
+
+/// BYTES decoded by CODING; a coding type VM2 has no decoder for refuses
+/// naming the system the decision chose.
+fn decode_with(cx: &mut Leaf<'_>, bytes: Value, coding: Value) -> Out {
+    cx.coding_convert_string(bytes, coding, Value::TRUE, Value::NIL, false).map_err(|fault| match fault {
+        Fault::Error(message) if message.starts_with("string conversion for this coding type is not implemented") => {
+            match cx.symbol_name(coding) {
+                Ok(name) => refuse(&format!("insert-file-contents decoding with {name}")),
+                Err(fault) => fault,
+            }
+        }
+        fault => fault,
+    })
 }
 
 /// Insert DECODED at point (fileio.c:5105-5137) and signal the change of

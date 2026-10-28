@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "0f0e8cc681eb21daea551bf121616fc41eea81fffd8e0240ae12b4890305b348",
+  "source_fingerprint": "f61abf29d4fb6ba64d3865f8b27f78e4c033f0b152941e4e963c6ac876ce1286",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -3584,7 +3584,7 @@
   "romacs--insert-file-contents-format": {
    "name": "romacs--insert-file-contents-format",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/insert_coding.rs:819"
+   "registered_at": "crates/romacs-vm/src/prims/insert_coding.rs:833"
   },
   "romacs--insert-file-contents-undecide": {
    "name": "romacs--insert-file-contents-undecide",
