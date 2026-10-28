@@ -179,20 +179,19 @@ impl Vm {
             form => call("function", vec![Form::List(vec![sym("lambda"), Form::List(vec![]), form.clone()])]),
         };
         let executable = lambda[2..].to_vec();
-        let saved_captures = std::mem::replace(&mut self.keep_captures, exposed);
-        let result = self.expr(
-            builder,
-            &call(
-                "#:vm2-set-interactive-form",
-                vec![call("function", vec![Form::List(lambda)]), quote(slot.clone()), thunk],
-            ),
-        );
-        self.keep_captures = saved_captures;
-        let result = result?;
-        let result = if exposed { self.expose_closure(builder, args.list()?, &executable, result)? } else { result };
+        // One slot value, registered and in the closure's slot 5, as GNU's
+        // closure holds it once.
         let spec_value = self.literal(&slot)?;
         let spec_reg = builder.reg();
         builder.emit(Op::Const(spec_reg, spec_value));
+        let saved_captures = std::mem::replace(&mut self.keep_captures, exposed);
+        let parts = self.expr(builder, &call("function", vec![Form::List(lambda)]))
+            .and_then(|closure| Ok((closure, self.expr(builder, &thunk)?)));
+        self.keep_captures = saved_captures;
+        let (closure, thunk) = parts?;
+        let register = crate::prim::subr_named("#:vm2-set-interactive-form").expect("registration subr");
+        let result = Self::native_call(builder, register, &[closure, spec_reg, thunk]);
+        let result = if exposed { self.expose_closure(builder, args.list()?, &executable, result)? } else { result };
         let doc = match doc_register { Some(doc) => doc, None => { let doc = builder.reg(); builder.emit(Op::Const(doc, Value::NIL)); doc } };
         Ok(self.closure_native_call(builder, Primitive::ClosureDocument, &[result, doc, spec_reg]))
     }
