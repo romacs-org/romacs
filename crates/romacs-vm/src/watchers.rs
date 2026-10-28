@@ -81,4 +81,15 @@ impl Vm {
         }
         result.map(|_| ())
     }
+    /// xdisp.c safe_calln: FUNCTION's value, or nil when it exits
+    /// non-locally (the exit is dropped; an escape already pending
+    /// survives). Called where `call_lisp_at_write' may be.
+    pub(crate) fn safe_call(&mut self, function: Value, args: &[Value]) -> Value {
+        let pending = (self.propagated_escape.take(), std::mem::take(&mut self.propagated_escape_hooked), self.propagated_eval_depth.take());
+        let threshold = std::mem::replace(&mut self.gc_threshold, usize::MAX);
+        let result = self.reader_call(function, args);
+        self.gc_threshold = threshold;
+        (self.propagated_escape, self.propagated_escape_hooked, self.propagated_eval_depth) = pending;
+        result.unwrap_or(Value::NIL)
+    }
 }

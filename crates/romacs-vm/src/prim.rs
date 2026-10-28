@@ -199,6 +199,10 @@ mod leaf {
             self.vm.slots[slot].value = raw;
             self.vm.display_state.free_realized_faces();
         }
+        /// xdisp.c safe_calln (see `Vm::safe_call').
+        pub(crate) fn safe_call(&mut self, function: Value, args: &[Value]) -> Value {
+            self.vm.safe_call(function, args)
+        }
         pub(crate) fn theme_face_attribute(&mut self, face: &str, keyword: &str, value: Value) {
             self.vm.theme_face_attribute(face, keyword, value);
         }

@@ -247,19 +247,34 @@ fn inheritance_cycle(cx: &mut Leaf<'_>, frame: Value, face: Value, child: Value,
     Ok(false)
 }
 
-/// merge_face_heights (VALUE, 10, nil) for validation; functions are Lisp calls.
+/// merge_face_heights (VALUE, 10, nil) for validation.
 fn test_height(cx: &mut Leaf<'_>, value: Value) -> std::result::Result<Option<i64>, Fault> {
     if let Some(n) = value.integer_value() { return Ok(Some(n)); }
     if cx.kind(value) == Kind::Float {
         let product = cx.float_value(value)? * 10.0;
         return Ok((product.is_finite() && product.abs() < Value::MAX_FIXNUM as f64).then_some(product as i64));
     }
-    let lambda = cx.pair(value).is_some_and(|(car, _)| car == cx.intern("lambda") || car == cx.intern("closure"));
-    if matches!(cx.kind(value), Kind::Closure | Kind::Subr) || lambda
-        || (cx.kind(value) == Kind::Symbol && value != Value::NIL && cx.fboundp(value)) {
-        return Err(super::fileio::refuse("internal-set-lisp-face-attribute function :height"));
-    }
-    Ok(None)
+    function_height(cx, value, 10)
+}
+
+/// merge_face_heights (FUNCTION, UNDER, nil) for an absolute UNDER: the
+/// function's value when it is an integer (safe_calln), else None.
+fn function_height(cx: &mut Leaf<'_>, function: Value, under: i64) -> std::result::Result<Option<i64>, Fault> {
+    if !super::vars::function_p(cx, function)? { return Ok(None); }
+    Ok(cx.safe_call(function, &[Value::integer(under).unwrap()]).integer_value())
+}
+
+/// The theme holds data only (romacs-face): a function :height is mirrored
+/// as its value over the default face's height (DIVERGENCES.md VM2-FACEFN1).
+fn theme_value(cx: &mut Leaf<'_>, keyword: &str, value: Value, frame: Value) -> std::result::Result<Value, Fault> {
+    if keyword != ":height" || value.integer_value().is_some() || cx.kind(value) == Kind::Float { return Ok(value); }
+    let default = cx.intern("default");
+    let lface = cx.face_lookup(default, frame)?;
+    let under = if lface == Value::NIL { None } else { cx.vector_get(lface, Value::integer(4).unwrap())?.integer_value() };
+    Ok(match under {
+        Some(under) => function_height(cx, value, under)?.map_or(value, |h| Value::integer(h).unwrap()),
+        None => value,
+    })
 }
 
 fn set_lisp_face_attribute(cx: &mut Leaf<'_>, face: Value, attr: Value, mut value: Value, frame: Value) -> Out {
@@ -414,7 +429,8 @@ fn set_lisp_face_attribute(cx: &mut Leaf<'_>, face: Value, attr: Value, mut valu
         let no_inherit = cx.intern("face-no-inherit");
         if cx.face_property(face, no_inherit)? == Value::NIL {
             let face_name = cx.symbol_name(face)?;
-            cx.theme_face_attribute(&face_name, keyword, value);
+            let mirrored = theme_value(cx, keyword, value, frame)?;
+            cx.theme_face_attribute(&face_name, keyword, mirrored);
         }
     }
     if special(value) || !changed { return Ok(face); }

@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "4df6ca9a2bcb440cf26c829d7a4a25d82eddab062bb0f6f513bd63ae40a1ce31",
+  "source_fingerprint": "8a7ab03416434198de76880987537c5d8b7f1adaebe2e0f416ef54850e0878c6",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -862,7 +862,7 @@
   "color-values-from-color-spec": {
    "name": "color-values-from-color-spec",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/face.rs:476"
+   "registered_at": "crates/romacs-vm/src/prims/face.rs:492"
   },
   "command-modes": {
    "name": "command-modes",
@@ -1280,7 +1280,7 @@
   "display-supports-face-attributes-p": {
    "name": "display-supports-face-attributes-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/face.rs:462"
+   "registered_at": "crates/romacs-vm/src/prims/face.rs:478"
   },
   "documentation": {
    "name": "documentation",
@@ -1672,7 +1672,7 @@
   "frame--face-hash-table": {
    "name": "frame--face-hash-table",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/face.rs:469"
+   "registered_at": "crates/romacs-vm/src/prims/face.rs:485"
   },
   "frame-bottom-divider-width": {
    "name": "frame-bottom-divider-width",
@@ -2170,7 +2170,7 @@
   "internal-set-lisp-face-attribute": {
    "name": "internal-set-lisp-face-attribute",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/face.rs:457"
+   "registered_at": "crates/romacs-vm/src/prims/face.rs:473"
   },
   "internal-show-cursor": {
    "name": "internal-show-cursor",
