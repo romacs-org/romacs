@@ -248,10 +248,17 @@ impl Vm {
         })
     }
 
+    /// GNU's C `Fget (elt, Qrisky_local_variable)`, read in place: compiling
+    /// a `get' request for every symbol of every mode line made each redisplay
+    /// retire enough request code to force a collection every few keys.
     fn ml_risky_marked(&mut self, symbol: &Form) -> bool {
-        let quote = |form| Form::List(vec![Form::Sym("quote".into()), form]);
-        let form = Form::List(vec![Form::Sym("get".into()), quote(symbol.clone()), quote(Form::Sym("risky-local-variable".into()))]);
-        self.eval_form_raw(&form).is_ok_and(|v| v != Value::NIL)
+        let symbol = match symbol {
+            Form::Sym(name) => self.intern(name),
+            Form::Generated(id) => self.generated_symbol(*id),
+            _ => return false,
+        };
+        let key = self.intern("risky-local-variable");
+        self.symbol_property(symbol, key).is_ok_and(|v| v != Value::NIL)
     }
 
     /// Expand a whole mode-line format for the window whose buffer is current.
