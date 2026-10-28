@@ -83,6 +83,20 @@ fn signal_hook_runs_once_across_eval_and_unwind_cleanup() {
       "[(arith-error 17) 1]", "DEPTH_HOOK_ONCE");
 }
 
+/// A loop over the threaded buffer fast paths (point, goto-char,
+/// char-after, point-min, point-max, buffer-size, and a quiet insert) must
+/// not grow the native stack per iteration: each handler continues by a
+/// tail call.
+#[test]
+fn buffer_read_handlers_run_in_constant_native_stack() {
+    std::thread::Builder::new().stack_size(2 * 1024 * 1024).spawn(|| {
+        check("(with-temp-buffer (insert \"abcdef\") (let ((n 0)) (while (< n 200000) (goto-char (1+ (% n 6))) (setq n (+ n (point) (- (point-min)) (- (point-max) (buffer-size)) (if (char-after) 0 0) (if (char-after 2) 0 0)))) n))",
+            "200001", "BUFFER_READ_TAIL_CALL");
+        check("(with-temp-buffer (let ((n 0)) (while (< n 200000) (insert \"a\") (setq n (1+ n))) (buffer-size)))",
+            "200000", "INSERT_STRING_TAIL_CALL");
+    }).unwrap().join().expect("BUFFER_READ_TAIL_CALL_CHILD");
+}
+
 #[test]
 fn t2_native_dispatch_is_bounded_without_lto() {
     let out = std::process::Command::new(std::env::current_exe().unwrap())

@@ -485,8 +485,14 @@ def build_and_run(src, run_dir, expr, threads, run, t0, suites, repeat=1):
         # scripts. Use one explicit config for build, inventory and execution;
         # slot admission supplies the memory limit, and this bounds test hangs.
         config = run_dir / 'nextest.toml'
+        # The warm census loads GNU's loadup chain through abbrev.el into a
+        # fresh VM per file: about 275s per pass alone in the gate, and over
+        # 600s beside the display suite. Only that test gets a longer bound.
         config.write_text('[profile.default]\n'
-                          'slow-timeout = { period = "600s", terminate-after = 1, grace-period = "0s" }\n')
+                          'slow-timeout = { period = "600s", terminate-after = 1, grace-period = "0s" }\n'
+                          '[[profile.default.overrides]]\n'
+                          "filter = 'test(=parity_ratchet_census_warm)'\n"
+                          'slow-timeout = { period = "1200s", terminate-after = 1, grace-period = "0s" }\n')
         nextest = ['cargo', 'nextest']
         config_flags = ['--config-file', str(config), '--user-config-file', 'none']
         flags = cargo_flags(src)

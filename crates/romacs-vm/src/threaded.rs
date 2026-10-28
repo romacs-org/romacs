@@ -3453,41 +3453,52 @@ unsafe fn insert_string(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> V
         if e.vm.slots[i.b].function != i.value {
             return direct(e, r, pc);
         }
-        let s = *r.add(i.d);
-        let t = e.vm.slots[e.vm.buffer_slot].value;
-        if s == Value::NIL || s.tag() != 0 || t == Value::NIL || t.tag() != 0 || s == t {
-            return direct(e, r, pc);
+        match quiet_insert(e.vm, *r.add(i.d)) {
+            None => direct(e, r, pc),
+            Some(false) => fail(e, "an insertion's undo record or deactivate-mark failed"),
+            Some(true) => {
+                *r.add(i.a) = Value::NIL;
+                advance(e, r, pc)
+            }
         }
-        let a = s.payload() as usize - 1;
-        let b = t.payload() as usize - 1;
-        if a.max(b) >= e.vm.objects.len() {
-            return direct(e, r, pc);
-        }
-        // Only an insertion that runs no Lisp skips the general bracket.
-        let Some(quiet) = e.vm.quiet_insertion() else {
-            return direct(e, r, pc);
-        };
-        let (source, target) = if a < b {
-            let (x, y) = e.vm.objects.split_at_mut(b);
-            (&x[a], &mut y[0])
-        } else {
-            let (x, y) = e.vm.objects.split_at_mut(a);
-            (&y[0], &mut x[b])
-        };
-        let (data::Object::String(chars), data::Object::Buffer(text)) = (source, target) else {
-            return direct(e, r, pc);
-        };
-        let length = chars.len();
-        if !chars.properties.is_empty() || !text.append_utf8(chars.as_str()) {
-            return direct(e, r, pc);
-        }
-        if e.vm.quiet_inserted(quiet, length).is_err() {
-            return fail(e, "an insertion's undo record or deactivate-mark failed");
-        }
-        e.vm.display_state.version += 1;
-        *r.add(i.a) = Value::NIL;
-        advance(e, r, pc)
     }
+}
+/// `insert_string''s insertion of string S at the end of the current
+/// buffer when it runs no Lisp: None for the general call, Some(false) if
+/// its undo record or mark deactivation failed. Kept out of line, as
+/// `buffer_read_value' is, so the handler's dispatch stays a tail call.
+#[inline(never)]
+fn quiet_insert(vm: &mut Vm, s: Value) -> Option<bool> {
+    let t = vm.slots[vm.buffer_slot].value;
+    if s == Value::NIL || s.tag() != 0 || t == Value::NIL || t.tag() != 0 || s == t {
+        return None;
+    }
+    let a = s.payload() as usize - 1;
+    let b = t.payload() as usize - 1;
+    if a.max(b) >= vm.objects.len() {
+        return None;
+    }
+    // Only an insertion that runs no Lisp skips the general bracket.
+    let quiet = vm.quiet_insertion()?;
+    let (source, target) = if a < b {
+        let (x, y) = vm.objects.split_at_mut(b);
+        (&x[a], &mut y[0])
+    } else {
+        let (x, y) = vm.objects.split_at_mut(a);
+        (&y[0], &mut x[b])
+    };
+    let (data::Object::String(chars), data::Object::Buffer(text)) = (source, target) else {
+        return None;
+    };
+    let length = chars.len();
+    if !chars.properties.is_empty() || !text.append_utf8(chars.as_str()) {
+        return None;
+    }
+    if vm.quiet_inserted(quiet, length).is_err() {
+        return Some(false);
+    }
+    vm.display_state.version += 1;
+    Some(true)
 }
 unsafe fn remainder(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
     unsafe {
@@ -3550,75 +3561,73 @@ unsafe fn buffer_read(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Val
         if e.vm.slots[i.b].function != i.value {
             return direct(e, r, pc);
         }
-        let v = e.vm.slots[e.vm.buffer_slot].value;
-        if v == Value::NIL || v.tag() != 0 {
-            return direct(e, r, pc);
-        }
-        let Some(data::Object::Buffer(t)) = e.vm.objects.get_mut(v.payload() as usize - 1) else {
+        let x = if i.e == 0 { Value::NIL } else { *r.add(i.d) };
+        let Some(value) = buffer_read_value(e.vm, i.value, x) else {
             return direct(e, r, pc);
         };
-        let kind = (i.value.0 >> 3) as usize;
-        let accessible = t.accessible();
-        let number = if kind == Primitive::CharAfter as usize {
-            let x = if i.e == 0 { Value::NIL } else { *r.add(i.d) };
-            if x != Value::NIL
-                && x.tag() == 1
-                && x.0 as i64 >> 2 >= 1
-                && accessible.start.0 == 0
-                && accessible.end.0 == t.len_bytes()
-            {
-                let Ok(ch) =
-                    t.character_of_char(coordinates::CharOffset((x.0 as i64 >> 2) as usize - 1))
-                else {
-                    return direct(e, r, pc);
-                };
-                *r.add(i.a) = ch
-                    .map(|n| Value::fixnum(n as i64).unwrap())
-                    .unwrap_or(Value::NIL);
-                return advance(e, r, pc);
-            }
-            let p = if x == Value::NIL {
-                t.point
-            } else {
-                if x.tag() != 1 || x.0 as i64 >> 2 < 1 {
-                    return direct(e, r, pc);
-                }
-                let Ok(b) = t.byte_of_char(coordinates::CharOffset((x.0 as i64 >> 2) as usize - 1))
-                else {
-                    return direct(e, r, pc);
-                };
-                b
-            };
-            if accessible.contains(&p) {
-                t.character_at(p).unwrap()
-            } else {
-                None
-            }
-        } else if kind == Primitive::GotoChar as usize {
-            let x = *r.add(i.d);
-            if x.tag() != 1 {
-                return direct(e, r, pc);
-            }
-            let c = (x.0 as i64 >> 2).saturating_sub(1).max(0) as usize;
-            t.point = t
-                .byte_of_char(coordinates::CharOffset(c.min(t.len_chars())))
-                .unwrap()
-                .clamp(accessible.start, accessible.end);
-            Some(x.0 as i64 >> 2)
-        } else if kind == Primitive::Point as usize {
-            Some((t.char_of_byte(t.point).unwrap().0 + 1) as i64)
-        } else if kind == Primitive::PointMin as usize {
-            Some((t.char_of_byte(accessible.start).unwrap().0 + 1) as i64)
-        } else if kind == Primitive::PointMax as usize {
-            Some((t.char_of_byte(accessible.end).unwrap().0 + 1) as i64)
-        } else {
-            Some(t.len_chars() as i64)
-        };
-        *r.add(i.a) = number
-            .map(|n| Value::fixnum(n).unwrap())
-            .unwrap_or(Value::NIL);
+        *r.add(i.a) = value;
         advance(e, r, pc)
     }
+}
+/// The fast buffer read of `buffer_read' (char-after, goto-char, point,
+/// point-min, point-max, buffer-size) with argument X, or None for the
+/// general call. Kept out of line: its locals would otherwise stay live
+/// across the handler's dispatch to the next instruction, which then
+/// cannot be a tail call, and every loop iteration keeps a native frame.
+#[inline(never)]
+fn buffer_read_value(vm: &mut Vm, target: Value, x: Value) -> Option<Value> {
+    let v = vm.slots[vm.buffer_slot].value;
+    if v == Value::NIL || v.tag() != 0 {
+        return None;
+    }
+    let Some(data::Object::Buffer(t)) = vm.objects.get_mut(v.payload() as usize - 1) else {
+        return None;
+    };
+    let kind = (target.0 >> 3) as usize;
+    let accessible = t.accessible();
+    let number = if kind == Primitive::CharAfter as usize {
+        if x != Value::NIL
+            && x.tag() == 1
+            && x.0 as i64 >> 2 >= 1
+            && accessible.start.0 == 0
+            && accessible.end.0 == t.len_bytes()
+        {
+            let ch = t.character_of_char(coordinates::CharOffset((x.0 as i64 >> 2) as usize - 1)).ok()?;
+            return Some(ch.map(|n| Value::fixnum(n as i64).unwrap()).unwrap_or(Value::NIL));
+        }
+        let p = if x == Value::NIL {
+            t.point
+        } else {
+            if x.tag() != 1 || x.0 as i64 >> 2 < 1 {
+                return None;
+            }
+            t.byte_of_char(coordinates::CharOffset((x.0 as i64 >> 2) as usize - 1)).ok()?
+        };
+        if accessible.contains(&p) {
+            t.character_at(p).unwrap()
+        } else {
+            None
+        }
+    } else if kind == Primitive::GotoChar as usize {
+        if x.tag() != 1 {
+            return None;
+        }
+        let c = (x.0 as i64 >> 2).saturating_sub(1).max(0) as usize;
+        t.point = t
+            .byte_of_char(coordinates::CharOffset(c.min(t.len_chars())))
+            .unwrap()
+            .clamp(accessible.start, accessible.end);
+        Some(x.0 as i64 >> 2)
+    } else if kind == Primitive::Point as usize {
+        Some((t.char_of_byte(t.point).unwrap().0 + 1) as i64)
+    } else if kind == Primitive::PointMin as usize {
+        Some((t.char_of_byte(accessible.start).unwrap().0 + 1) as i64)
+    } else if kind == Primitive::PointMax as usize {
+        Some((t.char_of_byte(accessible.end).unwrap().0 + 1) as i64)
+    } else {
+        Some(t.len_chars() as i64)
+    };
+    Some(number.map(|n| Value::fixnum(n).unwrap()).unwrap_or(Value::NIL))
 }
 unsafe fn cons(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Value {
     unsafe {
