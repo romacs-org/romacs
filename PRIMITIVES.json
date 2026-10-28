@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "f6c86618e0f70ea8b6f12ea6a2216b18a03bde9e4ba52681fdaeb7f4fddb155c",
+  "source_fingerprint": "d1f03d77fd0b9882a408e15372315117f0e9e7761f4b6cc0539d61bd394a5d54",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 983,
-  "parsed_vm2_only": 983
+  "parsed_total": 984,
+  "parsed_vm2_only": 984
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -104,6 +104,12 @@
    "implementation": "vm2",
    "variant": "Primitive::LookupKey",
    "registered_at": "crates/romacs-vm/src/lib.rs:723"
+  },
+  "#:vm2-message": {
+   "name": "#:vm2-message",
+   "implementation": "vm2",
+   "variant": "Primitive::Message",
+   "registered_at": "crates/romacs-vm/src/lib.rs:575"
   },
   "#:vm2-provide": {
    "name": "#:vm2-provide",
@@ -606,7 +612,7 @@
   "byte-to-string": {
    "name": "byte-to-string",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/str.rs:368"
+   "registered_at": "crates/romacs-vm/src/prims/str.rs:358"
   },
   "call-interactively": {
    "name": "call-interactively",
@@ -795,7 +801,7 @@
   "clear-string": {
    "name": "clear-string",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/str.rs:365"
+   "registered_at": "crates/romacs-vm/src/prims/str.rs:355"
   },
   "clear-this-command-keys": {
    "name": "clear-this-command-keys",
@@ -1536,7 +1542,7 @@
   "fillarray": {
    "name": "fillarray",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/str.rs:348"
+   "registered_at": "crates/romacs-vm/src/prims/str.rs:338"
   },
   "find-coding-systems-region-internal": {
    "name": "find-coding-systems-region-internal",
@@ -2264,17 +2270,17 @@
   "length<": {
    "name": "length<",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/str.rs:222"
+   "registered_at": "crates/romacs-vm/src/prims/str.rs:212"
   },
   "length=": {
    "name": "length=",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/str.rs:238"
+   "registered_at": "crates/romacs-vm/src/prims/str.rs:228"
   },
   "length>": {
    "name": "length>",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/str.rs:230"
+   "registered_at": "crates/romacs-vm/src/prims/str.rs:220"
   },
   "let": {
    "name": "let",
@@ -2702,8 +2708,7 @@
   "message": {
    "name": "message",
    "implementation": "vm2",
-   "variant": "Primitive::Message",
-   "registered_at": "crates/romacs-vm/src/lib.rs:575"
+   "registered_at": "crates/romacs-vm/src/prims/message.rs:13"
   },
   "min": {
    "name": "min",
@@ -4395,12 +4400,12 @@
   "string-equal": {
    "name": "string-equal",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/str.rs:168"
+   "registered_at": "crates/romacs-vm/src/prims/str.rs:160"
   },
   "string-lessp": {
    "name": "string-lessp",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/str.rs:181"
+   "registered_at": "crates/romacs-vm/src/prims/str.rs:173"
   },
   "string-make-multibyte": {
    "name": "string-make-multibyte",
@@ -4426,7 +4431,7 @@
   "string-to-char": {
    "name": "string-to-char",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/str.rs:188"
+   "registered_at": "crates/romacs-vm/src/prims/str.rs:178"
   },
   "string-to-multibyte": {
    "name": "string-to-multibyte",
@@ -4493,7 +4498,7 @@
   "substring-no-properties": {
    "name": "substring-no-properties",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/str.rs:145"
+   "registered_at": "crates/romacs-vm/src/prims/str.rs:137"
   },
   "switch-to-buffer": {
    "name": "switch-to-buffer",
@@ -4504,17 +4509,17 @@
   "sxhash": {
    "name": "sxhash",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/str.rs:341"
+   "registered_at": "crates/romacs-vm/src/prims/str.rs:331"
   },
   "sxhash-eq": {
    "name": "sxhash-eq",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/str.rs:346"
+   "registered_at": "crates/romacs-vm/src/prims/str.rs:336"
   },
   "sxhash-equal": {
    "name": "sxhash-equal",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/str.rs:343"
+   "registered_at": "crates/romacs-vm/src/prims/str.rs:333"
   },
   "symbol-function": {
    "name": "symbol-function",

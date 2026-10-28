@@ -230,6 +230,7 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "menu-prompting", gnu: "keyboard.c:14001", kind: Kind::Bool(true) },
     CVariable { name: "menu-updating-frame", gnu: "xdisp.c:39120", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "message-truncate-lines", gnu: "xdisp.c:39108", kind: Kind::Bool(false) },
+    CVariable { name: "messages-buffer-name", gnu: "xdisp.c:38597", kind: Kind::Lisp(Init::Str("*Messages*")) },
     CVariable { name: "minibuffer-auto-raise", gnu: "minibuf.c:2665", kind: Kind::Bool(false) },
     CVariable { name: "minibuffer-completing-file-name", gnu: "minibuf.c:2641", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "minibuffer-completion-confirm", gnu: "minibuf.c:2630", kind: Kind::Lisp(Init::Nil) },

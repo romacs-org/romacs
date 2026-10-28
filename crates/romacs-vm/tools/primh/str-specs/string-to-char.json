@@ -9,7 +9,7 @@
   "editfns.c"
  ],
  "gnu_def": "editfns.c:176",
- "rust": "src/prims/str.rs:188",
+ "rust": "src/prims/str.rs:178",
  "args": [],
  "probes": [
   "(string-to-char (unibyte-string 255))",
