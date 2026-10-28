@@ -69,7 +69,12 @@ impl Vm {
     fn overlay_order_key(&self, overlay: Value) -> (i64, u32, std::cmp::Reverse<u32>, usize) {
         let priority = self.overlay_property_named(overlay, "priority").unwrap().integer_value().unwrap_or(0);
         let (start, end) = self.overlay_range(overlay).unwrap().unwrap();
-        (priority, start, std::cmp::Reverse(end), overlay.index(0).unwrap())
+        (priority, start, std::cmp::Reverse(end), self.overlay_age(overlay))
+    }
+    /// Heap order, standing in for GNU's overlay identity order and for
+    /// the itree's insertion order among overlays with one start.
+    pub(crate) fn overlay_age(&self, overlay: Value) -> usize {
+        overlay.index(0).unwrap()
     }
 
     /// Visit covering overlays without allocating a result list or Lisp conses.

@@ -71,6 +71,10 @@ fn unsupported(what: &str) -> Fault { Fault::Error(format!("VM2 window-text-pixe
 #[derive(Clone, Copy)]
 enum Replacement { String(Value, bool), Space(Value, bool), Nothing }
 
+/// An overlay string recorded by load_overlay_strings.
+#[derive(Clone, Copy)]
+struct OverlayEntry { overlay: Value, string: Value, priority: i64, after: bool }
+
 /// One character of a buffer or string, before classification.
 #[derive(Clone, Copy)]
 struct Origin { charpos: i64, string: Value, strpos: Option<usize>, from_display: bool, text_area: bool, whitespace_under: bool }
@@ -294,26 +298,25 @@ impl<'l, 'a> Source<'l, 'a> {
         Ok(out)
     }
 
-    /// load_overlay_strings at P: after-strings before before-strings,
-    /// after-strings by decreasing and before-strings by increasing
-    /// priority; an overlay over invisible text shows both at either end.
+    /// load_overlay_strings at P, overlays in ITREE_DESCENDING order: by
+    /// decreasing start, oldest first among equal starts. An overlay over
+    /// invisible text shows both strings at either end.
     fn overlay_string_list(&mut self, p: i64) -> R<Vec<Value>> {
+        let mut overlays = self.overlays_at(p)?;
+        overlays.sort_by_key(|&(overlay, start, _)| (std::cmp::Reverse(start), self.leaf.vm.overlay_age(overlay)));
         let mut entries = vec![];
-        for (overlay, start, end) in self.overlays_at(p)? {
+        for (overlay, start, end) in overlays {
             let property = self.leaf.vm.overlay_property(overlay, self.syms.invisible).map_err(Fault::Error)?;
             let invisible = self.leaf.invisible_kind(property)? != 0;
             let priority = self.leaf.vm.overlay_property(overlay, self.syms.priority).map_err(Fault::Error)?
                 .integer_value().unwrap_or(0);
-            let before = self.leaf.vm.overlay_property(overlay, self.syms.before).map_err(Fault::Error)?;
-            let after = self.leaf.vm.overlay_property(overlay, self.syms.after).map_err(Fault::Error)?;
-            let shows_before = (start == p || (end == p && invisible)) && self.nonempty_string(before);
-            let shows_after = (end == p || (start == p && invisible)) && self.nonempty_string(after);
-            let both = shows_before && shows_after;
-            if shows_before { entries.push(((if both { 1 } else { 2 }, priority), before)); }
-            if shows_after { entries.push(((if both { 1 } else { 0 }, -priority), after)); }
+            for (key, after, shows) in [(self.syms.before, false, start == p || (end == p && invisible)),
+                (self.syms.after, true, end == p || (start == p && invisible))] {
+                let string = self.leaf.vm.overlay_property(overlay, key).map_err(Fault::Error)?;
+                if shows && self.nonempty_string(string) { entries.push(OverlayEntry { overlay, string, priority, after }); }
+            }
         }
-        entries.sort_by_key(|(key, _)| *key);
-        Ok(entries.into_iter().map(|(_, string)| string).collect())
+        Ok(merge_sort(entries, &compare_overlay_entries).into_iter().map(|e| e.string).collect())
     }
     fn nonempty_string(&self, v: Value) -> bool {
         self.leaf.vm.str_view(v).is_some_and(|s| s.chars > 0)
@@ -706,6 +709,34 @@ impl<'l, 'a> Source<'l, 'a> {
         if value == Value::NIL { value = self.leaf.variable_value(key)?.unwrap_or(Value::NIL); }
         Ok(value)
     }
+}
+
+/// compare_overlay_entries: after-strings before before-strings, except
+/// within one overlay; after-strings by decreasing and before-strings by
+/// increasing priority. Not a total order across overlays.
+fn compare_overlay_entries(a: &OverlayEntry, b: &OverlayEntry) -> std::cmp::Ordering {
+    use std::cmp::Ordering::{Equal, Greater, Less};
+    if a.after != b.after {
+        let first = if a.overlay == b.overlay { !a.after } else { a.after };
+        if first { Less } else { Greater }
+    } else if a.priority == b.priority { Equal }
+    else if a.after { b.priority.cmp(&a.priority) }
+    else { a.priority.cmp(&b.priority) }
+}
+
+/// glibc's qsort, a top-down merge sort, so that a comparator which is
+/// not a total order yields GNU's sequence.
+fn merge_sort<T: Copy>(mut items: Vec<T>, compare: &impl Fn(&T, &T) -> std::cmp::Ordering) -> Vec<T> {
+    if items.len() <= 1 { return items; }
+    let right = merge_sort(items.split_off(items.len() / 2), compare);
+    let left = merge_sort(items, compare);
+    let (mut out, mut i, mut j) = (Vec::with_capacity(left.len() + right.len()), 0, 0);
+    while i < left.len() && j < right.len() {
+        if compare(&left[i], &right[j]).is_le() { out.push(left[i]); i += 1; } else { out.push(right[j]); j += 1; }
+    }
+    out.extend_from_slice(&left[i..]);
+    out.extend_from_slice(&right[j..]);
+    out
 }
 
 /// printablep (character.c): not a control, surrogate or unassigned
