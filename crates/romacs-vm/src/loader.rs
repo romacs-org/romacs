@@ -353,6 +353,9 @@ impl Vm {
         // bindings of the reading buffer (standard-input, eval-buffer-list,
         // lexical-binding) have no counterpart: VM2 reads the file's bytes.
         let shorthands = self.file_shorthands(&source)?;
+        // The source cache keys a form by its text; shorthands read that
+        // text to other symbols, so such a file's forms are compiled afresh.
+        let cacheable = shorthands == Value::NIL;
         let file = self.literal(&Form::String(named.clone()))?;
         let history_slot = self.slot("current-load-list");
         let outer = self.dynamic.len();
@@ -414,7 +417,7 @@ impl Vm {
                 ordinal += 1;
                 // A form holding characters outside Unicode has no exact
                 // &str text: it is reported lossily and not compile-cached.
-                let exact = std::str::from_utf8(&source[at + begin..at + used]).ok();
+                let exact = std::str::from_utf8(&source[at + begin..at + used]).ok().filter(|_| cacheable);
                 let form_source = String::from_utf8_lossy(&source[at + begin..at + used]);
                 let form = self.source_form(value, 0)?;
                 line += source[counted..at + begin].iter().filter(|b| **b == b'\n').count();

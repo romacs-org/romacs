@@ -71,3 +71,30 @@ fn load_without_the_hook_function_reads_names_as_written() {
     std::fs::remove_dir_all(&dir).unwrap();
     assert_eq!(mine, "(t t nil)");
 }
+
+/// Two files with the same form text under different shorthands read to
+/// different symbols, so neither may reuse the other's compiled form.
+#[test]
+fn identical_forms_under_different_shorthands_compile_apart() {
+    let dir = std::env::temp_dir().join(format!("read-shorthands-cache-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = |name: &str, longhand: &str| {
+        let path = dir.join(name);
+        std::fs::write(&path, format!(";;; {name} --- -*- lexical-binding: t -*-\n(setq shc-results (cons 's-value shc-results))\n;; Local Variables:\n;; read-symbol-shorthands: ((\"s-\" . \"{longhand}\"))\n;; End:\n")).unwrap();
+        path
+    };
+    let (first, second) = (file("shc-a.el", "string-"), file("shc-b.el", "other-"));
+    let after = "(prin1-to-string shc-results)";
+    let gnu = gnu(&["-Q", "--batch", "--eval", "(setq shc-results nil)", "-l", first.to_str().unwrap(), "-l", second.to_str().unwrap(), "--eval", &format!("(princ {after})")]);
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    // The eager regime (macroexp loaded, as in GNU's loadup) compiles each
+    // top-level form through the source cache.
+    vm.eval_source("(defun internal-macroexpand-for-load (form &rest _) form)").unwrap();
+    vm.eval_source("(setq shc-results nil hack-read-symbol-shorthands-function (lambda () (goto-char (point-min)) (and (search-forward \"read-symbol-shorthands: \" nil t) (read (current-buffer)))))").unwrap();
+    vm.load_file(&first).unwrap();
+    vm.load_file(&second).unwrap();
+    let mine = vm.eval_source(after).unwrap().display().unwrap();
+    std::fs::remove_dir_all(&dir).unwrap();
+    assert_eq!(mine, format!("{gnu:?}"));
+}
