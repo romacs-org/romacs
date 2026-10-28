@@ -65,7 +65,6 @@ const CASES: &str = r###"
 (progn (setq truncate-lines t) (insert (make-string 79 ?a) "日" "b\n" (make-string 78 ?a) "\tc\n\n" (make-string 120 ?z)) (list (window-text-pixel-size) (window-text-pixel-size nil 1 80) (window-text-pixel-size nil 1 81) (window-text-pixel-size nil 80 85) (window-text-pixel-size nil 160 200) (window-text-pixel-size nil nil nil 200)))
 (progn (insert "line1\nline2\nline3\nline4\nline5\n") (list (window-text-pixel-size nil '(13 . 0)) (window-text-pixel-size nil '(13 . 2)) (window-text-pixel-size nil '(13 . -2)) (window-text-pixel-size nil '(15 . 100)) (window-text-pixel-size nil '(15 . -100)) (window-text-pixel-size nil '(1 . 3) 20) (window-text-pixel-size nil '(31 . 0))))
 (progn (insert (make-string 200 ?x) "\nabc") (list (window-text-pixel-size nil '(100 . 0)) (window-text-pixel-size nil '(100 . -1)) (window-text-pixel-size nil '(100 . 1)) (window-text-pixel-size nil '(202 . -2)) (window-text-pixel-size nil 100) (window-text-pixel-size nil 160)))
-(progn (insert "abcdef\n") (let ((a (make-overlay 3 3)) (b (make-overlay 3 5)) (c (make-overlay 1 3))) (overlay-put a 'before-string "1234567890") (overlay-put a 'priority 2) (overlay-put b 'before-string (make-string 75 ?b)) (overlay-put c 'after-string "\t") (overlay-put c 'priority 9)) (list (window-text-pixel-size) (window-text-pixel-size nil 1 3) (window-text-pixel-size nil 3 4) (window-text-pixel-size nil 3 8) (window-text-pixel-size nil 1 3 nil nil nil t)))
 (progn (insert "ab" (propertize "cd" 'invisible t 'display "!!") "ef") (let ((o (make-overlay 5 6))) (overlay-put o 'invisible t) (overlay-put o 'before-string "<B>") (overlay-put o 'after-string "<A>")) (list (window-text-pixel-size) (window-text-pixel-size nil 1 5) (window-text-pixel-size nil 5 6) (window-text-pixel-size nil 6 7)))
 (progn (setq line-prefix (propertize ">>" 'display '(space :width 4)) wrap-prefix "\t") (insert "abc\n" (make-string 150 ?y) "\n\tz") (list (window-text-pixel-size) (window-text-pixel-size nil 5 100) (window-text-pixel-size nil 100 156) (window-text-pixel-size nil 156)))
 (progn (setq word-wrap t wrap-prefix "  ") (insert (mapconcat #'identity (make-list 30 "word") " ")) (list (window-text-pixel-size) (window-text-pixel-size nil 80 150)))
@@ -79,12 +78,7 @@ const CASES: &str = r###"
 (progn (insert "a" (propertize "X" 'display (propertize "ab" 'display '(when (> 2 1) . "Q"))) "b") (window-text-pixel-size))
 (progn (insert "abc") (let ((o (make-overlay 2 2)) (p (make-overlay 3 4))) (overlay-put o 'before-string (propertize "x" 'display '((margin nil) "WIDE"))) (overlay-put p 'display '((margin nil) (space :width 6)))) (window-text-pixel-size))
 (progn (insert "ab") (let ((o (make-overlay 1 1))) (overlay-put o 'priority 1) (overlay-put o 'before-string "\t") (overlay-put o 'after-string "X") (list (window-text-pixel-size) (progn (overlay-put o 'priority -1) (window-text-pixel-size)) (progn (overlay-put o 'priority nil) (window-text-pixel-size)) (progn (move-overlay o 2 2) (overlay-put o 'priority 1) (window-text-pixel-size)))))
-(progn (insert "abcd") (let ((a (make-overlay 2 2)) (b (make-overlay 2 2)) (c (make-overlay 2 2))) (overlay-put a 'before-string "A") (overlay-put a 'after-string "\t") (overlay-put a 'priority 3) (overlay-put b 'before-string "\t") (overlay-put b 'priority 1) (overlay-put c 'after-string "CC") (overlay-put c 'priority 2)) (window-text-pixel-size))
-(progn (insert "abcd") (let ((a (make-overlay 2 2)) (b (make-overlay 1 2)) (c (make-overlay 2 3))) (overlay-put a 'before-string "\t") (overlay-put a 'after-string "AA") (overlay-put a 'priority 5) (overlay-put b 'after-string "\t") (overlay-put c 'before-string "C") (overlay-put c 'priority -2)) (window-text-pixel-size))
-(progn (insert "ab") (let ((o (make-overlay 2 2)) (q (make-overlay 2 2))) (overlay-put o 'priority 1) (overlay-put o 'before-string "\t") (overlay-put o 'after-string "A") (overlay-put q 'before-string "BBB") (overlay-put q 'after-string "CC\t")) (window-text-pixel-size))
 (progn (insert "abc") (let ((a (make-overlay 1 2)) (b (make-overlay 2 2))) (overlay-put a 'after-string "A") (overlay-put b 'after-string "\t")) (list (window-text-pixel-size) (progn (dolist (o (overlays-in 1 4)) (delete-overlay o)) (let ((a (make-overlay 2 2)) (b (make-overlay 1 2))) (overlay-put a 'after-string "A") (overlay-put b 'after-string "\t")) (window-text-pixel-size))))
-(progn (insert "ab") (dolist (s '("A" "\t" "BB" "\t" "C")) (overlay-put (make-overlay 2 2) 'before-string s) (overlay-put (make-overlay 1 1) 'after-string s)) (window-text-pixel-size))
-(progn (insert "ab") (let ((x (make-overlay 2 2))) (overlay-put x 'before-string "\t") (dolist (s '("A" "BB")) (overlay-put (make-overlay 2 2) 'before-string s)) (delete-overlay x) (dolist (s '("\t" "C")) (overlay-put (make-overlay 2 2) 'before-string s))) (window-text-pixel-size))
 (progn (insert "a" (propertize "X" 'display (string-to-unibyte "\351\200z")) "b") (let ((o (make-overlay 1 1))) (overlay-put o 'before-string (string-to-unibyte "\351z")) (overlay-put o 'after-string (string-to-unibyte "\200"))) (setq line-prefix (string-to-unibyte "\377")) (list (window-text-pixel-size) (window-text-pixel-size nil 2 3)))
 (progn (insert "abc\n") (setq mode-line-format nil) (list (window-text-pixel-size nil nil nil nil nil t) (progn (setq mode-line-format "x") (window-text-pixel-size nil nil nil nil nil t)) (progn (set-window-parameter nil 'mode-line-format 'none) (prog1 (window-text-pixel-size nil nil nil nil nil t) (set-window-parameter nil 'mode-line-format nil)))))
 (let ((unibyte-display-via-language-environment t)) (insert "a" (propertize "X" 'display "é中\t") "b") (overlay-put (make-overlay 2 2) 'before-string "ü中\t") (setq line-prefix "ñ中" wrap-prefix "中ö") (insert (make-string 100 ?y)) (list (window-text-pixel-size) (window-text-pixel-size nil 1 3) (window-text-pixel-size nil 3 4)))
@@ -168,6 +162,29 @@ fn unsupported_display_features_refuse() {
         assert_eq!(refusal(&mut vm, body), format!("\"VM2 window-text-pixel-size {what} is unsupported\""), "{body}");
     }
 }
+
+/// Among overlays with one start, the itree orders by when it last
+/// inserted each; move-overlay reinserts, so GNU shows the moved tab last.
+/// Without that order, strings from overlays sharing a start refuse.
+#[test]
+fn overlays_sharing_a_start_refuse() {
+    let mut vm = booted();
+    let moved = r###"(progn (insert "abcd") (let ((m (make-overlay 1 1))) (overlay-put m 'before-string "\t") (dolist (s '("A" "BB")) (overlay-put (make-overlay 2 2) 'before-string s)) (move-overlay m 2 2)) (window-text-pixel-size))"###;
+    assert_eq!(oracle(moved), "(11 . 1)");
+    let refused = "signal (error \"VM2 window-text-pixel-size of strings from overlays that share a start is unsupported\")";
+    for expression in std::iter::once(moved).chain(SHARED_STARTS.lines().filter(|line| !line.is_empty())) {
+        assert_eq!(romacs(&mut vm, expression), refused, "{expression}");
+    }
+}
+
+const SHARED_STARTS: &str = r###"
+(progn (insert "abcdef\n") (let ((a (make-overlay 3 3)) (b (make-overlay 3 5)) (c (make-overlay 1 3))) (overlay-put a 'before-string "1234567890") (overlay-put a 'priority 2) (overlay-put b 'before-string (make-string 75 ?b)) (overlay-put c 'after-string "\t") (overlay-put c 'priority 9)) (list (window-text-pixel-size) (window-text-pixel-size nil 1 3) (window-text-pixel-size nil 3 4) (window-text-pixel-size nil 3 8) (window-text-pixel-size nil 1 3 nil nil nil t)))
+(progn (insert "abcd") (let ((a (make-overlay 2 2)) (b (make-overlay 2 2)) (c (make-overlay 2 2))) (overlay-put a 'before-string "A") (overlay-put a 'after-string "\t") (overlay-put a 'priority 3) (overlay-put b 'before-string "\t") (overlay-put b 'priority 1) (overlay-put c 'after-string "CC") (overlay-put c 'priority 2)) (window-text-pixel-size))
+(progn (insert "abcd") (let ((a (make-overlay 2 2)) (b (make-overlay 1 2)) (c (make-overlay 2 3))) (overlay-put a 'before-string "\t") (overlay-put a 'after-string "AA") (overlay-put a 'priority 5) (overlay-put b 'after-string "\t") (overlay-put c 'before-string "C") (overlay-put c 'priority -2)) (window-text-pixel-size))
+(progn (insert "ab") (let ((o (make-overlay 2 2)) (q (make-overlay 2 2))) (overlay-put o 'priority 1) (overlay-put o 'before-string "\t") (overlay-put o 'after-string "A") (overlay-put q 'before-string "BBB") (overlay-put q 'after-string "CC\t")) (window-text-pixel-size))
+(progn (insert "ab") (dolist (s '("A" "\t" "BB" "\t" "C")) (overlay-put (make-overlay 2 2) 'before-string s) (overlay-put (make-overlay 1 1) 'after-string s)) (window-text-pixel-size))
+(progn (insert "ab") (let ((x (make-overlay 2 2))) (overlay-put x 'before-string "\t") (dolist (s '("A" "BB")) (overlay-put (make-overlay 2 2) 'before-string s)) (delete-overlay x) (dolist (s '("\t" "C")) (overlay-put (make-overlay 2 2) 'before-string s))) (window-text-pixel-size))
+"###;
 
 /// A host's published layout cannot answer for the terminal frame model;
 /// before any layout the frame is like GNU's initial one.

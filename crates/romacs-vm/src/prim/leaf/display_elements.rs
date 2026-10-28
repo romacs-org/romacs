@@ -74,7 +74,7 @@ enum Replacement { String(Value, bool), Space(Value, bool), Nothing }
 
 /// An overlay string recorded by load_overlay_strings.
 #[derive(Clone, Copy)]
-struct OverlayEntry { overlay: Value, string: Value, priority: i64, after: bool }
+struct OverlayEntry { overlay: Value, string: Value, priority: i64, after: bool, start: i64 }
 
 /// One character of a buffer or string, before classification.
 #[derive(Clone, Copy)]
@@ -298,11 +298,14 @@ impl<'l, 'a> Source<'l, 'a> {
     }
 
     /// load_overlay_strings at P, overlays in ITREE_DESCENDING order: by
-    /// decreasing start, oldest first among equal starts. An overlay over
-    /// invisible text shows both strings at either end.
+    /// decreasing start, then by when the itree last inserted each, which
+    /// move-overlay and insertion before a front-advance start change and
+    /// VM2 does not record. So two overlays showing strings here must not
+    /// share a start. An overlay over invisible text shows both strings at
+    /// either end.
     fn overlay_string_list(&mut self, p: i64) -> R<Vec<Value>> {
         let mut overlays = self.overlays_at(p)?;
-        overlays.sort_by_key(|&(overlay, start, _)| (std::cmp::Reverse(start), self.leaf.vm.overlay_age(overlay)));
+        overlays.sort_by_key(|&(_, start, _)| std::cmp::Reverse(start));
         let mut entries = vec![];
         for (overlay, start, end) in overlays {
             let property = self.leaf.vm.overlay_property(overlay, self.syms.invisible).map_err(Fault::Error)?;
@@ -312,8 +315,11 @@ impl<'l, 'a> Source<'l, 'a> {
             for (key, after, shows) in [(self.syms.before, false, start == p || (end == p && invisible)),
                 (self.syms.after, true, end == p || (start == p && invisible))] {
                 let string = self.leaf.vm.overlay_property(overlay, key).map_err(Fault::Error)?;
-                if shows && self.nonempty_string(string) { entries.push(OverlayEntry { overlay, string, priority, after }); }
+                if shows && self.nonempty_string(string) { entries.push(OverlayEntry { overlay, string, priority, after, start }); }
             }
+        }
+        if entries.iter().any(|a| entries.iter().any(|b| a.overlay != b.overlay && a.start == b.start)) {
+            return Err(unsupported("of strings from overlays that share a start"));
         }
         Ok(merge_sort(entries, &compare_overlay_entries).into_iter().map(|e| e.string).collect())
     }
