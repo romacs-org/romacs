@@ -88,12 +88,16 @@ one (it extends a \"...\" prefix), or N > 1 if it should replace it with
           (cond
            ((eq (char-after p) ?\n) 2)
            ((and (eq (char-after p) ?\s) (eq (char-after (1+ p)) ?\[))
-            ;; strtoimax, then exactly " times]\n".
-            (let ((rest (buffer-substring-no-properties (+ p 2) (point-max))))
-              (if (string-match "\\`[ \t\n\v\f\r]*\\([-+]?[0-9]+\\) times]\n" rest)
-                  (let ((n (string-to-number (substring rest (match-beginning 1) (match-end 1)))))
-                    (if (and (integerp n) (> n 0)) (1+ n) 0))
-                0)))
+            ;; strtoimax, then exactly " times]\n".  The caller's match
+            ;; data survives, as GNU's C parse never touches it.
+            (let ((rest (buffer-substring-no-properties (+ p 2) (point-max)))
+                  (saved (match-data)))
+              (unwind-protect
+                  (if (string-match "\\`[ \t\n\v\f\r]*\\([-+]?[0-9]+\\) times]\n" rest)
+                      (let ((n (string-to-number (substring rest (match-beginning 1) (match-end 1)))))
+                        (if (and (integerp n) (> n 0)) (1+ n) 0))
+                    0)
+                (set-match-data saved t))))
            (t 0))))))
 
 )

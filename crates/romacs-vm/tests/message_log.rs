@@ -74,3 +74,13 @@ fn message_creates_log_in_messages_buffer_mode_and_signals_format_errors() {
         assert_eq!(eval(&mut vm, &format!("(equal (condition-case e (message {args}) (error e)) (condition-case e (format {args}) (error e)))")), "t", "{args}");
     }
 }
+
+/// message_log_check_duplicate parses " [N times]" in C, so a repeated
+/// message leaves the caller's match data alone.
+#[test]
+fn repeated_message_keeps_match_data() {
+    let mut vm = Vm::new();
+    let source = "(progn (message \"same\") (message \"same\") (string-match \"b\" \"abc\") (message \"same\") \
+                  (list (match-data) (with-current-buffer \"*Messages*\" (buffer-string))))";
+    assert_eq!(eval(&mut vm, source), "((1 2) \"same [3 times]\\n\")");
+}
