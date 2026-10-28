@@ -20,9 +20,7 @@ pub(crate) fn capitalized(cx: &mut Leaf<'_>, object: Value, initials: bool) -> O
         let code = if !multibyte && (128..256).contains(&code) {
             code + BYTE8_OFFSET
         } else { code };
-        let cased = if let Some(row) = mapping(code) { row.1 }
-            else if initials { cx.case_mapping_character(code, false)? }
-            else { code };
+        let cased = word_start(cx, code)?;
         if cased == code { return Ok(object); }
         let cased = if !multibyte && cased >= BYTE8_OFFSET { cased - BYTE8_OFFSET } else { cased };
         return Ok(Value::integer(i64::from(cased | flags)).unwrap());
@@ -57,16 +55,18 @@ pub(crate) fn capitalized_chars(cx: &mut Leaf<'_>, chars: &[u32], prefixes: Opti
     let mut inword = false;
     let mut cased = Vec::with_capacity(chars.len());
     for (i, &code) in chars.iter().enumerate() {
+        // case_character: a special casing of several characters first,
+        // then the case table (in a word) or the titlecase (at its start).
+        let special = |full: &'static [u32]| (full.len() > 1).then(|| full.to_vec());
         let row = mapping(code);
-        let fallback = [if initials && !inword && row.is_none() { cx.case_mapping_character(code, false)? } else { code }];
-        let mut out = if inword && initials { &fallback[..] }
-                      else if inword { row.map_or(&fallback[..], |r| r.3) }
-                      else { row.map_or(&fallback[..], |r| r.2) };
-        let sigma = [0x3c2];
-        if !initials && inword && code == 0x3a3 && !words.get(i + 1).copied().unwrap_or(false) {
-            out = &sigma;
-        }
-        cased.push(out.to_vec());
+        let out = if inword && initials { vec![code] }
+            else if !initials && inword && code == 0x3a3 && !words.get(i + 1).copied().unwrap_or(false) { vec![0x3c2] }
+            else if inword {
+                row.and_then(|r| special(r.3)).map_or_else(|| cx.case_mapping_character(code, true).map(|c| vec![c]), Ok)?
+            } else {
+                row.and_then(|r| special(r.2)).map_or_else(|| word_start(cx, code).map(|c| vec![c]), Ok)?
+            };
+        cased.push(out);
         inword = words[i] && (inword || !prefixes.is_some_and(|p| p[i]));
     }
     Ok(cased)
@@ -91,3 +91,14 @@ defsubr! { name = "upcase-initials", gnu = "casefiddle.c:418", effect = Reads,
 fn upcase_initials(cx, object: Value) {
     capitalized(cx, object, true)
 }}
+
+/// case_character's one-character titlecase of CODE at a word start: its
+/// titlecase property when that changes it, a titlecase letter itself
+/// (its uppercase differs), else the current upcase table.
+fn word_start(cx: &mut Leaf<'_>, code: u32) -> std::result::Result<u32, Fault> {
+    match mapping(code) {
+        Some(row) if row.1 != code => Ok(row.1),
+        _ if Leaf::unicode_case(code, false) != code => Ok(code),
+        _ => cx.case_mapping_character(code, false),
+    }
+}

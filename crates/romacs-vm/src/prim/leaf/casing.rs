@@ -46,6 +46,11 @@ fn byte_code(code: u32, unibyte: bool) -> u32 {
 }
 
 impl Leaf<'_> {
+    /// The Unicode simple mapping of CODE, the default a case table refines.
+    pub(crate) fn unicode_case(code: u32, down: bool) -> u32 {
+        simple(code, down)
+    }
+
     pub(crate) fn byte_case_result(code: u32, original: u32, down: bool) -> u8 {
         if code >= crate::lstring::BYTE8_OFFSET + 128 {
             return (code - crate::lstring::BYTE8_OFFSET) as u8;
@@ -63,10 +68,14 @@ impl Leaf<'_> {
 }
 
 impl Leaf<'_> {
-    fn case_override(&self, table: Value, code: u32) -> std::result::Result<Option<u32>, Fault> {
+    /// TABLE's mapping of CODE, None for the Unicode default. A nil entry
+    /// is identity (buffer.h downcase/upcase), except above ASCII in the
+    /// native startup tables before GNU's Lisp enriches them
+    /// (VM2-COMPLETION-CASE).
+    fn case_override(&self, table: Value, code: u32, down: bool) -> std::result::Result<Option<u32>, Fault> {
         let value = self.char_table_element(table, code as usize)?;
         if value == Value::NIL {
-            return Ok(None);
+            return Ok((code < 128 || !self.native_case_mapping(table, if down { 0 } else { 1 })).then_some(code));
         }
         // GNU ignores non-natural-number entries, but they remain explicit
         // identity overrides rather than requests for the Unicode default.
@@ -102,7 +111,7 @@ impl Leaf<'_> {
                 continue;
             }
             let default = if multibyte || code < 128 { simple(code, down) } else { code };
-            let cased = self.case_override(table, byte_code(code, !multibyte))?.unwrap_or(default);
+            let cased = self.case_override(table, byte_code(code, !multibyte), down)?.unwrap_or(default);
             let last = !words.get(i + 1).copied().unwrap_or(false);
             mappings.push(vec![if was_inword && code == SIGMA && cased != code && last { 0x3c2 } else { cased }]);
         }
@@ -121,7 +130,7 @@ impl Leaf<'_> {
             let unibyte = code < 256 && !self.casing_multibyte()?;
             let lookup = byte_code(code, unibyte);
             let mapped = self
-                .case_override(table, lookup)?
+                .case_override(table, lookup, down)?
                 .unwrap_or_else(|| simple(lookup, down));
             let mapped = if unibyte {
                 Self::byte_case_result(mapped, code, down) as u32
