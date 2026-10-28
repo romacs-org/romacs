@@ -3079,8 +3079,9 @@ fn primitive_value(
     match call(e.vm, p, start, argc) {
         Ok(value) => Some(value),
         Err(error) => {
-            // A variable watcher's own signal travels behind the write's text.
-            if matches!(p, Primitive::Set | Primitive::Makunbound | Primitive::DefvarSetDefault) && let Some(escape) = e.vm.propagated_escape.take() {
+            // A variable watcher's or `defalias-fset-function''s own signal
+            // travels behind the write's text.
+            if matches!(p, Primitive::Set | Primitive::Makunbound | Primitive::DefvarSetDefault | Primitive::Defalias) && let Some(escape) = e.vm.propagated_escape.take() {
                 e.escape = Some(escape);
                 e.escape_hooked = std::mem::take(&mut e.vm.propagated_escape_hooked);
                 e.failed_eval_depth = e.vm.propagated_eval_depth.take();

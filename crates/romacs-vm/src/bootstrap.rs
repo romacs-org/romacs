@@ -37,6 +37,15 @@ impl Vm {
             _ => false,
         })
     }
+    /// data.c:1021: a non-nil DOCSTRING becomes SYMBOL's
+    /// `function-documentation'.
+    fn defalias_documentation(&mut self, args: &[Value]) -> Result<()> {
+        if let Some(&doc) = args.get(2) && doc != Value::NIL {
+            let property = self.intern("function-documentation");
+            self.put_symbol_property(args[0], property, doc)?;
+        }
+        Ok(())
+    }
     pub(super) fn bootstrap_primitive(
         &mut self,
         p: Primitive,
@@ -81,6 +90,17 @@ impl Vm {
                 if slot >= self.slots.len() {
                     return Err("invalid symbol".into());
                 }
+                // data.c:993 automatic advice activation: a symbol's
+                // `defalias-fset-function' stores the definition instead of
+                // Ffset (nadvice keeps an autoloaded function's advice so).
+                let property = self.intern("defalias-fset-function");
+                let hook = self.symbol_property(a[0], property)?;
+                if hook != Value::NIL {
+                    self.autoload_note_defalias(slot);
+                    self.call_lisp_at_write(hook, &[a[0], a[1]])?;
+                    self.defalias_documentation(&a)?;
+                    return Ok(a[0]);
+                }
                 let mut definition = a[1];
                 let mut is_macro = false;
                 if definition.tag() == 3 && self.resolve_keymap(definition).is_none() {
@@ -109,6 +129,7 @@ impl Vm {
                     }
                 }
                 self.define_function(slot, definition, is_macro)?;
+                self.defalias_documentation(&a)?;
                 Ok(a[0])
             }
             Boundp => {

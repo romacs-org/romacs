@@ -44,7 +44,7 @@ impl Vm {
             result = if prim::native_watcher(self, watcher).is_some() {
                 prim::call_native_watcher(self, watcher, &args)
             } else {
-                self.call_lisp_watcher(watcher, &args)
+                self.call_lisp_at_write(watcher, &args)
             };
             if result.is_err() { break; }
             tail = self.cons_pair(tail).map_or(Value::NIL, |(_, rest)| rest);
@@ -59,14 +59,15 @@ impl Vm {
         if self.variable_binding_slot(base, false)? != base { return Ok(true); }
         Ok(self.local_table(base)?.is_some() && !self.slots[base].explicit_local)
     }
-    /// calln (WATCHER, ARGS...) at a write point. The writer's Values (an
-    /// engine's registers, a leaf's locals) are not rooted there, so
-    /// collection is inhibited until the watcher returns, as GNU's is in
-    /// compilation and loading here; the engine grows its code cache for
-    /// functions the watcher compiled (`lower_function'). A non-local exit
-    /// is left in `propagated_escape' for the writer; an escape already
-    /// pending there survives a watcher that returns.
-    fn call_lisp_watcher(&mut self, watcher: Value, args: &[Value]) -> Result<()> {
+    /// calln (FUNCTION, ARGS...) at a write point (a variable watcher, a
+    /// `defalias-fset-function'). The writer's Values (an engine's
+    /// registers, a leaf's locals) are not rooted there, so collection is
+    /// inhibited until FUNCTION returns, as GNU's is in compilation and
+    /// loading here; the engine grows its code cache for functions FUNCTION
+    /// compiled (`lower_function'). A non-local exit is left in
+    /// `propagated_escape' for the writer; an escape already pending there
+    /// survives a FUNCTION that returns.
+    pub(crate) fn call_lisp_at_write(&mut self, watcher: Value, args: &[Value]) -> Result<()> {
         let pending = self.propagated_escape.take();
         let hooked = std::mem::take(&mut self.propagated_escape_hooked);
         let depth = self.propagated_eval_depth.take();
