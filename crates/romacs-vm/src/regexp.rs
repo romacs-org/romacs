@@ -186,6 +186,19 @@ impl Vm {
         Ok(self.make_lisp_string(bytes, input.is_multibyte() || replacement.is_multibyte()))
     }
 
+    /// search.c update_search_regs: OLDSTART..OLDEND became OLDSTART..NEWEND.
+    /// Registers after the old text shift with it, those inside it go to
+    /// OLDSTART, whatever the last match searched.
+    pub(crate) fn regexp_update_search_regs(&mut self, oldstart: i64, oldend: i64, newend: i64) {
+        let moved = |at: usize| {
+            let at = at as i64;
+            (if at >= oldend { at + newend - oldend } else if at > oldstart { oldstart } else { at }) as usize
+        };
+        for (start, end) in self.regexp.groups.iter_mut().flatten() {
+            (*start, *end) = (moved(*start), moved(*end));
+        }
+    }
+
     pub(crate) fn regexp_translate_match_data(&mut self, delta: i64) {
         if self.regexp.succeeded {
             for (start, end) in self.regexp.groups.iter_mut().flatten() {
