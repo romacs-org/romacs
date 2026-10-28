@@ -104,7 +104,8 @@ impl Vm {
     pub(super) fn splice_overlay_strings(&mut self, window: Value, buffer: Value, text: &str) -> Result<Spliced> {
         let mut out = Spliced::default();
         let mut copied = 0;
-        for (at, strings) in self.overlay_strings(window, buffer)? {
+        // TEXT ends at ZV: an overlay past it is outside the accessible region.
+        for (at, strings) in self.overlay_strings(window, buffer)?.into_iter().filter(|(at, _)| *at <= text.len()) {
             if at > copied {
                 out.segments.push(Segment { display: out.text.len(), buffer: copied, len: at - copied, string: false });
                 out.text.push_str(&text[copied..at]);

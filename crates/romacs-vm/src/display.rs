@@ -465,13 +465,19 @@ impl Vm {
         let Object::Buffer(b) = self.object(buffer)? else {
             return Err("Unicode display buffer required".into());
         };
-        let utf8 = b.as_str().to_owned();
+        // The window shows the accessible region, from a start and with a
+        // point inside it (xdisp.c CLIP_TEXT_POS_FROM_MARKER, Fwindow_point).
+        let accessible = b.accessible();
+        let (begv, zv) = (accessible.start.0, accessible.end.0);
+        let utf8 = b.as_str()[..zv].to_owned();
         let point_byte = b
             .byte_of_char(crate::coordinates::CharOffset((point - 1) as usize))?
-            .0;
+            .0
+            .clamp(begv, zv);
         let start_byte = b
             .byte_of_char(crate::coordinates::CharOffset((start - 1) as usize))?
-            .0;
+            .0
+            .clamp(begv, zv);
         let (names, mut faces) = self.display_faces()?;
         let terminal = self.terminal_bindings.iter().find(|binding| binding.buffer == buffer);
         if let Some(binding) = terminal {
