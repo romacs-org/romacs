@@ -376,8 +376,7 @@ fn paint(
         "{}",
         json!({"diagnostic":if synchronous { "paint" } else { "paint-submitted" },"presentation":presentation,
         "buffer_versions":snapshot.windows.iter().map(|w|w.snapshot.buffer_version).collect::<Vec<_>>(),"resolved_fonts":resolved_fonts,
-        "unresolved_face_text_total":diagnostic.map(|sample| sample.unresolved_face_text_total),
-        "collections":vm.heap_stats().collections})
+        "unresolved_face_text_total":diagnostic.map(|sample| sample.unresolved_face_text_total)})
     );
     if SCENE_DUMPS.load(std::sync::atomic::Ordering::Relaxed) { eprintln!(
         "{}",
@@ -565,7 +564,6 @@ fn evaluate(
             if live && timers::ends_idle(&event) { vm.timer_stop_idle(); }
             let event = command::unwrap_event(event);
             let command_start = Instant::now();
-            let gc_before = vm.heap_stats().collections;
             if live && let InputEvent::WindowResize { width: w, height: h, .. } = event {
                 if w > 0 && h > 0 && (width, height) != (w, h) {
                     width = w; height = h;
@@ -645,7 +643,6 @@ fn evaluate(
                         "key_to_command_complete_ns":received.map(|t| t.elapsed().as_nanos()),
                         "presentation_pending":live,
                         "evaluator_total_ns":command_start.elapsed().as_nanos(),
-                        "collections_before":gc_before,"collections_after":vm.heap_stats().collections,
                         "force_gc":force_gc,"gc_floor":floor,"scene_dumps":SCENE_DUMPS.load(std::sync::atomic::Ordering::Relaxed)}));
                 }
                 let diagnostic_start = key_trace.as_ref().map(|_| Instant::now());
@@ -683,8 +680,7 @@ fn evaluate(
                     }
                     eprintln!("{}", json!({"diagnostic":"paint","presentation":diagnostic.presentation,
                         "buffer_versions":previous.windows.iter().map(|w|w.snapshot.buffer_version).collect::<Vec<_>>(),
-                        "unresolved_face_text_total":diagnostic.unresolved_face_text_total,
-                        "collections":vm.heap_stats().collections}));
+                        "unresolved_face_text_total":diagnostic.unresolved_face_text_total}));
                     if tracing() {
                         eprintln!("{}", json!({"diagnostic":"latency-render","presentation":in_flight,
                             "units":"ns","submit_to_render_observed_ns":submitted.elapsed().as_nanos(),
