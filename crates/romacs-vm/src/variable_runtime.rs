@@ -270,6 +270,25 @@ impl Vm {
         self.declaration_hash_put(table, buffer, Value::reference(local+1, 7))?;
         Ok(local)
     }
+    /// SLOT's value in BUFFER, as `buffer-local-value' reads it: its
+    /// buffer-local value there, else its default.  UNBOUND when void.
+    pub(crate) fn value_in_buffer(&mut self, slot: usize, buffer: Value) -> Result<Value> {
+        if let Some(fwd) = self.forwarding(slot) {
+            return match fwd {
+                forwarded::Fwd::Buffer(i) => Ok(self.forwarded_buffer_value(buffer.index(0)? - 1, i)),
+                _ => self.forwarded_value(fwd),
+            };
+        }
+        if let Some(table) = self.local_table(slot)? {
+            if let Some(local) = self.declaration_hash_get(table, buffer)? {
+                return Ok(self.slots[local.index(7)? - 1].value);
+            }
+            if let Some(fwd) = self.localized_boolean(slot) {
+                return self.forwarded_default(fwd);
+            }
+        }
+        Ok(self.slots[slot].value)
+    }
     pub(super) fn variable_value(&mut self, slot: usize) -> Result<Value> {
         let base = self.indirect_variable(slot);
         if let Some(fwd) = self.native_forwarding(base) {

@@ -382,13 +382,20 @@ impl Vm {
         w.buffer = buffer;
         w.end_distance = 0;
         w.end_valid = false;
-        // GNU resets margins when KEEP-MARGINS is nil
+        self.display_state.version += 1;
+        // Without KEEP-MARGINS the window takes the buffer's margin widths
         // (src/window.c:4397), independently of the guard above.
         if !keep {
-            w.left_margin = 0;
-            w.right_margin = 0;
+            let width = |vm: &mut Self, name: &str| -> Result<u32> {
+                let slot = vm.slot(name);
+                let value = vm.value_in_buffer(slot, buffer)?;
+                Ok(value.integer_value().and_then(|n| u32::try_from(n).ok()).unwrap_or(0))
+            };
+            let (left, right) = (width(self, "left-margin-width")?, width(self, "right-margin-width")?);
+            let w = self.window_mut(v)?;
+            w.left_margin = left;
+            w.right_margin = right;
         }
-        self.display_state.version += 1;
         Ok(())
     }
     /// GNU `select_window` (window.c:536): NORECORD nil bumps the use time

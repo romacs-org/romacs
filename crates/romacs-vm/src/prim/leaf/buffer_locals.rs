@@ -39,18 +39,7 @@ impl Leaf<'_> {
         if buffer == Value::NIL { return Err(Fault::Wrong("bufferp", buffer)); }
         let buffer = self.decode_buffer(buffer)?;
         let Some(slot) = slot else { return Ok(symbol) };
-        let value = if let Some(fwd) = self.vm.forwarding(slot) {
-            match fwd {
-                Fwd::Buffer(i) => self.vm.forwarded_buffer_value(buffer.index(0).unwrap() - 1, i),
-                _ => self.vm.forwarded_value(fwd).map_err(Fault::Error)?,
-            }
-        } else if let Some(table) = self.vm.local_table(slot).map_err(Fault::Error)? {
-            if let Some(local) = self.vm.declaration_hash_get(table, buffer).map_err(Fault::Error)? {
-                self.vm.slots[local.index(7).unwrap() - 1].value
-            } else if let Some(fwd) = self.vm.localized_boolean(slot) {
-                self.vm.forwarded_default(fwd).map_err(Fault::Error)?
-            } else { self.vm.slots[slot].value }
-        } else { self.vm.slots[slot].value };
+        let value = self.vm.value_in_buffer(slot, buffer).map_err(Fault::Error)?;
         if value == Value::UNBOUND {
             Err(Fault::VoidVariable(symbol))
         } else { Ok(value) }
