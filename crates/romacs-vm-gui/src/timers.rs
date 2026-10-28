@@ -121,6 +121,14 @@ mod tests {
         let start = std::time::Instant::now();
         assert_eq!(printed(&mut vm, "(list (read-event nil nil 0.05) probe (current-idle-time))"), "(nil (ordinary) nil)");
         assert!(start.elapsed() >= Duration::from_millis(50));
+        // A timer that adds a timer: the wait checks again before blocking,
+        // so the new one runs when due, not when the limit ends the block.
+        // Pinned GNU 45b0f7699df, batch, stdin open: (nil (a (b t))).
+        vm.set_host_input(Some(Box::new(Paced([Step::Pause(Duration::from_secs(10))].into()))));
+        printed(&mut vm, "(setq timer-list nil timer-idle-list nil probe nil start (float-time))
+            (run-at-time 0 nil (lambda () (push 'a probe)
+              (run-at-time 0.01 nil (lambda () (push (list 'b (< (- (float-time) start) 0.1)) probe)))))");
+        assert_eq!(printed(&mut vm, "(list (read-event nil nil 0.2) (reverse probe))"), "(nil (a (b t)))");
     }
 
     enum Step { Pause(Duration), Key(char) }

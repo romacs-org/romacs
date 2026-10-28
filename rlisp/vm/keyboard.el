@@ -79,8 +79,12 @@ runs no timers."
     (and timers (null end) (romacs--timer-start-idle))
     (unwind-protect
         (while waiting
-          (let* ((delay (and timers (romacs--timer-check)))
-                 (left (and end (- end (float-time)))))
+          (let ((delay nil) (run -1) left)
+            ;; Check again while timers run: one may have added another
+            ;; (wait_reading_process_output's timer_check loop).
+            (while (and timers (/= run romacs--timers-run))
+              (setq run romacs--timers-run delay (romacs--timer-check)))
+            (setq left (and end (- end (float-time))))
             (if (and left (<= left 0))
                 (setq waiting nil)
               (setq c (romacs--read-host-event
