@@ -97,13 +97,16 @@ runs no timers."
             ;; (wait_reading_process_output's timer_check loop).
             (while (and timers (/= run romacs--timers-run))
               (setq run romacs--timers-run delay (romacs--timer-check)))
+            ;; Before every block, not only after a completion's wake: one
+            ;; that arrived while callbacks could not run (in a minibuffer
+            ;; read) has already used its wake.
+            (romacs--dispatch-background)
             (setq left (and end (- end (float-time))))
             (if (or (romacs--unread-p) (and left (<= left 0)))
                 (setq waiting nil)
               (setq c (romacs--read-host-event
                        (if (and delay left) (min delay left) (or delay left)))
-                    waiting (null c))
-              (unless c (romacs--dispatch-background)))))
+                    waiting (null c)))))
       (and timers (null end) (romacs--timer-stop-idle)))
     c))
 

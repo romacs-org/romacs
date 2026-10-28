@@ -160,10 +160,31 @@ mod tests {
         let out = run(&mut vm).unwrap();
         assert_eq!(out.command.as_deref(), Some("mark-whole-buffer"), "{out:?}");
         assert_eq!(printed(&mut vm, "(mapcar #'car (reverse log))"), "(callback pre post)");
-        vm.eval_source(&format!("(setq log nil) (global-set-key [f9] (lambda () (interactive) (setq got (read-string \"x: \")))) {start}")).unwrap();
+        // Started by the command, the job can finish only during its read.
+        vm.eval_source(&format!("(setq log nil) (global-set-key [f9] (lambda () (interactive) {start} (setq got (read-string \"x: \"))))")).unwrap();
         vm.set_host_input(Some(Box::new(Scripted([Some(CommandEvent::Named("f9".into())), None, Some(CommandEvent::Character(97)), Some(CommandEvent::Character(13))].into()))));
         assert!(run(&mut vm).unwrap().signal.is_none());
         assert_eq!(printed(&mut vm, "(list got (mapcar #'car (reverse log)) (romacs--process-pending-p))"), "(\"a\" (pre post pre post pre post) t)", "the minibuffer's own commands run too, no callback");
+    }
+
+    /// A completion whose wake came during a minibuffer read runs before
+    /// the next command's keys though no further wake comes: RET ends the
+    /// read and C-x h follows at once.
+    #[test]
+    fn a_completion_held_by_a_minibuffer_read_runs_before_the_next_keys() {
+        let mut vm = logged();
+        // Started by the command, the job can finish only during its read.
+        vm.eval_source("(global-set-key [f9] (lambda () (interactive)
+            (romacs-process-start (list \"true\") \"\" default-directory 10
+              (lambda (result) (setq log (cons (list 'callback (car result)) log)) nil))
+            (setq got (read-string \"x: \"))))").unwrap();
+        vm.set_host_input(Some(Box::new(Scripted([Some(CommandEvent::Named("f9".into())), None, Some(CommandEvent::Character(97)),
+            Some(CommandEvent::Character(13)), Some(CommandEvent::Character(24)), Some(CommandEvent::Character(104))].into()))));
+        assert!(run(&mut vm).unwrap().signal.is_none());
+        assert_eq!(printed(&mut vm, "(list got (assq 'callback log))"), "(\"a\" nil)", "held during the read");
+        vm.eval_source("(setq log nil)").unwrap();
+        assert_eq!(run(&mut vm).unwrap().command.as_deref(), Some("mark-whole-buffer"));
+        assert_eq!(printed(&mut vm, "(list (mapcar #'car (reverse log)) (romacs--process-pending-p))"), "((callback pre post) nil)");
     }
 
     /// pre-command-hook runs before each command and post-command-hook
