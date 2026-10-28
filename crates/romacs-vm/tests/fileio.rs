@@ -440,15 +440,18 @@ fn unsupported_reads_refuse_and_leave_the_buffer_alone() {
     std::fs::write(&bom, b"\xef\xbb\xbfx").unwrap();
     let mut vm = Vm::new();
     let (crlf, latin, nul, bom) = (lisp(&crlf), lisp(&latin), lisp(&nul), lisp(&bom));
-    // Bootstrap regime: the bare registry defines no coding category, so
-    // detection finds nothing in 8-bit text and the undecided raw decoder
-    // would insert raw bytes, which VM2 buffer text cannot hold.
-    let raw = "insert-file-contents of raw bytes into a multibyte buffer";
+    // Bootstrap regime: the bare registry gives no coding category a
+    // system, so detect_coding rejects every category in 8-bit text and
+    // decides raw-text, which GNU's C does not define before mule-conf.el
+    // either (syms_of_coding defines no-conversion and undecided only):
+    // setup_coding_system signals before the buffer changes.
+    for form in [format!("(insert-file-contents {latin})"), format!("(insert-file-contents {bom})"),
+                 // Anchor the nonmatching basename: random TMPDIR components may contain x.
+                 format!("(let ((file-name-handler-alist '((\"/handler-only\\\\'\" . ignore)))) (insert-file-contents {latin}))")] {
+        let source = format!("(with-temp-buffer (insert \"keep\") (goto-char 3) (list (condition-case e {form} (error e)) (buffer-string) (point) last-coding-system-used))");
+        assert_eq!(eval(&mut vm, &source), "((coding-system-error raw-text) \"keep\" 3 nil)", "{form}");
+    }
     for (form, message) in [
-        (format!("(insert-file-contents {latin})"), raw),
-        (format!("(insert-file-contents {bom})"), raw),
-        // Anchor the nonmatching basename: random TMPDIR components may contain x.
-        (format!("(let ((file-name-handler-alist '((\"/handler-only\\\\'\" . ignore)))) (insert-file-contents {latin}))"), raw),
         // The matching control must still refuse before touching the buffer or file.
         (format!("(let ((file-name-handler-alist '((\"/crlf\\\\'\" . ignore)))) (insert-file-contents {crlf}))"), "expand-file-name matching file name handler"),
         (format!("(let ((selective-display t)) (write-region nil nil {crlf}))"), "write-region with selective-display t"),
