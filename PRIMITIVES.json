@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "97e280628ce27b33cac0890c8611acdca3dbd30e656dec02d108e9dc5c9cb75d",
+  "source_fingerprint": "dd3a5c7d20c2ed4eac20fa9d8989a64261ef7577c49faa4fadfc11af8f17b086",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 975,
-  "parsed_vm2_only": 975
+  "parsed_total": 980,
+  "parsed_vm2_only": 980
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -576,6 +576,11 @@
    "implementation": "vm2",
    "variant": "Primitive::Substring",
    "registered_at": "crates/romacs-vm/src/lib.rs:546"
+  },
+  "buffer-text-pixel-size": {
+   "name": "buffer-text-pixel-size",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/window.rs:361"
   },
   "bufferp": {
    "name": "bufferp",
@@ -1673,6 +1678,16 @@
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/window.rs:182"
   },
+  "frame-native-height": {
+   "name": "frame-native-height",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/window.rs:376"
+  },
+  "frame-native-width": {
+   "name": "frame-native-width",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/window.rs:371"
+  },
   "frame-or-buffer-changed-p": {
    "name": "frame-or-buffer-changed-p",
    "implementation": "vm2",
@@ -2139,7 +2154,7 @@
   "invisible-p": {
    "name": "invisible-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/invisible.rs:20"
+   "registered_at": "crates/romacs-vm/src/prims/invisible.rs:4"
   },
   "isnan": {
    "name": "isnan",
@@ -3031,6 +3046,11 @@
    "implementation": "vm2",
    "variant": "Primitive::CharToByte",
    "registered_at": "crates/romacs-vm/src/lib.rs:550"
+  },
+  "posn-at-point": {
+   "name": "posn-at-point",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/window.rs:366"
   },
   "preceding-char": {
    "name": "preceding-char",
@@ -5065,6 +5085,11 @@
    "name": "window-tab-line-height",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/window.rs:74"
+  },
+  "window-text-pixel-size": {
+   "name": "window-text-pixel-size",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/window.rs:356"
   },
   "window-top-child": {
    "name": "window-top-child",

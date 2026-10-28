@@ -1604,8 +1604,12 @@ mod leaf {
     mod random;
     mod width;
     mod coding_safe;
+    mod display_motion;
+    mod display_elements;
+    mod text_pixel_size;
+    pub(crate) use text_pixel_size::TextSizeArgs;
 }
-pub(crate) use leaf::{Leaf, Kind, SyntaxOp, SyntaxOutcome, CallOutput};
+pub(crate) use leaf::{Leaf, Kind, SyntaxOp, SyntaxOutcome, CallOutput, TextSizeArgs};
 
 /// Realize C-initialized coding variables before their first Lisp observation.
 /// Like the charset slot hook, this preserves allocation-free VM construction.

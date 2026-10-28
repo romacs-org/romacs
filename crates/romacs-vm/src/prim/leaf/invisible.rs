@@ -143,6 +143,39 @@ impl Leaf<'_> {
         value.map_err(Fault::Error)
     }
 
+    /// TEXT_PROP_MEANS_INVISIBLE (xdisp.c invisible_prop) over the current
+    /// buffer's `buffer-invisibility-spec': 0 visible, 1 invisible, 2
+    /// invisible with an ellipsis. The whole PROPERTY is matched first,
+    /// then each element of a list, both with eq; the first match wins.
+    pub(crate) fn invisible_kind(&mut self, property: Value) -> std::result::Result<u8, Fault> {
+        let symbol = self.intern("buffer-invisibility-spec");
+        let spec = self.variable_value(symbol)?.unwrap_or(Value::NIL);
+        if spec == Value::TRUE {
+            return Ok(u8::from(property != Value::NIL));
+        }
+        let matched = self.match_invisibility_spec(property, spec);
+        if matched != 0 { return Ok(matched); }
+        let mut rest = property;
+        for _ in 0..self.list_limit() {
+            let Some((entry, tail)) = self.pair(rest) else { break };
+            let matched = self.match_invisibility_spec(entry, spec);
+            if matched != 0 { return Ok(matched); }
+            rest = tail;
+        }
+        Ok(0)
+    }
+    fn match_invisibility_spec(&self, property: Value, mut spec: Value) -> u8 {
+        for _ in 0..self.list_limit() {
+            let Some((entry, tail)) = self.pair(spec) else { break };
+            if property == entry { return 1; }
+            if let Some((key, ellipsis)) = self.pair(entry) && property == key {
+                return if ellipsis == Value::NIL { 1 } else { 2 };
+            }
+            spec = tail;
+        }
+        0
+    }
+
     pub fn invisible_property(&mut self, pos: Value) -> super::super::Out {
         // GNU deliberately treats negative fixnums, floats and bignums as
         // property values, not positions (FIXNATP, rather than INTEGERP).

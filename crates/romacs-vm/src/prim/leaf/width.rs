@@ -9,7 +9,7 @@ const DISP_TABLE_EXTRA_SLOTS: usize = 18;
 impl Leaf<'_> {
     /// buffer_display_table (indent.c): the buffer's `buffer-display-table',
     /// else `standard-display-table', when it is a display table.
-    fn display_table(&mut self) -> std::result::Result<Option<Value>, Fault> {
+    pub(super) fn display_table(&mut self) -> std::result::Result<Option<Value>, Fault> {
         for name in ["buffer-display-table", "standard-display-table"] {
             let symbol = self.intern(name);
             let Some(table) = self.variable_value(symbol)? else { continue };
@@ -22,7 +22,7 @@ impl Leaf<'_> {
         Ok(None)
     }
     /// CHARACTER_WIDTH.
-    fn character_width(&mut self, c: u32) -> std::result::Result<i64, Fault> {
+    pub(super) fn character_width(&mut self, c: u32) -> std::result::Result<i64, Fault> {
         Ok(match c {
             0x20..0x7f => 1,
             0x80.. => {
