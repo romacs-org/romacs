@@ -400,7 +400,7 @@ impl Vm {
     }
     /// GNU `select_window` (window.c:536): NORECORD nil bumps the use time
     /// even when V is already selected (`record_and_return`).
-    fn select_window_value(&mut self, v: Value, record: bool) -> Result<Value> {
+    pub(crate) fn select_window_value(&mut self, v: Value, record: bool) -> Result<Value> {
         if record {
             self.window_state.select_count += 1;
             let count = self.window_state.select_count;
@@ -986,8 +986,8 @@ impl Vm {
             SetWindowStart | SetWindowMargins | SetWindowNewPixel => n >= 2 && n <= 3,
             SetWindowParameter => n == 3,
             SplitWindowInternal => n == 4 || n == 5,
-            SelectWindow | WindowEnd | WindowTotalHeight | WindowTotalWidth | WindowResizeApply => {
-                n <= 2 && (p != SelectWindow || n >= 1)
+            WindowEnd | WindowTotalHeight | WindowTotalWidth | WindowResizeApply => {
+                n <= 2
             }
             WindowParameter => n == 2,
             DeleteWindowInternal | Windowp | WindowLiveP => n == 1,
@@ -1052,8 +1052,7 @@ impl Vm {
         }
         let live = matches!(
             p,
-            SelectWindow
-                | SetWindowPoint
+            SetWindowPoint
                 | SetWindowStart
                 | WindowPoint
                 | WindowStart
@@ -1067,7 +1066,6 @@ impl Vm {
         );
         let v = self.decode_window(a, live, dead_ok)?;
         let value = match p {
-            SelectWindow => self.select_window_value(v, b == Value::NIL)?,
             DeleteWindowInternal => self.delete_window_value(v)?,
             SplitWindowInternal => self.split_window_value(
                 v,
@@ -1245,8 +1243,7 @@ impl Vm {
         };
         if matches!(
             p,
-            SelectWindow
-                | DeleteWindowInternal
+            DeleteWindowInternal
                 | SplitWindowInternal
                 | SetWindowPoint
                 | SetWindowStart
@@ -1771,6 +1768,15 @@ impl<'a> Windows<'a> {
     pub(crate) fn set_window_buffer(&mut self, window: Value, buffer: Value, keep_margins: Value) -> Out {
         self.vm.set_window_buffer_value(window, buffer, keep_margins != Value::NIL).map_err(internal)?;
         Ok(Value::NIL)
+    }
+    /// window.c select_window: WINDOW, live, becomes the selected window and
+    /// its buffer current; without NORECORD its use time and buffer are
+    /// recorded.  The selected window and its buffer.
+    pub(crate) fn select_window(&mut self, window: Value, norecord: bool) -> std::result::Result<(Value, Value), Fault> {
+        let v = self.live(window)?;
+        let v = self.vm.select_window_value(v, !norecord).map_err(internal)?;
+        self.vm.display_state.version += 1;
+        Ok((v, self.get(v)?.buffer))
     }
     /// GNU `window-prev-buffers` (NEXT false) / `window-next-buffers`.
     pub(crate) fn window_buffers(&mut self, window: Value, next: bool) -> Out {

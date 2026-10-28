@@ -390,3 +390,16 @@ defsubr! { name = "long-line-optimizations-p", gnu = "xdisp.c:20409", effect = R
 fn long_line_optimizations_p(_cx) {
     Ok(Value::NIL)
 }}
+
+// window.c Fselect_window; record_buffer (buffer.c:2218) runs
+// buffer-list-update-hook unless the buffer inhibits its hooks.
+defsubr! { name = "select-window", gnu = "window.c:604", effect = Global,
+fn select_window(cx, window: Value; optional norecord: Value) -> Step {
+    let (window, buffer) = cx.windows().select_window(window, norecord != Value::NIL)?;
+    if norecord != Value::NIL || cx.buffer_state(buffer).is_none_or(|s| s.inhibit_buffer_hooks) {
+        return Ok(Step::Done(window));
+    }
+    let hook = cx.intern("buffer-list-update-hook");
+    Ok(Step::Call { f: cx.intern("run-hooks"), args: vec![hook], then: selected, saved: vec![window] })
+}}
+fn selected(_: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next { Ok(Step::Done(saved[0])) }

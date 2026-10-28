@@ -1,7 +1,7 @@
 //! `select-window' records its buffer at the front of `buffer-list' unless
-//! NORECORD (window.c select_window, buffer.c record_buffer), and
-//! `window-discard-buffer-from-window' drops a buffer from a window's
-//! previous and next buffers (window.c:3445); both as pinned GNU answers.
+//! NORECORD (window.c select_window, buffer.c record_buffer, which runs
+//! `buffer-list-update-hook'), and `window-discard-buffer-from-window'
+//! drops a buffer from a window's previous and next buffers (window.c:3445); both as pinned GNU answers.
 use romacs_vm::Vm;
 
 const EXPRESSIONS: &[&str] = &[
@@ -24,6 +24,16 @@ const EXPRESSIONS: &[&str] = &[
          (let ((kept (window-parameter w 'quit-restore)))
            (window-discard-buffer-from-window a w t)
            (list (and kept t) (window-parameter w 'quit-restore) (window-parameter w 'quit-restore-prev))))"#,
+    // record_buffer runs buffer-list-update-hook, in the selected buffer,
+    // unless NORECORD or the buffer inhibits its hooks.
+    r#"(let ((b (get-buffer-create "rec-hook")) (quiet (get-buffer-create " rec-quiet" t)) (log nil))
+         (set-window-buffer nil b)
+         (let ((buffer-list-update-hook (list (lambda () (setq log (cons (buffer-name) log))))))
+           (select-window (selected-window)) (select-window (selected-window) t))
+         (set-window-buffer nil quiet)
+         (let ((buffer-list-update-hook (list (lambda () (setq log (cons (buffer-name) log))))))
+           (select-window (selected-window)))
+         (list log (eq (car (buffer-list)) quiet)))"#,
     r#"(condition-case err (window-discard-buffer-from-window (let ((b (get-buffer-create "dis-dead"))) (kill-buffer b) b) (selected-window)) (error err))"#,
 ];
 
