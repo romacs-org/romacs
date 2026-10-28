@@ -470,6 +470,13 @@ mod leaf {
             self.vm
                 .allocate_object(data::Object::String(Box::new(data::LispString::new(text))))
         }
+        /// keymap.c's flush of where_is_cache (`Vm::note_keymap_change').
+        pub(crate) fn note_keymap_change(&mut self) {
+            self.vm.note_keymap_change();
+        }
+        pub(crate) fn keymap_generation(&self) -> u64 {
+            self.vm.keymap_generation()
+        }
         pub fn string_view(
             &self,
             v: Value,

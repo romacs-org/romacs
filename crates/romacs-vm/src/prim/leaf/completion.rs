@@ -1,4 +1,5 @@
 use super::*;
+use crate::regexp::Translation;
 use romacs_regex_engine::{CaseTable, CaseTranslation};
 
 #[derive(Debug)]
@@ -59,26 +60,46 @@ impl Leaf<'_> {
         self.vm.completion_hash_find(table, key)
     }
 
+    /// How completion folds case when FOLD: as dired.c, with the standard
+    /// canonical table (FILE), or as minibuf.c, with the current buffer's
+    /// case-canon table; as the pattern cache's key and the translation it
+    /// compiles with.
+    fn completion_translation(&mut self, fold: bool, file: bool)
+        -> std::result::Result<(Translation, Option<CaseTranslation>), Fault> {
+        Ok(match (fold, file) {
+            (false, _) => (Translation::None, None),
+            (true, true) => (Translation::Standard, Some(CaseTranslation::standard())),
+            (true, false) => {
+                let canon = self.completion_case_canon()?;
+                let case = CompletionCase { ranges: self.completion_case_ranges()?, standard: CaseTranslation::standard() };
+                (Translation::Completion(canon), Some(CaseTranslation::from_case_table(std::rc::Rc::new(case))))
+            }
+        })
+    }
+
     pub(crate) fn completion_regexp_match(
         &mut self,
         pattern: Value,
         string: Value,
         fold: bool,
     ) -> std::result::Result<bool, Fault> {
-        let translation = if fold {
-            Some(CaseTranslation::from_case_table(std::rc::Rc::new(
-                CompletionCase {
-                    ranges: self.completion_case_ranges()?,
-                    standard: CaseTranslation::standard(),
-                },
-            )))
-        } else {
-            None
-        };
-        Ok(self
-            .vm
-            .string_match_no_data(pattern, string, translation)?
-            .is_some())
+        let (key, translation) = self.completion_translation(fold, false)?;
+        Ok(self.vm.string_match_no_data(pattern, string, key, translation)?.is_some())
+    }
+
+    /// PATTERNS, the `completion-regexp-list' regexps, to test the
+    /// candidates of one pass, folding case as `completion_regexp_match'
+    /// (FILE: as `file_completion_regexp_match'); None when each candidate's
+    /// own `syntax-table' properties matter, so each is tested alone.
+    pub(crate) fn completion_matcher(&mut self, patterns: &[Value], fold: bool, file: bool)
+        -> std::result::Result<Option<crate::regexp::StringMatcher>, Fault> {
+        let (key, translation) = self.completion_translation(fold, file)?;
+        self.vm.string_matcher(patterns, key, translation)
+    }
+
+    pub(crate) fn completion_matches(&mut self, matcher: &mut crate::regexp::StringMatcher, name: Value)
+        -> std::result::Result<bool, Fault> {
+        self.vm.string_matcher_matches(matcher, name)
     }
 
     /// dired.c file_name_completion matches `completion-regexp-list' with
@@ -90,7 +111,7 @@ impl Leaf<'_> {
         string: Value,
         fold: bool,
     ) -> std::result::Result<bool, Fault> {
-        let translation = fold.then(CaseTranslation::standard);
-        Ok(self.vm.string_match_no_data(pattern, string, translation)?.is_some())
+        let (key, translation) = self.completion_translation(fold, true)?;
+        Ok(self.vm.string_match_no_data(pattern, string, key, translation)?.is_some())
     }
 }

@@ -7,7 +7,7 @@ import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 GUI_MODULES = (
-    'startup', 'find-file', 'buffer-switch', 'extended-command',
+    'startup', 'find-file', 'buffer-switch', 'workspace-completion',
     'editing', 'dired', 'install-command',
 )
 

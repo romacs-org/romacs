@@ -73,6 +73,12 @@ innermost-loop checks, which need recursive minibuffers)."
   (let* ((outer-prefix current-prefix-arg)
          (outer-default minibuffer-default)
          (outer-level romacs--minibuf-level)
+         ;; minibuf_save_list and the specbind of
+         ;; `minibuffer-completing-file-name' (minibuf.c:602, 727).
+         (outer-history-variable minibuffer-history-variable)
+         (outer-history-position minibuffer-history-position)
+         (outer-completing-file-name minibuffer-completing-file-name)
+         (ambient-directory default-directory)
          ;; window.c:8428: the entry's window configuration saves the caller
          ;; only inside a minibuffer, and its restore puts it back.
          (outer-selected (and (> outer-level 0) romacs--minibuf-selected-window))
@@ -80,6 +86,7 @@ innermost-loop checks, which need recursive minibuffers)."
          (outer-keys romacs--command-keys)
          (outer-loop-levels romacs--minibuf-loop-levels)
          (level (1+ outer-level))
+         (reused (get-buffer (format " *Minibuf-%d*" level)))
          (buffer (get-buffer-create (format " *Minibuf-%d*" level)))
          (calling-buffer (current-buffer))
          (calling-window (selected-window))
@@ -91,10 +98,37 @@ innermost-loop checks, which need recursive minibuffers)."
     (unless (boundp histvar) (set histvar nil))
     (setq minibuffer-default default romacs--minibuf-level level
           romacs--minibuf-prompts (cons (copy-sequence prompt) outer-prompts)
-          romacs--minibuf-loop-levels (cons romacs--command-loop-level outer-loop-levels))
+          romacs--minibuf-loop-levels (cons romacs--command-loop-level outer-loop-levels)
+          minibuffer-history-variable histvar minibuffer-history-position 0)
+    ;; minibuf.c:602, 765: a caller's file name reading is `lambda' here,
+    ;; nil in a minibuffer this one opens.
+    (when (eq minibuffer-completing-file-name 'lambda)
+      (setq minibuffer-completing-file-name nil))
+    (when minibuffer-completing-file-name
+      (setq minibuffer-completing-file-name 'lambda))
     (unwind-protect
         (progn
           (set-buffer buffer)
+          ;; minibuf.c get_minibuffer: a minibuffer used before starts
+          ;; afresh, without the overlays its last use left.
+          (when reused
+            (let ((overlays (overlays-in (point-min) (point-max))))
+              (while overlays
+                (delete-overlay (car overlays))
+                (setq overlays (cdr overlays)))))
+          ;; set_minibuffer_mode: `minibuffer-mode' resets its local state.
+          (when (fboundp 'minibuffer-mode) (minibuffer-mode))
+          ;; minibuf.c:796-822: lines never truncate, and the directory is
+          ;; the caller's, or the first live buffer's that has one.
+          (set (make-local-variable 'truncate-lines) nil)
+          (set (make-local-variable 'default-directory)
+               (if (stringp ambient-directory) ambient-directory
+                 (let ((buffers (buffer-list)) found)
+                   (while (and buffers (not found))
+                     (let ((directory (buffer-local-value 'default-directory (car buffers))))
+                       (when (stringp directory) (setq found directory)))
+                     (setq buffers (cdr buffers)))
+                   found)))
           (set-window-buffer mini buffer)
           ;; minibuf.c:827.
           (when (or (= level 1) (not (eq mini calling-window)))
@@ -135,6 +169,10 @@ innermost-loop checks, which need recursive minibuffers)."
           (setq val (if minibuffer-allow-text-properties
                         (buffer-substring prompt-end (point-max))
                       (buffer-substring-no-properties prompt-end (point-max)))))
+      ;; run_exit_minibuf_hook, before read_minibuf_unwind, in the minibuffer.
+      (when (buffer-live-p buffer)
+        (set-buffer buffer)
+        (romacs--safe-run-hooks 'minibuffer-exit-hook))
       ;; read_minibuf_unwind (minibuf.c:1111). The level and the default are
       ;; restored FIRST and unconditionally: if a later step signalled, a
       ;; stale level would refuse every future prompt as recursive. Then
@@ -146,7 +184,10 @@ innermost-loop checks, which need recursive minibuffers)."
             minibuffer-default outer-default romacs--minibuf-level outer-level
             romacs--minibuf-selected-window outer-selected
             romacs--minibuf-prompts outer-prompts romacs--minibuf-loop-levels outer-loop-levels
-            romacs--command-keys outer-keys)
+            romacs--command-keys outer-keys
+            minibuffer-history-variable outer-history-variable
+            minibuffer-history-position outer-history-position
+            minibuffer-completing-file-name outer-completing-file-name)
       (set-buffer buffer)
       ;; minibuf.c:1186: past the read-only prompt, with no hooks, and
       ;; leaving deactivate-mark alone.
@@ -210,6 +251,51 @@ prompt's field; elsewhere `point-min'."
   (if properties
       (buffer-substring (romacs--minibuffer-prompt-end) (point-max))
     (buffer-substring-no-properties (romacs--minibuffer-prompt-end) (point-max))))
+
+(defun romacs--read-buffer (prompt def require-match predicate)
+  "minibuf.c Fread_buffer: complete a buffer name, or call `read-buffer-function'."
+  (when (bufferp def) (setq def (buffer-name def)))
+  (let ((completion-ignore-case read-buffer-completion-ignore-case))
+    (cond
+     (read-buffer-function
+      ;; Older reader functions take no PREDICATE.
+      (if predicate
+          (funcall read-buffer-function prompt def require-match predicate)
+        (funcall read-buffer-function prompt def require-match)))
+     (t
+      ;; With a default, `format-prompt' puts it before the colon.
+      (when def
+        (when (stringp prompt)
+          (let ((len (length prompt)))
+            (setq prompt (substring prompt 0
+                                    (cond ((and (>= len 2) (eq (aref prompt (- len 2)) ?:)
+                                                (eq (aref prompt (1- len)) ?\s))
+                                           (- len 2))
+                                          ((and (>= len 1) (memq (aref prompt (1- len)) '(?: ?\s)))
+                                           (1- len))
+                                          (t len))))))
+        (setq prompt (format-prompt prompt (if (consp def) (car def) def))))
+      (completing-read prompt #'internal-complete-buffer predicate require-match
+                       nil 'buffer-name-history def nil)))))
+
+(defun romacs--internal-complete-buffer (string predicate flag)
+  "minibuf.c Finternal_complete_buffer: complete STRING over the buffer names."
+  (let ((alist (mapcar (lambda (buffer) (cons (buffer-name buffer) buffer)) (buffer-list))))
+    (cond
+     ((null flag) (try-completion string alist predicate))
+     ((eq flag t)
+      (let ((names (all-completions string alist predicate)))
+        (if (> (length string) 0)
+            names
+          ;; Without input, leave out the internal buffers, unless every
+          ;; buffer is one.
+          (let ((visible (delq nil (mapcar (lambda (name) (unless (eq (aref name 0) ?\s) name))
+                                           names))))
+            (cond (visible visible)
+                  ((= (length names) (length alist)) names))))))
+     ((eq flag 'lambda) (test-completion string alist predicate))
+     ((eq flag 'metadata)
+      '(metadata (category . buffer) (cycle-sort-function . identity))))))
 
 (defun romacs--yes-or-no-p (prompt)
   "fns.c Fyes_or_no_p, without dialog boxes: ask until the answer read

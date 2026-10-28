@@ -67,6 +67,7 @@ fn set_keymap_parent(cx, keymap: Value, parent: Value) {
         }
         parent
     };
+    cx.note_keymap_change();
     let mut prev = keymap;
     for _ in 0..=cx.list_limit() {
         let list = cx.pair(prev).map_or(Value::NIL, |(_, tail)| tail);
@@ -154,4 +155,12 @@ fn lookup_key_filtered(cx: &mut Leaf<'_>, result: Value, saved: &[Value]) -> Nex
 defsubr! { name = "recent-keys", gnu = "keyboard.c:12213", effect = Reads,
 fn recent_keys(cx; optional include_cmds: Value) {
     Ok(cx.recent_keys(include_cmds != Value::NIL))
+}}
+
+// The count of keymap changes, which keymap.c keeps implicitly as the
+// validity of its where_is_cache: `where-is-internal' (rlisp/vm/prelude.el)
+// rebuilds its reverse map when this moves.
+defsubr! { name = "romacs--keymap-generation", gnu = "keymap.c:2505", effect = Reads,
+fn romacs_keymap_generation(cx) {
+    Value::integer((cx.keymap_generation() & 0x0fff_ffff_ffff_ffff) as i64).map_err(Fault::Error)
 }}

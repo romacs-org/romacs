@@ -274,7 +274,7 @@ impl Vm {
         target.anchor = anchor;
         Ok(v)
     }
-    fn overlay_range(&self, v: Value) -> Result<Option<(u32, u32)>> {
+    pub(crate) fn overlay_range(&self, v: Value) -> Result<Option<(u32, u32)>> {
         let o = self.overlay(v)?;
         let (Some(a), Some(b)) = (o.start, o.end) else {
             return Ok(None);

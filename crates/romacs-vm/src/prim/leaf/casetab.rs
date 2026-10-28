@@ -164,6 +164,17 @@ impl Leaf<'_> {
         Ok(roots[if down { 0 } else { 1 }])
     }
 
+    /// The current buffer's case-canon table, the one completion folds with.
+    pub(crate) fn completion_case_canon(&mut self) -> std::result::Result<Value, Fault> {
+        self.current_case_mapping(true)?;
+        let index = self.vm.buffer_index().map_err(Fault::Error)?;
+        Ok(match &self.vm.objects[index] {
+            Object::Buffer(b) => b.case_tables[2],
+            Object::ByteBuffer(b) => b.case_tables[2],
+            _ => unreachable!(),
+        })
+    }
+
     pub(crate) fn completion_case_ranges(&mut self) -> std::result::Result<Vec<(u32, u32, i64)>, Fault> {
         self.current_case_mapping(true)?;
         let index = self.vm.buffer_index().map_err(Fault::Error)?;

@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "0a070c796461b7c5b6e6d5cb6d5edb797276f5ea669b263be8f5c9c2a6633e5b",
+  "input_hash": "3bff54d800e853f6644c9e76f5a25136cad0ee7add9796eabd4960c6aa0f2fe9",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -12,8 +12,8 @@
   "note": "Derived from the prose ledgers. Do not edit; edit those and regenerate."
  },
  "counts": {
-  "rows": 262,
-  "symbols": 596,
+  "rows": 263,
+  "symbols": 601,
   "rows_without_symbols": 15
  },
  "by_symbol": {
@@ -42,7 +42,7 @@
    68
   ],
   "[:class:]": [
-   261
+   262
   ],
   "abort-minibuffers": [
    62
@@ -56,7 +56,7 @@
   ],
   "add-text-properties": [
    211,
-   250
+   251
   ],
   "add-variable-watcher": [
    222,
@@ -66,14 +66,17 @@
    161
   ],
   "after-insert-file-set-coding": [
-   251
+   252
   ],
   "after-load-alist": [
    237
   ],
+  "after-string": [
+   246
+  ],
   "all-completions": [
-   246,
-   247
+   247,
+   248
   ],
   "append": [
    103
@@ -106,7 +109,7 @@
    174
   ],
   "backtrace--locals": [
-   249
+   250
   ],
   "backward-char": [
    137
@@ -122,6 +125,9 @@
   ],
   "before-change-functions": [
    161
+  ],
+  "before-string": [
+   246
   ],
   "beginning-of-line": [
    137
@@ -141,7 +147,7 @@
   ],
   "buffer-file-coding-system": [
    95,
-   251
+   252
   ],
   "buffer-file-name": [
    95
@@ -224,10 +230,10 @@
    84
   ],
   "cl-print-object": [
-   249
+   250
   ],
   "cl-type-of": [
-   248
+   249
   ],
   "clear-composition-cache": [
    159
@@ -266,7 +272,7 @@
    100
   ],
   "compare-strings": [
-   247
+   248
   ],
   "compiled-function-p": [
    230
@@ -381,7 +387,7 @@
    94
   ],
   "default-file-name-coding-system": [
-   251
+   252
   ],
   "default-value": [
    232,
@@ -397,8 +403,8 @@
    120,
    121,
    145,
-   253,
-   257
+   254,
+   258
   ],
   "define-category": [
    217
@@ -408,7 +414,7 @@
    214
   ],
   "define-coding-system": [
-   251
+   252
   ],
   "define-coding-system-alias": [
    215
@@ -509,7 +515,7 @@
    99
   ],
   "downcase_char_code_emacs_compat": [
-   260
+   261
   ],
   "elt": [
    22,
@@ -520,7 +526,7 @@
    153
   ],
   "emacs_downcase_compat": [
-   260
+   261
   ],
   "enable-recursive-minibuffers": [
    234
@@ -551,7 +557,7 @@
    219
   ],
   "ert--run-test-internal": [
-   249
+   250
   ],
   "esc-map": [
    135
@@ -600,23 +606,23 @@
    118,
    119,
    120,
-   253,
    254,
-   257
+   255,
+   258
   ],
   "face-family": [
    116,
-   256
+   257
   ],
   "face-font": [
    115,
-   255
+   256
   ],
   "face-remapping-alist": [
    110,
    119,
    120,
-   259
+   260
   ],
   "featurep": [
    87
@@ -642,7 +648,7 @@
    95
   ],
   "find-auto-coding": [
-   251
+   252
   ],
   "find-composition": [
    191
@@ -946,7 +952,7 @@
   ],
   "last-coding-system-used": [
    95,
-   251
+   252
   ],
   "last-command": [
    71
@@ -959,7 +965,7 @@
    181
   ],
   "latin-extra-code-table": [
-   251
+   252
   ],
   "length": [
    103
@@ -1069,7 +1075,7 @@
    127
   ],
   "make-interpreted-closure": [
-   248
+   249
   ],
   "make-local-variable": [
    152,
@@ -1129,7 +1135,7 @@
    241
   ],
   "mapbacktrace": [
-   249
+   250
   ],
   "mapc": [
    51,
@@ -1170,6 +1176,9 @@
   ],
   "max-lisp-eval-depth": [
    89
+  ],
+  "max-mini-window-height": [
+   246
   ],
   "memory-signal-data": [
    210
@@ -1242,10 +1251,10 @@
    122
   ],
   "next-property-change": [
-   250
+   251
   ],
   "next-single-char-property-change": [
-   250
+   251
   ],
   "normal-top-level-add-to-load-path": [
    88
@@ -1269,7 +1278,7 @@
    241
   ],
   "oclosure-type": [
-   248
+   249
   ],
   "optimize-char-table": [
    158
@@ -1395,7 +1404,7 @@
    239
   ],
   "purify-flag": [
-   248
+   249
   ],
   "push macroexp-let2 gv-letplace": [
    27
@@ -1492,6 +1501,9 @@
    138,
    186
   ],
+  "redisplay-adhoc-scroll-in-resize-mini-windows": [
+   246
+  ],
   "remove-variable-watcher": [
    223
   ],
@@ -1516,7 +1528,10 @@
   ],
   "reset": [
    118,
-   252
+   253
+  ],
+  "resize-mini-windows": [
+   246
   ],
   "reverse": [
    56,
@@ -1526,7 +1541,7 @@
    64
   ],
   "romacs--oclosure-type": [
-   248
+   249
   ],
   "romacs--read-host-event": [
    64
@@ -1541,7 +1556,7 @@
    97
   ],
   "romacs-unsafe-coding": [
-   251
+   252
   ],
   "round": [
    193
@@ -1589,13 +1604,13 @@
    213
   ],
   "select-safe-coding-system": [
-   251
+   252
   ],
   "select-safe-coding-system-function": [
    95
   ],
   "select-safe-coding-system-interactively": [
-   251
+   252
   ],
   "selected-frame": [
    145,
@@ -1619,7 +1634,7 @@
   ],
   "set-auto-coding": [
    11,
-   251
+   252
   ],
   "set-buffer-redisplay": [
    223
@@ -1635,7 +1650,7 @@
   ],
   "set-coding-system-priority": [
    215,
-   251
+   252
   ],
   "set-default": [
    233
@@ -1644,10 +1659,10 @@
    114,
    115,
    116,
-   254,
    255,
    256,
-   258
+   257,
+   259
   ],
   "set-file-times": [
    8
@@ -1718,10 +1733,10 @@
    89
   ],
   "skip-chars-backward": [
-   261
+   262
   ],
   "skip-chars-forward": [
-   261
+   262
   ],
   "sleep-for": [
    167
@@ -1844,8 +1859,8 @@
    155
   ],
   "test-completion": [
-   246,
-   247
+   247,
+   248
   ],
   "text-properties-at": [
    79,
@@ -1889,8 +1904,8 @@
    153
   ],
   "try-completion": [
-   246,
-   247
+   247,
+   248
   ],
   "tty-color-alist": [
    169
@@ -3029,7 +3044,7 @@
    "planned": false,
    "mechanism": "`read-from-minibuffer` / `read-string` (prompt subset)",
    "gnu": "GNU `read_minibuf` (`src/minibuf.c:573`) runs a recursive command loop in ` *Minibuf-N*` shown in the selected minibuffer window; RET, C-j and C-g are bound in `minibuffer-local-map` by `lisp/minibuffer.el:3407-3415` to `exit-minibuffer` (`minibuffer.el:3077`) and `abort-minibuffers` (C, `minibuf.c:472`), whose `minibuffer-quit-recursive-edit` (`minibuffer.el:3104`) signals `minibuffer-quit`. `faces.el:2914` appends `face minibuffer-prompt` to the C value `(read-only t)` of `minibuffer-prompt-properties` (`minibuf.c:2697`). After the loop `add-to-history` (subr.el) records the input (`minibuf.c:1095`). In batch, without `executing-kbd-macro`, it reads stdin (`minibuf.c:653-661`)",
-   "romacs": "VM2 implements both DEFUNs through `defsubr!` (`src/prims/minibuf.rs`, T2) with GNU's argument checks and order, `string_to_object` and read-string's DEFAULT-VALUE rule in Rust, and the loop in Lisp (`src/prims/minibuf.el`, installed on first use). Supported: PROMPT, INITIAL-CONTENTS string or `(STRING . POSITION)`, KEYMAP, READ, HIST (unbound variable set to nil), DEFAULT-VALUE, INHERIT-INPUT-METHOD (accepted; no input methods exist). Different: (1) **input**: the command loop of VM2-KBD1 reads `unread-command-events` and then the executing keyboard macro while `executing-kbd-macro` is non-nil (GNU's batch prompt regime: `execute-kbd-macro`, `ert-simulate-keys`); otherwise VM2 is batch GNU with an empty stdin and signals `(end-of-file \"Error reading from stdin\")`, unless an embedder attached a host keyboard (the live GUI does: VM2-HOSTIN1), in which case keys are read from it as interactive GNU does; (2) **bootstrap stand-ins**: until GNU's `minibuffer.el` loads, the Lisp half defines minimal `exit-minibuffer` (no innermost-loop checks), `minibuffer-quit-recursive-edit` and `abort-minibuffers` (single level), and binds RET/C-j/C-g, only where nothing is defined or bound; (3) **prompt face**: VM2 starts from the C value, so the prompt has no `face minibuffer-prompt` until faces.el runs (pins `read-from-minibuffer/1747`, `/1751`, `/1752`); (4) **history**: recorded only if `add-to-history` is fbound, so a bare VM2 never updates `minibuffer-history` (pin `/1778`); HISTPOS and the history commands are absent; (5) a character typed after propertied INITIAL-CONTENTS does not inherit its sticky properties, because VM2's `self-insert-command` does not inherit, so `minibuffer-allow-text-properties` returns them on INITIAL only (pin `/1755`); (6) the prompt's `read-only`/`field` properties are set but VM2 does not enforce read-only text, so DEL can delete into the prompt; (7) no `minibuffer-setup-hook` run unless `run-hooks` is fbound, no `minibuffer-exit-hook`, completion-table rebinding or window-configuration restore; `yes-or-no-p` never uses a dialog box; when a command at the prompt deletes the calling window, VM2 leaves the minibuffer window selected instead of choosing another window (the level and `minibuffer-default` are still restored, test `deleting_the_calling_window_does_not_poison_later_prompts`); (8) recursive prompts follow `enable-recursive-minibuffers` but only the refusal path is evidenced",
+   "romacs": "VM2 implements both DEFUNs through `defsubr!` (`src/prims/minibuf.rs`, T2) with GNU's argument checks and order, `string_to_object` and read-string's DEFAULT-VALUE rule in Rust, and the loop in Lisp (`src/prims/minibuf.el`, installed on first use). Supported: PROMPT, INITIAL-CONTENTS string or `(STRING . POSITION)`, KEYMAP, READ, HIST (unbound variable set to nil), DEFAULT-VALUE, INHERIT-INPUT-METHOD (accepted; no input methods exist). Different: (1) **input**: the command loop of VM2-KBD1 reads `unread-command-events` and then the executing keyboard macro while `executing-kbd-macro` is non-nil (GNU's batch prompt regime: `execute-kbd-macro`, `ert-simulate-keys`); otherwise VM2 is batch GNU with an empty stdin and signals `(end-of-file \"Error reading from stdin\")`, unless an embedder attached a host keyboard (the live GUI does: VM2-HOSTIN1), in which case keys are read from it as interactive GNU does; (2) **bootstrap stand-ins**: until GNU's `minibuffer.el` loads, the Lisp half defines minimal `exit-minibuffer` (no innermost-loop checks), `minibuffer-quit-recursive-edit` and `abort-minibuffers` (single level), and binds RET/C-j/C-g, only where nothing is defined or bound; (3) **prompt face**: VM2 starts from the C value, so the prompt has no `face minibuffer-prompt` until faces.el runs (pins `read-from-minibuffer/1747`, `/1751`, `/1752`); (4) **history**: recorded only if `add-to-history` is fbound, so a bare VM2 never updates `minibuffer-history` (pin `/1778`); while the prompt reads, `minibuffer-history-variable` is HIST's variable and `minibuffer-history-position` 0, so GNU's history commands work, but HISTPOS of `(HISTVAR . HISTPOS)` is dropped; (5) a character typed after propertied INITIAL-CONTENTS does not inherit its sticky properties, because VM2's `self-insert-command` does not inherit, so `minibuffer-allow-text-properties` returns them on INITIAL only (pin `/1755`); (6) the prompt's `read-only`/`field` properties are set but VM2 does not enforce read-only text, so DEL can delete into the prompt; (7) no `minibuffer-setup-hook` run unless `run-hooks` is fbound; as GNU, a minibuffer used before starts afresh (its overlays deleted, `minibuffer-mode` run when defined, the caller's directory, lines not truncated), `minibuffer-completing-file-name` is `lambda` inside a file-name read, and `minibuffer-exit-hook` runs through safe_run_hooks before the unwind; no completion-table rebinding or window-configuration restore; `yes-or-no-p` never uses a dialog box; when a command at the prompt deletes the calling window, VM2 leaves the minibuffer window selected instead of choosing another window (the level and `minibuffer-default` are still restored, test `deleting_the_calling_window_does_not_poison_later_prompts`); (8) recursive prompts follow `enable-recursive-minibuffers` but only the refusal path is evidenced",
    "why": "**Package-observable**: (1) without a host keyboard, any prompt outside a keyboard-macro/`unread-command-events` context fails instead of waiting; (3)-(5) through text properties and `minibuffer-history`; (6) by deleting prompt text; (7) by hooks and introspection functions. Corpus: 2492 live-GNU cases (`tools/primh/evidence/read-from-minibuffer.json`, `read-string.json`), 5 pinned VALUE",
    "symbols": [
     "read-from-minibuffer",
@@ -3079,7 +3094,7 @@
    "planned": false,
    "mechanism": "Keyboard input read by a prompt in the middle of a command (GUI)",
    "gnu": "GNU `read_char` (`src/keyboard.c`) first takes `unread-command-events`, then a keyboard macro, then redisplays (skipped while input is pending, `detect_input_pending`) and blocks in `wait_reading_process_output`; `read_minibuf`'s recursive edit runs inside the suspended command on the native stack, and redisplay may run Lisp (mode-line `:eval`). C-g typed while Lisp runs sets `quit-flag` asynchronously and interrupts it. Deleting the last frame runs `handle-delete-frame`/`save-buffers-kill-emacs`. RET is the function key `return`, translated to 13 by `function-key-map`",
-   "romacs": "Same order: the command loop's `romacs--read-char` (`rlisp/vm/keyboard.el`, VM2-KBD1) takes `unread-command-events`, then the executing macro, then calls `romacs--read-host-event`, engine control like `eval` (`threaded.rs` `reentrant_load`): the suspended register stack leaves the collector's view and collection is inhibited for the wait, redisplay (`Vm::frame_snapshot`, mode-line `:eval` included) runs in its own engine, the embedder (`Vm::set_host_input`, `host_input.rs`; the GUI's `prompt.rs`) paints and blocks on its input channel; pending input skips the redisplay. Different: (1) two internal names are visible: function `romacs--read-host-event` and variable `romacs--host-input` (t while a host is attached); (2) **no asynchronous quit**: C-g is an ordinary key, seen only when a prompt reads it, so it cannot interrupt running Lisp; (3) closing the frame while a prompt waits signals `quit` (catchable); every later read in that command signals `quit` again without waiting, and the GUI exits when the command returns, with no `delete-frame-functions` or kill-emacs query; (4) the GUI translates the Return keysym to 10 (C-j, `native.rs`), so `last-command-event` for RET at the prompt is 10, not 13 (both exit the prompt); (5) keys read from the host are recorded as VM2-KBD1 records them",
+   "romacs": "Same order: the command loop's `romacs--read-char` (`rlisp/vm/keyboard.el`, VM2-KBD1) takes `unread-command-events`, then the executing macro, then calls `romacs--read-host-event`, engine control like `eval` (`threaded.rs` `reentrant_load`): the suspended register stack leaves the collector's view and collection is inhibited for the wait, redisplay (`Vm::frame_snapshot`, mode-line `:eval` included) runs in its own engine, the embedder (`Vm::set_host_input`, `host_input.rs`; the GUI's `prompt.rs`) paints and blocks on its input channel; pending input skips the redisplay. Different: (1) two internal names are visible: function `romacs--read-host-event` and variable `romacs--host-input` (t while a host is attached); (2) **no asynchronous quit**: C-g is an ordinary key, seen only when a prompt reads it, so it cannot interrupt running Lisp; (3) closing the frame while a prompt waits signals `quit` (catchable); every later read in that command signals `quit` again without waiting, and the GUI exits when the command returns, with no `delete-frame-functions` or kill-emacs query; (4) the GUI translates the Return keysym to 10 (C-j, `native.rs`), so `last-command-event` for RET at the prompt is 10, not 13 (both exit the prompt); in a completing prompt Return therefore runs C-j's `minibuffer-complete-and-exit` on the input, not RET's command (fido's `icomplete-fido-ret`, which takes the selected candidate): TAB first, or C-m, gives GNU's RET; (5) keys read from the host are recorded as VM2-KBD1 records them",
    "why": "**Package-observable**: (1) by `fboundp`/`boundp`; (2) by a long-running command (no `quit` arrives); (3) by `delete-frame-functions`/`kill-emacs-hook` not running; (4) by commands at the prompt that inspect `last-command-event`; (5) as VM2-KBD1. Not observable: collection is deferred only for the duration of a wait (no Lisp allocates during it except redisplay's)",
    "symbols": [
     "romacs--read-host-event",
@@ -6278,6 +6293,25 @@
     "find-file-name-handler",
     "inhibit-file-name-handlers",
     "inhibit-file-name-operation"
+   ],
+   "symbols_derived": false
+  },
+  {
+   "id": "VM2-MINIWIN1",
+   "source": "DIVERGENCES.md",
+   "section": "Observable by a package: mini-window display",
+   "observable": true,
+   "planned": false,
+   "mechanism": "Overlay strings and mini-window height",
+   "gnu": "Redisplay shows every window's overlay `before-string` and `after-string` (xdisp.c load_overlay_strings) and resizes the mini-window to its display within `max-mini-window-height` as `resize-mini-windows` says (resize_mini_window; loadup.el sets `grow-only`).",
+   "romacs": "The mini-window shows its buffer's overlay strings in load_overlay_strings' order, with their `face` properties (a face list merged as xfaces.c does) and a `cursor` property placing point, and redisplay sizes it as resize_mini_window does, including `redisplay-adhoc-scroll-in-resize-mini-windows`; the shared chain sets `grow-only` after window.el as loadup.el does. Other windows show no overlay strings yet; strings' own `display`, `invisible` and image properties are not interpreted; a tab in a string shows as spaces and other controls as `^X`; lines do not wrap, so a line counts once however wide.",
+   "why": "Completion UIs (icomplete, fido) display their candidates this way. Other windows' point visibility and scrolling count buffer lines (redisplay.rs), which overlay strings would invalidate, so they stay out until that counts display lines. `crates/romacs-vm/tests/mini_window.rs`; the GUI journey `crates/romacs-vm-gui/tests/gnu_completion.rs` and `harness/completion_live.py`.",
+   "symbols": [
+    "resize-mini-windows",
+    "max-mini-window-height",
+    "redisplay-adhoc-scroll-in-resize-mini-windows",
+    "before-string",
+    "after-string"
    ],
    "symbols_derived": false
   },

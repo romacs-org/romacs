@@ -189,6 +189,7 @@ impl Vm {
         Err("circular keymap".into())
     }
     pub(super) fn keymap_store(&mut self, map: Value, event: Value, value: Value, remove: bool) -> Result<()> {
+        self.note_keymap_change();
         let keymap_symbol = Value::reference(self.names["keymap"] + 1, 7);
         // Where a brand-new binding gets prepended. Normally the map itself, but a
         // nested sub-keymap element takes over below.
@@ -397,6 +398,13 @@ impl Vm {
             events.push(KeyEvent { value: event, input_index });
         }
         Ok(events)
+    }
+    /// keymap.c's flush of where_is_cache: a keymap changed.
+    pub(crate) fn note_keymap_change(&mut self) {
+        self.keymap_generation = self.keymap_generation.wrapping_add(1);
+    }
+    pub(crate) fn keymap_generation(&self) -> u64 {
+        self.keymap_generation
     }
     fn define_keymap_key(&mut self, map: Value, events: &[KeyEvent], value: Value, remove: bool) -> Result<Value> {
         let mut map = self.resolve_keymap(map).ok_or("keymap required")?;
