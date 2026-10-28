@@ -25,7 +25,7 @@ fn done(_: &mut Leaf<'_>, value: Value, _: &[Value]) -> Next {
 /// cell ends the chain as nil. `fset`/`defalias` refuse cycles; the bound
 /// only keeps a cycle VM2 could not build from becoming a hang.
 fn indirect(cx: &Leaf<'_>, mut f: Value) -> std::result::Result<Value, Fault> {
-    for _ in 0..=cx.list_limit() {
+    for _ in 0..=cx.symbol_limit() {
         if f == Value::NIL || !symbolp(cx, f) {
             return Ok(f);
         }
@@ -135,7 +135,7 @@ fn form_of(cx: &mut Leaf<'_>, cmd: Value) -> Next {
     // An `interactive-form' property anywhere on the alias chain wins.
     let property = cx.intern("interactive-form");
     let mut fun = cmd;
-    for _ in 0..=cx.list_limit() {
+    for _ in 0..=cx.symbol_limit() {
         if !symbolp(cx, fun) {
             break;
         }
