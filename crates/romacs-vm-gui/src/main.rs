@@ -961,7 +961,7 @@ fn evaluate(
             });
         // An evaluation may mutate before signalling; its error must not hide that paint.
         let next = frame(&mut vm, g1, width, height)?;
-        if next != previous.frame {
+        if let Some(next) = changed_frame(&mut vm, &previous, next, last_presentation())? {
             let presentation = next_presentation(&host)?;
             previous = paint(&mut engine.borrow_mut(), &mut vm, sender, presentation, force_gc, floor, next, &mut pending, true, &mut paint_timings)?;
         }
