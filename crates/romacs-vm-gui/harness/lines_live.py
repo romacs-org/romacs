@@ -14,7 +14,10 @@ text).  The point after each command must equal pinned GNU's on a
 terminal frame (`emacs -Q -nw' over a pty, private HOME) whose window
 continues lines after as many columns as the native window does.
 
-keys: Return in *scratch* runs what RET is bound to there (GNU's
+keys: a timer runs `sit-for' (as simple.el's M-x suggestion does) and C-b
+typed during it, which sit-for reads and pushes back onto
+`unread-command-events', runs as the next command with no other key.
+Then Return in *scratch* runs what RET is bound to there (GNU's
 `newline'), as the function key `return' that `local-function-key-map'
 translates to RET; C-j runs its own binding.  Both insert a newline.
 
@@ -314,6 +317,9 @@ def check_motion(args, report, check, file=MIXED_FILE, keys=KEYS, name='motion')
 RETURN_INIT = INIT + '''(run-with-timer 1 nil (lambda () (lines-live-record
   (list 'bindings (with-current-buffer (window-buffer) (list (key-binding [13]) (key-binding [10])))
         (lookup-key local-function-key-map [return])))))
+(run-with-timer 3 nil (lambda ()
+  (lines-live-record '(sit-start))
+  (lines-live-record (list 'sit-end (sit-for 6)))))
 '''
 
 
@@ -326,14 +332,24 @@ def check_return(args, report, check):
         fio.wait(lambda: any(r.startswith('(bindings') for r in records(state)), args.timeout, 'bindings record', process)
         bindings = next(r for r in records(state) if r.startswith('(bindings'))
         ret, cj = bindings.split('(', 2)[2].split(')')[0].split()
-        time.sleep(.5)
         replies = lambda: [json.loads(line) for line in log.read_text(errors='replace').split('\n') if line.startswith('{') and '"native_command"' in line]
-        for count, key in enumerate([['-k', 'Return'], ['-M', 'ctrl', 'j', '-m', 'ctrl']], 1):
+        fio.wait(lambda: '(sit-start)' in records(state), args.timeout, 'sit-for in a timer', process)
+        time.sleep(.5)
+        typed = time.monotonic()
+        subprocess.run(['wtype', '-M', 'ctrl', 'b', '-m', 'ctrl'], env=env, check=True, timeout=20)
+        fio.wait(lambda: len(replies()) >= 1, 5, 'the key typed during sit-for as a command', process)
+        unread = {'records': records(state), 'reply': replies()[0], 'seconds': round(time.monotonic() - typed, 2)}
+        report['unread'] = unread
+        check('a key sit-for read in a timer runs as the next command, with no other key',
+              '(sit-end nil)' in unread['records'] and unread['reply']['native_command'] == 'backward-char'
+              and unread['reply']['signal'] is None, unread)
+        time.sleep(.5)
+        for count, key in enumerate([['-k', 'Return'], ['-M', 'ctrl', 'j', '-m', 'ctrl']], 2):
             subprocess.run(['wtype', *key], env=env, check=True, timeout=20)
             fio.wait(lambda: len(replies()) >= count, 10, f'command {count}', process)
         time.sleep(.5)
         fio.shot(args.output / 'keys.png', env, report)
-        shown = replies()
+        shown = replies()[1:]
         # The selected window's point before the keys and after each.
         points, selected = [], None
         for line in log.read_text(errors='replace').split('\n'):

@@ -582,51 +582,75 @@ fn evaluate(
         if live && service_native(&mut vm)? { live_presentation.changed(); }
         let available = sender.input().len();
         let mut batch: std::collections::VecDeque<_> = presentation::take_batch(&mut pending, sender.input().try_iter(), available).collect();
-        while let Some(event) = batch.pop_front() {
-            if matches!(event, InputEvent::WindowClose { .. }) {
-                if !live || live_presentation.window_close(&mut vm)? {
-                    return shutdown_editor(&mut vm, sender);
+        loop {
+            // read_char takes `unread-command-events' before host input:
+            // a key Lisp read and pushed back (sit-for in a timer) is the
+            // next command's.
+            let unread = if live { timers::take_unread(&mut vm)? } else { timers::Unread::Empty };
+            let (event, unread) = match unread {
+                timers::Unread::Key(key) => (None, Some(key)),
+                timers::Unread::Other(event) => {
+                    eprintln!("{}", json!({"diagnostic":"unread-event-not-run","event":event}));
+                    continue;
                 }
-                terminal_modal = true;
-                continue;
-            }
-            let received = if tracing() {
-                romacs_display_runtime::paint_host::take_key_enqueue_time(&event)
-            } else { None };
-            // read_char's timer_stop_idle: Emacs is idle until a key arrives.
-            if live && timers::ends_idle(&event) { vm.timer_stop_idle(); }
-            let event = command::unwrap_event(event);
-            let command_start = Instant::now();
-            let gc_before = vm.heap_stats().collections;
-            if live && let InputEvent::WindowResize { width: w, height: h, .. } = event {
-                if w > 0 && h > 0 && (width, height) != (w, h) {
-                    width = w; height = h;
-                    let (lh, cw) = romacs_layout2::frame_metrics(&vm.display_default_face()?)?;
-                    vm.set_frame_geometry(width, height, lh, cw)?;
-                    if let Err(error) = vm.resize_selected_terminal() { echo::show(&mut vm, &error)?; }
-                    live_presentation.changed();
-                }
-                continue;
-            }
-            if live && let Some((session, input)) = vm.selected_terminal()? {
-                let mode = if input { terminal_input::Mode::Terminal } else { terminal_input::Mode::Emacs };
-                match terminal_input::route(&event, mode, commands.in_prefix() || terminal_modal) {
-                    terminal_input::Target::Terminal => {
-                        let sent = vm.terminal_input_state(session).and_then(|state| {
-                            let bytes = terminal_input::encode(&event, state.application_cursor)?;
-                            if bytes.is_empty() { Ok(()) }
-                            else if !state.running { Err("Terminal is not running".into()) }
-                            else { vm.terminal_send(session, &bytes) }
-                        });
-                        if let Err(error) = sent { echo::show(&mut vm, &error)?; }
-                        live_presentation.changed();
-                        continue;
+                timers::Unread::Empty => match batch.pop_front() {
+                    Some(event) => (Some(event), None),
+                    None => break,
+                },
+            };
+            let (received, command_start, gc_before);
+            let translated = if let Some(key) = unread {
+                vm.timer_stop_idle();
+                (received, command_start, gc_before) = (None, Instant::now(), vm.heap_stats().collections);
+                Some(key)
+            } else {
+                let event = event.expect("host input");
+                if matches!(event, InputEvent::WindowClose { .. }) {
+                    if !live || live_presentation.window_close(&mut vm)? {
+                        return shutdown_editor(&mut vm, sender);
                     }
-                    terminal_input::Target::Ignore => continue,
-                    terminal_input::Target::Editor => {}
+                    terminal_modal = true;
+                    continue;
                 }
-            }
-            if let Some(event) = native::translate(event) {
+                received = if tracing() {
+                    romacs_display_runtime::paint_host::take_key_enqueue_time(&event)
+                } else { None };
+                // read_char's timer_stop_idle: Emacs is idle until a key arrives.
+                if live && timers::ends_idle(&event) { vm.timer_stop_idle(); }
+                let event = command::unwrap_event(event);
+                command_start = Instant::now();
+                gc_before = vm.heap_stats().collections;
+                if live && let InputEvent::WindowResize { width: w, height: h, .. } = event {
+                    if w > 0 && h > 0 && (width, height) != (w, h) {
+                        width = w; height = h;
+                        let (lh, cw) = romacs_layout2::frame_metrics(&vm.display_default_face()?)?;
+                        vm.set_frame_geometry(width, height, lh, cw)?;
+                        if let Err(error) = vm.resize_selected_terminal() { echo::show(&mut vm, &error)?; }
+                        live_presentation.changed();
+                    }
+                    continue;
+                }
+                if live && let Some((session, input)) = vm.selected_terminal()? {
+                    let mode = if input { terminal_input::Mode::Terminal } else { terminal_input::Mode::Emacs };
+                    match terminal_input::route(&event, mode, commands.in_prefix() || terminal_modal) {
+                        terminal_input::Target::Terminal => {
+                            let sent = vm.terminal_input_state(session).and_then(|state| {
+                                let bytes = terminal_input::encode(&event, state.application_cursor)?;
+                                if bytes.is_empty() { Ok(()) }
+                                else if !state.running { Err("Terminal is not running".into()) }
+                                else { vm.terminal_send(session, &bytes) }
+                            });
+                            if let Err(error) = sent { echo::show(&mut vm, &error)?; }
+                            live_presentation.changed();
+                            continue;
+                        }
+                        terminal_input::Target::Ignore => continue,
+                        terminal_input::Target::Editor => {}
+                    }
+                }
+                native::translate(event)
+            };
+            if let Some(event) = translated {
                 let outcome = if live {
                     let mut lent = Lent { queue: &mut batch, presentation: &mut presentation, live: &mut live_presentation, width: &mut width, height: &mut height };
                     let (outcome, closed) = lent.run(&host, |live| live.command(&mut vm, &mut commands, event));
