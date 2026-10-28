@@ -86,6 +86,38 @@ mod native_wake_tests {
 }
 
 #[cfg(test)]
+mod lent_tests {
+    use super::*;
+
+    /// Lisp the outer loop runs (a command, a timer) reads with the loop's
+    /// presentation state, and what its reads did comes back.
+    #[test]
+    fn a_read_inside_lisp_sees_and_returns_the_loops_presentation_state() {
+        let host = std::rc::Rc::new(std::cell::RefCell::new(prompt::Shared::default()));
+        let mut live = presentation::Presentation::new();
+        live.submitted(7, Instant::now());
+        let (mut queue, mut presentation, mut width, mut height) = (std::collections::VecDeque::new(), 7, 10, 20);
+        queue.push_back(InputEvent::WindowClose { emacs_frame_id: 0 });
+        let mut lent = Lent { queue: &mut queue, presentation: &mut presentation, live: &mut live, width: &mut width, height: &mut height };
+        let (seen, closed) = lent.run(&host, |_| {
+            let mut shared = host.borrow_mut();
+            let seen = (shared.presentation, shared.in_flight, shared.pending.len());
+            // What a prompt's redisplay does: settle the loop's frame, submit its own.
+            shared.settled = shared.in_flight.take();
+            shared.presentation += 1;
+            shared.size = Some((30, 40));
+            shared.closed = true;
+            seen
+        });
+        assert_eq!(seen, (7, Some(7), 1), "the read starts from the loop's state");
+        assert!(closed);
+        assert_eq!((queue.len(), presentation, width, height), (1, 8, 30, 40));
+        assert!(live.in_flight().is_none(), "the settled presentation is no longer in flight");
+        assert_eq!(host.borrow().in_flight, None);
+    }
+}
+
+#[cfg(test)]
 mod evaluator_stack_tests {
     use std::os::unix::process::ExitStatusExt;
 
@@ -596,24 +628,9 @@ fn evaluate(
             }
             if let Some(event) = native::translate(event) {
                 let outcome = if live {
-                    // Hand the prompt the keys typed ahead and the presentation
-                    // state; take back what it did not consume.
-                    {
-                        let mut shared = host.borrow_mut();
-                        shared.pending = std::mem::take(&mut batch);
-                        shared.presentation = presentation;
-                        shared.in_flight = live_presentation.in_flight().map(|(p, _)| p);
-                    }
-                    let outcome = live_presentation.command(&mut vm, &mut commands, event);
-                    let mut shared = host.borrow_mut();
-                    batch = std::mem::take(&mut shared.pending);
-                    presentation = shared.presentation;
-                    if let Some(settled) = shared.settled.take() { live_presentation.completed(settled); }
-                    shared.in_flight = None;
-                    if let Some((w, h)) = shared.size.take() { width = w; height = h; }
-                    let close_requested = std::mem::take(&mut shared.closed);
-                    drop(shared);
-                    if close_requested && live_presentation.window_close(&mut vm)? {
+                    let mut lent = Lent { queue: &mut batch, presentation: &mut presentation, live: &mut live_presentation, width: &mut width, height: &mut height };
+                    let (outcome, closed) = lent.run(&host, |live| live.command(&mut vm, &mut commands, event));
+                    if closed && live_presentation.window_close(&mut vm)? {
                         return shutdown_editor(&mut vm, sender);
                     }
                     outcome
@@ -716,7 +733,14 @@ fn evaluate(
             if pending.is_empty() && sender.input().is_empty() {
                 // read_char: with no key to read, idle and run ripe timers;
                 // after any ran, redisplay and check again before blocking.
-                let idle = timers::idle(&mut vm).unwrap_or_else(|error| {
+                // A timer may read input (`read-event' with a timeout, a
+                // prompt) as a command may, so it gets the same handoff.
+                let mut lent = Lent { queue: &mut pending, presentation: &mut presentation, live: &mut live_presentation, width: &mut width, height: &mut height };
+                let (idle, closed) = lent.run(&host, |_| timers::idle(&mut vm));
+                if closed && live_presentation.window_close(&mut vm)? {
+                    return shutdown_editor(&mut vm, sender);
+                }
+                let idle = idle.unwrap_or_else(|error| {
                     let _ = echo::show(&mut vm, &format!("Timer: {error}"));
                     timers::Idle { ran: true, message: false, delay: None }
                 });
@@ -761,6 +785,41 @@ fn evaluate(
         }
     }
     shutdown_editor(&mut vm, sender)
+}
+
+/// The outer loop's input and presentation state, lent to the prompt host
+/// (prompt.rs) while the loop runs Lisp that may read input mid-way: the
+/// keys queued ahead, the last presentation submitted and the one in flight.
+/// What the Lisp did not consume, and what its reads presented, settled or
+/// saw (a resize, a close), come back. A read that redisplays from stale
+/// state submits a presentation the renderer has already passed and waits
+/// for it in vain.
+struct Lent<'a> {
+    queue: &'a mut std::collections::VecDeque<InputEvent>,
+    presentation: &'a mut u64,
+    live: &'a mut presentation::Presentation,
+    width: &'a mut u32,
+    height: &'a mut u32,
+}
+
+impl Lent<'_> {
+    /// RUN's value, and whether a read inside it saw the frame close.
+    fn run<T>(&mut self, host: &std::rc::Rc<std::cell::RefCell<prompt::Shared>>, run: impl FnOnce(&mut presentation::Presentation) -> T) -> (T, bool) {
+        {
+            let mut shared = host.borrow_mut();
+            shared.pending = std::mem::take(self.queue);
+            shared.presentation = *self.presentation;
+            shared.in_flight = self.live.in_flight().map(|(p, _)| p);
+        }
+        let value = run(self.live);
+        let mut shared = host.borrow_mut();
+        *self.queue = std::mem::take(&mut shared.pending);
+        *self.presentation = shared.presentation;
+        if let Some(settled) = shared.settled.take() { self.live.completed(settled); }
+        shared.in_flight = None;
+        if let Some((w, h)) = shared.size.take() { (*self.width, *self.height) = (w, h); }
+        (value, std::mem::take(&mut shared.closed))
+    }
 }
 
 /// Native work that woke the wait: terminal output, then completed background
