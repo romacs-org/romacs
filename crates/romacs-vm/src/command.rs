@@ -162,10 +162,6 @@ impl Vm {
             }
             _ => unreachable!("head_is matched a list"),
         };
-        let slot = match modes {
-            Some(modes) => Form::Vector(vec![spec.clone(), modes]),
-            None => spec.clone(),
-        };
         let mut lambda = vec![sym("lambda"), args.clone()];
         lambda.extend_from_slice(&body[..i]);
         lambda.extend_from_slice(&body[i + 1..]);
@@ -180,10 +176,20 @@ impl Vm {
         };
         let executable = lambda[2..].to_vec();
         // One slot value, registered and in the closure's slot 5, as GNU's
-        // closure holds it once.
-        let spec_value = self.literal(&slot)?;
+        // closure holds it once. [SPEC MODES] is a fresh vector for each
+        // closure, as make-interpreted-closure's Fvector makes it.
+        let spec_value = self.literal(&spec)?;
         let spec_reg = builder.reg();
         builder.emit(Op::Const(spec_reg, spec_value));
+        let spec_reg = match modes {
+            Some(modes) => {
+                let modes_value = self.literal(&modes)?;
+                let modes_reg = builder.reg();
+                builder.emit(Op::Const(modes_reg, modes_value));
+                self.closure_native_call(builder, Primitive::Vector, &[spec_reg, modes_reg])
+            }
+            None => spec_reg,
+        };
         let saved_captures = std::mem::replace(&mut self.keep_captures, exposed);
         let parts = self.expr(builder, &call("function", vec![Form::List(lambda)]))
             .and_then(|closure| Ok((closure, self.expr(builder, &thunk)?)));
