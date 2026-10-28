@@ -26,6 +26,9 @@ impl Presentation {
 
     pub fn changed(&mut self) { self.dirty = true; }
 
+    /// A redisplay found the frame as last painted: nothing to submit.
+    pub fn unchanged(&mut self) { self.dirty = false; }
+
     pub fn ready(&self) -> bool { self.dirty && self.in_flight.is_none() }
 
     pub fn after_batch<T>(&self, submit: impl FnOnce() -> T) -> Option<T> {

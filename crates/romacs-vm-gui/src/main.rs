@@ -572,6 +572,8 @@ fn evaluate(
     let mut paint_timings = None;
     let mut key_trace = tracing().then(latency::Trace::default);
     let mut previous = paint(&mut engine.borrow_mut(), &mut vm, sender, presentation, force_gc, floor, initial, &mut pending, true, &mut paint_timings)?;
+    // The presentation `previous` shows; a prompt's paint advances past it.
+    let mut painted = presentation;
     let mut live_presentation = presentation::Presentation::new();
     let mut terminal_modal = false;
     reply(json!({"ready":true,"presentation":presentation}))?;
@@ -657,6 +659,7 @@ fn evaluate(
                     let snapshot_ns = snapshot_start.elapsed().as_nanos();
                     presentation = presentation.checked_add(1).ok_or("presentation exhausted")?;
                     previous = paint(&mut engine.borrow_mut(), &mut vm, sender, presentation, force_gc, floor, next, &mut pending, true, &mut paint_timings)?;
+                    painted = presentation;
                     Some(snapshot_ns)
                 } else { None };
                 if tracing() && !live {
@@ -721,11 +724,18 @@ fn evaluate(
                 let snapshot_start = Instant::now();
                 let next = snapshot(&mut vm, g1, width, height)?;
                 let snapshot_ns = snapshot_start.elapsed().as_nanos();
+                // GNU's redisplay draws nothing when nothing changed: a timer
+                // that left the frame as painted submits no frame.
+                if next == previous && painted == presentation { return Ok(None); }
                 presentation = presentation.checked_add(1).ok_or("presentation exhausted")?;
                 previous = paint(&mut engine.borrow_mut(), &mut vm, sender, presentation, force_gc, floor, next, &mut pending, false, &mut paint_timings)?;
-                Ok((snapshot_start, snapshot_ns))
+                painted = presentation;
+                Ok(Some((snapshot_start, snapshot_ns)))
             }) {
-                let (snapshot_start, snapshot_ns) = result?;
+                let Some((snapshot_start, snapshot_ns)) = result? else {
+                    live_presentation.unchanged();
+                    continue;
+                };
                 live_presentation.submitted(presentation, Instant::now());
                 if let Some(trace) = &mut key_trace {
                     trace.submitted(presentation, paint_timings.take().expect("traced paint"), snapshot_start, snapshot_ns);
@@ -783,6 +793,7 @@ fn evaluate(
                 .checked_add(1)
                 .ok_or("presentation exhausted")?;
             previous = paint(&mut engine.borrow_mut(), &mut vm, sender, presentation, force_gc, floor, next, &mut pending, true, &mut paint_timings)?;
+            painted = presentation;
         }
         match result {
             Err(error) => reply(json!({"error":error,"presentation":presentation}))?,
