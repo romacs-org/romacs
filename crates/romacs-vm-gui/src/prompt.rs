@@ -32,6 +32,8 @@ pub struct Shared {
     /// Latest frame geometry seen by the prompt.
     pub size: Option<(u32, u32)>,
     pub closed: bool,
+    /// Under --trace-latency, when the prompt last read a key.
+    pub key_read: Option<std::time::Instant>,
 }
 
 pub struct GuiHost {
@@ -117,6 +119,7 @@ impl HostInput for GuiHost {
     }
 
     fn redisplay(&mut self, frame: HostFrame) -> Result<Vec<(u64, usize)>, String> {
+        let started = std::time::Instant::now();
         let wait = Duration::from_secs(30);
         let presentation = {
             let mut shared = self.shared.borrow_mut();
@@ -138,6 +141,13 @@ impl HostInput for GuiHost {
                 "minibuffer":frame.frame.windows.last().map(|w| w.snapshot.text.utf8.clone()),
                 "glyphs":glyphs})
         );
+        // The key's command and hooks ran before this redisplay began.
+        if let Some(read) = self.shared.borrow_mut().key_read.take() {
+            let now = std::time::Instant::now();
+            eprintln!("{}", serde_json::json!({"diagnostic":"prompt-key-latency","presentation":presentation,"units":"ns",
+                "command_ns":started.duration_since(read).as_nanos(),"redisplay_ns":now.duration_since(started).as_nanos(),
+                "key_to_render_ns":now.duration_since(read).as_nanos()}));
+        }
         Ok(ends)
     }
 
@@ -158,6 +168,9 @@ impl HostInput for GuiHost {
             };
             if let Some(classified) = classify(&event) {
                 self.note(&classified);
+                if crate::tracing() && matches!(classified, HostEvent::Key(_)) {
+                    self.shared.borrow_mut().key_read = Some(std::time::Instant::now());
+                }
                 return Ok(classified);
             }
         }

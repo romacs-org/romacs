@@ -134,6 +134,41 @@ A numeric ARG selects tenths from the end; a universal prefix suppresses mark pu
                (point-max)))
   (when (and arg (not (consp arg))) (forward-line 1)))
 
+;; The prompt state M-: and the workspace's readers
+;; (romacs-workspace-completion.el) bind while they read.
+(defvar romacs-prompt--input-start nil)
+(defvar romacs-prompt--history-position nil)
+(defvar romacs-prompt--history-input nil)
+(defvar romacs-prompt--history-variable nil)
+
+(defun romacs-prompt--replace-input (text)
+  "Replace the active minibuffer input with TEXT, retaining its prompt."
+  (delete-region romacs-prompt--input-start (point-max))
+  (goto-char (point-max))
+  (insert text))
+
+(defun romacs-prompt-previous-history ()
+  "Recall an older entry from the active prompt's history variable."
+  (interactive)
+  (when (null romacs-prompt--history-position)
+    (setq romacs-prompt--history-input
+          (buffer-substring-no-properties romacs-prompt--input-start (point-max))))
+  (let* ((next (if romacs-prompt--history-position (1+ romacs-prompt--history-position) 0))
+         (entry (nth next (symbol-value romacs-prompt--history-variable))))
+    (if entry
+        (progn (setq romacs-prompt--history-position next) (romacs-prompt--replace-input entry))
+      (message "No older history entry"))))
+
+(defun romacs-prompt-next-history ()
+  "Recall a newer history entry, or restore the input preceding recall."
+  (interactive)
+  (when romacs-prompt--history-position
+    (if (= romacs-prompt--history-position 0)
+        (progn (setq romacs-prompt--history-position nil)
+               (romacs-prompt--replace-input romacs-prompt--history-input))
+      (setq romacs-prompt--history-position (1- romacs-prompt--history-position))
+      (romacs-prompt--replace-input (nth romacs-prompt--history-position (symbol-value romacs-prompt--history-variable))))))
+
 (defun romacs-read-expression ()
   "Read exactly one Lisp expression, with history and ordinary quit handling."
   (let* ((prompt "Eval: ")
