@@ -236,17 +236,6 @@ pub(super) fn refuse_handler(cx: &mut Leaf<'_>, filename: Value, operation: &str
     Ok(())
 }
 
-/// GNU `barf-if-buffer-read-only' (buffer.c), reached at fileio.c:4146.
-fn barf_if_read_only(cx: &mut Leaf<'_>) -> std::result::Result<(), Fault> {
-    if var(cx, "buffer-read-only")? != Value::NIL && var(cx, "inhibit-read-only")? == Value::NIL && cx.fileio_property_at_point("inhibit-read-only")? == Value::NIL {
-        let buffer = cx.current_buffer()?;
-        let condition = cx.intern("buffer-read-only");
-        let data = cx.cons(buffer, Value::NIL);
-        return Err(Fault::Signal(condition, data));
-    }
-    Ok(())
-}
-
 /// GNU Finsert_file_contents (fileio.c:4057) up to the coding decision:
 /// the read-only and visit checks, the handler refusal, the open (a
 /// visited missing file goes on to notfound with no bytes), the
@@ -264,7 +253,7 @@ defsubr! { name = "insert-file-contents", gnu = "fileio.c:4057", effect = Global
 fn insert_file_contents(cx, filename: Value; optional visit: Value, beg: Value, end: Value,
                         replace: Value) -> Step {
     // fileio.c:4143: VM2 has no indirect buffers.
-    barf_if_read_only(cx)?;
+    super::buffer_state::barf_if_read_only(cx, Value::NIL)?;
     let shape = cx.buffer_shape()?;
     // fileio.c:4126 empty_undo_list_p.
     let empty_undo = visit != Value::NIL && var(cx, "buffer-undo-list")? == Value::NIL && shape.empty;
@@ -624,29 +613,43 @@ defsubr! { name = "locate-file-internal", gnu = "lread.c:1590", effect = Global,
 fn locate_file_internal(cx, filename: Value, path: Value; optional suffixes: Value, predicate: Value) -> Step {
     cx.string_view(filename)?;
     // openp: nil or t opens the file for reading; a natural number is an
-    // access(2) mode tested with AT_EACCESS. Function predicates need a Lisp
-    // call from inside the search and remain refused.
-    if !(predicate == Value::NIL || predicate == Value::TRUE || predicate.integer_value().is_some_and(|n| n >= 0)) {
-        return Err(refuse("locate-file-internal function predicate"));
-    }
-    // FOR_EACH_TAIL_SAFE: the elements up to a cycle or dotted end, as a
-    // fresh list the continuations can carry. A nil PATH uses NAME itself.
-    let mut roots = Vec::new();
-    let mut seen = std::collections::HashSet::new();
-    let mut tail = path;
-    while let Some((root, rest)) = cx.pair(tail) {
-        if !seen.insert(tail.0) { break; }
-        roots.push(root);
-        tail = rest;
-    }
+    // access(2) mode tested with AT_EACCESS; anything else is a function
+    // called on each candidate.
+    let mut roots = safe_elements(cx, path);
     let nil_path = if path == Value::NIL { Value::TRUE } else { Value::NIL };
     if path == Value::NIL { roots.push(Value::NIL); }
-    let roots = roots.into_iter().rev().fold(Value::NIL, |list, root| cx.cons(root, list));
+    let roots = fresh_list(cx, roots);
+    let suffixes = if suffixes == Value::NIL {
+        let empty = cx.make_string(Vec::new(), cx.string_view(filename)?.is_multibyte());
+        cx.cons(empty, Value::NIL)
+    } else {
+        let suffixes = safe_elements(cx, suffixes);
+        fresh_list(cx, suffixes)
+    };
     locate_next(cx, &[filename, roots, suffixes, predicate, nil_path])
 }}
 
+/// FOR_EACH_TAIL_SAFE: LIST's elements up to a cycle or dotted end.
+fn safe_elements(cx: &mut Leaf<'_>, list: Value) -> Vec<Value> {
+    let mut elements = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let mut tail = list;
+    while let Some((element, rest)) = cx.pair(tail) {
+        if !seen.insert(tail.0) { break; }
+        elements.push(element);
+        tail = rest;
+    }
+    elements
+}
+
+/// A fresh proper list of ELEMENTS, which the continuations can carry.
+fn fresh_list(cx: &mut Leaf<'_>, elements: Vec<Value>) -> Value {
+    elements.into_iter().rev().fold(Value::NIL, |list, element| cx.cons(element, list))
+}
+
 // Continuations share SAVED = [FILENAME ROOTS SUFFIXES PREDICATE NIL-PATH],
-// ROOTS being the elements not yet tried after the current one.
+// ROOTS being the elements not yet tried after the current one, and while
+// one root's suffixes are tried, [... BASE SUFFIXES-LEFT] after them.
 
 /// openp's next PATH element: NAME itself for a nil PATH, else
 /// (expand-file-name NAME ROOT).
@@ -668,38 +671,54 @@ fn locate_expanded(cx: &mut Leaf<'_>, expanded: Value, saved: &[Value]) -> Next 
 /// Try each suffix on an absolute EXPANDED; skip an element left relative.
 fn locate_absolute(cx: &mut Leaf<'_>, expanded: Value, saved: &[Value]) -> Next {
     if cx.string_bytes(expanded)?.first() != Some(&b'/') { return locate_next(cx, saved); }
-    let (filename, suffixes, predicate) = (saved[0], saved[2], saved[3]);
-    let multibyte = cx.string_view(filename)?.is_multibyte();
-    let access_mode = predicate.integer_value();
     // openp drops a leading `/:' before trying the suffixes.
     let text = cx.string_text(expanded)?;
     let base = match text.strip_prefix("/:") { Some(rest) if text.len() > 2 => rest.to_owned(), _ => text };
-    let mut suffix_tail = if suffixes == Value::NIL {
-        let empty = cx.make_string(Vec::new(), multibyte);
-        cx.cons(empty, Value::NIL)
-    } else { suffixes };
-    let mut seen_suffixes = std::collections::HashSet::new();
-    while let Some((suffix, rest)) = cx.pair(suffix_tail) {
-        if !seen_suffixes.insert(suffix_tail.0) { break; }
-        suffix_tail = rest;
-        let candidate = format!("{base}{}", cx.string_text(suffix)?);
-        let candidate_value = cx.make_string(candidate.as_bytes().to_vec(), multibyte || !candidate.is_ascii());
-        // lread.c openp selects after suffix concatenation, even for an
-        // absolute filename. A selected handler can run Lisp: still refuse.
-        // A natural-number predicate tests access(2) without handlers.
-        if access_mode.is_none() {
-            refuse_locate_handler(cx, candidate_value, "file-exists-p")?;
-        }
-        let found = match access_mode {
-            None => std::path::Path::new(&candidate).is_file() && open_for_reading(&candidate).is_ok(),
-            Some(mode) => i32::try_from(mode).is_ok_and(|mode| cx.filesave_access(&candidate, mode).is_ok())
-                && !std::path::Path::new(&candidate).is_dir(),
-        };
-        if found {
-            return Ok(Step::Done(candidate_value));
-        }
+    let base = cx.make_string(base.into_bytes(), true);
+    let mut saved = saved[..5].to_vec();
+    saved.extend([base, saved[2]]);
+    locate_suffix(cx, &saved)
+}
+
+/// The next suffix of SAVED's root, or the next root once none is left.
+fn locate_suffix(cx: &mut Leaf<'_>, saved: &[Value]) -> Next {
+    let Some((suffix, rest)) = cx.pair(saved[6]) else { return locate_next(cx, &saved[..5]) };
+    let mut saved = saved.to_vec();
+    saved[6] = rest;
+    let (filename, predicate) = (saved[0], saved[3]);
+    let multibyte = cx.string_view(filename)?.is_multibyte();
+    let candidate = format!("{}{}", cx.string_text(saved[5])?, cx.string_text(suffix)?);
+    let candidate_value = cx.make_string(candidate.as_bytes().to_vec(), multibyte || !candidate.is_ascii());
+    let access_mode = predicate.integer_value().filter(|&n| n >= 0);
+    if predicate != Value::NIL && predicate != Value::TRUE && access_mode.is_none() {
+        saved.push(candidate_value);
+        return Ok(Step::Call { f: predicate, args: vec![candidate_value], then: locate_predicate_result, saved });
     }
-    locate_next(cx, saved)
+    // lread.c openp selects after suffix concatenation, even for an
+    // absolute filename. A selected handler can run Lisp: still refuse.
+    // A natural-number predicate tests access(2) without handlers.
+    if access_mode.is_none() {
+        refuse_locate_handler(cx, candidate_value, "file-exists-p")?;
+    }
+    let found = match access_mode {
+        None => std::path::Path::new(&candidate).is_file() && open_for_reading(&candidate).is_ok(),
+        Some(mode) => i32::try_from(mode).is_ok_and(|mode| cx.filesave_access(&candidate, mode).is_ok())
+            && !std::path::Path::new(&candidate).is_dir(),
+    };
+    if found { return Ok(Step::Done(candidate_value)); }
+    locate_suffix(cx, &saved)
+}
+
+/// openp's verdict on a function PREDICATE's RESULT for the candidate last
+/// in SAVED: nil rejects it, and a directory needs `dir-ok'.
+fn locate_predicate_result(cx: &mut Leaf<'_>, result: Value, saved: &[Value]) -> Next {
+    let candidate = saved[7];
+    if result != Value::NIL
+        && (result == cx.intern("dir-ok") || !std::path::Path::new(&cx.string_text(candidate)?).is_dir())
+    {
+        return Ok(Step::Done(candidate));
+    }
+    locate_suffix(cx, &saved[..7])
 }
 
 /// Native file lookup still refuses dispatch when a handler is selected.

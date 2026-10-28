@@ -123,6 +123,11 @@ fn remove_list_of_text_properties(cx, start: Value, end: Value, list_of_properti
     property_change(cx, 6, start, end, names, object)
 }}
 
+defsubr! { name = "get-char-property-and-overlay", gnu = "textprop.c:695", effect = Reads,
+fn get_char_property_and_overlay(cx, position: Value, prop: Value; optional object: Value) {
+    cx.get_char_property_and_overlay(position, prop, object)
+}}
+
 defsubr! { name = "get-pos-property", gnu = "editfns.c:275", effect = Reads,
 fn get_pos_property(cx, position: Value, prop: Value; optional object: Value) {
     cx.get_pos_property(position, prop, object)

@@ -45,16 +45,13 @@ editor open/edit/save round trip are outside this slice.
 
 ## VM2-LOCATE1 — Readable regular-file lookup subset
 
-`locate-file-internal` implements the nil-predicate search GNU `locate-library`
-reaches through its Lisp wrapper. GNU defines `locate-file` itself in Lisp
+`locate-file-internal` implements GNU openp's search for every PREDICATE:
+nil or t (readable), a natural-number access mode, and a function called on
+each candidate (nil rejects it; a directory needs `dir-ok`). GNU defines `locate-file` itself in Lisp
 (`lisp/files.el:1113`) and only `locate-file-internal` in C
 (`src/lread.c:1590`), so the substrate provides the C entry point ONLY: a bare
 VM has no `locate-file` until GNU's own `files.el` loads, and anything needing
 the wrapper must load that Lisp rather than call a native stand-in.
-Non-nil predicates (including integer access modes) explicitly signal
-`(error "VM2 locate-file-internal non-nil predicate is unsupported")`.
-For example GNU 32.0.50 returns `"/etc/passwd"` for
-`(locate-file-internal "/etc/passwd" nil nil #'file-exists-p)`; VM2 refuses it.
 The existing native file-name expansion/handler restrictions also apply:
 nonempty `file-name-handler-alist` is refused rather than invoking handlers,
 and `~user` and above-root expansion are unsupported. This lookup accepts

@@ -9,7 +9,7 @@
   "fileio.c"
  ],
  "gnu_def": "fileio.c:4057",
- "rust": "src/prims/fileio.rs:263",
+ "rust": "src/prims/fileio.rs:252",
  "args": [
   "none",
   "none",
