@@ -23,6 +23,7 @@ mod terminal_service;
 mod terminal_wait;
 mod batch;
 mod user_init;
+mod measure;
 
 const SCENE: &str = include_str!("../scene.el");
 
@@ -414,6 +415,8 @@ fn evaluate(
 ) -> Result<(), String> {
     let engine = std::rc::Rc::new(std::cell::RefCell::new(romacs_layout2::LayoutEngine::new()?));
     let mut vm = Vm::new();
+    // Measuring primitives ask the engine that paints (VM2-WTPS1).
+    vm.set_layout_host(Some(Box::new(measure::Host { engine: engine.clone() })));
     let terminal_service = terminal_service::Service::new();
     let terminal_ready = terminal_service.ready();
     if live { vm.set_terminal_host(Some(Box::new(terminal_service)))?; }
