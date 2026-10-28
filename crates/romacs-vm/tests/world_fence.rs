@@ -6,6 +6,7 @@ use romacs_vm::Vm;
 use romacs_vm::host::{self, Pinned};
 use serde_json::Value as Json;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::UNIX_EPOCH;
 
 const PINNED: Pinned = Pinned { clock: UNIX_EPOCH, pid: 4242, seed: [1, 2, 3, 4] };
@@ -31,7 +32,11 @@ const BOOTSTRAP: &str = "\
 ";
 
 fn scratch(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("romacs-world-fence-{}-{name}", std::process::id()));
+    // libtest runs a binary's tests as threads of one process: the pid
+    // alone would let two tests share, and remove, one directory.
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+    let unique = NEXT.fetch_add(1, Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("romacs-world-fence-{}-{unique}-{name}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(dir.join("rlisp")).unwrap();
     dir
