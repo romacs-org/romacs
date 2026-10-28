@@ -123,7 +123,18 @@ fn source_coding_is_explicit_and_invalid_utf8_is_not_replaced() {
     .unwrap();
     std::fs::write(dir.join("bad.el"), b"(setq bad \"\xff\")").unwrap();
     std::fs::write(dir.join("other.el"), ";;; -*- coding: shift_jis -*-\n1").unwrap();
+    // GNU decode_coding_utf_8 (pinned GNU's answers): a byte that starts no
+    // character is a raw-byte character; a 4-byte sequence may name a
+    // character beyond Unicode, which a file without a cookie still detects
+    // as UTF-8 (quick-cns.el).
+    std::fs::write(dir.join("raw.el"), b";; -*- coding: utf-8 -*-\n(setq raw \"\xe6\xb1\x89 \xa3\xa0\")\n").unwrap();
+    std::fs::write(dir.join("wide.el"), b"(setq wide \"\xf4\x94\x80\x99\")\n").unwrap();
     let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    vm.load_file(&dir.join("raw.el")).unwrap();
+    vm.load_file(&dir.join("wide.el")).unwrap();
+    assert_eq!(vm.eval_source("(list (multibyte-string-p raw) (mapcar #'identity raw) (mapcar #'identity wide))").unwrap().display().unwrap(),
+               "(t (27721 32 4194211 4194208) (1130521))");
     vm.load_file(&dir.join("latin.el")).unwrap();
     let v = vm.eval_source("latin").unwrap();
     assert_eq!(v.display().unwrap(), "\"é\"");

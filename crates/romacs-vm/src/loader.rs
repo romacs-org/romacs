@@ -567,10 +567,17 @@ fn decode_source(bytes: &[u8]) -> Result<Vec<u8>> {
         .or_else(|| name.strip_suffix("-mac"))
         .unwrap_or(name);
     let mut source = match base {
-        "utf-8" => {
-            String::from_utf8(bytes.to_vec()).map_err(|_| "source is not valid UTF-8")?.into_bytes()
+        // GNU's utf-8 and utf-8-emacs share decode_coding_utf_8.
+        "utf-8" | "utf-8-emacs" => {
+            let (text, raw) = utf_8_decode(bytes);
+            // Without a cookie GNU detects the coding system
+            // (load-with-code-conversion); its UTF-8 detector accepts
+            // exactly what this decodes without a raw byte.
+            if raw && coding.is_none() {
+                return Err("source is not valid UTF-8 and names no coding system: GNU would detect one, VM2 detects only UTF-8".into());
+            }
+            text
         }
-        "utf-8-emacs" => utf_8_emacs(bytes),
         "latin-1" | "iso-latin-1" | "iso-8859-1" => bytes.iter().map(|b| char::from(*b)).collect::<String>().into_bytes(),
         "us-ascii" if bytes.is_ascii() => bytes.to_vec(),
         _ => return Err(format!("unsupported source coding system: {name}")),
@@ -589,12 +596,15 @@ fn decode_source(bytes: &[u8]) -> Result<Vec<u8>> {
     Ok(source)
 }
 
-/// GNU's utf-8-emacs decoder: its own internal encoding, every byte that
-/// starts no valid character becoming a raw-byte character. As in coding.c,
-/// the internal 2-byte raw-byte forms (C0/C1 leads) and surrogate codes are
-/// not characters in a file.
-fn utf_8_emacs(bytes: &[u8]) -> Vec<u8> {
+/// coding.c decode_coding_utf_8, which utf-8 and utf-8-emacs share: the
+/// internal encoding (characters up to MAX_CHAR, beyond Unicode included),
+/// every byte that starts no valid character becoming a raw-byte
+/// character. As in coding.c, the internal 2-byte raw-byte forms (C0/C1
+/// leads) and surrogate codes are not characters in a file. Also says
+/// whether any raw byte was made.
+fn utf_8_decode(bytes: &[u8]) -> (Vec<u8>, bool) {
     let mut out = Vec::with_capacity(bytes.len());
+    let mut raw_seen = false;
     let mut at = 0;
     while at < bytes.len() {
         let decoded = crate::lstring::decode_char(&bytes[at..])
@@ -606,9 +616,10 @@ fn utf_8_emacs(bytes: &[u8]) -> Vec<u8> {
                 let mut raw = [0; 5];
                 let n = crate::lstring::char_string(crate::lstring::BYTE8_OFFSET + u32::from(bytes[at]), &mut raw);
                 out.extend_from_slice(&raw[..n]);
+                raw_seen = true;
                 at += 1;
             }
         }
     }
-    out
+    (out, raw_seen)
 }
