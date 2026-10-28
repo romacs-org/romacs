@@ -44,3 +44,37 @@ fn skip_chars_iso_classes_match_gnu() {
     let mine = vm.eval_source(&format!("(prin1-to-string {expression})")).unwrap().display().unwrap();
     assert_eq!(mine, format!("{gnu:?}"));
 }
+
+/// [:upper:] and [:lower:] are regex-emacs.c's ISUPPER and ISLOWER, buffer.h
+/// uppercasep and lowercasep over the buffer's case tables: a character is
+/// upper when its downcase differs, lower when it is not upper and its
+/// upcase differs.
+#[test]
+fn skip_chars_case_classes_read_the_buffers_case_tables() {
+    let oracle = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
+    let expression = r#"(let ((b (get-buffer-create "skip-case-classes")) (r nil))
+  (set-buffer b)
+  (insert "ABab xy")
+  (goto-char 1)
+  (setq r (list (skip-chars-forward "[:upper:]") (skip-chars-forward "[:lower:]")))
+  (let ((d (copy-sequence (standard-case-table))))
+    (aset d ?A ?A)
+    (aset d ?x ?y)
+    (set-case-table d)
+    (goto-char 1)
+    (setq r (append r (list (skip-chars-forward "[:upper:]") (skip-chars-forward "[:lower:]")
+                            (progn (goto-char 2) (skip-chars-forward "[:upper:]"))
+                            (progn (goto-char 6) (list (skip-chars-forward "[:upper:]") (skip-chars-forward "[:lower:]")))
+                            (progn (goto-char 1) (skip-chars-forward "^[:upper:]"))))))
+  r)"#;
+    let output = std::process::Command::new(oracle)
+        .args(["-Q", "--batch", "--eval", &format!("(princ (prin1-to-string {expression}))")])
+        .stdin(std::process::Stdio::null())
+        .output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let gnu = String::from_utf8(output.stdout).unwrap();
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    let mine = vm.eval_source(&format!("(prin1-to-string {expression})")).unwrap().display().unwrap();
+    assert_eq!(mine, format!("{gnu:?}"));
+}

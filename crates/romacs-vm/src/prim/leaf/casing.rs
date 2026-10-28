@@ -88,6 +88,12 @@ impl Leaf<'_> {
         Ok(Some(mapped as u32))
     }
 
+    /// buffer.h downcase (DOWN) or upcase of CODE through TABLE, the current
+    /// buffer's case table of that direction.
+    pub(crate) fn case_of(&self, table: Value, code: u32, down: bool) -> std::result::Result<u32, Fault> {
+        Ok(self.case_override(table, code, down)?.unwrap_or_else(|| simple(code, down)))
+    }
+
     /// Each of CODES as casefiddle.c's case_character cases it for upcase
     /// or downcase: in multibyte text the special casing first, then the
     /// case table's mapping, else the Unicode default, and a capital sigma

@@ -5,8 +5,11 @@ use crate::coordinates::{ByteOffset, CharOffset};
 struct CharacterSet {
     negate: bool,
     ranges: Vec<(u32, u32)>,
-    /// The ISO C `[:NAME:]` classes, as the regex engine's class bits.
+    /// The ISO C `[:NAME:]` classes, as the regex engine's class bits,
+    /// but for [:upper:] and [:lower:], which read the case tables.
     classes: u32,
+    upper: bool,
+    lower: bool,
     multibyte: bool,
 }
 
@@ -27,11 +30,13 @@ impl CharacterSet {
         let negate = chars.first() == Some(&(b'^' as u32));
         let mut at = usize::from(negate);
         let mut ranges = Vec::new();
-        let mut classes = 0;
+        let (mut classes, mut upper, mut lower) = (0, false, false);
         while at < chars.len() {
             if let Some(class) = iso_class(&chars[at..]) {
                 let (bit, used) = class?;
-                classes |= bit;
+                if Some(bit) == romacs_regex_engine::char_class_bit("upper") { upper = true; }
+                else if Some(bit) == romacs_regex_engine::char_class_bit("lower") { lower = true; }
+                else { classes |= bit; }
                 at += used;
                 continue;
             }
@@ -53,13 +58,22 @@ impl CharacterSet {
             }
             if start <= end { ranges.push((start, end)); }
         }
-        Ok(Self { negate, ranges, classes, multibyte: string.is_multibyte() })
+        Ok(Self { negate, ranges, classes, upper, lower, multibyte: string.is_multibyte() })
     }
 
-    /// SYNTAX is the buffer's table, present when the set has classes.
-    fn contains(&self, code: u32, buffer_multibyte: bool, syntax: Option<&dyn romacs_regex_engine::SyntaxLookup>) -> bool {
+    /// SYNTAX is the buffer's table, present when the set has classes; CASE
+    /// is buffer.h downcase (true) or upcase of a character, for [:upper:]
+    /// (uppercasep) and [:lower:] (lowercasep).
+    fn contains(&self, code: u32, buffer_multibyte: bool, syntax: Option<&dyn romacs_regex_engine::SyntaxLookup>,
+                case: &dyn Fn(u32, bool) -> std::result::Result<u32, Fault>) -> std::result::Result<bool, Fault> {
         if let Some(syntax) = syntax && romacs_regex_engine::char_in_classes(code, self.classes, syntax) {
-            return !self.negate;
+            return Ok(!self.negate);
+        }
+        if self.upper || self.lower {
+            let upper = case(code, true)? != code;
+            if (self.upper && upper) || (self.lower && !upper && case(code, false)? != code) {
+                return Ok(!self.negate);
+            }
         }
         let comparable = if self.multibyte == buffer_multibyte || code < 128 {
             Some(code)
@@ -68,7 +82,7 @@ impl CharacterSet {
         } else {
             Some(code + crate::lstring::BYTE8_OFFSET)
         };
-        comparable.is_some_and(|c| self.ranges.iter().any(|&(a, b)| a <= c && c <= b)) != self.negate
+        Ok(comparable.is_some_and(|c| self.ranges.iter().any(|&(a, b)| a <= c && c <= b)) != self.negate)
     }
 }
 
@@ -86,9 +100,12 @@ impl Leaf<'_> {
         };
         let set = CharacterSet::parse(string)?;
         let source = if set.classes != 0 { Some(self.vm.word_motion_syntax()?) } else { None };
+        let tables = if set.upper || set.lower { (self.current_case_mapping(true)?, self.current_case_mapping(false)?) } else { (Value::NIL, Value::NIL) };
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
         let syntax = source.map(|source| crate::regexp::VmSyntax::new(self.vm, source));
         let syntax = syntax.as_ref().map(|s| s as &dyn romacs_regex_engine::SyntaxLookup);
+        let leaf = &*self;
+        let case = |code: u32, down: bool| leaf.case_of(if down { tables.0 } else { tables.1 }, code, down);
         let (start, at) = match &self.vm.objects[index] {
             data::Object::Buffer(buffer) => {
                 let accessible = buffer.accessible();
@@ -101,7 +118,7 @@ impl Leaf<'_> {
                 while if forward { at < bound } else { at > bound } {
                     let character = if forward { at } else { at - 1 };
                     let Some(code) = buffer.character_of_char(CharOffset(character)).map_err(Fault::Error)? else { break; };
-                    if !set.contains(code as u32, true, syntax) { break; }
+                    if !set.contains(code as u32, true, syntax, &case)? { break; }
                     if forward { at += 1; } else { at -= 1; }
                 }
                 (start, at)
@@ -115,7 +132,7 @@ impl Leaf<'_> {
                 let mut at = start;
                 while if forward { at < bound } else { at > bound } {
                     let character = if forward { at } else { at - 1 };
-                    if !set.contains(buffer.bytes[character] as u32, false, syntax) { break; }
+                    if !set.contains(buffer.bytes[character] as u32, false, syntax, &case)? { break; }
                     if forward { at += 1; } else { at -= 1; }
                 }
                 (start, at)
