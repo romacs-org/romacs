@@ -1240,19 +1240,20 @@ impl Vm {
     /// unrestored, as does a saved integer that set-default-toplevel-value
     /// replaced with a non-integer, which signals once the watchers ran.
     pub(super) fn unbind_forwarded(&mut self, slot: usize, fwd: Fwd, old: Value, owner: Value, let_default: bool) -> Result<()> {
-        let local = owner.index_if(0).and_then(|n| n.checked_sub(1));
+        let mut local = owner.index_if(0).and_then(|n| n.checked_sub(1));
         if let Fwd::Buffer(i) = fwd && !let_default && !local.is_some_and(|buffer| self.per_buffer_local_p(buffer, i)) {
             return Ok(());
         }
+        let mut old = old;
         if self.variable_trapped(slot) {
-            if matches!(fwd, Fwd::Buffer(_)) && !let_default {
-                self.notify_watchers_at(slot, old, "unlet", Some(owner))?;
-            } else {
-                self.notify_watchers_at(slot, old, "set", Some(Value::NIL))?;
-                if !matches!(fwd, Fwd::Buffer(_)) && self.localized_boolean(slot).is_none() {
-                    self.notify_watchers(slot, old, "unlet")?;
-                }
-            }
+            // The popped value is rooted across its watchers and read back.
+            let frame = self.root_frame(&[old, owner]);
+            let notified = self.notify_unbind_forwarded(slot, fwd, &frame, let_default);
+            let owner;
+            [old, owner] = self.release_frame(frame);
+            notified?;
+            // The owner's index, as its buffer may have moved.
+            local = owner.index_if(0).and_then(|n| n.checked_sub(1));
         }
         match fwd {
             Fwd::Obj(i) => self.forwarded.objects[i as usize] = old,
@@ -1269,6 +1270,18 @@ impl Vm {
             }
             Fwd::Buffer(i) if let_default => self.forwarded.defaults[i as usize] = old,
             Fwd::Buffer(i) => self.per_buffer_mut(local.expect("live owner")).expect("live buffer").set(i, old),
+        }
+        Ok(())
+    }
+    /// `unbind_forwarded's notifications, reading OLD and OWNER from FRAME
+    /// before each.
+    fn notify_unbind_forwarded(&mut self, slot: usize, fwd: Fwd, frame: &crate::gc::RootFrame, let_default: bool) -> Result<()> {
+        if matches!(fwd, Fwd::Buffer(_)) && !let_default {
+            return self.notify_watchers_at(slot, self.rooted(frame, 0), "unlet", Some(self.rooted(frame, 1)));
+        }
+        self.notify_watchers_at(slot, self.rooted(frame, 0), "set", Some(Value::NIL))?;
+        if !matches!(fwd, Fwd::Buffer(_)) && self.localized_boolean(slot).is_none() {
+            self.notify_watchers(slot, self.rooted(frame, 0), "unlet")?;
         }
         Ok(())
     }

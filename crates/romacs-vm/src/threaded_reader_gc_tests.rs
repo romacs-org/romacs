@@ -95,14 +95,16 @@ fn collecting_read_callback_propagates_throw_and_signal() {
 }
 
 #[test]
-fn callback_preserves_existing_compiler_collection_inhibition() {
+fn callback_preserves_an_open_builders_collection_hold() {
     let mut vm = Vm::new();
-    vm.eval_source_raw("(defun inhibited-reader () (garbage-collect) 32)")
+    vm.eval_source_raw("(defun inhibited-reader () (garbage-collect))")
         .unwrap();
     let callback = vm.intern("inhibited-reader");
-    vm.gc_threshold = usize::MAX;
+    // A compiler builder expanding a macro holds collection (`Vm::function').
+    vm.gc_holds += 1;
     let before = vm.heap_stats().collections;
-    vm.reader_call(callback, &[]).unwrap();
+    let result = vm.reader_call(callback, &[]).unwrap();
+    assert_eq!(result, Value::NIL, "garbage-collect returns nil while inhibited");
     assert_eq!(vm.heap_stats().collections, before);
-    assert_eq!(vm.gc_threshold, usize::MAX);
+    assert_eq!(vm.gc_holds, 1);
 }

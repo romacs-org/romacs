@@ -718,13 +718,51 @@ impl Control {
 /// Unbind N bindings; the first whose restore signals (a watcher, or an
 /// integer forwarding given a non-integer by set-default-toplevel-value)
 /// is consumed and its escape returned, like unbind_to's pop.
+/// A restore can run unlet watchers, so the engine is suspended for them.
 fn checked_unbind(e: &mut Engine<'_>, n: usize) -> Option<Escape> {
-    for _ in 0..n {
-        if e.vm.unbind_one().is_err() {
-            return e.vm.propagated_escape.take();
+    let trapped = n > 0 && !e.vm.trapped.is_empty();
+    watched_write(e, trapped, |vm| {
+        for _ in 0..n {
+            if vm.unbind_one().is_err() {
+                return vm.propagated_escape.take();
+            }
         }
+        None
+    })
+}
+/// Perform a variable write (`set_variable_value', `bind_variable',
+/// `unbind_one') that can run watchers. With WATCHED, this engine is
+/// suspended first, so a watcher may collect: the engine's state, code and
+/// registers are traced, and the write roots its own Values. The caller
+/// keeps nothing else in Rust locals across it.
+fn watched_write<T>(e: &mut Engine<'_>, watched: bool, write: impl FnOnce(&mut Vm) -> T) -> T {
+    if !watched {
+        return write(e.vm);
     }
-    None
+    let roots = e.suspend_code();
+    let rooted = std::mem::replace(&mut e.vm.rooted_write, true);
+    let out = write(e.vm);
+    e.vm.rooted_write = rooted;
+    e.resume_code(roots);
+    out
+}
+/// Suspend this engine across a native call that runs Lisp (eval, load, an
+/// autoload, a lazy body's expansion, `signal-hook-function'): its state and
+/// code are traced in place (`suspend_code`), its register stack set aside
+/// still traced, so the nested run gets fresh registers and every frame
+/// pointer stays valid. Returns CALL's result and the caller's registers
+/// rebased, as the call can widen them (None when that overflows).
+unsafe fn call_suspended<T>(e: &mut Engine<'_>, r: *mut Value, call: impl FnOnce(&mut Vm) -> T) -> (T, Option<*mut Value>) {
+    let roots = e.suspend_code();
+    e.vm.suspend_stack();
+    let out = call(e.vm);
+    e.vm.resume_stack();
+    e.resume_code(roots);
+    e.vm.end_nested_execution();
+    e.code.resize_with(e.vm.functions.len(), Vec::new);
+    let r = unsafe { widen_registers(e, r, e.vm.register_width) };
+    if let Some(r) = r { e.regs = r; }
+    (out, r)
 }
 
 /// GNU signal_or_quit: call the edebug hook before unwinding, borrowing at
@@ -737,9 +775,6 @@ fn signal_hook(e: &mut Engine<'_>, condition: Value, data: Value, failed_depth: 
     let hook = e.vm.variable_value(slot).ok()?;
     if hook == Value::NIL || hook == Value::UNBOUND { return None; }
     let r = e.regs;
-    let threshold = std::mem::replace(&mut e.vm.gc_threshold, usize::MAX);
-    let stack = std::mem::take(&mut e.vm.stack);
-    let external = std::mem::take(&mut e.vm.external_roots);
     let saved_depth = e.vm.eval_depth;
     // A refused activation has already incremented GNU's depth, even though
     // no register frame was installed for it.
@@ -749,28 +784,27 @@ fn signal_hook(e: &mut Engine<'_>, condition: Value, data: Value, failed_depth: 
     e.vm.propagated_escape = None;
     e.vm.propagated_eval_depth = None;
     e.vm.propagated_escape_hooked = false;
-    let result = (|| {
-        let form = {
-            let vm: &Vm = e.vm;
-            let quote = |v| Form::List(vec![Form::Sym("quote".into()), Form::Object(handle::FormObject::new(vm, v))]);
-            Form::List(vec![Form::Sym("funcall".into()), quote(hook), quote(condition), quote(data)])
-        };
-        let function = e.vm.compile(&form)?;
-        e.vm.propagate_next = true;
-        e.vm.execute_raw(function)
-    })();
-    e.vm.propagate_next = false;
+    // The quoted objects are rooted; CONDITION and DATA are also the pending
+    // escape, which the suspended engine traces.
+    let form = {
+        let vm: &Vm = e.vm;
+        let quote = |v| Form::List(vec![Form::Sym("quote".into()), Form::Object(handle::FormObject::new(vm, v))]);
+        Form::List(vec![Form::Sym("funcall".into()), quote(hook), quote(condition), quote(data)])
+    };
+    // Compiling the hook can widen the registers; the rebase follows them.
+    let (result, rebased) = unsafe {
+        call_suspended(e, r, |vm| {
+            let function = vm.compile(&form)?;
+            vm.propagate_next = true;
+            let result = vm.execute_raw(function);
+            vm.propagate_next = false;
+            result
+        })
+    };
     let replacement = e.vm.propagated_escape.take();
     if let Some(old) = token { e.vm.restore_stack_limits(old); }
     e.vm.eval_depth = saved_depth;
-    e.vm.gc_threshold = threshold;
-    e.vm.stack = stack;
-    e.vm.external_roots = external;
-    e.vm.end_nested_execution();
-    e.code.resize_with(e.vm.functions.len(), Vec::new);
-    // Rebase from the suspended allocation, which may now need a larger
-    // width because compiling the hook introduced a wider function.
-    if unsafe { widen_registers(e, r, e.vm.register_width) }.is_none() {
+    if rebased.is_none() {
         e.error = Some("register storage exhausted".into());
     }
     match (result, replacement) {
@@ -847,17 +881,22 @@ fn route_escape(e: &mut Engine<'_>) -> Option<(*mut Value, *const Inst)> {
     if let Some(mark) = e.apply_mark.take() { e.vm.backtrace.leave(mark); }
     loop {
         while e.controls.len() > e.controls_base {
-            let control = e.controls.pop().unwrap();
             // Unwind while each intervening handler is still live: restoring
-            // a saved integer forwarding can replace the pending escape.
-            if let Some(signal) = checked_unbind(e, e.vm.dynamic.len() - control.dynamic) {
-                e.controls.push(control);
+            // a saved integer forwarding can replace the pending escape. The
+            // exit and this control stay engine state, traced, while the
+            // restores run watchers.
+            let depth = e.controls.last().unwrap().dynamic;
+            e.escape = Some(escape);
+            let signal = checked_unbind(e, e.vm.dynamic.len() - depth);
+            escape = e.escape.take().unwrap();
+            if let Some(signal) = signal {
                 e.escape = Some(signal);
                 prepare_signal(e, false, None);
                 escape = e.escape.take().unwrap();
                 original = None;
                 continue;
             }
+            let control = e.controls.pop().unwrap();
             let matches = match (&control.kind, &escape) {
                 (ControlKind::Protect { .. }, _) => true,
                 (ControlKind::Catch(tag), Escape::Throw(wanted, _)) => {
@@ -917,7 +956,10 @@ fn route_escape(e: &mut Engine<'_>) -> Option<(*mut Value, *const Inst)> {
             e.error = Some("invalid image protect depth".into());
             return None;
         }
-        if let Some(signal) = checked_unbind(e, e.vm.dynamic.len() - e.dynamic) {
+        e.escape = Some(escape);
+        let signal = checked_unbind(e, e.vm.dynamic.len() - e.dynamic);
+        escape = e.escape.take().unwrap();
+        if let Some(signal) = signal {
             e.escape = Some(signal);
             prepare_signal(e, false, None);
             escape = e.escape.take().unwrap();
@@ -1158,12 +1200,12 @@ pub(super) fn assert_opaque_rest_compaction() {
 }
 
 impl Vm {
+    /// Call FUNCTION with ARGS from native code, the caller's register stack
+    /// set aside (traced, its allocation unmoved for suspended engines' raw
+    /// pointers). FUNCTION and ARGS are rooted as quoted objects; the caller
+    /// keeps nothing else across the call unless it is rooted.
     pub(crate) fn reader_call(&mut self, function: Value, args: &[Value]) -> Result<Value> {
-        let mut stack = std::mem::take(&mut self.stack);
-        let roots = self.external_roots.len();
-        self.external_roots.extend_from_slice(&stack);
-        self.external_roots.push(function);
-        self.external_roots.extend_from_slice(args);
+        self.suspend_stack();
         self.propagated_escape = None;
         self.propagated_escape_hooked = false;
         self.propagated_eval_depth = None;
@@ -1183,11 +1225,7 @@ impl Vm {
             result
         })();
         self.propagate_next = false;
-        // Preserve the allocation: suspended engines retain raw register pointers.
-        let stack_end = roots + stack.len();
-        stack.copy_from_slice(&self.external_roots[roots..stack_end]);
-        self.stack = stack;
-        self.external_roots.truncate(roots);
+        self.resume_stack();
         self.end_nested_execution();
         result
     }
@@ -1242,19 +1280,18 @@ fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Va
     vm.execution_fatal = false;
     vm.require_live_function(function)?;
     if vm.functions[function].lazy.is_some() {
-        // No engine is suspended here; nested macro calls get their own and
-        // must not consume this execution's propagation request.
-        let threshold = std::mem::replace(&mut vm.gc_threshold, usize::MAX);
+        // Nested macro calls get their own engines and must not consume this
+        // execution's propagation request. The open builder holds collection.
         let propagate = std::mem::take(&mut vm.propagate_next);
         let forced = vm.force_lazy(function);
         vm.propagate_next = propagate;
-        vm.gc_threshold = threshold;
         forced?;
     }
     if let Err(error) = vm.materialize_image_function(function) {
         vm.execution_fatal = true;
         return Err(error);
     }
+    debug_assert!(vm.stack.is_empty(), "a nested run's caller set its registers aside");
     let mut program = std::mem::take(&mut vm.execution);
     if program.registers.is_empty() {
         if let Some(spare) = vm.spare_programs.pop() {
@@ -1320,6 +1357,13 @@ fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Va
         #[cfg(debug_assertions)]
         resume: None,
     };
+    // This engine holds collection until it suspends; a writer's rooted
+    // watcher notification does not extend into it.
+    engine.vm.running_engines += 1;
+    let rooted_write = std::mem::take(&mut engine.vm.rooted_write);
+    if engine.vm.stress_due() && engine.vm.may_collect(1) {
+        poll_collect(&mut engine);
+    }
     // SAFETY: storage and lowered code satisfy the module invariants above.
     let mut value = unsafe { next(&mut engine, regs, std::ptr::null()) };
     // Unoptimized Rust does not perform sibling-call elimination. Drive the
@@ -1361,6 +1405,8 @@ fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Va
         registers: std::mem::take(&mut engine.vm.stack),
     };
     engine.vm.execution_fatal = engine.fatal_image_failure;
+    engine.vm.rooted_write = rooted_write;
+    engine.vm.running_engines -= 1;
     match engine.error {
         Some(error) => Err(error),
         None => Ok(value),
@@ -1699,7 +1745,7 @@ unsafe fn poll_resume(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> Val
     if eval_depth::stack_pointer() < e.native_floor {
         return native_stack_failure(e, "native stack exhausted during Lisp evaluation");
     }
-    if e.vm.heap_objects() >= e.vm.gc_threshold {
+    if e.vm.heap_objects() >= e.vm.gc_threshold && e.vm.may_collect(1) {
         poll_collect(e);
     }
     unsafe { next(e, r, pc) }
@@ -1710,6 +1756,7 @@ fn poll_collect(e: &mut Engine<'_>) {
     // Forward in place without moving instruction buffers: suspended PCs and
     // entry pointers stay valid.
     let roots = e.suspend_code();
+    debug_assert!(e.vm.may_collect(0), "collecting while a frame holds untraced Values");
     e.vm.collect(&mut []);
     e.resume_code(roots);
 }
@@ -2156,7 +2203,7 @@ unsafe fn resolve_entry(
             };
             let function = closure.function;
             if e.vm.functions[function].lazy.is_some() {
-                // Collection stays inhibited throughout, so `target` and the
+                // No collection runs in it (`force_lazy`), so `target` and the
                 // argument registers keep their indices; only `r` is rebased.
                 match force_lazy(e, r, function) {
                     Some(rebased) => r = rebased,
@@ -2582,13 +2629,13 @@ unsafe fn take_step(
             }
             Ok(prim::Step::Collect) => {
                 leave_native(e);
-                if e.vm.gc_threshold == usize::MAX {
-                    // Nested compilation/load owns unforwarded Rust locals.
-                    // Match GNU's garbage_collection_inhibited early return.
-                    *r.add((*pc).a) = Value::NIL;
-                } else {
+                if e.vm.may_collect(1) {
                     poll_collect(e);
                     *r.add((*pc).a) = e.vm.garbage_collect_statistics();
+                } else {
+                    // A frame below holds untraced Values (`Vm::may_collect`):
+                    // GNU's garbage_collection_inhibited early return.
+                    *r.add((*pc).a) = Value::NIL;
                 }
                 return Continue::At(r, pc.add(1));
             }
@@ -3183,54 +3230,29 @@ unsafe fn widen_registers(e: &mut Engine<'_>, r: *mut Value, width: usize) -> Op
     }
 }
 /// R215: expand and compile a lazily held body before its first frame entry.
-/// Exactly `reentrant_load`'s discipline: macro expansion runs Lisp, so the
-/// suspended register stack is taken out of the collector's view, collection
-/// is inhibited while compiler builders hold unrooted Values, and every frame
-/// pointer is rebased afterwards because compiling can widen the registers.
-/// Returns the rebased caller registers, or None with the expansion's own
-/// condition pending (GNU signals it when the call reaches the body).
+/// Macro expansion runs Lisp, so this engine is suspended (`call_suspended`).
+/// That Lisp runs only inside the compiler builder, which holds collection,
+/// so callers may keep the callee and argument indices across this. Returns
+/// the rebased caller registers, or None with the expansion's own condition
+/// pending (GNU signals it when the call reaches the body).
 #[cold]
 #[inline(never)]
 unsafe fn force_lazy(e: &mut Engine<'_>, r: *mut Value, function: usize) -> Option<*mut Value> {
     unsafe {
-        let old_base = e.vm.stack.as_ptr();
-        let current = r.offset_from(old_base) as usize;
-        let frames: Vec<_> = e
-            .frames
-            .iter()
-            .map(|frame| frame.regs.offset_from(old_base) as usize)
-            .collect();
-        let stack = std::mem::take(&mut e.vm.stack);
-        let external = std::mem::take(&mut e.vm.external_roots);
-        let threshold = e.vm.gc_threshold;
-        e.vm.gc_threshold = usize::MAX;
         e.vm.execution_fatal = false;
         e.vm.propagated_escape = None;
         e.vm.propagated_eval_depth = None;
         let saved_depth = e.vm.eval_depth;
         e.vm.eval_depth = e.depth_base + e.frames.len();
-        let result = stacker::maybe_grow(512 * 1024, 2 * 1024 * 1024, || e.vm.force_lazy(function));
+        let collections = e.vm.gc_stats.collections;
+        let (result, r) = call_suspended(e, r, |vm| stacker::maybe_grow(512 * 1024, 2 * 1024 * 1024, || vm.force_lazy(function)));
+        debug_assert_eq!(e.vm.gc_stats.collections, collections, "a lazy body's expansion collected");
         e.vm.eval_depth = saved_depth;
         e.fatal_image_failure |= e.vm.execution_fatal;
-        e.vm.gc_threshold = threshold;
-        e.vm.stack = stack;
-        e.vm.external_roots = external;
-        e.vm.end_nested_execution();
-        e.code.resize_with(e.vm.functions.len(), Vec::new);
-        let width = e.vm.register_width;
-        let Some(size) = width.checked_mul((e.frames.len() + 3).max(MIN_FRAMES)).and_then(|n| n.checked_add(4096)) else {
+        let Some(r) = r else {
             fail(e, "register storage overflow");
             return None;
         };
-        if e.vm.stack.len() < size {
-            e.vm.stack.resize(size, Value::NIL);
-        }
-        let base = e.vm.stack.as_mut_ptr();
-        for (i, offset) in frames.into_iter().enumerate() {
-            e.frames[i].regs = base.add(offset);
-        }
-        let r = base.add(current);
-        e.regs = r;
         match result {
             Ok(()) => Some(r),
             Err(error) => {
@@ -3252,55 +3274,30 @@ unsafe fn force_lazy(e: &mut Engine<'_>, r: *mut Value, function: usize) -> Opti
         }
     }
 }
-/// eval.c `Fautoload_do_load (FUNDEF, FUNCTION, Qnil)` for a call site:
-/// `force_lazy`'s discipline (the suspended register stack leaves the
-/// collector's view, collection is inhibited, every frame pointer is rebased
-/// because the load can widen the registers). Returns the rebased caller
-/// registers, or None with the load's own condition pending.
+/// eval.c `Fautoload_do_load (FUNDEF, FUNCTION, Qnil)` for a call site,
+/// with this engine suspended (`call_suspended`); the load roots FUNDEF in
+/// its own binding. Returns the rebased caller registers, or None with the
+/// load's own condition pending.
 #[cold]
 #[inline(never)]
 unsafe fn autoload_then(e: &mut Engine<'_>, r: *mut Value, function: Value, fundef: Value) -> Option<*mut Value> {
     unsafe {
-        let old_base = e.vm.stack.as_ptr();
-        let current = r.offset_from(old_base) as usize;
-        let frames: Vec<_> = e
-            .frames
-            .iter()
-            .map(|frame| frame.regs.offset_from(old_base) as usize)
-            .collect();
-        let stack = std::mem::take(&mut e.vm.stack);
-        let external = std::mem::take(&mut e.vm.external_roots);
-        let threshold = e.vm.gc_threshold;
-        e.vm.gc_threshold = usize::MAX;
         e.vm.execution_fatal = false;
         e.vm.propagated_escape = None;
         e.vm.propagated_eval_depth = None;
         let saved_depth = e.vm.eval_depth;
         e.vm.eval_depth = e.depth_base + e.frames.len();
         e.vm.loader.propagate += 1;
-        let result = stacker::maybe_grow(512 * 1024, 2 * 1024 * 1024, || e.vm.autoload_do_load(fundef, function, Value::NIL));
+        let (result, r) = call_suspended(e, r, |vm| {
+            stacker::maybe_grow(512 * 1024, 2 * 1024 * 1024, || vm.autoload_do_load(fundef, function, Value::NIL))
+        });
         e.vm.loader.propagate -= 1;
         e.vm.eval_depth = saved_depth;
         e.fatal_image_failure |= e.vm.execution_fatal;
-        e.vm.gc_threshold = threshold;
-        e.vm.stack = stack;
-        e.vm.external_roots = external;
-        e.vm.end_nested_execution();
-        e.code.resize_with(e.vm.functions.len(), Vec::new);
-        let width = e.vm.register_width;
-        let Some(size) = width.checked_mul((e.frames.len() + 3).max(MIN_FRAMES)).and_then(|n| n.checked_add(4096)) else {
+        let Some(r) = r else {
             fail(e, "register storage overflow");
             return None;
         };
-        if e.vm.stack.len() < size {
-            e.vm.stack.resize(size, Value::NIL);
-        }
-        let base = e.vm.stack.as_mut_ptr();
-        for (i, offset) in frames.into_iter().enumerate() {
-            e.frames[i].regs = base.add(offset);
-        }
-        let r = base.add(current);
-        e.regs = r;
         match result {
             Ok(_) => Some(r),
             Err(error) => {
@@ -3316,9 +3313,9 @@ unsafe fn autoload_then(e: &mut Engine<'_>, r: *mut Value, function: Value, fund
         }
     }
 }
-// A load can compile and run new functions while an outer frame is suspended.
-// Retain that frame's allocation, inhibit compaction, then rebase every pointer
-// if the newly compiled register width requires a larger outer stack.
+// eval, load, require, macroexpand, autoload-do-load and the host read run
+// Lisp with this frame suspended (`call_suspended`). ARGS are a copy taken
+// before the call; the primitive roots whatever it keeps across Lisp.
 #[cold]
 unsafe fn reentrant_load(
     e: &mut Engine<'_>,
@@ -3329,18 +3326,7 @@ unsafe fn reentrant_load(
     argc: usize,
 ) -> Value {
     unsafe {
-        let old_base = e.vm.stack.as_ptr();
-        let current = r.offset_from(old_base) as usize;
-        let frames: Vec<_> = e
-            .frames
-            .iter()
-            .map(|frame| frame.regs.offset_from(old_base) as usize)
-            .collect();
         let args = e.vm.stack[start..start + argc].to_vec();
-        let stack = std::mem::take(&mut e.vm.stack);
-        let external = std::mem::take(&mut e.vm.external_roots);
-        let threshold = e.vm.gc_threshold;
-        e.vm.gc_threshold = usize::MAX;
         e.vm.execution_fatal = false;
         // Only an escape produced by THIS operation may be re-raised below.
         e.vm.propagated_escape = None;
@@ -3348,26 +3334,15 @@ unsafe fn reentrant_load(
         let saved_depth = e.vm.eval_depth;
         e.vm.eval_depth = e.depth_base + e.frames.len();
         e.vm.loader.propagate += 1;
-        let result = stacker::maybe_grow(512 * 1024, 2 * 1024 * 1024, || e.vm.loader_primitive(p, &args));
+        let (result, r) = call_suspended(e, r, |vm| {
+            stacker::maybe_grow(512 * 1024, 2 * 1024 * 1024, || vm.loader_primitive(p, &args))
+        });
         e.vm.loader.propagate -= 1;
         e.vm.eval_depth = saved_depth;
         e.fatal_image_failure |= e.vm.execution_fatal;
-        e.vm.gc_threshold = threshold;
-        e.vm.stack = stack;
-        e.vm.external_roots = external;
-        e.vm.end_nested_execution();
-        e.code.resize_with(e.vm.functions.len(), Vec::new);
-        let width = e.vm.register_width;
-        let Some(size) = width.checked_mul((e.frames.len() + 3).max(MIN_FRAMES)).and_then(|n| n.checked_add(4096)) else {
+        let Some(r) = r else {
             return fail(e, "register storage overflow");
         };
-        if e.vm.stack.len() < size { e.vm.stack.resize(size, Value::NIL); }
-        let base = e.vm.stack.as_mut_ptr();
-        for (i, offset) in frames.into_iter().enumerate() {
-            e.frames[i].regs = base.add(offset);
-        }
-        let r = base.add(current);
-        e.regs = r;
         match result {
             Ok(value) => {
                 leave_native(e);
@@ -3707,26 +3682,28 @@ unsafe fn cold_step(e: &mut Engine<'_>, r: *mut Value, pc: *const Inst) -> bool 
                     raise(e, "setting-constant", &[Value::reference(slot + 1, 7)]);
                     return Err("setting constant".into());
                 }
+                // The value is read again from its register after a write
+                // whose watchers may have collected.
                 Op::SetGlobal(slot, reg) => {
-                    let value = *r.add(reg);
-                    if let Err(error) = e.vm.set_variable_value(slot, value) {
+                    let watched = e.vm.variable_trapped(e.vm.indirect_variable(slot));
+                    if let Err(error) = watched_write(e, watched, |vm| vm.set_variable_value(slot, *r.add(reg))) {
                         // A variable watcher's own signal, else a forwarded store fault.
                         if let Some(escape) = e.vm.propagated_escape.take() {
                             e.escape = Some(escape);
-                        } else if let Some((condition, data)) = e.vm.forwarded_condition(&error, value) {
+                        } else if let Some((condition, data)) = e.vm.forwarded_condition(&error, *r.add(reg)) {
                             e.escape = Some(Escape::Signal(condition, data));
                         }
                         return Err(error);
                     }
                 }
                 Op::Bind(slot, reg) => {
-                    let value = *r.add(reg);
-                    if let Err(error) = e.vm.bind_variable(slot, value) {
+                    let watched = e.vm.variable_trapped(e.vm.indirect_variable(slot));
+                    if let Err(error) = watched_write(e, watched, |vm| vm.bind_variable(slot, *r.add(reg))) {
                         if let Some(escape) = e.vm.propagated_escape.take() {
                             e.escape = Some(escape);
                             return Err(error);
                         }
-                        if let Some((condition, data)) = e.vm.forwarded_condition(&error, value) {
+                        if let Some((condition, data)) = e.vm.forwarded_condition(&error, *r.add(reg)) {
                             e.escape = Some(Escape::Signal(condition, data));
                         }
                         return Err(error);

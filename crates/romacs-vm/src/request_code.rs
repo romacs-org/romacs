@@ -10,7 +10,7 @@ pub(super) struct RequestCode {
     free_caches: Vec<usize>,
     compiling: bool,
     compiled: Vec<usize>,
-    since_collection: usize,
+    pub(super) since_collection: usize,
 }
 
 impl Vm {
@@ -187,12 +187,15 @@ impl Vm {
             self.propagated_escape_hooked = false;
             self.propagated_eval_depth = None;
         }
-        // Nested loads and macro expansion temporarily disable GC: builders and
-        // suspended outer register stacks are not a request boundary.
-        if self.gc_threshold != usize::MAX
+        // A request boundary: no engine's registers are live here, and any
+        // suspended frame or caller below holds its Values in traced storage
+        // unless it holds collection (`Vm::may_collect`). Only an outermost
+        // request retires request code, so only one collects for its count.
+        let outermost = self.suspended_stacks.is_empty();
+        if self.may_collect(0)
             && self.stack.is_empty()
             && (self.heap_objects() >= self.gc_threshold
-                || self.request_code.since_collection >= 1024)
+                || (outermost && self.request_code.since_collection >= 1024))
         {
             match &mut outcome {
                 Ok(value) => self.collect(std::slice::from_mut(value)),
@@ -241,7 +244,6 @@ impl Vm {
         for program in self.programs_mut() {
             program.retire_code(marks);
         }
-        self.request_code.since_collection = 0;
     }
 }
 

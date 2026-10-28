@@ -57,18 +57,27 @@ fn garbage_collect_forwards_live_call_state() {
     assert_eq!(result.unwrap().display().unwrap(), "((11 22) [33 44])");
 }
 
+/// GNU's inhibited `garbage-collect' returns nil (alloc.c:6044). Romacs
+/// inhibits where a native frame holds untraced Values (DIVERGENCES
+/// VM2-GC-INHIBITED): a watcher a primitive's write runs, and macro
+/// expansion inside an open compiler builder. A pacing floor does not
+/// inhibit an explicit collection.
 #[test]
 fn garbage_collect_obeys_existing_inhibition() {
     let mut vm = Vm::new();
+    // Counts collections, so no forced ones (`ROMACS_GC_STRESS`).
+    vm.set_gc_stress(0);
     vm.set_collection_floor(usize::MAX);
+    let eval = |vm: &mut Vm, source: &str| vm.eval_source(source).unwrap().display().unwrap();
+    assert_ne!(eval(&mut vm, "(garbage-collect)"), "nil", "GC_PACING_IS_NOT_INHIBITION");
+    eval(&mut vm, "(defvar gi-v nil)");
+    eval(&mut vm, "(add-variable-watcher 'gi-v (lambda (&rest _) (setq gi-r (garbage-collect))))");
+    eval(&mut vm, "(defmacro gi-m () (list 'quote (garbage-collect)))");
     let before = vm.heap_stats().collections;
-    assert_eq!(
-        vm.eval_source("(garbage-collect)")
-            .unwrap()
-            .display()
-            .unwrap(),
-        "nil",
-        "GC_INHIBITED_RESULT"
-    );
+    assert_eq!(eval(&mut vm, "(progn (set 'gi-v 1) gi-r)"), "nil", "GC_INHIBITED_RESULT");
+    eval(&mut vm, "(defun gi-f () (gi-m))");
+    assert_eq!(eval(&mut vm, "(gi-f)"), "nil", "GC_INHIBITED_RESULT");
     assert_eq!(vm.heap_stats().collections, before, "GC_INHIBITED_COUNT");
+    // The same watcher collects from a compiled `setq', whose engine suspends.
+    assert_ne!(eval(&mut vm, "(progn (setq gi-v 2) gi-r)"), "nil", "GC_WATCHED_SETQ");
 }

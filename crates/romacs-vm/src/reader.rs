@@ -1402,22 +1402,30 @@ impl Vm {
         let outcome = self.eval_source_inner(source);
         self.finish_request(outcome)
     }
-    fn eval_source_inner(&mut self, mut source: &str) -> Result<Value> {
+    fn eval_source_inner(&mut self, source: &str) -> Result<Value> {
         if let Some(f) = self.cached_submission(source) {
             return self.execute_raw(f);
         }
-        let mut result = Value::NIL;
+        // The last form's value is rooted across reading the next one, which
+        // can call Lisp (a `\N{NAME}' character).
+        let last = self.root_frame(&[Value::NIL]);
+        let outcome = self.eval_source_forms(source, &last);
+        let [value] = self.release_frame(last);
+        outcome.map(|()| value)
+    }
+    fn eval_source_forms(&mut self, mut source: &str, last: &crate::gc::RootFrame) -> Result<()> {
         while let Some((value, used)) = self.read_source_raw(source)? {
             let form = self.source_form(value, 0)?;
-            result = if let Some(result) = self.direct_form(&form) {
+            let result = if let Some(result) = self.direct_form(&form) {
                 result?
             } else {
                 let function = self.cached_source_form(&source[..used], &form)?;
                 self.execute_raw(function)?
             };
+            self.set_rooted(last, 0, result);
             source = &source[used..];
         }
-        Ok(result)
+        Ok(())
     }
 }
 

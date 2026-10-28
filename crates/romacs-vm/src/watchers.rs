@@ -23,7 +23,7 @@ impl Vm {
         if !self.trapped.contains(&base) { return Ok(()); }
         let symbol = Value::reference(base + 1, 7);
         let property = self.intern("watchers");
-        let mut tail = self.symbol_property(symbol, property)?;
+        let tail = self.symbol_property(symbol, property)?;
         let place = match place {
             Some(place) => place,
             None if self.local_if_set(base)? => {
@@ -36,19 +36,29 @@ impl Vm {
         let operation = self.intern(operation);
         // GNU untraps the variable while its watchers run (no recursion).
         self.trapped.remove(&base);
+        // A watcher may collect only for a writer that rooted its own frame
+        // (an engine write, `threaded::watched_write'); any other native
+        // writer may keep Values in locals, so it holds collection.
+        let held = usize::from(!self.rooted_write);
+        self.gc_holds += held;
+        // The list, the value and the place are rooted and read back after
+        // each watcher. The live list's next link is read after each call:
+        // a watcher removed by an earlier one is not called.
+        let frame = self.root_frame(&[tail, newval, place]);
         let mut result = Ok(());
-        // The live list, its next link read after each call: a watcher
-        // removed by an earlier one is not called.
-        while let Ok((watcher, _)) = self.cons_pair(tail) {
-            let args = [symbol, newval, operation, place];
+        while let Ok((watcher, _)) = self.cons_pair(self.rooted(&frame, 0)) {
+            let args = [symbol, self.rooted(&frame, 1), operation, self.rooted(&frame, 2)];
             result = if prim::native_watcher(self, watcher).is_some() {
                 prim::call_native_watcher(self, watcher, &args)
             } else {
                 self.call_lisp_watcher(watcher, &args)
             };
             if result.is_err() { break; }
-            tail = self.cons_pair(tail).map_or(Value::NIL, |(_, rest)| rest);
+            let rest = self.cons_pair(self.rooted(&frame, 0)).map_or(Value::NIL, |(_, rest)| rest);
+            self.set_rooted(&frame, 0, rest);
         }
+        self.drop_frame(frame);
+        self.gc_holds -= held;
         self.trapped.insert(base);
         result
     }
@@ -59,20 +69,22 @@ impl Vm {
         if self.variable_binding_slot(base, false)? != base { return Ok(true); }
         Ok(self.local_table(base)?.is_some() && !self.slots[base].explicit_local)
     }
-    /// calln (WATCHER, ARGS...) at a write point. The writer's Values (an
-    /// engine's registers, a leaf's locals) are not rooted there, so
-    /// collection is inhibited until the watcher returns, as GNU's is in
-    /// compilation and loading here; the engine grows its code cache for
-    /// functions the watcher compiled (`lower_function'). A non-local exit
-    /// is left in `propagated_escape' for the writer; an escape already
-    /// pending there survives a watcher that returns.
+    /// calln (WATCHER, ARGS...) at a write point; the engine grows its code
+    /// cache for functions the watcher compiled (`lower_function'). A
+    /// non-local exit is left in `propagated_escape' for the writer; an
+    /// escape already pending there survives a watcher that returns, rooted
+    /// across it.
     fn call_lisp_watcher(&mut self, watcher: Value, args: &[Value]) -> Result<()> {
-        let pending = self.propagated_escape.take();
+        let mut pending = self.propagated_escape.take();
         let hooked = std::mem::take(&mut self.propagated_escape_hooked);
         let depth = self.propagated_eval_depth.take();
-        let threshold = std::mem::replace(&mut self.gc_threshold, usize::MAX);
+        let mut held = vec![];
+        if let Some(escape) = &mut pending { escape.visit_values(&mut |v| held.push(*v)); }
+        let frame = self.root_frame(&held);
         let result = self.reader_call(watcher, args);
-        self.gc_threshold = threshold;
+        let mut i = 0;
+        if let Some(escape) = &mut pending { escape.visit_values(&mut |v| { *v = self.rooted(&frame, i); i += 1; }); }
+        self.drop_frame(frame);
         if result.is_ok() {
             self.propagated_escape = pending;
             self.propagated_escape_hooked = hooked;

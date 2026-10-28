@@ -11,6 +11,56 @@ pub struct HeapStats {
     pub capacity_bytes: usize,
 }
 
+/// Values a native frame keeps across a call that can run Lisp: a span of
+/// `external_roots`, pushed before the call and read back by index after it,
+/// so only the forwarded copy is used. Frames nest; release each in reverse
+/// order on every exit, the failing ones included.
+#[must_use = "a root frame is released on every exit"]
+pub(crate) struct RootFrame {
+    base: usize,
+    len: usize,
+}
+
+/// Test mode: every Nth Lisp entry (`threaded::execute_args`) collects and
+/// moves every live object, so a heap Value a native frame kept in a Rust
+/// local across the call becomes a wrong object. Enabled by
+/// `ROMACS_GC_STRESS=N` or [`Vm::set_gc_stress`]; off (0) by default.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct Stress {
+    every: u32,
+    entries: u32,
+    /// Dead fillers the last collection left at the front of each arena.
+    pads: usize,
+    /// The collection about to run is a forced one.
+    shift: bool,
+}
+
+impl Stress {
+    pub(crate) fn from_env() -> Self {
+        let every = std::env::var("ROMACS_GC_STRESS").ok().and_then(|n| n.parse().ok()).unwrap_or(0);
+        Self { every, ..Self::default() }
+    }
+    /// Count one Lisp entry; true when this one must collect.
+    pub(crate) fn due(&mut self) -> bool {
+        if self.every == 0 {
+            return false;
+        }
+        self.entries += 1;
+        self.entries % self.every == 0
+    }
+    /// Fillers for the next collection: a forced one changes the count from
+    /// the last, so every object with no other garbage below it moves.
+    fn take_pads(&mut self) -> usize {
+        let pads = match std::mem::take(&mut self.shift) {
+            false => 0,
+            true if self.pads == 1 => 2,
+            true => 1,
+        };
+        self.pads = pads;
+        pads
+    }
+}
+
 /// What a retention probe measured at each workload size.
 #[derive(Clone, Debug, Default)]
 pub struct RetentionReport {
@@ -91,6 +141,61 @@ pub fn assert_no_retention_growth(
 }
 
 impl Vm {
+    pub(crate) fn root_frame(&mut self, values: &[Value]) -> RootFrame {
+        let base = self.external_roots.len();
+        self.external_roots.extend_from_slice(values);
+        RootFrame { base, len: values.len() }
+    }
+    pub(crate) fn rooted(&self, frame: &RootFrame, i: usize) -> Value {
+        assert!(i < frame.len, "root frame index");
+        self.external_roots[frame.base + i]
+    }
+    pub(crate) fn set_rooted(&mut self, frame: &RootFrame, i: usize, value: Value) {
+        assert!(i < frame.len, "root frame index");
+        self.external_roots[frame.base + i] = value;
+    }
+    /// Release FRAME, returning its forwarded values.
+    pub(crate) fn release_frame<const N: usize>(&mut self, frame: RootFrame) -> [Value; N] {
+        assert_eq!(frame.len, N, "root frames are released whole");
+        let values = std::array::from_fn(|i| self.rooted(&frame, i));
+        self.drop_frame(frame);
+        values
+    }
+    pub(crate) fn drop_frame(&mut self, frame: RootFrame) {
+        assert_eq!(self.external_roots.len(), frame.base + frame.len, "root frames are released in reverse order");
+        self.external_roots.truncate(frame.base);
+    }
+    /// GNU's `garbage_collection_inhibited`, derived from its owners: a
+    /// collection may run only when no frame keeps heap Values in untraced
+    /// Rust storage. Those are OWN unsuspended engines (the caller's own),
+    /// no other running engine outside `suspended_code`, no open compiler
+    /// builder and no watcher notification from an unrooted native writer.
+    /// Every other native frame on the stack holds its Values in traced
+    /// storage: a binding, a `#:` slot or a [`RootFrame`]
+    /// (tests/fixtures/reentry-sites.txt lists each call site).
+    pub(crate) fn may_collect(&self, own: usize) -> bool {
+        self.gc_holds == 0 && self.running_engines.saturating_sub(self.suspended_code.len()) == own
+    }
+    /// Set the suspended engine's register stack aside for a nested run,
+    /// still traced, its allocation unmoved for the frames' raw pointers.
+    pub(crate) fn suspend_stack(&mut self) {
+        let stack = std::mem::take(&mut self.stack);
+        self.suspended_stacks.push(stack);
+    }
+    pub(crate) fn resume_stack(&mut self) {
+        debug_assert!(self.stack.is_empty(), "a nested run returned its registers");
+        self.stack = self.suspended_stacks.pop().expect("a suspended register stack");
+    }
+    /// [`Stress`]: collect at every Nth Lisp entry; 0 turns it off.
+    pub fn set_gc_stress(&mut self, every: u32) {
+        self.gc_stress = Stress { every, ..Stress::default() };
+    }
+    /// A forced stress collection is due at this Lisp entry.
+    pub(crate) fn stress_due(&mut self) -> bool {
+        let due = self.gc_stress.due();
+        self.gc_stress.shift |= due;
+        due
+    }
     /// Snapshot before constructing the result, just as GNU snapshots gcstat.
     /// Object arenas share spare storage: no typed free string/float/buffer pools.
     pub(crate) fn garbage_collect_statistics(&mut self) -> Value {
@@ -303,15 +408,17 @@ impl Vm {
     /// Runtime register, global, binding and inline-cache roots are added here.
     pub(super) fn collect_marked(&mut self, roots: &mut [Value]) {
         let before = self.heap_objects();
-        self.gc_stats.allocations += (before - self.gc_retained) as u64;
+        self.gc_stats.allocations += before.saturating_sub(self.gc_retained) as u64;
         let mut marks = [
             vec![false; self.conses.len()],
             vec![false; self.closures.len()],
             vec![false; self.cells.len()],
             vec![false; self.objects.len()],
         ];
+        let pads = self.gc_stress.take_pads();
         let mut pending = roots.to_vec();
         pending.extend_from_slice(&self.stack);
+        pending.extend(self.suspended_stacks.iter().flatten().copied());
         pending.extend_from_slice(&self.external_roots);
         for code in &self.suspended_code {
             // SAFETY: each entry's engine is suspended in a nested call.
@@ -358,7 +465,7 @@ impl Vm {
             }
         }
         let mut code_marks = vec![false; self.functions.len()];
-        let active = !self.stack.is_empty();
+        let active = !self.stack.is_empty() || !self.suspended_stacks.is_empty();
         let mut code_pending: Vec<_> = self
             .request_code
             .live
@@ -570,17 +677,25 @@ impl Vm {
             }
         }
         self.retire_code(&code_marks);
+        // Only a collection with no request running retires live request
+        // code; one inside an engine must not postpone the next of those.
+        if !active {
+            self.request_code.since_collection = 0;
+        }
         // A completely live arena needs no forwarding table or rewrite pass.
-        if marked == before && obarray_symbols_live.len() == self.obarray_symbol_names.len() {
+        if pads == 0 && marked == before && obarray_symbols_live.len() == self.obarray_symbol_names.len() {
             self.gc_retained = before;
             self.gc_stats.collections += 1;
             self.gc_threshold = before.saturating_mul(2).max(self.gc_floor);
             return;
         }
+        // Stress fillers go only where live objects would move past them.
+        let fill: Vec<usize> = marks.iter().map(|m| if m.contains(&true) { pads } else { 0 }).collect();
         let maps: Vec<Vec<usize>> = marks
             .iter()
-            .map(|m| {
-                let mut next = 0;
+            .zip(&fill)
+            .map(|(m, &fill)| {
+                let mut next = fill;
                 m.iter()
                     .map(|&live| {
                         if live {
@@ -651,6 +766,7 @@ impl Vm {
         for v in roots
             .iter_mut()
             .chain(self.stack.iter_mut())
+            .chain(self.suspended_stacks.iter_mut().flatten())
             .chain(self.external_roots.iter_mut())
             .chain(self.terminal_bindings.iter_mut().map(|binding| &mut binding.buffer))
         {
@@ -761,6 +877,15 @@ impl Vm {
             unsafe { code.visit_values(&mut |v| rewrite(v)) };
         }
         self.conditions.visit_values(&mut |v| rewrite(v));
+        // Stress fillers: unreachable, so the next collection drops them.
+        self.conses.splice(0..0, std::iter::repeat_n((Value::NIL, Value::NIL), fill[0]));
+        self.closures.splice(0..0, std::iter::repeat_with(|| Closure {
+            function: 0, captures: vec![], metadata: vec![], document: Value::NIL,
+        }).take(fill[1]));
+        self.cells.splice(0..0, std::iter::repeat_n(Value::NIL, fill[2]));
+        self.objects.splice(0..0, std::iter::repeat_with(|| {
+            data::Object::String(Box::new(data::LispString::from_bytes(vec![], true)))
+        }).take(fill[3]));
         self.objects
             .shrink_to(self.objects.len().saturating_mul(2).max(1024));
         // Release grossly oversized arenas, but retain modest slack for allocation.
@@ -771,7 +896,7 @@ impl Vm {
         self.closures
             .shrink_to(self.closures.len().saturating_mul(2).max(1024));
         self.gc_retained = self.heap_objects();
-        self.gc_stats.reclaimed += (before - self.gc_retained) as u64;
+        self.gc_stats.reclaimed += before.saturating_sub(self.gc_retained) as u64;
         self.gc_stats.collections += 1;
         self.gc_threshold = self.gc_retained.saturating_mul(2).max(self.gc_floor);
     }

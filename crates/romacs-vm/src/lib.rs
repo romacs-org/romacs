@@ -130,8 +130,8 @@ pub enum Form {
     /// Compiler-only: a heap object with no source spelling (a closure, a
     /// buffer, ...) carried by a macro expansion or an `eval` datum, exactly
     /// as GNU's evaluator carries it (src/eval.c eval_sub). Produced only by
-    /// `Vm::expansion_form`, and only while collection is inhibited or the
-    /// object is otherwise rooted; it must not outlive the compilation that
+    /// `Vm::expansion_form`; the object is rooted while the form lives
+    /// (`FormObject`), and it must not outlive the compilation that
     /// consumes it, which moves it into a traced `Op::Const`.
     #[doc(hidden)]
     Object(handle::FormObject),
@@ -1149,6 +1149,18 @@ pub struct Vm {
     gc_retained: usize,
     gc_threshold: usize,
     gc_floor: usize,
+    /// Open frames that keep heap Values in untraced Rust storage across a
+    /// call that can run Lisp: compiler builders and watcher notifications
+    /// from native writers (`gc.rs`, `Vm::may_collect`).
+    gc_holds: usize,
+    /// Engines between entry and exit, suspended or not; those not in
+    /// `suspended_code` hold untraced registers and code.
+    running_engines: usize,
+    /// The writer notifying watchers is an engine write suspended for it,
+    /// whose own Values the write roots (`threaded::watched_write`).
+    rooted_write: bool,
+    /// Test mode: a moving collection at every Nth Lisp entry (`gc.rs`).
+    gc_stress: gc::Stress,
     names: NameMap<String, usize>,
     symbol_names: Vec<String>,
     obarray_symbol_names: HashMap<usize, Value>,
@@ -1188,6 +1200,9 @@ pub struct Vm {
     caches: Vec<Cache>,
     stack: Vec<Value>,
     external_roots: Vec<Value>,
+    /// Register stacks of engines suspended across a nested run, traced and
+    /// forwarded in place: their frames keep raw pointers into them.
+    suspended_stacks: Vec<Vec<Value>>,
     /// Suspended engines' code and entry caches, traced and forwarded in place.
     suspended_code: Vec<threaded::SuspendedCode>,
     /// Menu-item `:filter' results for the keymap walk in progress, as
@@ -1289,6 +1304,10 @@ impl Vm {
             gc_retained: 0,
             gc_threshold: 16384,
             gc_floor: 16384,
+            gc_holds: 0,
+            running_engines: 0,
+            rooted_write: false,
+            gc_stress: gc::Stress::from_env(),
             names: NameMap::default(),
             symbol_names: vec![],
             obarray_symbol_names: HashMap::default(),
@@ -1317,6 +1336,7 @@ impl Vm {
             caches: vec![],
             stack: vec![],
             external_roots: vec![],
+            suspended_stacks: vec![],
             suspended_code: vec![],
             keymap_filters: Vec::new(),
             keymap_pending_filter: None,
@@ -1551,7 +1571,21 @@ impl Vm {
         self.register_width = self.register_width.max(function.regs);
         self.install_code(function)
     }
+    /// Compile one function. Its builder keeps constants in untraced Rust
+    /// storage while macro expansion runs Lisp, so it holds collection.
     fn function(
+        &mut self,
+        args: &[Form],
+        body: &[Form],
+        outer: &NameMap<Name, Binding>,
+        local_specials: &NameSet<String>,
+    ) -> Result<(usize, Vec<Name>)> {
+        self.gc_holds += 1;
+        let result = self.build_function(args, body, outer, local_specials);
+        self.gc_holds -= 1;
+        result
+    }
+    fn build_function(
         &mut self,
         args: &[Form],
         body: &[Form],
@@ -1807,8 +1841,8 @@ impl Vm {
     }
     /// Expand and compile a lazily held body in place, keeping its function
     /// ID and capture layout so every closure already made from it, and every
-    /// cache naming it, now runs the compiled code. The caller must have
-    /// inhibited collection: builders hold unrooted Values. On failure the
+    /// cache naming it, now runs the compiled code. Its Lisp (macro
+    /// expansion) runs inside the builder, which holds collection. On failure the
     /// body stays lazy, so the next call expands again, as GNU does.
     pub(crate) fn force_lazy(&mut self, id: usize) -> Result<()> {
         let Some(lazy) = self.functions.get(id).and_then(|f| f.lazy.clone()) else {
@@ -2466,10 +2500,12 @@ impl Vm {
         if f.arity != 0 || f.captures != 0 {
             return Err("entry function needs arguments or captures".into());
         }
-        self.external_roots.extend_from_slice(roots);
+        let frame = self.root_frame(roots);
         let outcome = threaded::execute(self, function);
-        roots.copy_from_slice(&self.external_roots);
-        self.external_roots.clear();
+        for (i, root) in roots.iter_mut().enumerate() {
+            *root = self.rooted(&frame, i);
+        }
+        self.drop_frame(frame);
         outcome
     }
     /// Declare that this embedder renders the echo area: printing to `t`
@@ -2529,11 +2565,19 @@ impl Vm {
         // A local let restores the owner's current local binding, if it
         // still has one (GNU do_one_unbind, SPECPDL_LET_LOCAL): the local
         // may have been killed and made again inside the let.
+        // The popped value and owner are no longer traced as a binding: a
+        // watcher sees them from a root frame, and the restore reads them back.
         if let Some(base) = base && self.local_binding_slots.contains(&slot) {
             if self.live_buffer_value(owner) {
                 let table = self.slots[base].local;
                 if let Some(local) = self.declaration_hash_get(table, owner).expect("localized variable table") {
-                    if self.variable_trapped(base) { self.notify_watchers_at(base, value, "unlet", Some(owner))?; }
+                    let mut value = value;
+                    if self.variable_trapped(base) {
+                        let frame = self.root_frame(&[value, owner]);
+                        let notified = self.notify_watchers_at(base, value, "unlet", Some(owner));
+                        [value, _] = self.release_frame(frame);
+                        notified?;
+                    }
                     // set-buffer-local-toplevel-value may have saved any object.
                     let value = if self.localized_boolean(base).is_none() { value } else if value == Value::NIL { Value::NIL } else { Value::TRUE };
                     self.slots[local.index(7).expect("private binding") - 1].value = value;
@@ -2544,9 +2588,13 @@ impl Vm {
         if let Some(fwd) = self.native_forwarding(slot) {
             return self.unbind_forwarded(slot, fwd, value, owner, let_default);
         }
+        let mut value = value;
         if let Some(base) = base && self.variable_trapped(base) {
-            if self.local_table(base)?.is_some() { self.notify_watchers_at(base, value, "set", Some(Value::NIL))?; }
-            else { self.notify_watchers(base, value, "unlet")?; }
+            let frame = self.root_frame(&[value]);
+            let notified = if self.local_table(base)?.is_some() { self.notify_watchers_at(base, value, "set", Some(Value::NIL)) }
+                else { self.notify_watchers(base, value, "unlet") };
+            [value] = self.release_frame(frame);
+            notified?;
         }
         if slot != self.buffer_slot || value == Value::NIL || self.live_buffer_value(value) {
             self.slots[slot].value = value;

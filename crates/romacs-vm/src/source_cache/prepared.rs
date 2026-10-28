@@ -68,10 +68,9 @@ impl Vm {
             .ok_or("invalid prepared handle")?;
         if !p.guard.as_ref().is_some_and(|e| self.cache_valid(e)) {
             let source = p.source.clone();
-            let threshold = self.gc_threshold;
-            self.gc_threshold = usize::MAX;
+            // ARGS are only read after this compile, whose builder holds
+            // collection.
             let updated = self.prepared_function(&source);
-            self.gc_threshold = threshold;
             self.source_cache.prepared[handle.0] = updated?;
         }
         let function = self.source_cache.prepared[handle.0].function;
