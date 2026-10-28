@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "b6c37ff2ae95904ba9729db32b030504933802747a1a10aa3575631bd8fae0ff",
+  "input_hash": "f09d4deb0e890a51cf0c35bc09380c12fa307148c2459a77c188b049a33a17fd",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -13,7 +13,7 @@
  },
  "counts": {
   "rows": 264,
-  "symbols": 600,
+  "symbols": 602,
   "rows_without_symbols": 15
  },
  "by_symbol": {
@@ -513,6 +513,9 @@
   ],
   "documentation-property": [
    102
+  ],
+  "downcase": [
+   249
   ],
   "downcase_char_code_emacs_compat": [
    262
@@ -1934,6 +1937,9 @@
    62,
    64
   ],
+  "upcase": [
+   249
+  ],
   "upcase-initials": [
    53
   ],
@@ -2899,8 +2905,8 @@
    "planned": false,
    "mechanism": "Custom casing and pinned titlecase mappings",
    "gnu": "GNU `casefiddle.c:prepare_casing_context` and `casify_object` consult current-buffer case/syntax tables and Unicode special/titlecase properties.",
-   "romacs": "`capitalize` retains pinned GNU default mappings and current syntax-table word boundaries. `upcase-initials` is available; its fallback uses supported current-case mappings, but known pinned mapping rows take precedence. `current-case-table` and `set-case-table` exist; `copy-case-table` remains unavailable.",
-   "why": "General custom capitalization remains outside this slice. `upcase-region` and `upcase-initials-region` case buffer regions (casify_region, VM2-CASE3); `downcase-region`, `capitalize-region` and the word commands remain absent. `tests/capitalize.rs` keeps the explicit custom-case divergence and tests the supported titlecase/initials domain.",
+   "romacs": "`capitalize` and `upcase-initials` take GNU's special casings and titlecase property from pinned GNU default mappings, and otherwise the current case tables, as `case_character` does: in-word characters through the downcase table, a word start with no titlecase change through the upcase table, a nil entry as identity (the native-table exception of VM2-COMPLETION-CASE aside); word boundaries come from the current syntax table. `current-case-table` and `set-case-table` exist; `copy-case-table` remains unavailable.",
+   "why": "The titlecase property itself is the pinned default, not read from `char-code-property-alist`. `upcase-region`, `downcase-region`, `capitalize-region` and `upcase-initials-region` case buffer regions (casify_region, VM2-CASE3); the word commands remain absent. `tests/capitalize.rs` keeps the explicit custom-case divergence and tests the supported titlecase/initials domain.",
    "symbols": [
     "capitalize",
     "upcase-initials",
@@ -3630,7 +3636,7 @@
    "mechanism": "`exec-directory`, `configure-info-directory`",
    "gnu": "`configure-info-directory` is the build's `PATH_INFO` (`src/callproc.c:2132`; pinned GNU: `share/info`). `init_callproc_1` (`src/callproc.c:1960`) sets `exec-directory` to the first `EMACSPATH` element or the build's `PATH_EXEC` (pinned GNU: `libexec/emacs/32.0.50/x86_64-pc-linux-gnu/`), where GNU installs its helper programs (`movemail`, `hexl`, `rcs2log`), and appends it to `exec-path`",
    "romacs": "`exec-directory` is `invocation-directory`, the directory of the running VM2 executable (`crates/romacs-vm/src/forwarded.rs`): Romacs installs no libexec helpers, so their programs are found through `exec-path` alone, which VM2 does not extend. `configure-info-directory` is `info` under the runtime root (`ROMACS_RUNTIME_ROOT`, else the checkout), as `data-directory` is its `etc/`",
-   "why": "**Package-observable, quiet:** callers that build `(expand-file-name movemail-program-name exec-directory)` find no file there and fall back to `exec-path`, as GNU does when a helper is not installed",
+   "why": "**Package-observable:** a caller that only probes `exec-directory` (rmail's `movemail` check, vc-rcs's `rcs2log`) finds no file there and falls back to `exec-path`, as GNU does when a helper is not installed; one that runs the helper by that absolute name (`hexlify-buffer` and `dehexlify-buffer` pass `(expand-file-name hexl-program exec-directory)` to `call-process-region`) fails, since Romacs ships no libexec helpers",
    "symbols": [
     "exec-directory",
     "exec-path",
@@ -5868,7 +5874,7 @@
    "planned": false,
    "mechanism": "`eval` and macro expansions copy list structure into source",
    "gnu": "GNU `Feval` (`src/eval.c:2548`) evaluates the datum itself, and a macro's expansion is evaluated as the object it returned: quoted objects anywhere in it are `eq` to the originals, any object (closures, buffers) may appear in it — `(eval (list (lambda (x) (* x 2)) 21) t)` => 42, `eval-when-compile` (byte-run.el:674) may return a list holding a closure — a circular form is only walked as far as evaluation goes, and bare symbols in a LEXICAL alist mark local specials",
-   "romacs": "A non-symbol atom, a top-level `(quote X)` and an alist-bound symbol return the identical object, and a non-symbol head or dotted argument list is diagnosed on the datum before conversion, as GNU does. Any other form, and every macro expansion, is converted to compiler source. Objects with no source spelling (closures, primitives, buffers, markers, hash tables, ...) are now carried as themselves, in `eval` data, macro expansions and lazily held bodies: they evaluate to themselves, are `eq` to the originals when quoted, and a closure or primitive in head position is called, as GNU does (this closed the `source datum required` limit that stopped macroexp.el:955; pin `eval/0509` removed). Still different: list cells, strings, vectors and floats are copied, so they are not `eq` to the originals (`(eq L (eval-when-compile L))` is nil, GNU t); circular forms signal `circular-list`; alist entries become fresh `let` bindings (not shared with the alist); a bare alist symbol is locally special for the form and its closures, as a file's `(defvar NAME)` is (VM2-FILESPECIAL1), so only `let` binds it dynamically; a circular or dotted alist signals only for a symbol form, as GNU's `assq` would, while other forms then evaluate without it. LEXICAL nil compiles every binding dynamically",
+   "romacs": "A non-symbol atom, a top-level `(quote X)` and an alist-bound symbol return the identical object, and a non-symbol head or dotted argument list is diagnosed on the datum before conversion, as GNU does. Any other form, and every macro expansion, is converted to compiler source. Objects with no source spelling (closures, primitives, buffers, markers, hash tables, ...) are now carried as themselves, in `eval` data, macro expansions and lazily held bodies: they evaluate to themselves, are `eq` to the originals when quoted, and a closure or primitive in head position is called, as GNU does (this closed the `source datum required` limit that stopped macroexp.el:955; pin `eval/0509` removed). Still different: list cells, strings, vectors and floats are copied, so they are not `eq` to the originals (`(eq L (eval-when-compile L))` is nil, GNU t); circular forms signal `circular-list`; alist entries become fresh `let` bindings (not shared with the alist); a bare alist symbol is locally special for the form and its closures, as a file's `(defvar NAME)` is (VM2-FILESPECIAL1), so only `let` binds it dynamically, while an alist binding of the same name stays lexical and is what references read; a circular or dotted alist signals only for a symbol form, as GNU's `assq` would, while other forms then evaluate without it. LEXICAL nil compiles every binding dynamically",
    "why": "**Package-observable identity limits:** code that relies on `eq` of list, string or vector structure spliced into an `eval`ed form or a macro expansion (or mutates such a quoted constant expecting the original to change) differs. Splicing live objects (closures, buffers) now behaves as in GNU. The harness pins 8 printer rows (circular data) and 2 arity-data rows",
    "symbols": [
     "eval",
@@ -6348,7 +6354,7 @@
    "section": "Observable by a package: circular completion tables",
    "observable": true,
    "planned": false,
-   "mechanism": "Completion case folding and string comparison",
+   "mechanism": "Completion case folding, string comparison and casing",
    "gnu": "GNU uses its current case tables, with nil entries meaning identity.",
    "romacs": "Original native tables retain Unicode fallback for nil entries above ASCII before GNU enrichment. Explicit non-nil entries override it; ASCII and replacement-table nil entries mean identity.",
    "why": "Preserve the native Unicode startup policy while respecting explicit ASCII edits and replacement tables. Range-crossing and replacement-table tests cover the boundary.",
@@ -6356,7 +6362,9 @@
     "try-completion",
     "all-completions",
     "test-completion",
-    "compare-strings"
+    "compare-strings",
+    "upcase",
+    "downcase"
    ],
    "symbols_derived": false
   },
