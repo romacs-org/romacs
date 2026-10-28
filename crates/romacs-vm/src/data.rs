@@ -502,6 +502,15 @@ impl Vm {
             let data = self.list_value(&[keymapp, x]);
             return Some((condition, data));
         }
+        // CHECK_CHARACTER_CDR (keymap.c:1158): the range's end is the datum.
+        if p == Primitive::DefineKey && error == "character range end must be a character" {
+            let Some(Object::Vector(events)) = self.object_if(y) else { return None };
+            let end = events.iter().find_map(|&event| self.cons_pair(event).ok().filter(|(from, _)| from.integer_value().is_some()))?.1;
+            let condition = self.intern("wrong-type-argument");
+            let characterp = self.intern("characterp");
+            let data = self.list_value(&[characterp, end]);
+            return Some((condition, data));
+        }
         // The bulk-verified core primitives re-derive GNU's exact data.
         if let Some((condition, values)) = self.core_condition(p, start, argc, error) {
             let slot = self.slot(condition);

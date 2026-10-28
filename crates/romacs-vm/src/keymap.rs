@@ -191,6 +191,9 @@ impl Vm {
     pub(super) fn keymap_store(&mut self, map: Value, event: Value, value: Value, remove: bool) -> Result<()> {
         self.note_keymap_change();
         let keymap_symbol = Value::reference(self.names["keymap"] + 1, 7);
+        let range = self.character_range(event)?;
+        // GNU uses t for an explicit nil binding in a char-table; nil means absent.
+        let table_value = if remove { Value::NIL } else if value == Value::NIL { Value::TRUE } else { value };
         // Where a brand-new binding gets prepended. Normally the map itself, but a
         // nested sub-keymap element takes over below.
         let mut insertion = map;
@@ -201,12 +204,9 @@ impl Vm {
             let (entry, next) = self.cons_pair(tail)?;
             if entry == keymap_symbol { break; }
             if matches!(self.object_if(entry), Some(Object::CharTable(_))) {
-                if let Some(c) = event.integer_value().filter(|&c| c >= 0 && c < char_table::CharTable::LEN as i64) {
-                    // GNU uses t for an explicit nil binding; nil means absent.
-                    let value = if remove { Value::NIL } else if value == Value::NIL { Value::TRUE } else { value };
-                    let slot = self.literal_table_slot(value);
-                    let Object::CharTable(table) = &mut self.objects[entry.index(0)? - 1] else { unreachable!() };
-                    table.set_range_slot(c as usize, c as usize, slot)?;
+                let single = event.integer_value().filter(|&c| c >= 0 && c < char_table::CharTable::LEN as i64).map(|c| (c as usize, c as usize));
+                if let Some((from, to)) = single.or(range) {
+                    self.set_keymap_table_range(entry, from, to, table_value)?;
                     return Ok(());
                 }
                 insertion = tail;
@@ -225,7 +225,16 @@ impl Vm {
                     tail = self.cons_pair(entry)?.1;
                     continue;
                 }
-                if key == event {
+                if let Some((from, to)) = range {
+                    // An alist binding of a character inside the range is set
+                    // (or removed); a one-character range is then done.
+                    if key.integer_value().is_some_and(|c| (from as i64..=to as i64).contains(&c)) {
+                        if remove { self.traversal(Primitive::Setcdr, previous, next)?; }
+                        else { self.traversal(Primitive::Setcdr, entry, value)?; }
+                        if from == to { return Ok(()); }
+                        if remove { tail = next; continue; }
+                    }
+                } else if key == event {
                     if remove { self.traversal(Primitive::Setcdr, previous, next)?; }
                     else { self.traversal(Primitive::Setcdr, entry, value)?; }
                     return Ok(());
@@ -239,12 +248,23 @@ impl Vm {
             return Err("circular keymap".into());
         }
         if !remove {
-            let binding = self.keymap_cons(event, value);
+            // A range this keymap has no char-table for gets a new one.
+            let binding = if let Some((from, to)) = range {
+                let head = self.keymap_symbol("keymap");
+                let table = self.allocate_object(Object::CharTable(Box::new(char_table::CharTable::new(head))));
+                self.set_keymap_table_range(table, from, to, table_value)?;
+                table
+            } else { self.keymap_cons(event, value) };
             let old = self.cons_pair(insertion)?.1;
             let new = self.keymap_cons(binding, old);
             self.traversal(Primitive::Setcdr, insertion, new)?;
         }
         Ok(())
+    }
+    fn set_keymap_table_range(&mut self, table: Value, from: usize, to: usize, value: Value) -> Result<()> {
+        let slot = self.literal_table_slot(value);
+        let Object::CharTable(table) = &mut self.objects[table.index(0)? - 1] else { unreachable!() };
+        table.set_range_slot(from, to, slot)
     }
     fn key_event_modifier(name: &str) -> Option<i64> {
         Some(match name {
@@ -369,16 +389,17 @@ impl Vm {
         for (input_index, mut event) in raw.into_iter().enumerate() {
             if event.tag() == 3 {
                 // keymap.c: a modifier list (lucid_event_type_list_p) is
-                // converted; another list, such as a mouse click, stands
-                // for its EVENT_HEAD. A character head would be define-key's
-                // (FROM . TO) range, which VM2 does not store.
-                event = if self.lucid_event_type_list_p(event) {
-                    self.key_event_from_list(event)?
+                // converted; a (FROM . TO) character range stays as it is
+                // for store_in_keymap; another list, such as a mouse click,
+                // stands for its EVENT_HEAD.
+                if self.lucid_event_type_list_p(event) {
+                    event = self.key_event_from_list(event)?;
+                } else if self.character_range(event)?.is_some() {
+                    events.push(KeyEvent { value: event, input_index });
+                    continue;
                 } else {
-                    let head = self.cons_pair(event)?.0;
-                    if head.integer_value().is_some() { return Err("character range key events are unsupported".into()); }
-                    head
-                };
+                    event = self.cons_pair(event)?.0;
+                }
             }
             if event.tag() == 7 {
                 event = self.canonical_key_event_symbol(event)?;
@@ -406,11 +427,26 @@ impl Vm {
     pub(crate) fn keymap_generation(&self) -> u64 {
         self.keymap_generation
     }
+    /// A (FROM . TO) key event of characters (store_in_keymap's range idx,
+    /// CHECK_CHARACTER_CDR); None for any other event.
+    fn character_range(&self, event: Value) -> Result<Option<(usize, usize)>> {
+        let Ok((from, to)) = self.cons_pair(event) else { return Ok(None) };
+        let character = |v: Value| v.integer_value().filter(|c| (0..char_table::CharTable::LEN as i64).contains(c));
+        let Some(from) = character(from) else { return Ok(None) };
+        let to = character(to).ok_or("character range end must be a character")?;
+        Ok(Some((from as usize, to as usize)))
+    }
+    /// EVENT_HEAD of a range: lookups use its first character.
+    fn event_head(&self, event: Value) -> Value {
+        if event.tag() == 3 { self.cons_pair(event).map_or(event, |(head, _)| head) } else { event }
+    }
     fn define_keymap_key(&mut self, map: Value, events: &[KeyEvent], value: Value, remove: bool) -> Result<Value> {
         let mut map = self.resolve_keymap(map).ok_or("keymap required")?;
         for (i, event) in events.iter().enumerate() {
             let event = event.value;
             if i + 1 == events.len() { self.keymap_store(map, event, value, remove)?; return Ok(value); }
+            // Fdefine_key: a range must be a leaf.
+            if event.tag() == 3 { return Err("Key sequence contains invalid event".into()); }
             let binding = self.keymap_entry(map, event, false, false)?.unwrap_or(Value::NIL);
             map = if binding == Value::NIL {
                 let prefix = self.sparse_keymap(Value::NIL);
@@ -431,7 +467,7 @@ impl Vm {
             None => return Err("keymap required".into()),
         };
         for (i, event) in events.iter().enumerate() {
-            let event = event.value;
+            let event = self.event_head(event.value);
             let binding = self.keymap_entry(map, event, true, defaults)?.unwrap_or(Value::NIL);
             if i + 1 == events.len() { return Ok(binding); }
             let Some(prefix) = self.resolve_keymap(binding) else {

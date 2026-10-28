@@ -106,7 +106,7 @@ pub use engine::{
 // Host boundary: syntax and case.
 pub use engine::{
     AsciiPreimage, CaseTranslation, DefaultSyntaxLookup, LookupClassKey, SyntaxCacheKey,
-    SyntaxLookup, default_char_has_category,
+    SyntaxLookup, char_class_bit, char_in_classes, default_char_has_category,
 };
 
 /// The engine's internals, for a host's white-box tests and the differential

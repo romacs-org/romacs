@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "32df0666eb70523db88810aaf7ede8c6bd331eb44136a5fcc34e0f1a13ea8074",
+  "source_fingerprint": "35ff9b6d0965986f83c23cdd53c9c0aff2ea56de06fa0789d6dac6b619766285",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 993,
-  "parsed_vm2_only": 993
+  "parsed_total": 998,
+  "parsed_vm2_only": 998
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -303,7 +303,7 @@
   "ash": {
    "name": "ash",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/bitwise.rs:65"
+   "registered_at": "crates/romacs-vm/src/prims/bitwise.rs:75"
   },
   "asin": {
    "name": "asin",
@@ -612,7 +612,7 @@
   "byte-to-string": {
    "name": "byte-to-string",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/str.rs:358"
+   "registered_at": "crates/romacs-vm/src/prims/str.rs:365"
   },
   "call-interactively": {
    "name": "call-interactively",
@@ -623,6 +623,11 @@
    "name": "capitalize",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/capitalize.rs:85"
+  },
+  "capitalize-region": {
+   "name": "capitalize-region",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/casefiddle.rs:79"
   },
   "car": {
    "name": "car",
@@ -801,7 +806,7 @@
   "clear-string": {
    "name": "clear-string",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/str.rs:355"
+   "registered_at": "crates/romacs-vm/src/prims/str.rs:362"
   },
   "clear-this-command-keys": {
    "name": "clear-this-command-keys",
@@ -1296,6 +1301,11 @@
    "name": "downcase",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/casefiddle.rs:7"
+  },
+  "downcase-region": {
+   "name": "downcase-region",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/casefiddle.rs:74"
   },
   "elt": {
    "name": "elt",
@@ -1920,6 +1930,11 @@
    "variant": "Primitive::GlobalSetKey",
    "registered_at": "crates/romacs-vm/src/lib.rs:727"
   },
+  "gnutls-available-p": {
+   "name": "gnutls-available-p",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/gnutls.rs:5"
+  },
   "goto-char": {
    "name": "goto-char",
    "implementation": "vm2",
@@ -2395,6 +2410,11 @@
    "name": "logb",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/logb.rs:3"
+  },
+  "logcount": {
+   "name": "logcount",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/bitwise.rs:62"
   },
   "logior": {
    "name": "logior",
@@ -4499,6 +4519,11 @@
    "variant": "Primitive::StringToBytes",
    "registered_at": "crates/romacs-vm/src/lib.rs:561"
   },
+  "string-version-lessp": {
+   "name": "string-version-lessp",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/string_version.rs:5"
+  },
   "string-width": {
    "name": "string-width",
    "implementation": "vm2",
@@ -4810,12 +4835,12 @@
   "upcase-initials-region": {
    "name": "upcase-initials-region",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/casefiddle.rs:70"
+   "registered_at": "crates/romacs-vm/src/prims/casefiddle.rs:84"
   },
   "upcase-region": {
    "name": "upcase-region",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/casefiddle.rs:65"
+   "registered_at": "crates/romacs-vm/src/prims/casefiddle.rs:69"
   },
   "use-global-map": {
    "name": "use-global-map",

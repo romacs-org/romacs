@@ -8,14 +8,14 @@
   "provenance": {
     "generated_by": "romacs-introspect-live",
     "generated_on": "linux-x86_64",
-    "input_hash": "7daf1e89b54ce2c5b84b2fad882d67a3ea1683825777b63e3696f7940d42342f",
+    "input_hash": "db8c92d806721fdebd8242fc960e5a150cce112b31b175c4cad3152da76dcaf7",
     "source_only_at_generation": [],
     "vm2_probe_panics": [],
-    "vm2_universe": 4352
+    "vm2_universe": 4393
   },
   "schema": 2,
   "vm2": {
-    "count": 1001,
+    "count": 1006,
     "entries": [
       "#:vm2-closure-document",
       "#:vm2-closure-metadata",
@@ -130,6 +130,7 @@
       "byte-to-string",
       "call-interactively",
       "capitalize",
+      "capitalize-region",
       "car",
       "car-less-than-car",
       "car-safe",
@@ -260,6 +261,7 @@
       "documentation-property",
       "documentation-stringp",
       "downcase",
+      "downcase-region",
       "elt",
       "emacs-lisp-mode",
       "emacs-pid",
@@ -379,6 +381,7 @@
       "getenv-internal",
       "gethash",
       "global-set-key",
+      "gnutls-available-p",
       "goto-char",
       "handler-bind-1",
       "hash-table-contains-p",
@@ -474,6 +477,7 @@
       "log",
       "logand",
       "logb",
+      "logcount",
       "logior",
       "lognot",
       "logxor",
@@ -879,6 +883,7 @@
       "string-to-number",
       "string-to-syntax",
       "string-to-unibyte",
+      "string-version-lessp",
       "string-width",
       "stringp",
       "subr-arity",

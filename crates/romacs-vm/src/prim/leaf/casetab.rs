@@ -193,7 +193,7 @@ impl Leaf<'_> {
         }).collect())
     }
 
-    fn native_case_mapping(&self, table: Value, kind: usize) -> bool {
+    pub(crate) fn native_case_mapping(&self, table: Value, kind: usize) -> bool {
         let Some(Object::CharTable(table)) = self.vm.object_if(table) else { return false };
         self.vm.native_case_roots[kind].upgrade().is_some_and(|root| std::sync::Arc::ptr_eq(&root, &table.root))
     }
