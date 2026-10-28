@@ -79,6 +79,9 @@ TYPED is accepted for GNU calling compatibility without binding suggestions."
          (command (if (stringp name) (intern-soft name) name)))
     (unless (romacs-command-p command)
       (signal 'user-error (list "Not an interactive command" name)))
-    (let ((current-prefix-arg prefixarg))
-      (setq this-command command real-this-command command)
-      (call-interactively command t))))
+    (setq this-command command real-this-command command)
+    ;; GNU's command-execute (simple.el): a named keyboard macro runs as one.
+    (if (arrayp (indirect-function command))
+        (execute-kbd-macro (indirect-function command) prefixarg)
+      (let ((current-prefix-arg prefixarg))
+        (call-interactively command t)))))

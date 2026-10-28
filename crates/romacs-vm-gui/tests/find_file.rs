@@ -596,6 +596,10 @@ fn extended_command_runs_interactive_autoloads() {
     assert_eq!(printed(&mut vm,
         "(progn (call-interactively 'execute-extended-command) (list mx-autoloaded-ran mx-package-loads mx-forbidden))"),
         "(t 1 nil)", "EXTENDED_COMMAND_LOADS_AUTOLOAD_ON_CALL");
+    // GNU's M-x runs a named keyboard macro through command-execute.
+    assert_eq!(printed(&mut vm,
+        "(progn (fset 'mx-macro \"xy\") (erase-buffer) (execute-extended-command nil \"mx-macro\") (buffer-string))"),
+        "\"xy\"", "EXTENDED_COMMAND_RUNS_NAMED_KEYBOARD_MACRO");
 }
 
 #[test]
