@@ -439,6 +439,13 @@ fn fillarray(cx, array: Value, item: Value) {
         Ok(array)
     } else if matches!(cx.kind(array), Kind::String | Kind::Bytes) {
         cx.fill_string(array,character(item)?)
+    } else if cx.kind(array) == Kind::CharTable {
+        // Every character and the default, as set-char-table-range's t and
+        // nil ranges write them; GNU's own loop leaves its ASCII cache
+        // stale (VM2-FILLARRAY1).
+        cx.set_char_table_range(array, Value::TRUE, item)?;
+        cx.set_char_table_range(array, Value::NIL, item)?;
+        Ok(array)
     } else { Err(Fault::Wrong("arrayp", array)) }
 }}
 
