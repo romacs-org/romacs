@@ -390,7 +390,7 @@ impl Vm {
     }
     /// GNU `select_window` (window.c:536): NORECORD nil bumps the use time
     /// even when V is already selected (`record_and_return`).
-    fn select_window_value(&mut self, v: Value, record: bool) -> Result<Value> {
+    pub(crate) fn select_window_value(&mut self, v: Value, record: bool) -> Result<Value> {
         if record {
             self.window_state.select_count += 1;
             let count = self.window_state.select_count;

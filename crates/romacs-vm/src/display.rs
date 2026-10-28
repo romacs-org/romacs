@@ -748,12 +748,16 @@ impl Vm {
         let format = self.mode_line_form(format);
         let outcome = (|| {
             let height = self.window(window)?.height.saturating_sub(self.window_state.line);
-            self.frame_mut(self.frame_value_peek())?.selected = window;
+            // Fselect_window (WINDOW, t): its point becomes its buffer's.
+            self.select_window_value(window, false)?;
             self.slots[self.buffer_slot].value = buffer;
             let state = self.mode_line_state(root, buffer_slot, height)?;
             self.mode_line_expand(&format, &state, target)
         })();
-        self.frame_mut(self.frame_value_peek())?.selected = self.slots[saved_window].value;
+        // unwind_format_mode_line: the old selection, if it lives, then
+        // the old current buffer.
+        let old = self.slots[saved_window].value;
+        if self.window(old).is_ok_and(|w| w.live()) { self.select_window_value(old, false)?; }
         if self.buffer_state(self.slots[saved_buffer].value).is_ok_and(|b| b.live) {
             self.slots[self.buffer_slot].value = self.slots[saved_buffer].value;
         }
