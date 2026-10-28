@@ -8,14 +8,14 @@
   "provenance": {
     "generated_by": "romacs-introspect-live",
     "generated_on": "linux-x86_64",
-    "input_hash": "3622f03c7f81536b5750cf3bee14c67ee5baf6bd36261d411a1f83e554306d66",
+    "input_hash": "27d90788f43621af76f0d2e3742cff2d3ce227734584e5dba859b772678e58c8",
     "source_only_at_generation": [],
     "vm2_probe_panics": [],
-    "vm2_universe": 4292
+    "vm2_universe": 4299
   },
   "schema": 2,
   "vm2": {
-    "count": 988,
+    "count": 989,
     "entries": [
       "#:vm2-closure-document",
       "#:vm2-closure-metadata",
@@ -32,6 +32,7 @@
       "#:vm2-insert-and-inherit",
       "#:vm2-insert-before-markers",
       "#:vm2-lookup-key",
+      "#:vm2-message",
       "#:vm2-provide",
       "#:vm2-set-interactive-form",
       "#:vm2-temp-buffer",

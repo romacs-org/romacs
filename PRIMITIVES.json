@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "ddbe0bc30b24102dcdff7b6de7728a3b4158971bb222c2dde0d547a3d8891aed",
+  "source_fingerprint": "64e60e8f7af70c6d8aa20083277453d23467834180d68ca5c527752667caec88",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 980,
-  "parsed_vm2_only": 980
+  "parsed_total": 981,
+  "parsed_vm2_only": 981
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -104,6 +104,12 @@
    "implementation": "vm2",
    "variant": "Primitive::LookupKey",
    "registered_at": "crates/romacs-vm/src/lib.rs:723"
+  },
+  "#:vm2-message": {
+   "name": "#:vm2-message",
+   "implementation": "vm2",
+   "variant": "Primitive::Message",
+   "registered_at": "crates/romacs-vm/src/lib.rs:575"
   },
   "#:vm2-provide": {
    "name": "#:vm2-provide",
@@ -2702,8 +2708,7 @@
   "message": {
    "name": "message",
    "implementation": "vm2",
-   "variant": "Primitive::Message",
-   "registered_at": "crates/romacs-vm/src/lib.rs:575"
+   "registered_at": "crates/romacs-vm/src/prims/message.rs:13"
   },
   "min": {
    "name": "min",

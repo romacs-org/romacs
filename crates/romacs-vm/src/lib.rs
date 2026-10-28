@@ -572,7 +572,7 @@ const PRIMITIVES: &[(&str, Primitive)] = &[
     // the row stays because legacy primitive references are table ordinals.
     ("#:vm2-provide", Primitive::Provide),
     ("featurep", Primitive::Featurep),
-    ("message", Primitive::Message),
+    ("#:vm2-message", Primitive::Message), // T2 defsubr now (prims/message.rs); the ordinal stays.
     ("list", Primitive::List),
     ("member", Primitive::Member),
     ("nth", Primitive::Nth),
