@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "593f8523f2e20e3f1161ac77309003f0a46b154cb70cb33d60a6b6236f64fb16",
+  "source_fingerprint": "c9d11218daa5cda3f677724a3013c3bae62e147d8d1fe2d8a0c5cb8825b9dd1a",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 996,
-  "parsed_vm2_only": 996
+  "parsed_total": 997,
+  "parsed_vm2_only": 997
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -3546,6 +3546,11 @@
    "name": "romacs--local-toplevel-cell",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/vars.rs:222"
+  },
+  "romacs--note-command-point": {
+   "name": "romacs--note-command-point",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/undo.rs:17"
   },
   "romacs--oclosure-type": {
    "name": "romacs--oclosure-type",

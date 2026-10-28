@@ -119,6 +119,19 @@ mod tests {
         assert_eq!(printed(&mut vm, "(list (buffer-string) prefix-arg mark-active)"), "(\"halo\" nil nil)");
     }
 
+    /// Point before a command reaches the undo list when the command's
+    /// first change is elsewhere (record_point). Pinned GNU, batch: after
+    /// an insertion at 1 from point 5, (1 . 2) then 5.
+    #[test]
+    fn undo_records_the_point_the_command_started_from() {
+        let mut vm = logged();
+        vm.eval_source("(buffer-enable-undo) (insert \"abcdefgh\") (undo-boundary) (goto-char 5)
+            (global-set-key [f9] (lambda () (interactive) (save-excursion (goto-char 1) (insert \"X\"))))").unwrap();
+        vm.set_host_input(Some(Box::new(Keys([CommandEvent::Named("f9".into())].into()))));
+        assert!(run(&mut vm).unwrap().signal.is_none());
+        assert_eq!(printed(&mut vm, "(let ((l (delq nil (copy-sequence buffer-undo-list)))) (list (point) (car l) (car (cdr l))))"), "(6 (1 . 2) 5)");
+    }
+
     /// pre-command-hook runs before each command and post-command-hook
     /// after it, also after a command that signalled (command_loop_1
     /// runs it when it resumes).

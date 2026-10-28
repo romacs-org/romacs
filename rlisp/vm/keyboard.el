@@ -473,6 +473,8 @@ Return the keys read, nil at the end of an executing keyboard macro."
       (if (null this-command)
           (undefined)
         (when (fboundp 'undo-auto--add-boundary) (undo-auto--add-boundary))
+        ;; point_before_last_command_or_undo, before the command's edits.
+        (romacs--note-command-point)
         ;; The display's delete-selection policy (romacs-editing.el). A
         ;; command the deletion supersedes runs as `ignore', as delsel.el's
         ;; pre-command-hook makes it, so it still consumes the prefix argument.
