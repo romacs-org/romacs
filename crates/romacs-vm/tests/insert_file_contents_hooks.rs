@@ -128,3 +128,23 @@ fn insert_file_contents_records_undo_as_gnu() {
     let _ = std::fs::remove_dir_all(&dir);
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
+
+// A REPLACE whose new middle holds a raw-byte character cannot be put in a
+// VM2 buffer (Unicode text, VM2-FILEIO1). It is refused before anything
+// changes: text, point and undo list stay as they were. Pinned GNU, whose
+// buffers hold raw bytes, gives (("…/f" 2) "abcλ\377def" 9 nil).
+#[test]
+fn an_unrepresentable_replace_changes_nothing() {
+    let dir: PathBuf = std::env::temp_dir().join(format!("romacs-ifc-raw-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("f"), b"abc\xce\xbb\xffdef").unwrap();
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut vm = gnu_ert_vm::bootstrapped_with(&root, "rlisp/romacs-loadup-bootstrap.el");
+    let expression = format!("(progn (set-buffer (generate-new-buffer \"ifc-raw\")) (buffer-enable-undo) (insert \"abcXYZdef\") (undo-boundary)
+      (let ((before (copy-tree buffer-undo-list)) (coding-system-for-read 'utf-8))
+        (list (condition-case e (insert-file-contents {} nil nil nil t) (error e)) (buffer-string) (point) (equal buffer-undo-list before))))",
+        lisp(&dir.join("f")));
+    let got = romacs(&mut vm, &expression);
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(got, "\"((error \\\"VM2 insert-file-contents of raw bytes into a multibyte buffer is unsupported\\\") \\\"abcXYZdef\\\" 10 t)\"");
+}

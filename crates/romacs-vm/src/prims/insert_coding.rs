@@ -526,6 +526,12 @@ fn replace(cx: &mut Leaf<'_>, mut r: Vec<Value>) -> Next {
         return Err(refuse("insert-file-contents of raw bytes into a multibyte buffer"));
     }
     let (start, end, middle) = common_ends(&old, &new, multibyte);
+    // VM2 buffer text is Unicode: refuse a middle with raw-byte characters
+    // before anything changes (insert_before_point would refuse it after
+    // the deletion).
+    if multibyte && std::str::from_utf8(&new[middle.clone()]).is_err() {
+        return Err(refuse("insert-file-contents of raw bytes into a multibyte buffer"));
+    }
     let chars = |bytes: &[u8]| if multibyte { bytes.iter().filter(|&&b| b & 0xc0 != 0x80).count() } else { bytes.len() } as i64;
     let (from, to) = (begv + chars(&old[..start]), begv + chars(&old[..end]));
     let marker = cx.editor_point_marker()?;
