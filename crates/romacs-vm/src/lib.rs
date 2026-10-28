@@ -2460,6 +2460,13 @@ impl Vm {
         self.external_roots.clear();
         outcome
     }
+    /// Declare that this embedder renders the echo area: printing to `t`
+    /// in an interactive session then goes there, as GNU's does on a
+    /// terminal (print.c PRINTPREPARE), not to standard output.
+    pub fn set_echo_area_host(&mut self, rendered: bool) {
+        let slot = self.slot(prim::ECHO_AREA_HOST);
+        self.slots[slot].value = if rendered { Value::TRUE } else { Value::NIL };
+    }
     /// The echo area's message for `current-message`, as an embedder that
     /// renders the echo area itself shows or clears it.
     pub fn set_echo_area_message(&mut self, text: Option<&str>) {

@@ -60,6 +60,9 @@ fn destination(cx: &mut Leaf<'_>, stream: Value) -> Out {
 }
 fn output(cx: &mut Leaf<'_>, result: Value, text: Value, stream: Value) -> Next {
     let stream = destination(cx, stream)?;
+    if stream == Value::TRUE && echo_area_shown(cx)? {
+        return echo_print(cx, result, text);
+    }
     if stream == Value::TRUE {
         let text = cx.string_text(text)?;
         std::io::stdout().write_all(text.as_bytes()).map_err(|e| Fault::Error(e.to_string()))?;
@@ -70,6 +73,25 @@ fn output(cx: &mut Leaf<'_>, result: Value, text: Value, stream: Value) -> Next 
         return Ok(Step::Done(result));
     }
     next_char(cx, vec![result, text, stream, Value::integer(0).unwrap()])
+}
+/// print.c PRINTPREPARE: `t` is the echo area unless `noninteractive`; in
+/// VM2, when the embedder renders one (`Vm::set_echo_area_host`).
+fn echo_area_shown(cx: &mut Leaf<'_>) -> std::result::Result<bool, Fault> {
+    let noninteractive = cx.intern("noninteractive");
+    Ok(cx.hidden_value(crate::prim::ECHO_AREA_HOST) != Value::NIL
+        && cx.variable_value(noninteractive)?.unwrap_or(Value::NIL) == Value::NIL)
+}
+/// print.c `printchar_to_stream` into the echo area: a print extends the
+/// message printing made (`message_buf_print`); after any other message,
+/// it starts a new one.
+fn echo_print(cx: &mut Leaf<'_>, result: Value, text: Value) -> Next {
+    let shown = cx.hidden_value(crate::prim::ECHO_AREA_MESSAGE);
+    let extended = shown != Value::NIL && shown == cx.hidden_value(crate::prim::ECHO_AREA_PRINTED);
+    let prefix = if extended { cx.string_text(shown)? } else { String::new() };
+    let text = cx.string(&(prefix + &cx.string_text(text)?));
+    cx.set_hidden_value(crate::prim::ECHO_AREA_MESSAGE, text);
+    cx.set_hidden_value(crate::prim::ECHO_AREA_PRINTED, text);
+    Ok(Step::Done(result))
 }
 fn next_char(cx: &mut Leaf<'_>, mut saved: Vec<Value>) -> Next {
     let at = saved[3].integer_value().unwrap() as usize;

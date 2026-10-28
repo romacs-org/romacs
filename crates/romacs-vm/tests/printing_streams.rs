@@ -64,3 +64,18 @@ fn printing_errors_restore_current_buffer_and_keep_text_atomic() {
     let source = "(with-temp-buffer (insert \"ab\") (let ((before-change-functions (list (lambda (&rest args) (error \"hook-must-run\"))))) (list (condition-case err (princ \"x\" (current-buffer)) (error (car err))) (buffer-string))))";
     assert_eq!(vm.eval_source(source).unwrap().display().unwrap(), "(error \"ab\")");
 }
+
+/// print.c: on a terminal, `t` is the echo area. Successive prints extend
+/// the message printing started; `message` replaces it. Batch (or an
+/// embedder that renders no echo area) prints to standard output.
+#[test]
+fn printing_to_t_reaches_the_echo_area_an_embedder_renders() {
+    let mut vm = Vm::new();
+    let ask = |vm: &mut Vm, source: &str| vm.eval_source(source).unwrap().display().unwrap();
+    assert_eq!(ask(&mut vm, "(prin1 'unshown t) (current-message)"), "nil");
+    vm.set_echo_area_host(true);
+    assert_eq!(ask(&mut vm, "(list (prin1 '(a \"λ\") t) (current-message))"), "((a \"λ\") \"(a \\\"λ\\\")\")");
+    assert_eq!(ask(&mut vm, "(princ \" b\") (current-message)"), "\"(a \\\"λ\\\") b\"");
+    assert_eq!(ask(&mut vm, "(message \"m\") (princ 7 t) (current-message)"), "\"7\"");
+    assert_eq!(ask(&mut vm, "(setq noninteractive t) (princ 8 t) (setq noninteractive nil) (current-message)"), "\"7\"");
+}
