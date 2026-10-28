@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/divergence_index.py",
-  "input_hash": "7123b6e682cc5c21145de473cc33f182ac63703b8e8a0790bf998336c312764b",
+  "input_hash": "aa882b3436fdf1a87720cb8ae88bee8187bf9efeecb75968a1f4c8964c458458",
   "inputs": [
    "DIVERGENCES.md",
    "crates/romacs-face/GNU-DIVERGENCES.md",
@@ -2741,8 +2741,8 @@
    "observable": false,
    "planned": false,
    "mechanism": "`replace-match` register capacity",
-   "gnu": "GNU retains allocated unused match registers, including startup search history, and reports nonexistent subexpressions inside that capacity.",
-   "romacs": "VM2 uses its retained match-group vector length, so an unused SUBEXP can signal args-out-of-range earlier and its maximum differs.",
+   "gnu": "GNU retains allocated unused match registers, including startup search history, and reports nonexistent subexpressions inside that capacity; a buffer replacement's `\\N` past that capacity signals invalid replacement text and one inside it inserts nothing.",
+   "romacs": "VM2 uses its retained match-group vector length, so an unused SUBEXP can signal args-out-of-range earlier and its maximum differs, and a buffer replacement's `\\N` past the match's groups signals where GNU's capacity may insert nothing.",
    "why": "Match-register allocation history is not modeled; successful groups and explicit nil groups retain their normal semantics.",
    "symbols": [
     "replace-match"

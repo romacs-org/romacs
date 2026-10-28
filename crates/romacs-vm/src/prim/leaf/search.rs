@@ -137,11 +137,13 @@ impl Leaf<'_> {
             if c != u32::from(b'\\') { out.push(c); continue; }
             let c = chars.get(i).copied();
             i += 1;
+            // A register past the match's signals; one that did not match,
+            // or whose start is below 1 (a string's match), inserts nothing.
             let (a, b) = match c.and_then(char::from_u32) {
                 Some('&') => (start, end),
-                Some(n @ '1'..='9') => match groups.get(n as usize - '0' as usize).copied().flatten() {
-                    Some(range) => range,
-                    None => continue,
+                Some(n @ '1'..='9') if (n as usize - '0' as usize) < groups.len() => match groups[n as usize - '0' as usize] {
+                    Some(range) if range.0 >= 1 => range,
+                    _ => continue,
                 },
                 Some('\\') => { out.push(u32::from(b'\\')); continue; }
                 _ => return Err(self.formatted_error(INVALID_BACKSLASH)),
