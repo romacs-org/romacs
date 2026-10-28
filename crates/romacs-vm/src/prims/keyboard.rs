@@ -299,6 +299,13 @@ fn discard_input(cx) {
     Ok(Value::NIL)
 }}
 
+defsubr! { name = "current-idle-time", gnu = "keyboard.c:4949", effect = Pure,
+fn current_idle_time(_cx) {
+    // timer_idleness_start_time is valid only while Emacs waits idle and
+    // runs idle timers; VM2 never does (VM2-PROC1), so Lisp always sees nil.
+    Ok(Value::NIL)
+}}
+
 defsubr! { name = "input-pending-p", gnu = "keyboard.c:12076", effect = Reads,
 fn input_pending_p(cx; optional check_timers: Value) {
     // requeued_events_pending_p; the host keyboard is not polled here.

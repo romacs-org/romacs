@@ -57,13 +57,19 @@ impl Vm {
         self.ordered_overlay_property(candidates, property)
     }
 
-    fn ordered_overlay_property(&self, mut overlays: Vec<Value>, property: Value) -> Result<Value> {
+    fn ordered_overlay_property(&self, overlays: Vec<Value>, property: Value) -> Result<Value> {
+        Ok(self.ordered_overlay_hit(overlays, property)?.0)
+    }
+
+    /// The highest-priority overlay among OVERLAYS with a non-nil PROPERTY:
+    /// (VALUE, OVERLAY), or (nil, nil) when none has it.
+    fn ordered_overlay_hit(&self, mut overlays: Vec<Value>, property: Value) -> Result<(Value, Value)> {
         overlays.sort_by_key(|&overlay| self.overlay_order_key(overlay));
         for overlay in overlays.into_iter().rev() {
-            let value = self.overlay_property(overlay, property)?;
-            if value != Value::NIL { return Ok(value); }
+            let value = self.overlay_get(overlay, property)?;
+            if value != Value::NIL { return Ok((value, overlay)); }
         }
-        Ok(Value::NIL)
+        Ok((Value::NIL, Value::NIL))
     }
 
     fn overlay_order_key(&self, overlay: Value) -> (i64, u32, std::cmp::Reverse<u32>, usize) {
@@ -386,6 +392,32 @@ impl Vm {
         }
         Ok(())
     }
+    /// buffer.c Foverlay_get: intervals.c lookup_char_property on OVERLAY's
+    /// plist with TEXTPROP false. PROP's own entry, else the last `category'
+    /// symbol's PROP, else the first non-nil `char-property-alias-alist'
+    /// alternative; never `default-text-properties'.
+    pub(crate) fn overlay_get(&self, overlay: Value, prop: Value) -> Result<Value> {
+        let properties = &self.overlay(overlay)?.properties;
+        let category = self.names.get("category").map(|&slot| Value::reference(slot + 1, 7));
+        let mut fallback = Value::NIL;
+        for &(key, value) in properties {
+            if key == prop { return Ok(value); }
+            if Some(key) == category && (value == Value::NIL || value == Value::TRUE || value.index(7).is_ok()) {
+                fallback = self.symbol_property(value, prop)?;
+            }
+        }
+        if fallback != Value::NIL { return Ok(fallback); }
+        for entry in self.list_values(self.annotation_variable("char-property-alias-alist"))? {
+            let Ok((key, aliases)) = self.cons_pair(entry) else { continue };
+            if key != prop { continue; }
+            for alias in self.list_values(aliases)? {
+                if let Some(&(_, value)) = properties.iter().find(|(k, _)| *k == alias)
+                    && value != Value::NIL { return Ok(value); }
+            }
+            break;
+        }
+        Ok(Value::NIL)
+    }
     pub(crate) fn overlay_property(&self, v: Value, key: Value) -> Result<Value> {
         Ok(self
             .overlay(v)?
@@ -400,11 +432,26 @@ impl Vm {
         property: Value,
         object: Value,
     ) -> Result<Value> {
-        let object = if object == Value::NIL {
-            self.buffer_index()?;
-            self.slots[self.buffer_slot].value
-        } else {
-            object
+        Ok(self.get_char_property_and_overlay_values(position, property, object)?.0)
+    }
+
+    /// textprop.c get_char_property_and_overlay: POSITION's PROPERTY in
+    /// OBJECT and the overlay that supplied it, nil for a text property.
+    pub(crate) fn get_char_property_and_overlay_values(
+        &mut self,
+        position: Value,
+        property: Value,
+        object: Value,
+    ) -> Result<(Value, Value)> {
+        // A window means its buffer, seeing only overlays whose `window'
+        // property is nil or that window.
+        let (object, window) = match self.object_if(object) {
+            _ if object == Value::NIL => {
+                self.buffer_index()?;
+                (self.slots[self.buffer_slot].value, None)
+            }
+            Some(Object::Window(w)) => (w.buffer, Some(object)),
+            _ => (object, None),
         };
         let at = if matches!(self.object_if(object), Some(Object::Buffer(_))) {
             let byte = self.buffer_position(object, position, false)?;
@@ -420,16 +467,45 @@ impl Vm {
                 )
                 .0;
             let at = buffer.char_of_byte(ByteOffset(byte as usize))?.0 + 1;
-            let value = self.ordered_overlay_property(found, property)?;
-            if value != Value::NIL {
-                return Ok(value);
+            let found = match window {
+                // window.h overlay_matches_window: a `window' that is not a
+                // window object restricts nothing.
+                Some(window) => {
+                    let key = self.intern("window");
+                    let mut kept = vec![];
+                    for o in found {
+                        let w = self.overlay_get(o, key)?;
+                        if w == window || !matches!(self.object_if(w), Some(Object::Window(_))) { kept.push(o); }
+                    }
+                    kept
+                }
+                None => found,
+            };
+            let hit = self.ordered_overlay_hit(found, property)?;
+            if hit.0 != Value::NIL {
+                return Ok(hit);
             }
             at
         } else {
             usize::try_from(position.as_integer()?).map_err(|_| "index out of range")?
         };
         let raw = self.annotation_raw(object, at)?;
-        self.annotation_resolve(&raw, property)
+        Ok((self.annotation_resolve(&raw, property)?, Value::NIL))
+    }
+
+    /// Fget_text_property (POSITION, PROPERTY, OBJECT) for a buffer of
+    /// either kind or a string: args-out-of-range outside its text.
+    pub(crate) fn text_property_at(&self, object: Value, position: i64, property: Value) -> std::result::Result<Value, crate::prim::Fault> {
+        use crate::prim::Fault;
+        let raw = match usize::try_from(position).ok().map(|at| self.annotation_raw(object, at)) {
+            Some(Ok(raw)) => raw,
+            Some(Err(e)) if e != "index out of range" => return Err(Fault::Error(e)),
+            _ => {
+                let at = Value::integer(position).map_err(Fault::Error)?;
+                return Err(Fault::Range(at, at));
+            }
+        };
+        self.annotation_resolve(&raw, property).map_err(Fault::Error)
     }
 
     /// editfns.c Fget_pos_property: the PROPERTY a character inserted at
@@ -712,7 +788,7 @@ impl Vm {
                     Ok(Value::NIL)
                 }
             }
-            OverlayGet => self.overlay_property(x, args[1]),
+            OverlayGet => self.overlay_get(x, args[1]),
             OverlayPut => {
                 self.overlay(x)?;
                 let Object::Overlay(o) = &mut self.objects[x.index(0)? - 1] else {

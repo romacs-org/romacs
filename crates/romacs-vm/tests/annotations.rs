@@ -197,7 +197,9 @@ fn overlays_compose_with_text_resolution_and_marker_insertion() {
               ["get-text-property", 2, ["quote", "face"]],
               ["marker-position", "m"]]]]]),
     );
-    assert_eq!(value.display().unwrap(), "[42 17 17 99 23 23 4]");
+    // Pinned GNU 32.0.50: the overlay's `face' answers the `alias' query,
+    // because Foverlay_get follows char-property-alias-alist too.
+    assert_eq!(value.display().unwrap(), "[42 17 42 99 23 23 4]");
 }
 
 #[test]

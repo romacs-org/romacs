@@ -31,18 +31,39 @@ fn locate_file_searches_paths_and_suffixes_without_loading() {
     std::fs::remove_dir_all(root).unwrap();
 }
 
+/// A function PREDICATE is called on each candidate (lread.c openp): nil
+/// rejects it, any other value accepts a file, and a directory needs
+/// `dir-ok'. The results and the call order must match pinned GNU.
 #[test]
-fn locate_file_refuses_unimplemented_predicates_explicitly() {
+fn locate_file_function_predicates_match_pinned_gnu() {
+    let root = std::env::temp_dir().join(format!("romacs-locate-function-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    for dir in ["a", "b", "a/lib.el"] {
+        std::fs::create_dir_all(root.join(dir)).unwrap();
+    }
+    for file in ["a/lib", "b/lib.el", "b/lib"] {
+        std::fs::write(root.join(file), "").unwrap();
+    }
+    let path = format!("(list {:?} {:?})", root.join("a").display().to_string(), root.join("b").display().to_string());
+    let calls = "(let (seen) (list (locate-file-internal \"lib\" PATH '(\".el\" \"\") (lambda (f) (push (file-name-nondirectory (directory-file-name (file-name-directory f))) seen) PRED)) (length seen)))";
+    let mut cases = Vec::new();
+    for predicate in ["t", "nil", "'dir-ok", "(if (string-match \"/b/lib\\\\'\" f) 'yes nil)"] {
+        cases.push(calls.replace("PATH", &path).replace("PRED", predicate));
+    }
+    cases.push(format!("(locate-file-internal \"lib\" {path} nil #'file-exists-p)"));
+    cases.push(format!("(condition-case e (locate-file-internal \"lib\" {path} nil -1) (error (car e)))"));
+    let oracle = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
     let mut vm = Vm::new();
-    // Only `locate-file-internal' is native: GNU defines `locate-file' in Lisp
-    // (lisp/files.el:1113), so a bare VM must not have it at all.
-    for name in ["locate-file-internal"] {
-        let source = format!("(condition-case e ({name} \"anything\" nil nil 'file-exists-p) (error (car (cdr e))))");
-        let actual = vm.eval_source(&source).unwrap().display().unwrap();
-        assert_eq!(actual, "\"VM2 locate-file-internal function predicate is unsupported\"");
+    for source in cases {
+        let output = std::process::Command::new(&oracle).args(["-Q", "--batch", "--eval", &format!("(prin1 {source})")]).output().unwrap();
+        assert!(output.status.success(), "{source}: {}", String::from_utf8_lossy(&output.stderr));
+        let expected = String::from_utf8(output.stdout).unwrap();
+        let actual = vm.eval_source(&source).and_then(|v| v.display()).map_err(|e| e.to_string());
+        assert_eq!(actual.as_deref(), Ok(expected.as_str()), "{source}");
     }
     let bare = vm.eval_source("(fboundp 'locate-file)").unwrap().display().unwrap();
     assert_eq!(bare, "nil", "locate-file must come from GNU's files.el, never from the substrate");
+    std::fs::remove_dir_all(root).unwrap();
 }
 
 #[test]

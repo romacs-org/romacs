@@ -671,7 +671,7 @@ impl Vm {
         let name = self.symbol_names.get(slot).ok_or("symbol required")?;
         if self.names.get(name) == Some(&slot) { Ok(name.as_str()) } else { Err("symbol required".into()) }
     }
-    fn annotation_variable(&self, name: &str) -> Value {
+    pub(super) fn annotation_variable(&self, name: &str) -> Value {
         self.names
             .get(name)
             .map(|i| self.slots[*i].value)

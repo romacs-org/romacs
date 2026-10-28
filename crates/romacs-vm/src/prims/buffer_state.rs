@@ -37,3 +37,36 @@ fn buffer_base_buffer(cx; optional buffer: Value) {
     cx.decode_buffer(buffer)?;
     Ok(Value::NIL)
 }}
+
+/// GNU Fbarf_if_buffer_read_only (buffer.c:2465): signal `buffer-read-only'
+/// in a read-only current buffer, unless `inhibit-read-only' is set or the
+/// text at POSITION (point when nil) has an `inhibit-read-only' property.
+pub(crate) fn barf_if_read_only(cx: &mut crate::prim::leaf::Leaf<'_>, position: Value) -> std::result::Result<(), crate::prim::Fault> {
+    use crate::prim::Fault;
+    let position = if position == Value::NIL {
+        cx.point()?
+    } else {
+        position.integer_value().ok_or(Fault::Wrong("fixnump", position))?
+    };
+    let read_only = super::fileio::var(cx, "buffer-read-only")?;
+    if read_only != Value::NIL
+        && super::fileio::var(cx, "inhibit-read-only")? == Value::NIL
+        && {
+            let buffer = cx.decode_buffer(Value::NIL)?;
+            let property = cx.intern("inhibit-read-only");
+            cx.text_property_at(buffer, position, property)? == Value::NIL
+        }
+    {
+        let buffer = cx.decode_buffer(Value::NIL)?;
+        let condition = cx.intern("buffer-read-only");
+        let data = cx.cons(buffer, Value::NIL);
+        return Err(Fault::Signal(condition, data));
+    }
+    Ok(())
+}
+
+defsubr! { name = "barf-if-buffer-read-only", gnu = "buffer.c:2465", effect = Reads,
+fn barf_if_buffer_read_only(cx; optional position: Value) {
+    barf_if_read_only(cx, position)?;
+    Ok(Value::NIL)
+}}

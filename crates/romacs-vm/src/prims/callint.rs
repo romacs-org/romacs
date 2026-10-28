@@ -412,7 +412,7 @@ fn keep_all_history(cx: &mut Leaf<'_>, var: Value, item: Value) -> std::result::
 
 fn recorded(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
     if index(saved[FLAGS]) as i64 & RECORD_THEN_FAIL != 0 {
-        barf_if_read_only(cx)?;
+        super::buffer_state::barf_if_read_only(cx, Value::NIL)?;
     }
     run_command(cx, saved)
 }
@@ -445,22 +445,6 @@ fn run_command(cx: &mut Leaf<'_>, saved: &[Value]) -> Next {
     }
     let f = cx.intern("funcall-interactively");
     Ok(Step::Call { f, args, then: done, saved: vec![] })
-}
-
-/// GNU `Fbarf_if_buffer_read_only (Qnil)` (buffer.c:2471-2482). VM2 has no
-/// `inhibit-read-only' text property support, so only the variables count.
-fn barf_if_read_only(cx: &mut Leaf<'_>) -> std::result::Result<(), Fault> {
-    let read_only = cx.intern("buffer-read-only");
-    let inhibit = cx.intern("inhibit-read-only");
-    if cx.variable_value(read_only)?.unwrap_or(Value::NIL) != Value::NIL
-        && cx.variable_value(inhibit)?.unwrap_or(Value::NIL) == Value::NIL
-    {
-        let condition = cx.intern("buffer-read-only");
-        let buffer = cx.decode_buffer(Value::NIL)?;
-        let data = list(cx, &[buffer]);
-        return Err(Fault::Signal(condition, data));
-    }
-    Ok(())
 }
 
 fn spec_bytes(cx: &Leaf<'_>, saved: &[Value]) -> std::result::Result<Vec<u8>, Fault> {
@@ -496,11 +480,11 @@ fn prefix_codes(cx: &mut Leaf<'_>, mut saved: Vec<Value>) -> Next {
                 if cx.variable_value(read_only)?.unwrap_or(Value::NIL) != Value::NIL {
                     if saved[RECORD] != Value::NIL {
                         if spec[pos + 1..].iter().any(|b| !b"rRpP\n".contains(b)) {
-                            barf_if_read_only(cx)?;
+                            super::buffer_state::barf_if_read_only(cx, Value::NIL)?;
                         }
                         saved[FLAGS] = fixnum(index(saved[FLAGS]) as i64 | RECORD_THEN_FAIL);
                     } else {
-                        barf_if_read_only(cx)?;
+                        super::buffer_state::barf_if_read_only(cx, Value::NIL)?;
                     }
                 }
             }

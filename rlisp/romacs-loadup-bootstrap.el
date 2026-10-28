@@ -162,6 +162,8 @@
 ;; startup.el command-line (startup.el:843): the initial frame's faces for
 ;; its background mode and display type.
 (frame-set-background-mode (selected-frame))
+;; startup.el command-line (startup.el:1717): initialization is over.
+(setq after-init-time (current-time))
 
 (provide 'romacs-loadup-bootstrap)
 ;;; romacs-loadup-bootstrap.el ends here

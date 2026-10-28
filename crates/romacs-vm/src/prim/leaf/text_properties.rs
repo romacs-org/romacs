@@ -136,4 +136,11 @@ impl Leaf<'_> {
     pub(crate) fn get_pos_property(&mut self, position: Value, property: Value, object: Value) -> super::super::Out {
         self.vm.get_pos_property_values(position, property, object)
     }
+    pub(crate) fn text_property_at(&self, object: Value, position: i64, property: Value) -> std::result::Result<Value, Fault> {
+        self.vm.text_property_at(object, position, property)
+    }
+    pub(crate) fn get_char_property_and_overlay(&mut self, position: Value, property: Value, object: Value) -> super::super::Out {
+        let (value, overlay) = self.vm.get_char_property_and_overlay_values(position, property, object).map_err(Fault::Error)?;
+        Ok(self.cons(value, overlay))
+    }
 }

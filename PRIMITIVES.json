@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "a14a4e137beb043dbad11149c0c41d1d1fc729f61aab2355dc78faa1e2465c8e",
+  "source_fingerprint": "f9e97b25c504c62fffb2714c36089e87dd9829caa693709f01125e3071152a95",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 961,
-  "parsed_vm2_only": 961
+  "parsed_total": 964,
+  "parsed_vm2_only": 964
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -114,7 +114,7 @@
   "#:vm2-set-interactive-form": {
    "name": "#:vm2-set-interactive-form",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/callint.rs:699"
+   "registered_at": "crates/romacs-vm/src/prims/callint.rs:683"
   },
   "#:vm2-temp-buffer": {
    "name": "#:vm2-temp-buffer",
@@ -238,7 +238,7 @@
   "add-face-text-property": {
    "name": "add-face-text-property",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/text_properties.rs:141"
+   "registered_at": "crates/romacs-vm/src/prims/text_properties.rs:146"
   },
   "add-name-to-file": {
    "name": "add-name-to-file",
@@ -372,6 +372,11 @@
    "name": "bare-symbol-p",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/bare_symbol_p.rs:5"
+  },
+  "barf-if-buffer-read-only": {
+   "name": "barf-if-buffer-read-only",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/buffer_state.rs:68"
   },
   "base64-decode-string": {
    "name": "base64-decode-string",
@@ -831,7 +836,7 @@
   "commandp": {
    "name": "commandp",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/callint.rs:708"
+   "registered_at": "crates/romacs-vm/src/prims/callint.rs:692"
   },
   "compare-strings": {
    "name": "compare-strings",
@@ -950,6 +955,11 @@
    "implementation": "vm2",
    "variant": "Primitive::CurrentGlobalMap",
    "registered_at": "crates/romacs-vm/src/lib.rs:725"
+  },
+  "current-idle-time": {
+   "name": "current-idle-time",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:302"
   },
   "current-indentation": {
    "name": "current-indentation",
@@ -1506,7 +1516,7 @@
   "find-file-name-handler": {
    "name": "find-file-name-handler",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:426"
+   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:415"
   },
   "find-operation-coding-system": {
    "name": "find-operation-coding-system",
@@ -1781,6 +1791,11 @@
    "variant": "Primitive::GetCharProperty",
    "registered_at": "crates/romacs-vm/src/lib.rs:596"
   },
+  "get-char-property-and-overlay": {
+   "name": "get-char-property-and-overlay",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/text_properties.rs:126"
+  },
   "get-file-buffer": {
    "name": "get-file-buffer",
    "implementation": "vm2",
@@ -1794,7 +1809,7 @@
   "get-pos-property": {
    "name": "get-pos-property",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/text_properties.rs:126"
+   "registered_at": "crates/romacs-vm/src/prims/text_properties.rs:131"
   },
   "get-process": {
    "name": "get-process",
@@ -1947,7 +1962,7 @@
   "input-pending-p": {
    "name": "input-pending-p",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:302"
+   "registered_at": "crates/romacs-vm/src/prims/keyboard.rs:309"
   },
   "insert": {
    "name": "insert",
@@ -1977,7 +1992,7 @@
   "insert-file-contents": {
    "name": "insert-file-contents",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:263"
+   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:252"
   },
   "insert-file-contents-literally": {
    "name": "insert-file-contents-literally",
@@ -2287,7 +2302,7 @@
   "locate-file-internal": {
    "name": "locate-file-internal",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:623"
+   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:612"
   },
   "locate-library": {
    "name": "locate-library",
@@ -2781,7 +2796,7 @@
   "next-single-property-change": {
    "name": "next-single-property-change",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/text_properties.rs:146"
+   "registered_at": "crates/romacs-vm/src/prims/text_properties.rs:151"
   },
   "next-window": {
    "name": "next-window",
@@ -3005,12 +3020,12 @@
   "previous-property-change": {
    "name": "previous-property-change",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/text_properties.rs:151"
+   "registered_at": "crates/romacs-vm/src/prims/text_properties.rs:156"
   },
   "previous-single-property-change": {
    "name": "previous-single-property-change",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/text_properties.rs:159"
+   "registered_at": "crates/romacs-vm/src/prims/text_properties.rs:164"
   },
   "prin1": {
    "name": "prin1",
@@ -3168,7 +3183,7 @@
   "put-text-property": {
    "name": "put-text-property",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/text_properties.rs:132"
+   "registered_at": "crates/romacs-vm/src/prims/text_properties.rs:137"
   },
   "put-unicode-property-internal": {
    "name": "put-unicode-property-internal",
@@ -3685,7 +3700,7 @@
   "romacs--write-region-body": {
    "name": "romacs--write-region-body",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:511"
+   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:500"
   },
   "romacs-find-buffer-visiting": {
    "name": "romacs-find-buffer-visiting",
@@ -5043,7 +5058,7 @@
   "write-region": {
    "name": "write-region",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:442"
+   "registered_at": "crates/romacs-vm/src/prims/fileio.rs:431"
   },
   "yank-handle-category-property": {
    "name": "yank-handle-category-property",
