@@ -214,13 +214,15 @@ fn effects_refuse_and_fail() {
     let dir = scratch("effects");
     let out = dir.join("out");
     let file = write(&dir.join("effects.el"), &format!(
-        "(setq w (condition-case e (write-region \"x\" nil {out}) (file-error (car e))))\n(setq p (condition-case e (process-lines \"true\") (error e)))\n", out = lisp(&out)));
+        "(setq w (condition-case e (write-region \"x\" nil {out}) (file-error (car e))))\n(setq p (condition-case e (process-lines \"true\") (error e)))\n(setq j (condition-case e (romacs--process-start '(\"true\") \"\" \"/\" 5) (error e)))\n", out = lisp(&out)));
     let (mut vm, trace) = build(&[file]);
     assert!(!out.exists());
-    assert_eq!(eval(&mut vm, "(list (and w t) (and p t))"), "(t t)");
+    // An asynchronous job refuses as it is submitted, not on its worker.
+    assert_eq!(eval(&mut vm, "(list (and w t) (and p t) (consp j))"), "(t t t)");
     let refused: Vec<_> = items(&trace, "refusals", "effect").iter().map(|r| (r["what"].as_str().unwrap().to_owned(), r["site"]["line"].as_u64().unwrap())).collect();
     assert!(refused.iter().any(|(what, line)| what.starts_with("write ") && *line == 1), "{refused:?}");
     assert!(refused.iter().any(|(what, line)| what == "run true" && *line == 2), "{refused:?}");
+    assert!(refused.iter().any(|(what, line)| what == "run true" && *line == 3), "{refused:?}");
 }
 
 #[test]
@@ -250,4 +252,44 @@ fn confinement_fails_and_lists_a_read_outside_the_roots() {
     assert_eq!(eval(&mut vm, "r"), "failed");
     let confined: Vec<_> = items(&trace, "refusals", "confined").iter().map(|r| r["path"].as_str().unwrap().to_owned()).collect();
     assert_eq!(confined, [outside.to_string_lossy()], "{trace}");
+}
+
+#[test]
+fn an_input_serves_the_bytes_its_record_describes() {
+    let dir = scratch("captured");
+    let path = write(&dir.join("data.txt"), "first\n");
+    host::enter_build(PINNED);
+    let mut input = host::open_input(&path, 0).unwrap();
+    // Rewritten in place after the open: what is read is what was recorded.
+    std::fs::write(&path, "second content\n").unwrap();
+    let head = input.read_range(0, 3).unwrap();
+    let rest = input.read_range(3, 100).unwrap();
+    let trace = host::leave_build().unwrap();
+    assert_eq!([head, rest].concat(), b"first\n");
+    let reads = items(&trace, "records", "file-read");
+    assert_eq!(reads.len(), 1, "{trace}");
+    assert_eq!(reads[0]["result"], json!({"len": 6, "sha256": "b640e840b19d378660b32fb51ae18d67dccb4a8596a29e7bd72c1b2ae5928f41"}), "{trace}");
+}
+
+#[test]
+fn records_keep_names_that_are_not_utf8_distinct() {
+    use std::os::unix::ffi::OsStrExt;
+    let dir = scratch("bytes");
+    let names = [b"n\xff".as_slice(), b"n\xfe".as_slice()];
+    for name in names {
+        write(&dir.join(std::ffi::OsStr::from_bytes(name)), "");
+    }
+    host::enter_build(PINNED);
+    let listed: Vec<Vec<u8>> = host::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name().as_bytes().to_vec()).collect();
+    host::probe(host::Probe::Exists, dir.join(std::ffi::OsStr::from_bytes(names[0])));
+    let trace = host::leave_build().unwrap();
+    let list = items(&trace, "records", "dir-list");
+    let recorded: Vec<Json> = serde_json::from_value(list[0]["names"].clone()).unwrap();
+    assert_eq!(recorded, listed.iter().map(|name| host::encoded(name)).collect::<Vec<_>>());
+    assert_ne!(recorded[0], recorded[1]);
+    assert_eq!(recorded.iter().filter(|n| **n == json!({"hex": "6eff"})).count(), 1, "{recorded:?}");
+    let probe = items(&trace, "records", "probe");
+    let mut path = dir.as_os_str().as_bytes().to_vec();
+    path.extend(b"/n\xff");
+    assert_eq!(probe[0]["path"], host::encoded(&path), "{probe:?}");
 }

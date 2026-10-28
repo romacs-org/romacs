@@ -251,7 +251,7 @@ pub(crate) fn note_confined() {
 /// A read of PATH that failed with ERROR, listed when confinement refused it.
 fn confined(path: &Path, error: &io::Error) {
     if error.raw_os_error() == Some(libc::EACCES) && CONFINED.with(Cell::get) {
-        refuse("confined", json!({"path": bytes(path)}));
+        refuse("confined", json!({"path": path_json(path)}));
     }
 }
 
@@ -298,8 +298,22 @@ fn effect(what: impl FnOnce() -> String) -> io::Result<()> {
     Err(io::Error::from_raw_os_error(libc::EPERM))
 }
 
+/// PATH as display text, for refusal messages.
 fn bytes(path: &Path) -> String {
     String::from_utf8_lossy(path.as_os_str().as_bytes()).into_owned()
+}
+
+/// DATA as a record holds it: a string when it is UTF-8, else
+/// `{"hex": ...}`, so that distinct host byte strings stay distinct.
+pub fn encoded(data: &[u8]) -> Json {
+    match std::str::from_utf8(data) {
+        Ok(text) => json!(text),
+        Err(_) => json!({"hex": data.iter().map(|b| format!("{b:02x}")).collect::<String>()}),
+    }
+}
+
+fn path_json(path: &Path) -> Json {
+    encoded(path.as_os_str().as_bytes())
 }
 
 fn errno(error: &io::Error) -> Json {
@@ -320,11 +334,11 @@ fn file_read(path: &Path, result: &io::Result<impl AsRef<[u8]>>) {
             errno(e)
         }
     };
-    record("file-read", json!({"path": bytes(path), "result": result}));
+    record("file-read", json!({"path": path_json(path), "result": result}));
 }
 
 fn probed(kind: &str, path: &Path, result: Json) {
-    record("probe", json!({"probe": kind, "path": bytes(path), "result": result}));
+    record("probe", json!({"probe": kind, "path": path_json(path), "result": result}));
 }
 
 /// The facts of a stat that Lisp can observe.
@@ -353,8 +367,7 @@ fn env_read(form: &str, name: &[u8], value: Option<&OsString>) {
     let shown = String::from_utf8_lossy(name);
     match class(Fact::Env(name), None) {
         Class::P => p_read(Fact::Env(name), format!("env {shown} ({form})")),
-        _ => record("env", json!({"form": form, "name": shown,
-                                  "value": value.map(|v| String::from_utf8_lossy(v.as_bytes()).into_owned())})),
+        _ => record("env", json!({"form": form, "name": encoded(name), "value": value.map(|v| encoded(v.as_bytes()))})),
     }
 }
 
@@ -450,27 +463,54 @@ pub fn file_metadata(file: &File) -> io::Result<Metadata> {
 /// A file opened for reading. Its reads and queries go through this module,
 /// so a recorder sees the bytes a caller consumes and each error; the
 /// descriptor never leaves it. In build mode it keeps its path, and opening
-/// records the whole file's content.
-pub struct Input(File, Option<PathBuf>);
+/// a regular file reads its whole content from the descriptor once: that is
+/// what the trace records and what every later read is served from.
+pub struct Input(File, Option<PathBuf>, Option<Captured>);
+
+/// A regular file's content as opening read it, or the errno that read
+/// failed with, and the read position.
+struct Captured {
+    content: Result<Vec<u8>, i32>,
+    at: usize,
+}
+
+impl Captured {
+    /// At most LIMIT bytes from AT, moving AT past them.
+    fn take(&mut self, limit: usize) -> io::Result<&[u8]> {
+        let content = self.content.as_deref().map_err(|&errno| io::Error::from_raw_os_error(errno))?;
+        let from = self.at.min(content.len());
+        self.at = from + limit.min(content.len() - from);
+        Ok(&content[from..self.at])
+    }
+}
 
 /// open(2) of PATH for reading, with FLAGS (`O_NONBLOCK`, `O_NOFOLLOW` …).
 pub fn open_input(path: impl AsRef<Path>, flags: i32) -> io::Result<Input> {
     use std::os::unix::fs::OpenOptionsExt;
     let result = OpenOptions::new().read(true).custom_flags(flags).open(&path);
     if !building() {
-        return result.map(|file| Input(file, None));
+        return result.map(|file| Input(file, None, None));
     }
     let path = path.as_ref();
-    match &result {
+    match result {
         // Only a regular file's content is a fact; a FIFO's read would block.
-        Ok(file) if file.metadata().is_ok_and(|m| !m.is_file()) => probed("open", path, json!("special")),
-        Ok(_) => file_read(path, &std::fs::read(path)),
+        Ok(file) if file.metadata().is_ok_and(|m| !m.is_file()) => {
+            probed("open", path, json!("special"));
+            Ok(Input(file, Some(path.to_owned()), None))
+        }
+        Ok(file) => {
+            let mut content = Vec::new();
+            let read = io::Read::read_to_end(&mut &file, &mut content).map(|_| content);
+            file_read(path, &read);
+            let content = read.map_err(|e| e.raw_os_error().unwrap_or(libc::EIO));
+            Ok(Input(file, Some(path.to_owned()), Some(Captured { content, at: 0 })))
+        }
         Err(e) => {
-            confined(path, e);
-            record("file-read", json!({"path": bytes(path), "result": errno(e)}));
+            confined(path, &e);
+            record("file-read", json!({"path": path_json(path), "result": errno(&e)}));
+            Err(e)
         }
     }
-    result.map(|file| Input(file, Some(path.to_owned())))
 }
 
 /// The kernel's random source, `/dev/urandom`.
@@ -478,7 +518,7 @@ pub fn random_source() -> io::Result<Input> {
     if building() {
         p_read(Fact::Seed, "random source".into());
     }
-    File::open("/dev/urandom").map(|file| Input(file, None))
+    File::open("/dev/urandom").map(|file| Input(file, None, None))
 }
 
 impl Input {
@@ -495,6 +535,10 @@ impl Input {
     /// end. An error from either discards what was read.
     pub fn read_range(&mut self, offset: u64, limit: u64) -> io::Result<Vec<u8>> {
         use std::io::{Read, Seek, SeekFrom};
+        if let Some(captured) = &mut self.2 {
+            captured.at = usize::try_from(offset).unwrap_or(usize::MAX);
+            return captured.take(usize::try_from(limit).unwrap_or(usize::MAX)).map(<[u8]>::to_vec);
+        }
         self.0.seek(SeekFrom::Start(offset))?;
         let mut bytes = Vec::new();
         (&mut self.0).take(limit).read_to_end(&mut bytes)?;
@@ -503,11 +547,20 @@ impl Input {
 
     /// One read into BUFFER: the count, 0 at the end.
     pub fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
-        io::Read::read(&mut self.0, buffer)
+        let Some(captured) = &mut self.2 else { return io::Read::read(&mut self.0, buffer) };
+        let bytes = captured.take(buffer.len())?;
+        buffer[..bytes.len()].copy_from_slice(bytes);
+        Ok(bytes.len())
     }
 
     pub fn read_exact(&mut self, buffer: &mut [u8]) -> io::Result<()> {
-        io::Read::read_exact(&mut self.0, buffer)
+        let Some(captured) = &mut self.2 else { return io::Read::read_exact(&mut self.0, buffer) };
+        let bytes = captured.take(buffer.len())?;
+        if bytes.len() < buffer.len() {
+            return Err(io::ErrorKind::UnexpectedEof.into());
+        }
+        buffer.copy_from_slice(bytes);
+        Ok(())
     }
 
     /// Whether the file carries an extended (POSIX or NFSv4) ACL.
@@ -539,7 +592,7 @@ pub fn open_child_input(path: impl AsRef<Path>) -> io::Result<OwnedFd> {
 pub fn read_link(path: impl AsRef<Path>) -> io::Result<PathBuf> {
     let result = std::fs::read_link(&path);
     if building() {
-        let observed = match &result { Ok(target) => json!(bytes(target)), Err(e) => errno(e) };
+        let observed = match &result { Ok(target) => path_json(target), Err(e) => errno(e) };
         probed("readlink", path.as_ref(), observed);
     }
     result
@@ -552,12 +605,12 @@ pub fn read_dir(path: impl AsRef<Path>) -> io::Result<ReadDir> {
     if !building() {
         return result.map(|entries| ReadDir(entries, None));
     }
-    let path = bytes(path.as_ref());
+    let path = path.as_ref();
     match result {
-        Ok(entries) => Ok(ReadDir(entries, Some(Listing { path, names: Vec::new(), end: None }))),
+        Ok(entries) => Ok(ReadDir(entries, Some(Listing { path: path_json(path), names: Vec::new(), end: None }))),
         Err(e) => {
-            confined(Path::new(&path), &e);
-            record("dir-list", json!({"path": path, "open": errno(&e)}));
+            confined(path, &e);
+            record("dir-list", json!({"path": path_json(path), "open": errno(&e)}));
             Err(e)
         }
     }
@@ -568,8 +621,8 @@ pub struct ReadDir(std::fs::ReadDir, Option<Listing>);
 
 /// A listing as far as it was read: `end` is None while it may continue.
 struct Listing {
-    path: String,
-    names: Vec<String>,
+    path: Json,
+    names: Vec<Json>,
     end: Option<Json>,
 }
 
@@ -579,7 +632,7 @@ impl Iterator for ReadDir {
         let next = self.0.next();
         if let Some(listing) = self.1.as_mut().filter(|l| l.end.is_none()) {
             match &next {
-                Some(Ok(entry)) => listing.names.push(String::from_utf8_lossy(entry.file_name().as_bytes()).into_owned()),
+                Some(Ok(entry)) => listing.names.push(encoded(entry.file_name().as_bytes())),
                 Some(Err(e)) => listing.end = Some(errno(e)),
                 None => listing.end = Some(json!("end")),
             }
@@ -626,8 +679,8 @@ impl DirEntry {
 pub fn canonicalize(path: impl AsRef<Path>) -> io::Result<PathBuf> {
     let result = std::fs::canonicalize(&path);
     if building() {
-        let observed = match &result { Ok(p) => json!(bytes(p)), Err(e) => errno(e) };
-        record("canon", json!({"path": bytes(path.as_ref()), "result": observed}));
+        let observed = match &result { Ok(p) => path_json(p), Err(e) => errno(e) };
+        record("canon", json!({"path": path_json(path.as_ref()), "result": observed}));
     }
     result
 }
@@ -697,7 +750,7 @@ fn host_fact(fact: &str, value: Json) {
 pub fn current_exe() -> io::Result<PathBuf> {
     let result = std::env::current_exe();
     if building() {
-        host_fact("exe", match &result { Ok(p) => json!(bytes(p)), Err(e) => errno(e) });
+        host_fact("exe", match &result { Ok(p) => path_json(p), Err(e) => errno(e) });
     }
     result
 }
@@ -754,18 +807,18 @@ fn passwd(buffer: usize, lookup: impl Fn(*mut libc::passwd, *mut libc::c_char, u
 
 pub fn user_by_uid(uid: u32, buffer: usize) -> Result<Passwd, i32> {
     let result = passwd(buffer, |entry, buffer, size, found| unsafe { libc::getpwuid_r(uid, entry, buffer, size, found) });
-    user_db(format!("uid {uid}"), &result);
+    user_db(json!({"uid": uid}), &result);
     result
 }
 
 pub fn user_by_name(name: &CStr, buffer: usize) -> Result<Passwd, i32> {
     let result = passwd(buffer, |entry, buffer, size, found| unsafe { libc::getpwnam_r(name.as_ptr(), entry, buffer, size, found) });
-    user_db(format!("name {}", String::from_utf8_lossy(name.to_bytes())), &result);
+    user_db(json!({"name": encoded(name.to_bytes())}), &result);
     result
 }
 
 /// A user-database answer, recorded as a digest of the fields read.
-fn user_db(key: String, result: &Result<Passwd, i32>) {
+fn user_db(key: Json, result: &Result<Passwd, i32>) {
     if building() {
         let result = match result {
             Ok(p) => json!(sha256(&[p.name.as_deref(), Some(&p.gecos), p.dir.as_deref()].map(|f| f.map(<[u8]>::to_vec)).iter()
@@ -789,8 +842,8 @@ pub fn group_by_gid(gid: u32, buffer: usize) -> Result<Vec<u8>, i32> {
         Ok(unsafe { CStr::from_ptr((*found).gr_name) }.to_bytes().to_vec())
     };
     if building() {
-        let observed = match &result { Ok(name) => json!(String::from_utf8_lossy(name)), Err(status) => json!({"status": status}) };
-        record("user-db", json!({"key": format!("gid {gid}"), "result": observed}));
+        let observed = match &result { Ok(name) => encoded(name), Err(status) => json!({"status": status}) };
+        record("user-db", json!({"key": {"gid": gid}, "result": observed}));
     }
     result
 }
