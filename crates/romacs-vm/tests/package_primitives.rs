@@ -4,7 +4,8 @@
 //! special forms' function cells, print-gensym as gnosis's serializer
 //! binds it, `random' seeded as GNU seeds glibc's generator,
 //! overlay-properties, byte-to-string, the base64 region coders,
-//! command-modes, local-minor-modes and replace-region-contents.
+//! command-modes, local-minor-modes, replace-region-contents and
+//! insert-before-markers into a unibyte buffer.
 use romacs_vm::Vm;
 
 /// One expression per line.
@@ -66,6 +67,9 @@ const CASES: &str = r###"
 (with-temp-buffer (set-buffer-multibyte nil) (buffer-enable-undo) (insert "abc") (undo-boundary) (goto-char 3) (list (replace-region-contents 1 4 "XYZ") (buffer-string) (point) (multibyte-string-p (buffer-string)) buffer-undo-list (save-excursion (goto-char 4) (replace-region-contents 2 4 "MNO" 0) (point)) (buffer-string) (point) (save-restriction (narrow-to-region 2 5) (replace-region-contents 3 5 (string-to-unibyte "\377") 0) (list (point-min) (point-max))) (append (buffer-string) nil) (point-max)))
 (with-temp-buffer (insert "ab") (goto-char 1) (re-search-forward "b") (list (replace-region-contents 2 2 "X" 0 nil t) (list (match-beginning 0) (match-end 0)) (progn (goto-char 1) (re-search-forward "\\(a\\)\\(X\\)\\(b\\)") (replace-region-contents 2 3 "YZ" 0 nil t) (list (match-beginning 0) (match-end 0) (match-beginning 2) (match-end 2) (match-beginning 3) (match-end 3))) (progn (goto-char 1) (re-search-forward "\\(a\\)\\(Y\\)") (replace-region-contents 3 3 "W" 0 nil t) (list (match-beginning 0) (match-end 0) (match-beginning 1) (match-end 1) (match-beginning 2) (match-end 2))) (buffer-string)))
 (progn (fset 'ignore (lambda (&rest _) nil)) (fset 'oclosure--fix-type (lambda (_ f) f)) (let* ((make (lambda () (oclosure--fix-type (ignore) (lambda () (interactive "p" a-mode) 1)))) (f (funcall make)) (g (funcall make))) (list (eq (aref f 5) (aref g 5)) (progn (aset (aref f 5) 1 '(z-mode)) (command-modes f)) (command-modes g) (aref g 5) (progn (aset (aref f 5) 0 "P") (interactive-form g)))))
+(with-temp-buffer (set-buffer-multibyte nil) (buffer-enable-undo) (insert "abc") (undo-boundary) (goto-char 2) (list (save-excursion (insert-before-markers "XY" ?Z) (point)) (point) (buffer-string) buffer-undo-list (multibyte-string-p (buffer-string)) (progn (goto-char (point-max)) (insert-before-markers "e" (string-to-unibyte "\377")) (point)) (append (buffer-string) nil) buffer-undo-list))
+(with-temp-buffer (set-buffer-multibyte nil) (insert "abcdef") (narrow-to-region 2 4) (goto-char 2) (list (save-restriction (insert-before-markers "q") (list (point-min) (point-max) (point))) (point-min) (point-max) (point) (progn (goto-char (point-max)) (save-restriction (insert-before-markers "r")) (list (point-min) (point-max) (point))) (progn (widen) (buffer-string))))
+(with-temp-buffer (set-buffer-multibyte nil) (insert "abc") (goto-char 2) (list (insert-before-markers-and-inherit "X") (point) (buffer-string) (progn (goto-char 1) (insert-before-markers) (point)) (buffer-modified-tick)))
 "###;
 
 /// Cases whose change hooks run Lisp, which needs the Lisp prelude.
