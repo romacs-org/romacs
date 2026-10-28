@@ -157,6 +157,18 @@
 (load "emacs-lisp/rmc.el" nil t t)
 (load "leim/leim-list.el" nil t t)
 
+;; startup.el normal-top-level (startup.el:585-592), before command-line:
+;; the per-user directory, which `locate-user-emacs-file' and the delayed
+;; standard values below build on.  A GUI session then names its own
+;; (rlisp/romacs-gui-loadup.el).
+(setq startup--xdg-config-home-emacs
+      (let ((xdg-config-home (getenv-internal "XDG_CONFIG_HOME")))
+        (if xdg-config-home
+            (concat xdg-config-home "/emacs/")
+          startup--xdg-config-default)))
+(setq user-emacs-directory
+      (startup--xdg-or-homedot startup--xdg-config-home-emacs nil))
+
 ;; startup.el command-line (startup.el:1479): variables whose standard value
 ;; depends on the runtime (user-mail-address and friends) get it once the
 ;; preloaded files are in.  Romacs does not run command-line in this
