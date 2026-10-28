@@ -40,5 +40,5 @@
   "(let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (list (equal (window-list) (list a b)) (equal (window-list nil nil b) (list b a)) (equal (window-list nil t b) (list b (minibuffer-window) a))))",
   "(let* ((a (selected-window)) (h (window-pixel-height a)) (half (/ h 2)) (b (progn (set-window-new-pixel a (- h half)) (split-window-internal a half nil 0.5))) (p (window-parent b))) (condition-case e (window-list nil nil p) (error (list (car e) (car (cdr e)) (eq (car (cdr (cdr e))) p)))))"
  ],
- "rust": "src/prims/frame.rs:18"
+ "rust": "src/prims/frame.rs:70"
 }
