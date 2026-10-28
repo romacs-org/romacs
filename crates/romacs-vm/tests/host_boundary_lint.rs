@@ -1,9 +1,12 @@
-//! Host boundary lint, rules 1 and 2 of the world-snapshot design (§6.1).
+//! Host boundary lint, rules 1, 2 and 4 of the world-snapshot design (§6.1).
 //!
 //! Rule 1: outside `crates/romacs-vm/src/host.rs`, no source in the runner's
 //! dependency closure calls a host query or effect API directly. Rule 2: only
 //! the environment owners name the environment slots, and only the per-buffer
-//! accessor looks up `default-directory`'s storage.
+//! accessor looks up `default-directory`'s storage. Rule 4: each site that
+//! can reach a saved value of the VM's binding stack (`vm.dynamic`) is
+//! listed, so only specbind, unbind and the saved-binding accessors, which
+//! check the fence (F2), read or write one.
 //!
 //! The scan is over the tokens of the compiled module tree of each crate:
 //! comments are removed, string contents are hidden from rule 1, whitespace
@@ -160,6 +163,8 @@ const APIS: &[Api] = &[
     slot("slot:initial-environment", &["\"initial-environment\""], ENVIRONMENT_OWNERS),
     slot("slot:exec-path", &["\"exec-path\""], ENVIRONMENT_OWNERS),
     slot("slot:default-directory", &["lookup(\"default-directory\")"], BUFFER_ACCESSOR),
+    api!("dynamic:saved", ".dynamic[", ".dynamic.iter*", ".dynamic.first", ".dynamic.last", ".dynamic.get*", ".dynamic.pop",
+         ".dynamic.push", "self.dynamic{", "vm.dynamic{"),
 ];
 
 /// The import forms that would give a forbidden item a second name.

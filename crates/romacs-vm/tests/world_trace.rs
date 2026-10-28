@@ -122,7 +122,7 @@ fn the_build_time_is_baked_at_its_one_site() {
 #[test]
 fn keyed_environment_reads_record_form_and_value() {
     let dir = scratch("env");
-    let file = write(&dir.join("env.el"), "(getenv-internal \"HOME\")\n(getenv-internal \"ROMACS_WORLD_TRACE_ABSENT\")\n(getenv-internal \"HOME\" '(\"HOME=/elsewhere\"))\n(getenv-internal \"HOME\" initial-environment)\n(expand-file-name \"~\")\n(user-login-name)\n");
+    let file = write(&dir.join("env.el"), "(getenv-internal \"HOME\")\n(getenv-internal \"ROMACS_WORLD_TRACE_ABSENT\")\n(getenv-internal \"HOME\" '(\"HOME=/elsewhere\"))\n(getenv-internal \"HOME\" initial-environment)\n(let ((default-directory \"/\")) (expand-file-name \"~\"))\n(user-login-name)\n");
     let (_, trace) = build(&[file]);
     let home = std::env::var("HOME").unwrap();
     let env: Vec<_> = items(&trace, "records", "env").iter()
@@ -139,7 +139,9 @@ fn keyed_environment_reads_record_form_and_value() {
         assert!(env.contains(&(form.into(), name.into(), value.clone(), line)), "{form} {name} {line:?}: {env:?}");
     }
     assert!(env.iter().any(|(form, name, _, _)| form == "initial" && name == "LOGNAME"), "UserIdentity: {env:?}");
-    assert!(trace["refusals"].as_array().unwrap().is_empty(), "{trace}");
+    // Only evaluating the fenced `initial-environment' as an argument refuses.
+    let refused: Vec<_> = trace["refusals"].as_array().unwrap().iter().map(|r| (r["kind"].as_str().unwrap(), r["symbol"].as_str(), r["site"]["line"].as_u64())).collect();
+    assert_eq!(refused, [("fence", Some("initial-environment"), Some(4))], "{trace}");
 }
 
 #[test]

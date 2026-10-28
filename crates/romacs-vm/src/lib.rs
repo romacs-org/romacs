@@ -1165,6 +1165,8 @@ pub struct Vm {
     cell_pairs: HashMap<usize, Value>,
     /// fns.c `random's generator, seeded from entropy as at GNU startup.
     random: random::Random,
+    /// A world build's P fence (`world`); None outside build mode.
+    fence: Option<Box<world::Fence>>,
     /// glibc's localtime_offset: the last mktime result's difference from
     /// its local time, where the next encode-time starts its search.
     mktime_offset: i64,
@@ -1297,6 +1299,7 @@ impl Vm {
             cells: vec![],
             cell_pairs: HashMap::default(),
             random: random::Random::from_entropy(),
+            fence: None,
             mktime_offset: 0,
             tz_rule_dstoff: 0,
             local_zone: LocalZone::Process,

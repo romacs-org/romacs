@@ -134,9 +134,11 @@ impl Vm {
     /// explicit LET_DEFAULT flag. Saved values are already traced by `dynamic`.
     pub(super) fn default_toplevel_binding(&mut self, slot: usize) -> Option<usize> {
         let buffer_forwarded = matches!(self.forwarding(slot), Some(forwarded::Fwd::Buffer(_)));
-        self.dynamic.iter().position(|(bound, _, _, let_default)| {
+        let at = self.dynamic.iter().position(|(bound, _, _, let_default)| {
             *bound == slot && (!buffer_forwarded || *let_default)
-        })
+        })?;
+        self.fence_saved(slot, at);
+        Some(at)
     }
 
     /// GNU eval.c:766: the oldest SPECPDL_LET_LOCAL of exactly this symbol
@@ -147,10 +149,12 @@ impl Vm {
     pub(super) fn local_toplevel_binding(&mut self, slot: usize, buffer: Value) -> Option<usize> {
         let symbol = Value::reference(slot + 1, 7);
         let buffer_forwarded = matches!(self.forwarding(slot), Some(forwarded::Fwd::Buffer(_)));
-        self.backtrace.bindings.iter().filter(|(_, bound)| *bound == symbol).map(|(at, _)| *at).find(|&at| {
+        let at = self.backtrace.bindings.iter().filter(|(_, bound)| *bound == symbol).map(|(at, _)| *at).find(|&at| {
             let (bound, _, owner, let_default) = self.dynamic[at];
             owner == buffer && if buffer_forwarded { bound == slot && !let_default } else { bound != slot }
-        })
+        })?;
+        self.fence_saved(slot, at);
+        Some(at)
     }
 
     fn allocate_local_binding_slot(&mut self) -> usize {
@@ -284,6 +288,11 @@ impl Vm {
             if value == Value::UNBOUND { self.notify_watchers_at(slot, value, "makunbound", Some(Value::NIL))?; }
             else { self.notify_watchers(slot, value, "set")?; }
         }
+        self.assign_variable(slot, value)
+    }
+    /// `set_variable_value` once the watchers have been told.
+    #[inline(always)]
+    pub(super) fn assign_variable(&mut self, slot: usize, value: Value) -> Result<()> {
         let base = self.indirect_variable(slot);
         if let Some(fwd) = self.native_forwarding(base) {
             if value == Value::UNBOUND {
@@ -300,6 +309,24 @@ impl Vm {
         self.slots[local].value = value;
         Ok(())
     }
+    /// GNU `default_value` (data.c:1960) of the variable at SLOT, the end of
+    /// its alias chain: UNBOUND when void.
+    pub(super) fn default_value(&mut self, slot: usize) -> Result<Value> {
+        match self.native_forwarding(slot) {
+            Some(fwd) => self.forwarded_default(fwd),
+            None => Ok(self.slots[slot].value),
+        }
+    }
+    /// GNU `set_default_internal` (data.c:2063) at SLOT, after its checks.
+    pub(super) fn set_default_value(&mut self, slot: usize, value: Value) -> std::result::Result<(), crate::prim::Fault> {
+        match self.native_forwarding(slot) {
+            Some(fwd) => self.set_forwarded_default(slot, fwd, value, forwarded::SetFlag::Set),
+            None => {
+                self.slots[slot].value = value;
+                Ok(())
+            }
+        }
+    }
     pub(super) fn promote_boolean_local(&mut self, slot: usize, explicit: bool) -> Result<()> {
         if self.dynamic.iter().any(|(bound, old, _, _)| *bound == slot && *old != Value::NIL && *old != Value::TRUE) {
             return Err(format!("VM2 localized Boolean default requires nil or t: {}", self.symbol_names[slot]));
@@ -312,6 +339,11 @@ impl Vm {
     }
     pub(super) fn bind_variable(&mut self, slot: usize, value: Value) -> Result<()> {
         if !self.trapped.is_empty() { self.notify_watchers(slot, value, "let")?; }
+        self.bind_unwatched(slot, value)
+    }
+    /// `bind_variable` once the watchers have been told.
+    #[inline(always)]
+    pub(super) fn bind_unwatched(&mut self, slot: usize, value: Value) -> Result<()> {
         let base = self.indirect_variable(slot);
         let local = self.variable_binding_slot(base, false)?;
         if let Some(fwd) = self.native_forwarding(base) && local == base {
@@ -327,6 +359,9 @@ impl Vm {
     }
     pub(super) fn make_local_variable(&mut self, slot: usize) -> Result<()> {
         if self.protected_variable_slot(slot) || self.symbol_names[slot].starts_with(':') { return Err("setting constant".into()); }
+        if self.fenced_variable(slot) {
+            return self.fenced(slot, crate::world::Access::Write, |vm| vm.make_local_variable(slot));
+        }
         if let Some(fwd) = self.forwarding(slot) { return self.make_forwarded_local(slot, fwd); }
         let value = self.variable_value(slot)?;
         let table = if let Some(table) = self.local_table(slot)? { table } else {
@@ -382,6 +417,10 @@ impl Vm {
                 Ok(if p == Set { value } else { symbol })
             }
             MakeLocalVariable => { self.make_local_variable(slot)?; Ok(symbol) }
+            // These read or write the toplevel or saved value, never a let's.
+            MakeVariableBufferLocal | DefvarBoundp | DefvarSetDefault if self.fenced_variable(slot) => {
+                self.fenced(slot, crate::world::Access::Saved, |vm| vm.variable_primitive(p, start, n))
+            }
             SymbolValue => {
                 let value = self.variable_value(slot)?;
                 if value == Value::UNBOUND { Err("unbound variable".into()) } else { Ok(value) }

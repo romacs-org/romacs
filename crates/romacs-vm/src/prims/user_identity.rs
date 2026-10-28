@@ -8,7 +8,7 @@ use crate::user_db::{self, Account};
 fn launch_env(vm: &mut Vm, name: &str) -> Option<Vec<u8>> {
     let slot = vm.slot("initial-environment");
     crate::host::lisp_env(crate::host::EnvList::Initial, name.as_bytes());
-    let mut tail = vm.variable_value(slot).ok()?;
+    let mut tail = vm.unfenced(slot, |vm| vm.variable_value(slot)).ok()?;
     let prefix = format!("{name}=");
     while let Ok((entry, rest)) = vm.cons_pair(tail) {
         if let Some(bytes) = vm.str_view(entry).map(|v| v.bytes().to_vec()) {

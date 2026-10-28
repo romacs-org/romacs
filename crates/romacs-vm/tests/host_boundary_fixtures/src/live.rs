@@ -2,6 +2,8 @@ use std::fs; // expect: std::fs use-host
 
 fn planted(p: &Path, dir: &Path, file: &File) {
     std::fs::write(p, b""); // expect: std::fs
+    let saved = vm.dynamic[0].1; // expect: dynamic:saved
+    for entry in &vm.dynamic {} // expect: dynamic:saved
     File::open(p); // expect: File::open
     std::fs::File::create(p); // expect: File::create
     std::os::unix::fs::symlink(a, b); // expect: std::fs

@@ -1,0 +1,162 @@
+//! The P fence of a world build (DESIGN-M1 §6.2, E5): outside startup, a
+//! read or write of a value restore rebuilds refuses the build, naming the
+//! root and the site; a `let` is exempt, the value it saved is not (F2).
+//! Without build mode the same forms behave exactly as before.
+use romacs_vm::Vm;
+use romacs_vm::host::{self, Pinned};
+use serde_json::Value as Json;
+use std::path::{Path, PathBuf};
+use std::time::UNIX_EPOCH;
+
+const PINNED: Pinned = Pinned { clock: UNIX_EPOCH, pid: 4242, seed: [1, 2, 3, 4] };
+
+/// A fake loadup whose startup sets two delayed variables.
+const BOOTSTRAP: &str = "\
+(defvar custom-delayed-init-variables '(fence-a fence-b))
+(defvar fence-a nil)
+(defvar fence-b nil)
+(unwind-protect
+    (progn (romacs--startup-phase t)
+           (setq fence-a \"/a/\" fence-b 1)
+           (setq startup-saw (list (length process-environment) default-directory (random 3)))
+           (setq custom-delayed-init-variables t))
+  (romacs--startup-phase nil))
+";
+
+fn scratch(name: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("romacs-world-fence-{}-{name}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("rlisp")).unwrap();
+    dir
+}
+
+fn write(path: &Path, text: &str) -> PathBuf {
+    std::fs::write(path, text).unwrap();
+    path.to_owned()
+}
+
+/// Load the fake loadup, then PRELOAD (one case per line), with build mode
+/// on when BUILDING: the VM and the trace.
+fn run(name: &str, preload: &str, building: bool) -> (Vm, Option<Json>) {
+    let dir = scratch(name);
+    let bootstrap = write(&dir.join("rlisp/romacs-loadup-bootstrap.el"), BOOTSTRAP);
+    let preload = write(&dir.join("preload.el"), preload);
+    if building {
+        host::enter_build(PINNED);
+    }
+    let mut vm = Vm::new();
+    vm.world_begin();
+    vm.install_lisp_prelude().expect("prelude");
+    for file in [bootstrap, preload] {
+        vm.load_file(&file).unwrap_or_else(|e| panic!("{}: {e}", file.display()));
+    }
+    (vm, host::leave_build())
+}
+
+/// The fence refusals as (line, root, access, symbol).
+fn fences(trace: &Json) -> Vec<(u64, u64, String, String)> {
+    trace["refusals"].as_array().unwrap().iter().filter(|r| r["kind"] == "fence")
+        .map(|r| (r["site"]["line"].as_u64().unwrap(), r["root"].as_u64().unwrap(),
+                  r["access"].as_str().unwrap().to_owned(), r["symbol"].as_str().unwrap().to_owned()))
+        .collect()
+}
+
+fn lines(trace: &Json) -> Vec<u64> {
+    let mut lines: Vec<u64> = trace["refusals"].as_array().unwrap().iter().map(|r| r["site"]["line"].as_u64().unwrap()).collect();
+    lines.dedup();
+    lines
+}
+
+/// Each line refuses with ROOT, ACCESS and SYMBOL; the trace has no other
+/// refusal.
+fn assert_refused(cases: &[(&str, u64, &str, &str)]) {
+    let preload: String = cases.iter().map(|(form, ..)| format!("{form}\n")).collect();
+    let (_, trace) = run("refused", &preload, true);
+    let trace = trace.unwrap();
+    let found = fences(&trace);
+    for (line, (form, root, access, symbol)) in (1..).zip(cases) {
+        assert!(found.contains(&(line, *root, (*access).into(), (*symbol).into())), "{form}: {found:?}");
+    }
+    assert_eq!(lines(&trace), (1..=cases.len() as u64).collect::<Vec<_>>(), "{trace}");
+}
+
+#[test]
+fn reads_of_fenced_values_refuse_compiled_and_interpreted() {
+    assert_refused(&[
+        ("(defvar x1 (length fence-a))", 3, "read", "fence-a"),
+        ("(symbol-value 'fence-a)", 3, "read", "fence-a"),
+        ("(boundp 'fence-b)", 3, "read", "fence-b"),
+        ("(default-value 'fence-a)", 3, "read", "fence-a"),
+        ("(funcall (eval '(lambda () fence-a) nil))", 3, "read", "fence-a"),
+        ("(eval 'fence-a nil)", 3, "read", "fence-a"),
+        ("(buffer-local-value 'fence-a (current-buffer))", 3, "read", "fence-a"),
+        ("(defvar x2 (length process-environment))", 1, "read", "process-environment"),
+        ("(let ((n 0)) (dolist (e initial-environment) (setq n (1+ n))))", 1, "read", "initial-environment"),
+        ("(expand-file-name \"foo\")", 2, "read", "default-directory"),
+        ("(let ((default-directory default-directory)) nil)", 2, "read", "default-directory"),
+        ("(defvar x3 (random 100))", 5, "read", "random state"),
+    ]);
+}
+
+#[test]
+fn writes_of_fenced_values_refuse() {
+    assert_refused(&[
+        ("(setq fence-a \"/x\")", 3, "write", "fence-a"),
+        ("(set 'fence-a \"/x\")", 3, "write", "fence-a"),
+        ("(makunbound 'fence-b)", 3, "write", "fence-b"),
+        ("(set-default 'fence-a 1)", 3, "write", "fence-a"),
+        ("(make-local-variable 'fence-a)", 3, "write", "fence-a"),
+        ("(setq process-environment nil)", 1, "write", "process-environment"),
+        ("(setq default-directory \"/\")", 2, "write", "default-directory"),
+    ]);
+}
+
+#[test]
+fn the_value_a_let_saved_stays_fenced() {
+    assert_refused(&[
+        ("(let ((fence-a nil)) (default-toplevel-value 'fence-a))", 3, "saved", "fence-a"),
+        ("(let ((fence-a nil)) (set-default-toplevel-value 'fence-a \"/x\"))", 3, "saved", "fence-a"),
+        ("(let ((fence-a nil)) (let ((fence-a 1)) (default-toplevel-value 'fence-a)))", 3, "saved", "fence-a"),
+        ("(let ((fence-a nil)) (defvar fence-a \"a@b\"))", 3, "saved", "fence-a"),
+        ("(let ((default-directory \"/\")) (buffer-local-toplevel-value 'default-directory))", 2, "saved", "default-directory"),
+        ("(let ((default-directory \"/\")) (set-buffer-local-toplevel-value 'default-directory \"/x/\"))", 2, "saved", "default-directory"),
+    ]);
+}
+
+#[test]
+fn lets_buffers_and_startup_pass() {
+    let preload = "\
+(setq p1 (let ((fence-a \"/l/\")) (list fence-a (symbol-value 'fence-a))))
+(setq p2 (let ((fence-a nil)) (setq fence-a 2) fence-a))
+(setq p3 (let ((default-directory \"/\")) (expand-file-name \"x\")))
+(setq p4 (let ((default-directory \"/\")) (let ((b (current-buffer))) (save-current-buffer (set-buffer (get-buffer-create \" other\")) (set-buffer b) (expand-file-name \"y\")))))
+(setq p5 (buffer-name (get-buffer-create \"fence-new\")))
+(setq p6 (getenv-internal \"HOME\"))
+";
+    let (mut vm, trace) = run("pass", preload, true);
+    let trace = trace.unwrap();
+    assert!(trace["refusals"].as_array().unwrap().is_empty(), "{trace}");
+    let shown = vm.eval_source("(list p1 p2 p3 p4 p5 (stringp p6) (length startup-saw))").and_then(|v| v.display()).unwrap();
+    assert_eq!(shown, "((\"/l/\" \"/l/\") 2 \"/x\" \"/y\" \"fence-new\" t 3)");
+}
+
+#[test]
+fn fenced_variables_behave_as_without_the_fence() {
+    let probes = "\
+(setq r1 (list fence-a (symbol-value 'fence-a) (default-value 'fence-a) (boundp 'fence-b)))
+(setq r2 (let ((fence-a 'l)) (list fence-a (default-toplevel-value 'fence-a))))
+(setq r3 (progn (setq fence-b 7) (set-default 'fence-b (1+ fence-b)) fence-b))
+(setq r4 (progn (makunbound 'fence-b) (list (boundp 'fence-b) (default-boundp 'fence-b))))
+(setq r5 (let ((default-directory \"/d/\")) (list default-directory (expand-file-name \"z\"))))
+(setq r6 (list (stringp default-directory) (consp process-environment) (length exec-path)))
+(setq r7 (progn (make-local-variable 'fence-a) (setq fence-a 'local) (list fence-a (default-value 'fence-a) (local-variable-p 'fence-a))))
+";
+    let show = "(list r1 r2 r3 r4 r5 r6 r7 fence-a (default-value 'fence-a))";
+    let (mut off, none) = run("same-off", probes, false);
+    assert!(none.is_none());
+    let (mut on, trace) = run("same-on", probes, true);
+    assert!(!trace.unwrap()["refusals"].as_array().unwrap().is_empty());
+    let off = off.eval_source(show).and_then(|v| v.display()).unwrap();
+    let on = on.eval_source(show).and_then(|v| v.display()).unwrap();
+    assert_eq!(on, off);
+}

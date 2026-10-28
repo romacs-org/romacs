@@ -197,6 +197,11 @@ pub fn begin_recipe() {
     with_build(|b| b.phase = Phase::Recipe);
 }
 
+/// Whether the startup function is running in a build.
+pub(crate) fn in_startup() -> bool {
+    with_build(|b| b.phase == Phase::Startup).unwrap_or(false)
+}
+
 /// `romacs--startup-phase`: enter or leave startup. Only the bootstrap's
 /// single run may switch; any other switch refuses and changes nothing.
 /// True when the phase changed.

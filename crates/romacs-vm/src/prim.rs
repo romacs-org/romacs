@@ -912,11 +912,7 @@ mod leaf {
                 return Ok(v);
             }
             let base = self.vm.indirect_variable(self.symbol_slot(v)?);
-            // GNU default_value, SYMBOL_FORWARDED arm (data.c:1983).
-            if let Some(fwd) = self.vm.native_forwarding(base) {
-                return self.vm.forwarded_default(fwd).map_err(Fault::Error);
-            }
-            let value = self.vm.slots[base].value;
+            let value = self.vm.default_value(base).map_err(Fault::Error)?;
             if value == Value::UNBOUND {
                 Err(Fault::VoidVariable(v))
             } else {
@@ -941,12 +937,7 @@ mod leaf {
             {
                 return Err(Fault::SettingConstant(v));
             }
-            // GNU set_default_internal, SYMBOL_FORWARDED arm (data.c:2085).
-            if let Some(fwd) = self.vm.native_forwarding(slot) {
-                self.vm.set_forwarded_default(slot, fwd, value, crate::forwarded::SetFlag::Set)?;
-                return Ok(value);
-            }
-            self.vm.slots[slot].value = value;
+            self.vm.set_default_value(slot, value)?;
             Ok(value)
         }
         /// GNU `SYMBOL_CONSTANT_P` (lisp.h): nil, t, keywords and the
