@@ -105,7 +105,7 @@ fn file_name_all_completions(cx, file: Value, directory: Value) -> Step {
     let entries = crate::host::read_dir(directory_file).map_err(|e| directory_error(cx, "Opening directory", &path, e))?;
     // Rust omits the dot entries, which GNU sees first on Linux file systems.
     let dots = [".", ".."].map(|name| Ok((std::ffi::OsString::from(name), Some(true))));
-    let entries = entries.map(|entry| entry.map(|e| (e.file_name(), e.file_type().ok().filter(|t| !t.is_symlink()).as_ref().map(std::fs::FileType::is_dir))));
+    let entries = entries.map(|entry| entry.map(|e| (e.file_name(), e.file_type().ok().filter(|t| !std::fs::FileType::is_symlink(t)).as_ref().map(std::fs::FileType::is_dir))));
     let mut result = Value::NIL;
     for entry in dots.into_iter().chain(entries) {
         let (name, directoryp) = entry.map_err(|e| directory_error(cx, "Reading directory", &path, e))?;

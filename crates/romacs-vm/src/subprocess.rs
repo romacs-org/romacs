@@ -438,7 +438,7 @@ pub(crate) fn read(fd: RawFd, buf: &mut [u8]) -> io::Result<usize> {
 /// One nonblocking write: bytes written, 0 when it would block.
 pub(crate) fn write(fd: RawFd, buf: &[u8]) -> io::Result<usize> {
     loop {
-        let n = unsafe { libc::send_or_write(fd, buf) };
+        let n = unsafe { send_or_write(fd, buf) };
         if n >= 0 {
             return Ok(n as usize);
         }
@@ -451,16 +451,13 @@ pub(crate) fn write(fd: RawFd, buf: &[u8]) -> io::Result<usize> {
     }
 }
 
-mod libc {
-    pub use ::libc::*;
-    /// write(2), except that a socket never raises SIGPIPE.
-    pub unsafe fn send_or_write(fd: c_int, buf: &[u8]) -> isize {
-        let n = unsafe { send(fd, buf.as_ptr().cast(), buf.len(), MSG_NOSIGNAL) };
-        if n < 0 && unsafe { *__errno_location() } == ENOTSOCK {
-            return unsafe { ::libc::write(fd, buf.as_ptr().cast(), buf.len()) };
-        }
-        n
+/// write(2), except that a socket never raises SIGPIPE.
+unsafe fn send_or_write(fd: RawFd, buf: &[u8]) -> isize {
+    let n = unsafe { libc::send(fd, buf.as_ptr().cast(), buf.len(), libc::MSG_NOSIGNAL) };
+    if n < 0 && unsafe { *libc::__errno_location() } == libc::ENOTSOCK {
+        return unsafe { libc::write(fd, buf.as_ptr().cast(), buf.len()) };
     }
+    n
 }
 
 /// Poll FDS (descriptor, events) for at most TIMEOUT; the revents of each.

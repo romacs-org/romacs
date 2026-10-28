@@ -25,6 +25,22 @@ fn near_misses(p: &Path, meta: &Metadata) {
     fn types(_: &std::fs::Metadata, _: std::fs::FileType) {}
     use std::os::unix::fs::MetadataExt;
     use std::os::unix::{ffi::OsStrExt, fs::{OpenOptionsExt, PermissionsExt}};
+    use std::io::Write as _;
+    use std::time::{Duration, Instant};
+    use std::path::{Path, PathBuf};
+    use std::process::Stdio;
+    use crate::host::{self, Input};
+    use super::*;
+    meta.file_type().is_symlink();
+    entry.file_type().ok().filter(|t| !std::fs::FileType::is_symlink(t));
+    MyPath::is_file(p);
+    crate::host::kill(pid, 0);
+    host::command("true");
+    let _: libc::time_t = 0;
+    let _ = libc::UTIME_NOW;
+    libc::waitpid(pid, s, 0);
+    type Item = u8;
+    type Out = std::result::Result<Value, Fault>;
 }
 
 #[cfg(test)]

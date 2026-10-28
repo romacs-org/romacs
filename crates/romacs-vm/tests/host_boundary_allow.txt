@@ -1,13 +1,35 @@
 # Host boundary allowlist: PATH:LINE API REASON (host_boundary_lint.rs).
-# LINE or API may be *. Every entry must match a current site.
-crates/romacs-display-protocol/src/frame_time.rs:* * romacs-vm depends on this crate, so it cannot call host.rs; the display event clock, not reached by the batch VM
-crates/romacs-display-protocol/src/input_latency.rs:* * romacs-vm depends on this crate, so it cannot call host.rs; GUI input-latency trace behind ROMACS_INPUT_LATENCY_FILE, not reached by the batch VM
-crates/romacs-display-protocol/src/present_trace.rs:* * romacs-vm depends on this crate, so it cannot call host.rs; GUI present trace behind ROMACS_PRESENT_TRACE, not reached by the batch VM
-crates/romacs-regex-engine/src/dfa.rs:* std::env::var romacs-vm depends on this crate, so it cannot call host.rs; process-wide ROMACS_REGEX_DFA* developer knobs, read once, that select a matcher strategy
-crates/romacs-regex-engine/src/engine.rs:* std::env::var romacs-vm depends on this crate, so it cannot call host.rs; process-wide ROMACS_REGEX_ANCHOR_ALT developer knob, read once, that selects a matcher strategy
-crates/romacs-vm/src/image.rs:* * the code-image store, reached only through the vm2 adapter's --image, --code-image and --cache-store; world builds refuse images (M1)
-crates/romacs-vm/src/bin/romacs-vm-census.rs:* * bin adapter that builds no worlds
-crates/romacs-vm/src/bin/romacs-vm-image.rs:* * bin adapter that builds no worlds
-crates/romacs-vm/src/lib.rs:* slot:process-environment declares the environment specials by name; reads no slot
-crates/romacs-vm/src/lib.rs:* slot:initial-environment declares the environment specials by name; reads no slot
-crates/romacs-vm/src/lib.rs:* slot:exec-path declares the environment specials by name; reads no slot
+# Every entry names one exact site and must match it.
+crates/romacs-display-protocol/src/frame_time.rs:45 Instant::now romacs-vm depends on this crate, so it cannot call host.rs; the display event clock, not reached by the batch VM
+crates/romacs-display-protocol/src/input_latency.rs:246 std::env::var_os romacs-vm depends on this crate, so it cannot call host.rs; GUI input-latency trace behind ROMACS_INPUT_LATENCY_FILE, not reached by the batch VM
+crates/romacs-display-protocol/src/input_latency.rs:408 OpenOptions romacs-vm depends on this crate, so it cannot call host.rs; GUI input-latency trace behind ROMACS_INPUT_LATENCY_FILE, not reached by the batch VM
+crates/romacs-display-protocol/src/input_latency.rs:408 std::fs romacs-vm depends on this crate, so it cannot call host.rs; GUI input-latency trace behind ROMACS_INPUT_LATENCY_FILE, not reached by the batch VM
+crates/romacs-display-protocol/src/present_trace.rs:37 OpenOptions romacs-vm depends on this crate, so it cannot call host.rs; GUI present trace behind ROMACS_PRESENT_TRACE, not reached by the batch VM
+crates/romacs-display-protocol/src/present_trace.rs:37 std::fs romacs-vm depends on this crate, so it cannot call host.rs; GUI present trace behind ROMACS_PRESENT_TRACE, not reached by the batch VM
+crates/romacs-display-protocol/src/present_trace.rs:155 std::env::var_os romacs-vm depends on this crate, so it cannot call host.rs; GUI present trace behind ROMACS_PRESENT_TRACE, not reached by the batch VM
+crates/romacs-display-protocol/src/present_trace.rs:173 OpenOptions romacs-vm depends on this crate, so it cannot call host.rs; GUI present trace behind ROMACS_PRESENT_TRACE, not reached by the batch VM
+crates/romacs-display-protocol/src/present_trace.rs:219 libc::clock romacs-vm depends on this crate, so it cannot call host.rs; GUI present trace behind ROMACS_PRESENT_TRACE, not reached by the batch VM
+crates/romacs-regex-engine/src/dfa.rs:2103 std::env::var romacs-vm depends on this crate, so it cannot call host.rs; process-wide ROMACS_REGEX_DFA* developer knobs, read once, that select a matcher strategy
+crates/romacs-regex-engine/src/dfa.rs:2122 std::env::var romacs-vm depends on this crate, so it cannot call host.rs; process-wide ROMACS_REGEX_DFA* developer knobs, read once, that select a matcher strategy
+crates/romacs-regex-engine/src/dfa.rs:2125 std::env::var romacs-vm depends on this crate, so it cannot call host.rs; process-wide ROMACS_REGEX_DFA* developer knobs, read once, that select a matcher strategy
+crates/romacs-regex-engine/src/dfa.rs:2167 std::env::var romacs-vm depends on this crate, so it cannot call host.rs; process-wide ROMACS_REGEX_DFA* developer knobs, read once, that select a matcher strategy
+crates/romacs-regex-engine/src/engine.rs:8605 std::env::var romacs-vm depends on this crate, so it cannot call host.rs; process-wide ROMACS_REGEX_ANCHOR_ALT developer knob, read once, that selects a matcher strategy
+crates/romacs-vm/src/bin/romacs-vm-census.rs:63 std::fs bin adapter that builds no worlds
+crates/romacs-vm/src/bin/romacs-vm-census.rs:81 std::fs bin adapter that builds no worlds
+crates/romacs-vm/src/bin/romacs-vm-image.rs:14 std::fs bin adapter that builds no worlds
+crates/romacs-vm/src/bin/romacs-vm-image.rs:42 std::fs bin adapter that builds no worlds
+crates/romacs-vm/src/image.rs:65 metadata the code-image store, reached only through the vm2 adapter's --image, --code-image and --cache-store; world builds refuse images (M1)
+crates/romacs-vm/src/image.rs:173 std::fs the code-image store, reached only through the vm2 adapter's --image, --code-image and --cache-store; world builds refuse images (M1)
+crates/romacs-vm/src/image.rs:185 File::open the code-image store, reached only through the vm2 adapter's --image, --code-image and --cache-store; world builds refuse images (M1)
+crates/romacs-vm/src/image.rs:186 metadata the code-image store, reached only through the vm2 adapter's --image, --code-image and --cache-store; world builds refuse images (M1)
+crates/romacs-vm/src/image.rs:367 std::fs the code-image store, reached only through the vm2 adapter's --image, --code-image and --cache-store; world builds refuse images (M1)
+crates/romacs-vm/src/image.rs:372 std::process::id the code-image store, reached only through the vm2 adapter's --image, --code-image and --cache-store; world builds refuse images (M1)
+crates/romacs-vm/src/image.rs:373 OpenOptions the code-image store, reached only through the vm2 adapter's --image, --code-image and --cache-store; world builds refuse images (M1)
+crates/romacs-vm/src/image.rs:373 std::fs the code-image store, reached only through the vm2 adapter's --image, --code-image and --cache-store; world builds refuse images (M1)
+crates/romacs-vm/src/image.rs:383 std::fs the code-image store, reached only through the vm2 adapter's --image, --code-image and --cache-store; world builds refuse images (M1)
+crates/romacs-vm/src/image.rs:386 std::fs the code-image store, reached only through the vm2 adapter's --image, --code-image and --cache-store; world builds refuse images (M1)
+crates/romacs-vm/src/image.rs:392 File::open the code-image store, reached only through the vm2 adapter's --image, --code-image and --cache-store; world builds refuse images (M1)
+crates/romacs-vm/src/image.rs:397 std::fs the code-image store, reached only through the vm2 adapter's --image, --code-image and --cache-store; world builds refuse images (M1)
+crates/romacs-vm/src/lib.rs:1342 slot:exec-path declares the environment specials by name; reads no slot
+crates/romacs-vm/src/lib.rs:1342 slot:initial-environment declares the environment specials by name; reads no slot
+crates/romacs-vm/src/lib.rs:1342 slot:process-environment declares the environment specials by name; reads no slot

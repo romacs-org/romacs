@@ -5,15 +5,22 @@
 //! the environment owners name the environment slots, and only the per-buffer
 //! accessor looks up `default-directory`'s storage.
 //!
-//! The scan is textual over the compiled module tree of each crate: comments
-//! are removed, string contents are hidden from rule 1, and `#[cfg(test)]`
-//! items are skipped, since test code builds no worlds. Every other match
-//! needs an entry in `host_boundary_allow.txt`, one `PATH:LINE API REASON`
-//! per line, where LINE or API may be `*`. An entry that matches nothing
-//! fails, so the list cannot rot. `ROMACS_HOST_LINT_BLESS=1` rewrites the
-//! list for the current tree: kept reasons follow their (path, API), and new
-//! matches are marked `pending`, which fails until it is migrated or given a
-//! reason.
+//! The scan is over the tokens of the compiled module tree of each crate:
+//! comments are removed, string contents are hidden from rule 1, whitespace
+//! does not separate a spelling, and `#[cfg(test)]` items are skipped, since
+//! test code builds no worlds. A forbidden item has one name outside host.rs:
+//! its path. So every `use` tree is flattened and each imported path is
+//! checked as a spelling, no `use` from std, core, alloc or libc may rename
+//! or glob (`use-alias`, `use-glob`), and no type alias may name a type whose
+//! associated functions are forbidden (`type-alias`). Type-qualified calls
+//! are matched in both `Type::f` and `<Type>::f` forms.
+//!
+//! Every match needs an entry in `host_boundary_allow.txt`, one exact
+//! `PATH:LINE API REASON` per line. An entry that matches nothing fails, so
+//! the list cannot rot. `ROMACS_HOST_LINT_BLESS=1` deliberately rewrites the
+//! list for the current tree: a reason follows its site, or an unused entry
+//! with the same path and API, and new matches are marked `pending`, which
+//! fails until it is migrated or given a reason.
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
@@ -35,14 +42,16 @@ const ENVIRONMENT_OWNERS: &[&str] = &[
 ];
 const BUFFER_ACCESSOR: &[&str] = &["crates/romacs-vm/src/forwarded.rs"];
 
-/// One forbidden spelling. A needle that starts with an identifier character
-/// must not continue an identifier on its left, nor follow `host::`; unless
-/// `prefix`, one that ends with an identifier character must not continue on
-/// its right. `strings` matches inside string literals (rule 2).
+/// One forbidden API and its spellings. A needle that ends in `*` is a
+/// prefix. A needle that starts with an identifier character must not
+/// continue an identifier on its left, nor, if it is a plain name, follow
+/// `host::`; one that ends
+/// with an identifier character must not continue on its right. A needle
+/// `Type::f` also matches `Type>::f`. `strings` matches inside string
+/// literals (rule 2).
 struct Api {
     name: &'static str,
-    needle: &'static str,
-    prefix: bool,
+    needles: &'static [&'static str],
     unless_after: &'static str,
     unless_before: &'static str,
     unless_pure: bool,
@@ -50,71 +59,116 @@ struct Api {
     owners: &'static [&'static str],
 }
 
-const fn api(name: &'static str, needle: &'static str) -> Api {
-    Api { name, needle, prefix: false, unless_after: "", unless_before: "", unless_pure: false, strings: false, owners: &[] }
+const fn apis(name: &'static str, needles: &'static [&'static str]) -> Api {
+    Api { name, needles, unless_after: "", unless_before: "", unless_pure: false, strings: false, owners: &[] }
+}
+macro_rules! api {
+    ($name:literal) => { apis($name, &[$name]) };
+    ($name:literal, $($needle:literal),+) => { apis($name, &[$($needle),+]) };
+}
+/// A Path method: called on a value, or named through `Path`/`PathBuf`.
+/// Metadata and FileType answer `is_file`/`is_dir`/`is_symlink` from data
+/// already read; spelled through `file_type()`, they are not a path probe.
+macro_rules! path_method {
+    ($name:literal, $method:literal) => {
+        Api {
+            unless_after: "file_type()",
+            ..apis($name, &[concat!(".", $method, "("), concat!("Path::", $method), concat!("PathBuf::", $method)])
+        }
+    };
 }
 /// A `fs::` path naming only data types and extension traits queries nothing;
 /// `File::open` and `File::create` are their own APIs.
-const fn fs_path(needle: &'static str) -> Api {
-    Api { unless_pure: true, ..api("std::fs", needle) }
+const fn fs_path(needle: &'static [&'static str]) -> Api {
+    Api { unless_pure: true, ..apis("std::fs", needle) }
 }
 const PURE_FS: &[&str] = &["File", "Metadata", "Permissions", "FileType", "FileTimes", "DirEntry", "ReadDir"];
-const fn libc_prefix(name: &'static str, needle: &'static str) -> Api {
-    Api { prefix: true, ..api(name, needle) }
-}
-/// Metadata and FileType answer `is_file`/`is_dir` from data already read;
-/// spelled through `file_type()`, they are not a path probe.
-const fn path_probe(name: &'static str, needle: &'static str) -> Api {
-    Api { unless_after: "file_type()", ..api(name, needle) }
-}
-const fn slot(name: &'static str, needle: &'static str, owners: &'static [&'static str]) -> Api {
-    Api { strings: true, owners, ..api(name, needle) }
+const fn slot(name: &'static str, needle: &'static [&'static str], owners: &'static [&'static str]) -> Api {
+    Api { strings: true, owners, ..apis(name, needle) }
 }
 
 const APIS: &[Api] = &[
-    fs_path("fs::"),
-    Api { unless_before: "::", ..api("std::fs", "std::fs") },
-    api("File::open", "File::open"),
-    api("File::create", "File::create"),
-    api("OpenOptions", "OpenOptions"),
-    api("read_dir", "read_dir"),
-    api("metadata", "metadata("),
-    api("symlink_metadata", "symlink_metadata"),
-    api("canonicalize", ".canonicalize("),
-    path_probe("Path::exists", ".exists()"),
-    path_probe("Path::is_file", ".is_file()"),
-    path_probe("Path::is_dir", ".is_dir()"),
-    api("std::path::absolute", "path::absolute"),
-    api("std::env::var", "env::var"),
-    api("std::env::var_os", "env::var_os"),
-    api("std::env::vars", "env::vars"),
-    api("std::env::vars_os", "env::vars_os"),
-    api("std::env::current_dir", "env::current_dir"),
-    api("std::env::current_exe", "env::current_exe"),
-    api("std::env::temp_dir", "env::temp_dir"),
-    api("std::process::id", "process::id"),
-    api("SystemTime::now", "SystemTime::now"),
-    api("Instant::now", "Instant::now"),
-    api("available_parallelism", "available_parallelism"),
-    libc_prefix("libc::getpw*", "libc::getpw"),
-    libc_prefix("libc::getgr*", "libc::getgr"),
-    api("libc::getpid", "libc::getpid"),
-    api("libc::getppid", "libc::getppid"),
-    api("libc::getuid", "libc::getuid"),
-    api("libc::geteuid", "libc::geteuid"),
-    api("libc::getgid", "libc::getgid"),
-    api("libc::getegid", "libc::getegid"),
-    api("libc::gethostname", "libc::gethostname"),
-    api("libc::uname", "libc::uname"),
-    api("libc::sysconf", "libc::sysconf"),
-    api("libc::sched_getaffinity", "libc::sched_getaffinity"),
-    api("libc::statvfs", "libc::statvfs"),
-    api("libc::clock_gettime", "libc::clock_gettime"),
-    api("libc::getrandom", "libc::getrandom"),
-    slot("slot:process-environment", "\"process-environment\"", ENVIRONMENT_OWNERS),
-    slot("slot:initial-environment", "\"initial-environment\"", ENVIRONMENT_OWNERS),
-    slot("slot:exec-path", "\"exec-path\"", ENVIRONMENT_OWNERS),
-    slot("slot:default-directory", "lookup(\"default-directory\")", BUFFER_ACCESSOR),
+    fs_path(&["fs::"]),
+    Api { unless_before: "::", ..api!("std::fs") },
+    api!("File::open"),
+    api!("File::create"),
+    api!("OpenOptions"),
+    api!("read_dir"),
+    api!("metadata", "metadata("),
+    api!("symlink_metadata"),
+    api!("canonicalize", ".canonicalize(", "Path::canonicalize", "PathBuf::canonicalize"),
+    path_method!("Path::exists", "exists"),
+    path_method!("Path::try_exists", "try_exists"),
+    path_method!("Path::is_file", "is_file"),
+    path_method!("Path::is_dir", "is_dir"),
+    path_method!("Path::is_symlink", "is_symlink"),
+    path_method!("Path::read_link", "read_link"),
+    api!("std::path::absolute", "path::absolute"),
+    api!("std::env::var", "env::var"),
+    api!("std::env::var_os", "env::var_os"),
+    api!("std::env::vars", "env::vars"),
+    api!("std::env::vars_os", "env::vars_os"),
+    api!("std::env::current_dir", "env::current_dir"),
+    api!("std::env::current_exe", "env::current_exe"),
+    api!("std::env::temp_dir", "env::temp_dir"),
+    api!("std::env::set", "env::set_var", "env::remove_var", "env::set_current_dir"),
+    api!("std::process::id", "process::id"),
+    api!("Command::new"),
+    api!("std::net", "TcpStream::connect", "TcpListener::bind", "UdpSocket::bind", "UnixStream::connect",
+         "UnixStream::pair", "UnixListener::bind", "UnixDatagram::bind", "UnixDatagram::unbound",
+         "UnixDatagram::pair", "to_socket_addrs", "ToSocketAddrs"),
+    api!("SystemTime::now"),
+    api!("Instant::now"),
+    api!("available_parallelism"),
+    api!("libc::getpw*"),
+    api!("libc::getgr*"),
+    api!("libc::getpid"),
+    api!("libc::getppid"),
+    api!("libc::getuid"),
+    api!("libc::geteuid"),
+    api!("libc::getgid"),
+    api!("libc::getegid"),
+    api!("libc::gethostname"),
+    api!("libc::uname"),
+    api!("libc::sysconf"),
+    api!("libc::sched_getaffinity"),
+    api!("libc::statvfs"),
+    api!("libc::clock", "libc::clock_gettime", "libc::time", "libc::gettimeofday"),
+    api!("libc::getrandom"),
+    api!("libc::getenv", "libc::getenv", "libc::secure_getenv"),
+    api!("libc::file", "libc::open*", "libc::creat*", "libc::access", "libc::eaccess", "libc::euidaccess",
+         "libc::faccessat*", "libc::chmod", "libc::fchmod*", "libc::chown", "libc::fchown*", "libc::lchown",
+         "libc::rename*", "libc::unlink*", "libc::mkdir*", "libc::rmdir", "libc::link*", "libc::symlink*",
+         "libc::readlink*", "libc::realpath", "libc::stat", "libc::stat64", "libc::statx", "libc::statfs*",
+         "libc::fstat*", "libc::lstat*", "libc::truncate*", "libc::ftruncate*", "libc::utime*", "libc::futime*",
+         "libc::copy_file_range", "libc::sendfile*", "libc::mkstemp*", "libc::mkostemp*", "libc::mkdtemp",
+         "libc::mkfifo*", "libc::mknod*", "libc::memfd_create", "libc::fdopendir", "libc::readdir*",
+         "libc::getcwd", "libc::chdir", "libc::fchdir", "libc::getxattr", "libc::fgetxattr", "libc::lgetxattr",
+         "libc::setxattr", "libc::fsetxattr", "libc::lsetxattr", "libc::listxattr", "libc::flistxattr",
+         "libc::llistxattr", "libc::removexattr", "libc::fremovexattr", "libc::lremovexattr"),
+    api!("libc::process", "libc::kill", "libc::killpg", "libc::tgkill", "libc::fork", "libc::vfork",
+         "libc::exec*", "libc::fexecve", "libc::posix_spawn*", "libc::system", "libc::popen", "libc::clone",
+         "libc::syscall"),
+    api!("libc::descriptor", "libc::pipe*", "libc::eventfd", "libc::posix_openpt", "libc::socketpair"),
+    api!("libc::socket", "libc::socket", "libc::connect", "libc::bind", "libc::listen", "libc::accept*",
+         "libc::getaddrinfo", "libc::gethostbyname*"),
+    slot("slot:process-environment", &["\"process-environment\""], ENVIRONMENT_OWNERS),
+    slot("slot:initial-environment", &["\"initial-environment\""], ENVIRONMENT_OWNERS),
+    slot("slot:exec-path", &["\"exec-path\""], ENVIRONMENT_OWNERS),
+    slot("slot:default-directory", &["lookup(\"default-directory\")"], BUFFER_ACCESSOR),
+];
+
+/// The import forms that would give a forbidden item a second name.
+const USE_ALIAS: &str = "use-alias";
+const USE_GLOB: &str = "use-glob";
+const TYPE_ALIAS: &str = "type-alias";
+const FORMS: &[&str] = &[USE_ALIAS, USE_GLOB, TYPE_ALIAS];
+/// The crates whose items no import may rename or glob.
+const ROOTS: &[&str] = &["std", "core", "alloc", "libc"];
+/// Types with forbidden associated functions, which no type alias may name.
+const TYPES: &[&str] = &[
+    "Path", "PathBuf", "File", "OpenOptions", "DirBuilder", "Instant", "SystemTime", "Command",
+    "TcpStream", "TcpListener", "UdpSocket", "UnixStream", "UnixListener", "UnixDatagram",
 ];
 
 fn ident(b: u8) -> bool {
@@ -452,31 +506,63 @@ fn scan(base: &Path, roots: Vec<PathBuf>) -> Vec<Violation> {
     out
 }
 
-fn violations(rel: &str, v: &Views) -> Vec<Violation> {
+/// One view as its tokens joined without whitespace (a space only between
+/// two words), with each byte's source line.
+struct Compact {
+    text: Vec<u8>,
+    lines: Vec<usize>,
+}
+
+fn compact(view: &[u8], toks: &[(usize, Tok)]) -> Compact {
+    let starts: Vec<usize> = view.iter().enumerate().filter(|&(_, &b)| b == b'\n').map(|(i, _)| i).collect();
+    let mut out = Compact { text: Vec::new(), lines: Vec::new() };
+    let mut word = false;
+    for &(at, tok) in toks {
+        let line = starts.partition_point(|&n| n < at) + 1;
+        let bytes: Vec<u8> = match tok {
+            Tok::Ident(a, b) => view[a..b].to_vec(),
+            Tok::Punct(b) => vec![b],
+            Tok::Str(a, b) => [&b"\""[..], &view[a..b], b"\""].concat(),
+        };
+        let is_word = !matches!(tok, Tok::Punct(_));
+        if word && is_word {
+            out.text.push(b' ');
+            out.lines.push(line);
+        }
+        word = is_word;
+        out.lines.extend(std::iter::repeat_n(line, bytes.len()));
+        out.text.extend(bytes);
+    }
+    out
+}
+
+/// The offsets in TEXT at which API is spelled.
+fn spellings(api: &Api, text: &[u8]) -> Vec<usize> {
     let mut out = Vec::new();
-    for api in APIS.iter().filter(|a| !a.owners.contains(&rel)) {
-        let view = if api.strings { &v.text } else { &v.code };
-        for (n, line) in view.split(|&b| b == b'\n').enumerate() {
-            if matches_line(api, line) {
-                out.push(Violation { path: rel.to_owned(), line: n + 1, api: api.name });
-            }
+    for needle in api.needles {
+        let (stem, prefix) = needle.strip_suffix('*').map_or((*needle, false), |s| (s, true));
+        let qualified = stem.starts_with(|c: char| c.is_ascii_uppercase()).then(|| stem.replacen("::", ">::", 1));
+        for form in std::iter::once(stem.to_owned()).chain(qualified) {
+            let form = form.as_bytes();
+            out.extend((0..text.len()).filter(|&i| text[i..].starts_with(form) && spelled(api, form, prefix, text, i)));
         }
     }
     out
 }
 
-fn matches_line(api: &Api, line: &[u8]) -> bool {
-    let needle = api.needle.as_bytes();
-    (0..line.len()).filter(|&i| line[i..].starts_with(needle)).any(|i| {
-        let before = &line[..i];
-        let end = i + needle.len();
-        let left = !ident(needle[0]) || (!before.last().is_some_and(|&b| ident(b)) && !before.ends_with(b"host::"));
-        let right = api.prefix || !ident(needle[needle.len() - 1]) || !line.get(end).is_some_and(|&b| ident(b));
-        let exempt = (!api.unless_after.is_empty() && before.ends_with(api.unless_after.as_bytes()))
-            || (!api.unless_before.is_empty() && line[end..].starts_with(api.unless_before.as_bytes()))
-            || (api.unless_pure && pure_items(&line[end..]));
-        left && right && !exempt
-    })
+fn spelled(api: &Api, needle: &[u8], prefix: bool, text: &[u8], i: usize) -> bool {
+    let before = &text[..i];
+    let end = i + needle.len();
+    // host.rs's own items (`host::read_dir`, `host::OpenOptions`) share a
+    // plain name with an API; no path reaches an API through it.
+    let host = before.strip_suffix(b"host::").is_some_and(|b| !b.last().is_some_and(|&c| ident(c)));
+    let through_host = host && !needle.windows(2).any(|w| w == b"::");
+    let left = !ident(needle[0]) || (!before.last().is_some_and(|&b| ident(b)) && !through_host);
+    let right = prefix || !ident(needle[needle.len() - 1]) || !text.get(end).is_some_and(|&b| ident(b));
+    let exempt = (!api.unless_after.is_empty() && before.ends_with(api.unless_after.as_bytes()))
+        || (!api.unless_before.is_empty() && text[end..].starts_with(api.unless_before.as_bytes()))
+        || (api.unless_pure && pure_items(&text[end..]));
+    left && right && !exempt
 }
 
 /// Whether REST starts with a pure `fs` item, or a `{…}` group of them.
@@ -493,81 +579,192 @@ fn pure_items(rest: &[u8]) -> bool {
     !names.is_empty() && names.iter().all(|n| PURE_FS.contains(n) || n.ends_with("Ext"))
 }
 
+/// One leaf of a `use` tree: its full path, and how it is bound.
+#[derive(Debug, PartialEq)]
+struct Import {
+    path: Vec<String>,
+    bind: Bind,
+    line: usize,
+}
+
+#[derive(Debug, PartialEq)]
+enum Bind {
+    Name,
+    Alias,
+    Glob,
+}
+
+/// The leaves of every `use` declaration and `extern crate … as` in TOKS.
+fn imports(code: &[u8], toks: &[(usize, Tok)]) -> Vec<Import> {
+    let words: Vec<&str> = toks.iter().map(|t| match t.1 {
+        Tok::Ident(a, b) => std::str::from_utf8(&code[a..b]).unwrap(),
+        _ => "",
+    }).collect();
+    let line = |i: usize| code[..toks[i].0].iter().filter(|&&b| b == b'\n').count() + 1;
+    let mut out = Vec::new();
+    for i in 0..toks.len() {
+        if words[i] == "use" {
+            use_tree(&words, toks, i + 1, &mut Vec::new(), &mut out, &line);
+        } else if words[i] == "extern" && words.get(i + 1) == Some(&"crate") && words.get(i + 3) == Some(&"as") {
+            out.push(Import { path: vec![words[i + 2].to_owned()], bind: Bind::Alias, line: line(i + 2) });
+        }
+    }
+    out
+}
+
+/// Parse the tree at token I under PREFIX into OUT; the index after it.
+fn use_tree(words: &[&str], toks: &[(usize, Tok)], mut i: usize, prefix: &mut Vec<String>, out: &mut Vec<Import>,
+            line: &dyn Fn(usize) -> usize) -> usize {
+    let depth = prefix.len();
+    let punct = |i: usize, c: u8| toks.get(i).is_some_and(|t| t.1 == Tok::Punct(c));
+    let separator = |i: usize| punct(i, b':') && punct(i + 1, b':');
+    if separator(i) { i += 2; }
+    loop {
+        if punct(i, b'*') {
+            out.push(Import { path: prefix.clone(), bind: Bind::Glob, line: line(i) });
+            i += 1;
+            break;
+        }
+        if punct(i, b'{') {
+            i += 1;
+            while !punct(i, b'}') && i < toks.len() {
+                let next = use_tree(words, toks, i, prefix, out, line);
+                i = if next == i { i + 1 } else { next };
+                if punct(i, b',') { i += 1; }
+            }
+            i += 1;
+            break;
+        }
+        let name = words.get(i).copied().unwrap_or("");
+        if name.is_empty() { break; }
+        if separator(i + 1) {
+            prefix.push(name.to_owned());
+            i += 3;
+            continue;
+        }
+        let at = line(i);
+        let mut path = prefix.clone();
+        if name != "self" { path.push(name.to_owned()); }
+        i += 1;
+        let bind = if words.get(i) == Some(&"as") {
+            i += 2;
+            if words[i - 1] == "_" { Bind::Name } else { Bind::Alias }
+        } else { Bind::Name };
+        out.push(Import { path, bind, line: at });
+        break;
+    }
+    prefix.truncate(depth);
+    i
+}
+
+/// The lines of `type NAME = …;` aliases that name one of TYPES.
+fn type_aliases(code: &[u8], toks: &[(usize, Tok)]) -> Vec<usize> {
+    let word = |t: Tok| match t {
+        Tok::Ident(a, b) => std::str::from_utf8(&code[a..b]).unwrap(),
+        _ => "",
+    };
+    let line = |at: usize| code[..at].iter().filter(|&&b| b == b'\n').count() + 1;
+    (0..toks.len()).filter(|&i| word(toks[i].1) == "type" && toks.get(i + 2).is_some_and(|t| t.1 == Tok::Punct(b'=')))
+        .filter(|&i| toks[i..].iter().map(|t| t.1).take_while(|&t| t != Tok::Punct(b';')).any(|t| TYPES.contains(&word(t))))
+        .map(|i| line(toks[i].0)).collect()
+}
+
+fn violations(rel: &str, v: &Views) -> Vec<Violation> {
+    let toks = tokens(&v.code);
+    let (code, text) = (compact(&v.code, &toks), compact(&v.text, &toks));
+    let mut out = Vec::new();
+    for api in APIS.iter().filter(|a| !a.owners.contains(&rel)) {
+        let view = if api.strings { &text } else { &code };
+        out.extend(spellings(api, &view.text).into_iter().map(|i| Violation { path: rel.to_owned(), line: view.lines[i], api: api.name }));
+    }
+    for import in imports(&v.code, &toks) {
+        let root = import.path.first().map(String::as_str).unwrap_or("");
+        let reaches = ROOTS.contains(&root) || import.path.iter().any(|s| s == "libc");
+        let form = match import.bind {
+            Bind::Alias if reaches => Some(USE_ALIAS),
+            Bind::Glob if reaches => Some(USE_GLOB),
+            _ => None,
+        };
+        out.extend(form.map(|api| Violation { path: rel.to_owned(), line: import.line, api }));
+        let spelling = import.path.join("::").into_bytes();
+        for api in APIS.iter().filter(|a| !a.strings) {
+            if !spellings(api, &spelling).is_empty() {
+                out.push(Violation { path: rel.to_owned(), line: import.line, api: api.name });
+            }
+        }
+    }
+    out.extend(type_aliases(&v.code, &toks).into_iter().map(|line| Violation { path: rel.to_owned(), line, api: TYPE_ALIAS }));
+    out
+}
+
+fn known(api: &str) -> bool {
+    APIS.iter().any(|a| a.name == api) || FORMS.contains(&api)
+}
+
 struct Entry {
     path: String,
-    line: Option<usize>,
-    api: Option<String>,
+    line: usize,
+    api: String,
     reason: String,
 }
 
 impl Entry {
     fn covers(&self, v: &Violation) -> bool {
-        self.path == v.path && self.line.is_none_or(|l| l == v.line) && self.api.as_deref().is_none_or(|a| a == v.api)
-    }
-    fn exact(&self) -> bool {
-        self.line.is_some() && self.api.is_some()
+        self.path == v.path && self.line == v.line && self.api == v.api
     }
 }
 
+/// The entries of TEXT, each with a reason.
 fn parse_allow(text: &str) -> Vec<Entry> {
+    let entries = parse_entries(text);
+    for e in &entries {
+        assert!(!e.reason.is_empty() && e.reason != "pending", "no reason: {}", render(e));
+    }
+    entries
+}
+
+fn parse_entries(text: &str) -> Vec<Entry> {
     text.lines().filter(|l| !l.trim().is_empty() && !l.starts_with('#')).map(|l| {
         let mut words = l.split_whitespace();
         let (site, api) = (words.next().unwrap(), words.next().unwrap_or_else(|| panic!("no API: {l}")));
         let reason = words.collect::<Vec<_>>().join(" ");
         let (path, line) = site.rsplit_once(':').unwrap_or_else(|| panic!("no line: {l}"));
-        assert!(!reason.is_empty() && reason != "pending", "no reason: {l}");
-        assert!(api == "*" || APIS.iter().any(|a| a.name == api), "unknown API: {l}");
+        assert!(known(api), "unknown API: {l}");
         Entry {
             path: path.to_owned(),
-            line: (line != "*").then(|| line.parse().unwrap_or_else(|_| panic!("bad line: {l}"))),
-            api: (api != "*").then(|| api.to_owned()),
+            line: line.parse().unwrap_or_else(|_| panic!("bad line: {l}")),
+            api: api.to_owned(),
             reason,
         }
     }).collect()
 }
 
-/// Each violation goes to its exact entry, else the first wildcard that
-/// covers it. Returns the uncovered violations and the unused entries.
+/// The violations no entry covers, and the entries that cover none.
 fn check<'a>(entries: &'a [Entry], found: &'a [Violation]) -> (Vec<&'a Violation>, Vec<&'a Entry>) {
-    let mut used = vec![false; entries.len()];
-    let mut uncovered = Vec::new();
-    for v in found {
-        let owner = entries.iter().position(|e| e.exact() && e.covers(v))
-            .or_else(|| entries.iter().position(|e| !e.exact() && e.covers(v)));
-        match owner {
-            Some(i) => used[i] = true,
-            None => uncovered.push(v),
-        }
-    }
-    let unused = entries.iter().zip(used).filter(|(_, u)| !u).map(|(e, _)| e).collect();
+    let uncovered = found.iter().filter(|v| !entries.iter().any(|e| e.covers(v))).collect();
+    let unused = entries.iter().filter(|e| !found.iter().any(|v| e.covers(v))).collect();
     (uncovered, unused)
 }
 
 fn render(e: &Entry) -> String {
-    let line = e.line.map_or("*".into(), |l| l.to_string());
-    format!("{}:{line} {} {}", e.path, e.api.as_deref().unwrap_or("*"), e.reason)
+    format!("{}:{} {} {}", e.path, e.line, e.api, e.reason)
 }
 
-/// The allowlist for FOUND: wildcard entries that still match, then one exact
-/// entry per remaining violation, its reason kept from the entry with the
-/// same site, else from an unused entry with the same path and API, else
-/// `pending`.
-fn bless(header: &str, entries: Vec<Entry>, found: &[Violation]) -> String {
-    let (wild, mut exact): (Vec<Entry>, Vec<Entry>) = entries.into_iter().partition(|e| !e.exact());
-    let wild: Vec<Entry> = wild.into_iter().filter(|e| found.iter().any(|v| e.covers(v))).collect();
-    let rest: Vec<&Violation> = found.iter().filter(|v| !wild.iter().any(|e| e.covers(v))).collect();
-    let mut kept: Vec<Option<String>> = rest.iter().map(|v| {
-        exact.iter().position(|e| e.covers(v)).map(|i| exact.remove(i).reason)
+/// The allowlist for FOUND: one entry per violation, its reason kept from
+/// the entry at the same site, else from an unused entry with the same path
+/// and API, else `pending`.
+fn bless(header: &str, mut entries: Vec<Entry>, found: &[Violation]) -> String {
+    let mut kept: Vec<Option<String>> = found.iter().map(|v| {
+        entries.iter().position(|e| e.covers(v)).map(|i| entries.remove(i).reason)
     }).collect();
-    for (v, reason) in rest.iter().zip(&mut kept) {
+    for (v, reason) in found.iter().zip(&mut kept) {
         if reason.is_none() {
-            *reason = exact.iter().position(|e| e.path == v.path && e.api.as_deref() == Some(v.api)).map(|i| exact.remove(i).reason);
+            *reason = entries.iter().position(|e| e.path == v.path && e.api == v.api).map(|i| entries.remove(i).reason);
         }
     }
     let mut out = header.to_owned();
-    out.extend(wild.iter().map(|e| render(e) + "\n"));
-    for (v, reason) in rest.iter().zip(kept) {
-        let e = Entry { path: v.path.clone(), line: Some(v.line), api: Some(v.api.to_owned()), reason: reason.unwrap_or("pending".into()) };
+    for (v, reason) in found.iter().zip(kept) {
+        let e = Entry { path: v.path.clone(), line: v.line, api: v.api.to_owned(), reason: reason.unwrap_or("pending".into()) };
         out.push_str(&(render(&e) + "\n"));
     }
     out
@@ -585,7 +782,7 @@ fn host_boundary_holds() {
     let mut text = std::fs::read_to_string(&allow).unwrap();
     if std::env::var_os("ROMACS_HOST_LINT_BLESS").is_some() {
         let header: String = text.lines().take_while(|l| l.starts_with('#')).map(|l| format!("{l}\n")).collect();
-        text = bless(&header, parse_allow(&text), &found);
+        text = bless(&header, parse_entries(&text), &found);
         std::fs::write(&allow, &text).unwrap();
     }
     let entries = parse_allow(&text);
@@ -617,7 +814,7 @@ fn lint_flags_each_planted_violation() {
         }
     }
     let planted: BTreeSet<&str> = expected.iter().map(|e| e.2.as_str()).collect();
-    let missing: Vec<&str> = APIS.iter().map(|a| a.name).filter(|n| !planted.contains(n)).collect();
+    let missing: Vec<&str> = APIS.iter().map(|a| a.name).chain(FORMS.iter().copied()).filter(|n| !planted.contains(n)).collect();
     assert!(missing.is_empty(), "no planted violation for {missing:?}");
     assert_eq!(found, expected);
 }
