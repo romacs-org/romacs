@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "c45c0a23fee857c1fd9e5c3075d7a6cf05d3d0ce5a208ecf07fb3bb86b5f5078",
+  "source_fingerprint": "74f5e3ee7b09623386495bab5647e7d759bf3e10e3b83dc8dc9b65b2e6448fc8",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 999,
-  "parsed_vm2_only": 999
+  "parsed_total": 1000,
+  "parsed_vm2_only": 1000
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -2430,6 +2430,11 @@
    "name": "logxor",
    "implementation": "vm2",
    "registered_at": "crates/romacs-vm/src/prims/bitwise.rs:44"
+  },
+  "long-line-optimizations-p": {
+   "name": "long-line-optimizations-p",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/window.rs:389"
   },
   "looking-at": {
    "name": "looking-at",
