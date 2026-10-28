@@ -74,10 +74,28 @@ commands: completed background commands may run their callbacks then.")
 (defun romacs--dispatch-background ()
   "Run completed background commands' callbacks while the command loop
 waits for a command's keys outside any minibuffer read (rlisp/vm/process.el
-runs them between commands, never inside a recursive minibuffer read)."
+runs them between commands, never inside a recursive minibuffer read).
+Non-nil when any ran."
   (when (and romacs--reading-command-keys (= (minibuffer-depth) 0)
              (fboundp 'romacs-process-dispatch-ready) (romacs--process-pending-p))
-    (romacs-process-dispatch-ready)))
+    (romacs-process-dispatch-ready)
+    t))
+
+(defun romacs--wait-state ()
+  "What a host wait's deadline depends on besides the clock: whether input
+is requeued, and when each ordinary and idle timer fires.  A redisplay
+inside the wait that changes it (a mode-line `:eval' that schedules a
+timer) ends the wait, so the deadline is computed again (host_input.rs)."
+  (let ((times nil)
+        (lists (list (and (boundp 'timer-list) timer-list)
+                     (and (boundp 'timer-idle-list) timer-idle-list))))
+    (while lists
+      (let ((timers (car lists)))
+        (while timers
+          (setq times (cons (and (fboundp 'romacs--timer-time) (romacs--timer-time (car timers))) times)
+                timers (cdr timers))))
+      (setq times (cons 'idle times) lists (cdr lists)))
+    (cons (romacs--unread-p) times)))
 
 (defun romacs--read-host-char (seconds)
   "keyboard.c kbd_buffer_get_event's wait for the host keyboard: the next
@@ -88,25 +106,31 @@ timer_start_idle and timer_stop_idle).  A VM without the process prelude
 runs no timers."
   (let ((end (and seconds (+ (float-time) seconds)))
         (timers (fboundp 'romacs--timer-check))
-        (c nil) (waiting t))
+        (c nil) (waiting t) (shown nil))
     (and timers (null end) (romacs--timer-start-idle))
     (unwind-protect
         (while waiting
-          (let ((delay nil) (run -1) left)
-            ;; Check again while timers run: one may have added another
-            ;; (wait_reading_process_output's timer_check loop).
+          ;; Whatever may add a timer or requeue input runs before the
+          ;; deadline is computed: completed background commands' callbacks
+          ;; (before every block, not only after a completion's wake, which
+          ;; a minibuffer read may have used), then ripe timers, again while
+          ;; timers run (wait_reading_process_output's timer_check loop).
+          ;; The host redisplays only when that changed something or it has
+          ;; not yet, and a redisplay that schedules a timer or requeues
+          ;; input ends the wait (`romacs--wait-state').
+          (let ((dispatched (romacs--dispatch-background)) (delay nil) (run -1) left)
             (while (and timers (/= run romacs--timers-run))
               (setq run romacs--timers-run delay (romacs--timer-check)))
-            ;; Before every block, not only after a completion's wake: one
-            ;; that arrived while callbacks could not run (in a minibuffer
-            ;; read) has already used its wake.
-            (romacs--dispatch-background)
             (setq left (and end (- end (float-time))))
             (if (or (romacs--unread-p) (and left (<= left 0)))
                 (setq waiting nil)
-              (setq c (romacs--read-host-event
-                       (if (and delay left) (min delay left) (or delay left)))
-                    waiting (null c)))))
+              ;; A VM without the process prelude runs no timers.
+              (let ((ran (if timers romacs--timers-run 0)))
+                (setq c (romacs--read-host-event
+                         (if (and delay left) (min delay left) (or delay left))
+                         (and shown (not dispatched) (= shown ran)))
+                      shown ran
+                      waiting (null c))))))
       (and timers (null end) (romacs--timer-stop-idle)))
     c))
 

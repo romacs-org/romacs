@@ -129,7 +129,7 @@ pub(super) fn arity(primitive: Primitive) -> (usize, Option<usize>) {
         | CacheEntries | MakeMarker | SyntaxTable | StandardSyntaxTable | SelectedWindow
         | SelectedFrame | CurrentGlobalMap | EmacsLispMode | Daemonp
         | DaemonInitialized => (0, Some(0)),
-        ReadHostEvent => (0, Some(1)),
+        ReadHostEvent => (0, Some(2)),
         FormatModeLine => (1, Some(4)),
         CharAfter | ForwardChar | BackwardChar | BeginningOfLine | EndOfLine | CopySyntaxTable
         | WindowBuffer | WindowStart | WindowPoint | FramePixelWidth | FramePixelHeight
