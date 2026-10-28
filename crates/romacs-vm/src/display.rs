@@ -485,22 +485,28 @@ impl Vm {
         let mut region_faces = std::collections::HashMap::new();
         let region_background = names.iter().position(|name| name == "region").map(|i| faces[i].background);
         let mut face_runs: Vec<FaceRun> = vec![];
+        // Resolve `face` once per run of one value, not per character.
+        let mut named = (0, FaceHandle(0));
         for (at, ch) in utf8.char_indices() {
-            let value = b
-                .properties
-                .get_property(ByteOffset(at), "face")
-                .unwrap_or(Value::NIL);
-            let graph = Graph(self);
-            let resolved = if value.tag() == 3 {
-                self.cons_pair(value)?.0
-            } else {
-                value
-            };
-            let name = match graph.view(resolved.0) {
-                NodeView::Symbol(s) => s,
-                _ => "default",
-            };
-            let mut face = FaceHandle(names.iter().position(|n| n == name).unwrap_or(0) as u32);
+            if at >= named.0 {
+                let value = b
+                    .properties
+                    .get_property(ByteOffset(at), "face")
+                    .unwrap_or(Value::NIL);
+                let graph = Graph(self);
+                let resolved = if value.tag() == 3 {
+                    self.cons_pair(value)?.0
+                } else {
+                    value
+                };
+                let name = match graph.view(resolved.0) {
+                    NodeView::Symbol(s) => s,
+                    _ => "default",
+                };
+                let end = b.properties.next_single_change(ByteOffset(at), "face", ByteOffset(utf8.len())).0;
+                named = (end, FaceHandle(names.iter().position(|n| n == name).unwrap_or(0) as u32));
+            }
+            let mut face = named.1;
             while styles.get(style_index).is_some_and(|run| run.bytes.end <= at) { style_index += 1; }
             if let Some(run) = styles.get(style_index).filter(|run| run.bytes.contains(&at)) {
                 face = *terminal_faces.entry(run.style).or_insert_with(|| {

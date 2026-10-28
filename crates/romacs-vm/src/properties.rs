@@ -429,6 +429,19 @@ impl Tree {
             }
         }
     }
+    /// The first position after `at` whose value differs from `at`'s, or
+    /// `limit` when that is nearer.
+    fn change_after(&self, at: ByteOffset, limit: ByteOffset) -> ByteOffset {
+        let Some(after) = at.0.checked_add(1) else {
+            return limit;
+        };
+        let before = self.at(at.0).filter(|r| r.stamp != 0).map(|r| r.value);
+        match self.next_different(0, after, before) {
+            Some(p) => ByteOffset(p.min(limit.0)),
+            None if before.is_some() && self.len() >= after => ByteOffset(self.len().min(limit.0)),
+            None => limit,
+        }
+    }
     fn next_different(&self, base: usize, at: usize, value: Option<Value>) -> Option<usize> {
         if base + self.len() <= at {
             return None;
@@ -609,19 +622,11 @@ impl Properties {
     }
     /// Observable boundaries compare presence and eq-values, never stamps.
     pub fn next_change(&self, at: ByteOffset, limit: ByteOffset) -> ByteOffset {
-        let Some(after) = at.0.checked_add(1) else {
-            return limit;
-        };
-        let mut next = limit.0;
-        for root in self.layers.values().flatten() {
-            let before = root.at(at.0).filter(|r| r.stamp != 0).map(|r| r.value);
-            if let Some(p) = root.next_different(0, after, before) {
-                next = next.min(p);
-            } else if before.is_some() && root.len() >= after {
-                next = next.min(root.len());
-            }
-        }
-        ByteOffset(next)
+        self.layers.values().flatten().fold(limit, |next, root| next.min(root.change_after(at, limit)))
+    }
+    /// [`Self::next_change`] of `key` alone.
+    pub fn next_single_change(&self, at: ByteOffset, key: &str, limit: ByteOffset) -> ByteOffset {
+        self.layers.get(key).and_then(Option::as_ref).map_or(limit, |root| root.change_after(at, limit))
     }
     /// Plain insertion inherits nothing. Suffix boundaries move by sums.
     pub fn replace(&mut self, range: Range<ByteOffset>, inserted: usize) -> usize {
