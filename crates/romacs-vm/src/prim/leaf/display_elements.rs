@@ -853,3 +853,9 @@ impl Leaf<'_> {
         v.integer_value().map(|n| n as f64).or_else(|| self.float_value(v).ok())
     }
 }
+
+impl super::display_motion::Lines for Source<'_, '_> {
+    fn reseat(&mut self, start: i64) -> R<()> { self.reset(start) }
+    fn line_start_before(&mut self, pos: i64) -> R<i64> { self.visible_line_start(pos) }
+    fn begv(&self) -> i64 { self.view.begv }
+}

@@ -139,6 +139,10 @@ impl Vm {
                     self.set_frame_geometry(width, height, line, column)?;
                     redraw = true;
                 }
+                // A completed background command ends the wait as a
+                // timeout does: Lisp may run its callback between commands
+                // (rlisp/vm/keyboard.el `romacs--read-host-char').
+                HostEvent::Background if self.background_processes_ready() => return Ok(HostEvent::Timeout),
                 HostEvent::Background => {}
                 event => return Ok(event),
             }

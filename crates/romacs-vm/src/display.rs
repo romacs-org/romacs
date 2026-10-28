@@ -405,6 +405,38 @@ impl Vm {
         self.slots[slot].value = Value::UNBOUND;
         outcome
     }
+    /// init_iterator's line wrap in the current buffer, for a window
+    /// COLUMNS wide that is or is not as wide as its frame.
+    pub(crate) fn line_wrap(&mut self, full_width: bool, columns: i64) -> Result<romacs_layout_input::LineWrap> {
+        use romacs_layout_input::LineWrap;
+        let mut var = |name: &str| { let slot = self.slot(name); self.variable_value(slot) };
+        let partial = var("truncate-partial-width-windows")?;
+        let continued = (full_width || partial == Value::NIL || partial.integer_value().is_some_and(|n| n <= columns))
+            && var("truncate-lines")? == Value::NIL;
+        Ok(if !continued { LineWrap::Truncate } else if var("word-wrap")? == Value::NIL { LineWrap::Window } else { LineWrap::Word })
+    }
+    /// WINDOW's line wrap for BUFFER.
+    fn window_line_wrap(&mut self, window: Value, buffer: Value) -> Result<romacs_layout_input::LineWrap> {
+        let w = self.window(window)?;
+        let (x, width) = (w.x, w.width);
+        let root = self.window_root_peek(crate::window::ROOT);
+        let full_width = self.window(root).is_ok_and(|r| r.x == x && r.width == width);
+        let columns = i64::from(width / self.window_state.column.max(1));
+        let saved = self.slots[self.buffer_slot].value;
+        self.slots[self.buffer_slot].value = buffer;
+        let wrap = self.line_wrap(full_width, columns);
+        self.slots[self.buffer_slot].value = saved;
+        wrap
+    }
+    /// BUFFER's `tab-width' as GNU's SANE_TAB_WIDTH: 1 to 1000, else 8.
+    fn buffer_tab_width(&mut self, buffer: Value) -> Result<u32> {
+        let saved = self.slots[self.buffer_slot].value;
+        self.slots[self.buffer_slot].value = buffer;
+        let slot = self.slot("tab-width");
+        let width = self.variable_value(slot);
+        self.slots[self.buffer_slot].value = saved;
+        Ok(width?.integer_value().filter(|w| (1..=1000).contains(w)).unwrap_or(8) as u32)
+    }
     fn snapshot_region(&mut self, window: Value, buffer: Value, point: i64) -> Result<Option<std::ops::Range<usize>>> {
         if window != self.selected_window_value()? { return Ok(None); }
         let saved = self.slots[self.buffer_slot].value;
@@ -472,6 +504,8 @@ impl Vm {
         let mut terminal_faces = std::collections::HashMap::new();
         let mut region_faces = std::collections::HashMap::new();
         let region_background = names.iter().position(|name| name == "region").map(|i| faces[i].background);
+        // A control character other than TAB and newline shows as an escape.
+        let escape = names.iter().position(|name| name == "escape-glyph").map(|i| FaceHandle(i as u32));
         let mut face_runs: Vec<FaceRun> = vec![];
         for (at, ch) in utf8.char_indices() {
             let value = b
@@ -479,6 +513,7 @@ impl Vm {
                 .get_property(ByteOffset(at), "face")
                 .unwrap_or(Value::NIL);
             let mut face = self.painted_face(&names, value)?.0;
+            if ch.is_control() && ch != '\n' && ch != '\t' && let Some(escape) = escape { face = escape; }
             while styles.get(style_index).is_some_and(|run| run.bytes.end <= at) { style_index += 1; }
             if let Some(run) = styles.get(style_index).filter(|run| run.bytes.contains(&at)) {
                 face = *terminal_faces.entry(run.style).or_insert_with(|| {
@@ -545,6 +580,8 @@ impl Vm {
             ),
             vscroll_px: self.window(window)?.vscroll_px,
             faces,
+            tab_width: self.buffer_tab_width(buffer)?,
+            wrap: self.window_line_wrap(window, buffer)?,
         };
         // The owned last publication also covers mutation paths with specialised
         // fast dispatch (point moves, regexp, yank), without retaining GC handles.
@@ -649,6 +686,117 @@ impl Vm {
         // using the real selection, not the temporary evaluation context.
         outcome
     }
+    /// GNU `Fformat_mode_line` (`src/xdisp.c:29058`): FORMAT expanded as
+    /// WINDOW's band (the selected window by default) for BUFFER (WINDOW's
+    /// by default), with WINDOW selected and BUFFER current meanwhile, by
+    /// the engine that builds the band. FACE nil gives the characters only
+    /// the faces their `:propertize' gives; t, the window's mode-line face;
+    /// another face, that face where they have none and appended where they
+    /// have one; an integer, no properties. Batch formats nothing.
+    pub(crate) fn format_mode_line(&mut self, args: &[Value]) -> Result<Value> {
+        if args.is_empty() || args.len() > 4 {
+            return Err("wrong primitive arity".into());
+        }
+        let arg = |i: usize| args.get(i).copied().unwrap_or(Value::NIL);
+        let (format, face, window, buffer) = (arg(0), arg(1), arg(2), arg(3));
+        self.ensure_windows()?;
+        let window = if window == Value::NIL { self.selected_window_value()? } else { window };
+        if !matches!(self.object_if(window), Some(Object::Window(_))) {
+            let predicate = self.intern("windowp");
+            return Err(self.signal_error("wrong-type-argument", &[predicate, window], "Wrong type argument: windowp".into()));
+        }
+        // GNU's `w->contents': an internal window's first child.
+        let buffer = if buffer != Value::NIL { buffer } else {
+            let w = self.window(window)?;
+            w.children.first().copied().unwrap_or(w.buffer)
+        };
+        if !matches!(self.object_if(buffer), Some(Object::Buffer(_) | Object::ByteBuffer(_))) {
+            let predicate = self.intern("bufferp");
+            return Err(self.signal_error("wrong-type-argument", &[predicate, buffer], "Wrong type argument: bufferp".into()));
+        }
+        if !self.buffer_state(buffer)?.live {
+            return Err("Attempt to format a mode line for a dead buffer".into());
+        }
+        let noninteractive = self.slot("noninteractive");
+        let target = if face.integer_value().is_some() || matches!(self.object_if(face), Some(Object::Bignum(_))) {
+            mode_line::Target::NoProp
+        } else {
+            mode_line::Target::String
+        };
+        if format == Value::NIL || self.variable_value(noninteractive)? != Value::NIL {
+            return Ok(self.allocate_object(Object::String(Box::new(data::LispString::from_bytes(vec![], false)))));
+        }
+        let face = if target == mode_line::Target::NoProp || face == Value::NIL || face == self.intern("default") {
+            Value::NIL
+        } else if face == Value::TRUE {
+            let selected = window == self.selected_window_value()?;
+            self.intern(if selected { "mode-line-active" } else { "mode-line-inactive" })
+        } else {
+            face
+        };
+        // A format can call format-mode-line again from :eval: each call
+        // roots its window, buffer and the selection it restores in slots
+        // of its own depth.
+        let depth = (0..).find(|d| { let slot = self.slot(&format!("#:vm2-format-mode-line-{d}")); self.slots[slot].value == Value::UNBOUND }).unwrap();
+        let [root, buffer_slot, face_slot, saved_window, saved_buffer] = ["", "-buffer", "-face", "-selected", "-current"]
+            .map(|suffix| self.slot(&format!("#:vm2-format-mode-line-{depth}{suffix}")));
+        self.slots[root].value = window;
+        self.slots[buffer_slot].value = buffer;
+        self.slots[face_slot].value = face;
+        self.slots[saved_window].value = self.selected_window_value()?;
+        self.slots[saved_buffer].value = self.slots[self.buffer_slot].value;
+        let format = self.mode_line_form(format);
+        let outcome = (|| {
+            let height = self.window(window)?.height.saturating_sub(self.window_state.line);
+            // Fselect_window (WINDOW, t): its point becomes its buffer's.
+            self.select_window_value(window, false)?;
+            self.slots[self.buffer_slot].value = buffer;
+            let state = self.mode_line_state(root, buffer_slot, height)?;
+            self.mode_line_expand(&format, &state, target)
+        })();
+        // unwind_format_mode_line: the old selection, if it lives, then
+        // the old current buffer.
+        let old = self.slots[saved_window].value;
+        if self.window(old).is_ok_and(|w| w.live()) { self.select_window_value(old, false)?; }
+        if self.buffer_state(self.slots[saved_buffer].value).is_ok_and(|b| b.live) {
+            self.slots[self.buffer_slot].value = self.slots[saved_buffer].value;
+        }
+        let face = self.slots[face_slot].value;
+        for slot in [root, buffer_slot, face_slot, saved_window, saved_buffer] { self.slots[slot].value = Value::UNBOUND; }
+        let band = outcome?;
+        let elt_slot = self.slot(mode_line::ELT_RESTARTED);
+        self.slots[elt_slot].value = Value::integer(band.elt)?;
+        self.mode_line_string(&band, face)
+    }
+    /// BAND's text with GNU's properties: each piece's `mode-line-elt-no'
+    /// and face, its `:propertize' face with FACE after it, else FACE.
+    /// GNU adds a piece's element number before a FACE it adds but after a
+    /// face the piece already had.
+    fn mode_line_string(&mut self, band: &mode_line::Band, face: Value) -> Result<Value> {
+        let text = &band.text;
+        // VM2 keys string properties by interned name.
+        self.intern("mode-line-elt-no");
+        let mut string = data::LispString::from_bytes(text.as_bytes().to_vec(), !text.is_ascii());
+        let mut bounds: Vec<usize> = band.runs.iter().map(|(r, _)| r).chain(band.elts.iter().map(|(r, _)| r))
+            .flat_map(|r| [r.start, r.end]).chain([0, text.len()]).collect();
+        bounds.sort_unstable();
+        bounds.dedup();
+        for span in bounds.windows(2) {
+            let range = ByteOffset(span[0])..ByteOffset(span[1]);
+            let own = band.runs.iter().find(|(r, _)| r.contains(&span[0])).map(|(_, name)| self.intern(name));
+            let elt = band.elts.iter().find(|(r, _)| r.contains(&span[0])).map(|(_, n)| *n);
+            let added = match own {
+                Some(own) if face != Value::NIL => Some(self.list_value(&[own, face])),
+                Some(own) => Some(own),
+                None => (face != Value::NIL).then_some(face),
+            };
+            // A later put lists its property first.
+            if own.is_none() && let Some(face) = added { string.properties.put(range.clone(), "face", face); }
+            if let Some(n) = elt { string.properties.put(range.clone(), "mode-line-elt-no", Value::integer(n)?); }
+            if own.is_some() && let Some(face) = added { string.properties.put(range, "face", face); }
+        }
+        Ok(self.allocate_object(Object::String(Box::new(string))))
+    }
     /// The window and buffer facts `decode_mode_spec` reads, after scrolling.
     fn mode_line_state(&mut self, root: usize, buffer_slot: usize, text_height: u32) -> Result<mode_line::SpecState> {
         let buffer = self.slots[buffer_slot].value;
@@ -681,8 +829,9 @@ impl Vm {
         let accessible = b.accessible();
         let (begv_byte, zv_byte) = (accessible.start.0, accessible.end.0);
         let char_at = |byte: usize| b.char_of_byte(ByteOffset(byte)).map(|c| c.0 + 1);
-        let start_byte = b.byte_of_char(crate::coordinates::CharOffset(start - 1))?.0.clamp(begv_byte, zv_byte);
-        let point_byte = b.byte_of_char(crate::coordinates::CharOffset(point - 1))?.0.clamp(begv_byte, zv_byte);
+        // Another buffer than the window's (format-mode-line's BUFFER) may be shorter.
+        let byte_at = |pos: usize| b.byte_of_char(crate::coordinates::CharOffset(pos.clamp(1, b.len_chars() + 1) - 1)).map(|o| o.0.clamp(begv_byte, zv_byte));
+        let (start_byte, point_byte) = (byte_at(start)?, byte_at(point)?);
         // Window end: after the last displayed row, as GNU's window_end_pos.
         let mut end_byte = start_byte;
         for _ in 0..displayed {
@@ -784,9 +933,10 @@ impl Vm {
             let byte = ByteOffset(bytes.start + at);
             let value = b.properties.get_property(byte, "face").unwrap_or(Value::NIL);
             let (face, whole) = self.painted_face(&names, value)?;
-            // The host paints no control character but newline; a space
-            // stands in for one, inexact, and the iterator refuses it anyway.
-            let control = ch.is_control() && ch != '\n';
+            // The host paints a control character other than newline and
+            // TAB as an escape; a space stands in for one, inexact, and the
+            // iterator refuses it anyway.
+            let control = ch.is_control() && ch != '\n' && ch != '\t';
             exact.push(!control && whole && b.properties.get_property(byte, "font-lock-face").is_none_or(|v| v == Value::NIL)
                 && !faced.iter().any(|range| range.contains(&byte)));
             let start = text.len();

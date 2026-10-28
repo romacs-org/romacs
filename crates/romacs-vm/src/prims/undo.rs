@@ -11,3 +11,10 @@ defsubr! { name = "buffer-enable-undo", gnu = "buffer.c:1843", effect = Global,
 fn buffer_enable_undo(cx; optional buffer: Value) {
     cx.buffer_enable_undo(buffer)
 }}
+
+// The command loop's Lisp half (rlisp/vm/keyboard.el) notes point before
+// each command, as command_loop_1 does.
+defsubr! { name = "romacs--note-command-point", gnu = "keyboard.c:1536", effect = Global,
+fn note_command_point(cx) {
+    cx.note_command_point()
+}}

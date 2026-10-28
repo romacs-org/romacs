@@ -136,6 +136,23 @@ mod tests {
             (run-at-time 0.01 nil (lambda () (push ?a unread-command-events)))");
         assert_eq!(printed(&mut vm, "(list (read-event nil nil 1) (< (- (float-time) start) 0.5) unread-command-events)"),
                    "(97 t nil)");
+        // sit-for in a timer reads a key typed during it and pushes it back
+        // as (t . KEY) (subr.el); the command loop, which reads Lisp's
+        // unread queues first, then runs it as the next command, though no
+        // other key follows. As simple.el's M-x suggestion timer does in a
+        // session (`interactive' sit-for).
+        vm.set_host_input(Some(Box::new(Paced([Step::Pause(Duration::from_millis(30)), Step::Key('x')].into()))));
+        printed(&mut vm, "(setq timer-list nil timer-idle-list nil unread-command-events nil probe 'unset)
+            (run-with-timer 0 nil (lambda () (let ((noninteractive nil)) (setq probe (sit-for 5)))))
+            (set-buffer (get-buffer-create \"unread\")) (erase-buffer) (set-window-buffer nil (current-buffer))");
+        vm.timer_stop_idle();
+        assert!(idle(&mut vm).unwrap().ran);
+        assert_eq!(printed(&mut vm, "(list probe unread-command-events)"), "(nil ((t . 120)))");
+        assert!(crate::command::unread_pending(&mut vm).unwrap());
+        let outcome = crate::command::run(&mut vm).unwrap();
+        assert_eq!(outcome.command.as_deref(), Some("self-insert-command"));
+        assert_eq!(printed(&mut vm, "(list (buffer-string) unread-command-events)"), "(\"x\" nil)");
+        assert!(!crate::command::unread_pending(&mut vm).unwrap());
     }
 
     enum Step { Pause(Duration), Key(char) }

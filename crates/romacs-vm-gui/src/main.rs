@@ -86,6 +86,38 @@ mod native_wake_tests {
 }
 
 #[cfg(test)]
+mod lent_tests {
+    use super::*;
+
+    /// Lisp the outer loop runs (a command, a timer) reads with the loop's
+    /// presentation state, and what its reads did comes back.
+    #[test]
+    fn a_read_inside_lisp_sees_and_returns_the_loops_presentation_state() {
+        let host = std::rc::Rc::new(std::cell::RefCell::new(prompt::Shared::default()));
+        let mut live = presentation::Presentation::new();
+        live.submitted(7, Instant::now());
+        let (mut queue, mut presentation, mut width, mut height) = (std::collections::VecDeque::new(), 7, 10, 20);
+        queue.push_back(InputEvent::WindowClose { emacs_frame_id: 0 });
+        let mut lent = Lent { queue: &mut queue, presentation: &mut presentation, live: &mut live, width: &mut width, height: &mut height };
+        let (seen, closed) = lent.run(&host, |_| {
+            let mut shared = host.borrow_mut();
+            let seen = (shared.presentation, shared.in_flight, shared.pending.len());
+            // What a prompt's redisplay does: settle the loop's frame, submit its own.
+            shared.settled = shared.in_flight.take();
+            shared.presentation += 1;
+            shared.size = Some((30, 40));
+            shared.closed = true;
+            seen
+        });
+        assert_eq!(seen, (7, Some(7), 1), "the read starts from the loop's state");
+        assert!(closed);
+        assert_eq!((queue.len(), presentation, width, height), (1, 8, 30, 40));
+        assert!(live.in_flight().is_none(), "the settled presentation is no longer in flight");
+        assert_eq!(host.borrow().in_flight, None);
+    }
+}
+
+#[cfg(test)]
 mod evaluator_stack_tests {
     use std::os::unix::process::ExitStatusExt;
 
@@ -243,10 +275,10 @@ impl PartialEq for Frame {
 fn paints_alike(a: &romacs_layout_input::WindowSnapshot, b: &romacs_layout_input::WindowSnapshot) -> bool {
     // Exhaustive, so a new field must be placed on one side or the other.
     let romacs_layout_input::WindowSnapshot { id, width, height, start_byte, point_byte, buffer_version: _,
-        text, mode_line, mode_line_face, vscroll_px, faces } = a;
-    (*id, *width, *height, *start_byte, *point_byte, *mode_line_face, *vscroll_px)
-        == (b.id, b.width, b.height, b.start_byte, b.point_byte, b.mode_line_face, b.vscroll_px)
-        && *text == b.text && *mode_line == b.mode_line && *faces == b.faces
+        text, mode_line, mode_line_face, vscroll_px, faces, tab_width, wrap } = a;
+    (*id, *width, *height, *start_byte, *point_byte, *mode_line_face, *vscroll_px, *tab_width)
+        == (b.id, b.width, b.height, b.start_byte, b.point_byte, b.mode_line_face, b.vscroll_px, b.tab_width)
+        && *wrap == b.wrap && *text == b.text && *mode_line == b.mode_line && *faces == b.faces
 }
 
 /// What the live loop last painted: the frame, the window ends its layout
@@ -647,7 +679,6 @@ fn evaluate(
     } else {
         vm.eval_source(if g1 { include_str!("../g1.el") } else { SCENE })?;
     }
-    let mut commands = command::Commands::default();
     let mut presentation = 1;
     // A live GUI has a keyboard: prompts read it mid-command (prompt.rs).
     let host = std::rc::Rc::new(std::cell::RefCell::new(prompt::Shared::default()));
@@ -674,75 +705,86 @@ fn evaluate(
         if live && service_native(&mut vm)? { live_presentation.changed(); }
         let available = sender.input().len();
         let mut batch: std::collections::VecDeque<_> = presentation::take_batch(&mut pending, sender.input().try_iter(), available).collect();
-        while let Some(event) = batch.pop_front() {
-            if matches!(event, InputEvent::WindowClose { .. }) {
-                if !live || live_presentation.window_close(&mut vm)? {
-                    return shutdown_editor(&mut vm, sender);
+        loop {
+            // read_char takes Lisp's unread queues before host input: a key
+            // Lisp read and pushed back (sit-for in a timer) starts the next
+            // command, which the Lisp command loop reads.
+            let unread = live && command::unread_pending(&mut vm)?;
+            let event = if unread { None } else {
+                match batch.pop_front() { Some(event) => Some(event), None => break }
+            };
+            let (received, command_start);
+            // A command to run, and the host key starting it if one does.
+            let translated: Option<Option<romacs_vm::CommandEvent>> = if event.is_none() {
+                vm.timer_stop_idle();
+                (received, command_start) = (None, Instant::now());
+                Some(None)
+            } else {
+                let event = event.expect("host input");
+                if matches!(event, InputEvent::WindowClose { .. }) {
+                    if !live || live_presentation.window_close(&mut vm)? {
+                        return shutdown_editor(&mut vm, sender);
+                    }
+                    terminal_modal = true;
+                    continue;
                 }
-                terminal_modal = true;
-                continue;
-            }
-            let received = if tracing() {
-                romacs_display_runtime::paint_host::take_key_enqueue_time(&event)
-            } else { None };
-            // read_char's timer_stop_idle: Emacs is idle until a key arrives.
-            if live && timers::ends_idle(&event) { vm.timer_stop_idle(); }
-            let event = command::unwrap_event(event);
-            let command_start = Instant::now();
-            if live && let InputEvent::WindowResize { width: w, height: h, .. } = event {
-                if w > 0 && h > 0 && (width, height) != (w, h) {
-                    width = w; height = h;
-                    let (lh, cw) = romacs_layout2::frame_metrics(&vm.display_default_face()?)?;
-                    vm.set_frame_geometry(width, height, lh, cw)?;
-                    if let Err(error) = vm.resize_selected_terminal() { echo::show(&mut vm, &error)?; }
-                    live_presentation.changed();
-                }
-                continue;
-            }
-            if live && let Some((session, input)) = vm.selected_terminal()? {
-                let mode = if input { terminal_input::Mode::Terminal } else { terminal_input::Mode::Emacs };
-                match terminal_input::route(&event, mode, commands.in_prefix() || terminal_modal) {
-                    terminal_input::Target::Terminal => {
-                        let sent = vm.terminal_input_state(session).and_then(|state| {
-                            let bytes = terminal_input::encode(&event, state.application_cursor)?;
-                            if bytes.is_empty() { Ok(()) }
-                            else if !state.running { Err("Terminal is not running".into()) }
-                            else { vm.terminal_send(session, &bytes) }
-                        });
-                        if let Err(error) = sent { echo::show(&mut vm, &error)?; }
+                received = if tracing() {
+                    romacs_display_runtime::paint_host::take_key_enqueue_time(&event)
+                } else { None };
+                // read_char's timer_stop_idle: Emacs is idle until a key arrives.
+                if live && timers::ends_idle(&event) { vm.timer_stop_idle(); }
+                let event = command::unwrap_event(event);
+                command_start = Instant::now();
+                if live && let InputEvent::WindowResize { width: w, height: h, .. } = event {
+                    if w > 0 && h > 0 && (width, height) != (w, h) {
+                        width = w; height = h;
+                        let (lh, cw) = romacs_layout2::frame_metrics(&vm.display_default_face()?)?;
+                        vm.set_frame_geometry(width, height, lh, cw)?;
+                        if let Err(error) = vm.resize_selected_terminal() { echo::show(&mut vm, &error)?; }
                         live_presentation.changed();
-                        continue;
                     }
-                    terminal_input::Target::Ignore => continue,
-                    terminal_input::Target::Editor => {}
+                    continue;
                 }
-            }
-            if let Some(event) = native::translate(event) {
-                let outcome = if live {
-                    // Hand the prompt the keys typed ahead and the presentation
-                    // state; take back what it did not consume.
-                    {
-                        let mut shared = host.borrow_mut();
-                        shared.pending = std::mem::take(&mut batch);
-                        shared.presentation = presentation;
-                        shared.in_flight = live_presentation.in_flight().map(|(p, _)| p);
+                if live && let Some((session, input)) = vm.selected_terminal()? {
+                    let mode = if input { terminal_input::Mode::Terminal } else { terminal_input::Mode::Emacs };
+                    match terminal_input::route(&event, mode, terminal_modal) {
+                        terminal_input::Target::Terminal => {
+                            let sent = vm.terminal_input_state(session).and_then(|state| {
+                                let bytes = terminal_input::encode(&event, state.application_cursor)?;
+                                if bytes.is_empty() { Ok(()) }
+                                else if !state.running { Err("Terminal is not running".into()) }
+                                else { vm.terminal_send(session, &bytes) }
+                            });
+                            if let Err(error) = sent { echo::show(&mut vm, &error)?; }
+                            live_presentation.changed();
+                            continue;
+                        }
+                        terminal_input::Target::Ignore => continue,
+                        terminal_input::Target::Editor => {}
                     }
-                    let outcome = live_presentation.command(&mut vm, &mut commands, event);
-                    let mut shared = host.borrow_mut();
-                    batch = std::mem::take(&mut shared.pending);
-                    presentation = shared.presentation;
-                    if let Some(settled) = shared.settled.take() { live_presentation.completed(settled); }
-                    shared.in_flight = None;
-                    if let Some((w, h)) = shared.size.take() { width = w; height = h; }
-                    let close_requested = std::mem::take(&mut shared.closed);
-                    drop(shared);
-                    if close_requested && live_presentation.window_close(&mut vm)? {
+                }
+                // The Lisp command loop reads the key itself, from the queue
+                // lent to the host keyboard.
+                let raw = match &event {
+                    &InputEvent::Key { ref key, modifiers, pressed, emacs_frame_id } if live =>
+                        Some(InputEvent::Key { key: key.clone(), modifiers, pressed, emacs_frame_id }),
+                    _ => None,
+                };
+                let key = native::translate(event);
+                if let (Some(_), Some(raw)) = (&key, raw) { batch.push_front(raw); }
+                key.map(Some)
+            };
+            if let Some(first) = translated {
+                let outcome = if live {
+                    let mut lent = Lent { queue: &mut batch, presentation: &mut presentation, live: &mut live_presentation, width: &mut width, height: &mut height };
+                    let (outcome, closed) = lent.run(&host, |live| live.host_command(&mut vm, first.as_ref()));
+                    if closed && live_presentation.window_close(&mut vm)? {
                         return shutdown_editor(&mut vm, sender);
                     }
                     outcome
                 } else {
                     vm.eval_source("(set-buffer (window-buffer (selected-window)))")?;
-                    vm.command_event(event).map(Some)
+                    vm.command_event(first.expect("a host key")).map(Some)
                 };
                 if live && vm.eval_source("romacs-gui-quit-requested")? != romacs_vm::Fixed::NIL {
                     return shutdown_editor(&mut vm, sender);
@@ -846,7 +888,14 @@ fn evaluate(
             if pending.is_empty() && sender.input().is_empty() {
                 // read_char: with no key to read, idle and run ripe timers;
                 // after any ran, redisplay and check again before blocking.
-                let idle = timers::idle(&mut vm).unwrap_or_else(|error| {
+                // A timer may read input (`read-event' with a timeout, a
+                // prompt) as a command may, so it gets the same handoff.
+                let mut lent = Lent { queue: &mut pending, presentation: &mut presentation, live: &mut live_presentation, width: &mut width, height: &mut height };
+                let (idle, closed) = lent.run(&host, |_| timers::idle(&mut vm));
+                if closed && live_presentation.window_close(&mut vm)? {
+                    return shutdown_editor(&mut vm, sender);
+                }
+                let idle = idle.unwrap_or_else(|error| {
                     let _ = echo::show(&mut vm, &format!("Timer: {error}"));
                     timers::Idle { ran: true, message: false, delay: None }
                 });
@@ -891,6 +940,41 @@ fn evaluate(
         }
     }
     shutdown_editor(&mut vm, sender)
+}
+
+/// The outer loop's input and presentation state, lent to the prompt host
+/// (prompt.rs) while the loop runs Lisp that may read input mid-way: the
+/// keys queued ahead, the last presentation submitted and the one in flight.
+/// What the Lisp did not consume, and what its reads presented, settled or
+/// saw (a resize, a close), come back. A read that redisplays from stale
+/// state submits a presentation the renderer has already passed and waits
+/// for it in vain.
+struct Lent<'a> {
+    queue: &'a mut std::collections::VecDeque<InputEvent>,
+    presentation: &'a mut u64,
+    live: &'a mut presentation::Presentation,
+    width: &'a mut u32,
+    height: &'a mut u32,
+}
+
+impl Lent<'_> {
+    /// RUN's value, and whether a read inside it saw the frame close.
+    fn run<T>(&mut self, host: &std::rc::Rc<std::cell::RefCell<prompt::Shared>>, run: impl FnOnce(&mut presentation::Presentation) -> T) -> (T, bool) {
+        {
+            let mut shared = host.borrow_mut();
+            shared.pending = std::mem::take(self.queue);
+            shared.presentation = *self.presentation;
+            shared.in_flight = self.live.in_flight().map(|(p, _)| p);
+        }
+        let value = run(self.live);
+        let mut shared = host.borrow_mut();
+        *self.queue = std::mem::take(&mut shared.pending);
+        *self.presentation = shared.presentation;
+        if let Some(settled) = shared.settled.take() { self.live.completed(settled); }
+        shared.in_flight = None;
+        if let Some((w, h)) = shared.size.take() { (*self.width, *self.height) = (w, h); }
+        (value, std::mem::take(&mut shared.closed))
+    }
 }
 
 /// Native work that woke the wait: terminal output, then completed background

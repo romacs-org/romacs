@@ -4,8 +4,10 @@
 //! threshold; values above 100 always reveal minimally. The owned GUI chooses
 //! 101 in Lisp, independently of the redisplay mechanism.
 //!
-//! Rows are logical lines of the frame's line height: `romacs-layout2` paints
-//! one logical line per row and does not wrap (DIVERGENCES.md VM2-RD1).
+//! Without a host layout, rows are logical lines of the frame's line
+//! height. Over a host's layout, which continues and truncates lines, the
+//! display iterator counts screen lines and chooses the start, which may
+//! begin a continuation line (DIVERGENCES.md VM2-RD1).
 use crate::{coordinates::CharOffset, data::Object, *};
 
 impl Vm {
@@ -51,6 +53,27 @@ impl Vm {
             text.as_bytes()[start_byte..point_byte].iter().filter(|&&c| c == b'\n').take(displayed).count()
         });
         let clamped = b.char_of_byte(coordinates::ByteOffset(start_byte))?.0 + 1;
+        // Over a host's layout, which continues lines, rows are screen
+        // lines: the iterator chooses, unless it refuses the text.
+        if !forced && self.display_state.hosted && self.has_layout_host() {
+            let point_line = text[begv..point_byte].rfind('\n').map_or(begv, |newline| begv + newline + 1);
+            let distance = if point_byte < start_byte {
+                text.as_bytes()[point_line..start_byte].iter().filter(|&&c| c == b'\n').count()
+            } else {
+                text.as_bytes()[start_byte..point_byte].iter().filter(|&&c| c == b'\n').count().saturating_sub(rows - 1)
+            };
+            let minimal = conservative > 100 || (conservative > 0 && distance <= conservative);
+            let back = recenter_rows(text_height, line);
+            if let Ok(chosen) = crate::prim::hosted_window_start(self, window, clamped as i64, point as i64, minimal, i64::from(back)) {
+                let position = Value::integer(chosen.unwrap_or(clamped as i64))?;
+                if chosen.is_some() || clamped != start { self.set_marker_object(start_marker, position, buffer)?; }
+                return Ok(());
+            }
+        }
+        let Object::Buffer(b) = self.object(buffer)? else {
+            return Ok(());
+        };
+        let text = b.as_str();
         if row.is_some_and(|row| row < rows) {
             if clamped != start {
                 self.set_marker_object(start_marker, Value::integer(clamped as i64)?, buffer)?;
@@ -100,11 +123,7 @@ impl Vm {
         // Recenter (`xdisp.c:21230`, `move_it_vertically_backward`):
         // dy = window_box_height / 2; back max(1, dy / line) lines from point,
         // one more when the remainder exceeds min(height, 2 * line / 3).
-        let dy = text_height / 2;
-        let mut back = (dy / line).max(1);
-        if dy > back * line && dy - back * line > text_height.min(line * 2 / 3) {
-            back += 1;
-        }
+        let back = recenter_rows(text_height, line);
         let (mut at, mut moved) = (point_line, 0);
         while moved < back && at > begv {
             at = text[begv..at - 1].rfind('\n').map_or(begv, |newline| begv + newline + 1);
@@ -127,4 +146,17 @@ impl Vm {
             self.set_marker_object(marker, position, buffer).map(drop)
         }
     }
+}
+
+/// The lines redisplay's recentring moves back from point's (`xdisp.c:21230`,
+/// `move_it_vertically_backward`): dy = window_box_height / 2; back
+/// max(1, dy / line) lines, one more when the remainder exceeds
+/// min(height, 2 * line / 3).
+fn recenter_rows(text_height: u32, line: u32) -> u32 {
+    let dy = text_height / 2;
+    let mut back = (dy / line).max(1);
+    if dy > back * line && dy - back * line > text_height.min(line * 2 / 3) {
+        back += 1;
+    }
+    back
 }

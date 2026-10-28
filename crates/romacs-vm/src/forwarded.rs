@@ -345,6 +345,7 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "unibyte-display-via-language-environment", gnu: "xdisp.c:39025", kind: Kind::Bool(false) },
     CVariable { name: "unicode-category-table", gnu: "character.c:1159", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "unread-post-input-method-events", gnu: "keyboard.c:13786", kind: Kind::Lisp(Init::Nil) },
+    CVariable { name: "unread-input-method-events", gnu: "keyboard.c:13792", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "use-dialog-box", gnu: "fns.c:6843", kind: Kind::Bool(true) },
     CVariable { name: "use-file-dialog", gnu: "fns.c:6852", kind: Kind::Bool(true) },
     CVariable { name: "use-short-answers", gnu: "fns.c:6860", kind: Kind::Bool(false) },
@@ -567,6 +568,9 @@ pub(crate) static C_VARIABLES: &[CVariable] = &[
     // char-width and string-width read it (indent.c buffer_display_table).
     CVariable { name: "buffer-display-table", gnu: "buffer.c:5502", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
     CVariable { name: "bidi-paragraph-direction", gnu: "buffer.c:5383", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
+    CVariable { name: "bidi-display-reordering", gnu: "buffer.c:5332", kind: Kind::PerBuffer { default: Init::True, predicate: None } },
+    CVariable { name: "bidi-paragraph-start-re", gnu: "buffer.c:5340", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
+    CVariable { name: "bidi-paragraph-separate-re", gnu: "buffer.c:5362", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
     CVariable { name: "word-wrap", gnu: "buffer.c:5408", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
     CVariable { name: "selective-display-ellipses", gnu: "buffer.c:5487", kind: Kind::PerBuffer { default: Init::True, predicate: None } },
     CVariable { name: "indicate-empty-lines", gnu: "buffer.c:5612", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
