@@ -615,6 +615,8 @@ pub(crate) static C_VARIABLES: &[CVariable] = &[
     CVariable { name: "transient-mark-mode", gnu: "buffer.c:5875", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "mark-even-if-inactive", gnu: "callint.c:898", kind: Kind::Lisp(Init::True) },
     // Heap-valued C variables materialize lazily on first read.
+    // A build without GnuTLS (VM2-TLS1).
+    CVariable { name: "libgnutls-version", gnu: "gnutls.c:3021", kind: Kind::Lisp(Init::Fixnum(-1)) },
     CVariable { name: "latin-extra-code-table", gnu: "coding.c:12140", kind: Kind::Lisp(Init::NilVector(256)) },
     CVariable { name: "user-full-name", gnu: "editfns.c:4862", kind: Kind::Lisp(Init::UserIdentity("user-full-name")) },
     CVariable { name: "user-login-name", gnu: "editfns.c:4865", kind: Kind::Lisp(Init::UserIdentity("user-login-name")) },
