@@ -115,6 +115,13 @@ impl DisplayState {
         }
     }
 }
+/// The bands redisplay built for a window, before their faces.
+#[derive(Default)]
+struct Bands {
+    mode_line: Option<mode_line::Band>,
+    header_line: Option<mode_line::Band>,
+}
+
 struct Graph<'a>(&'a Vm);
 impl LispGraph for Graph<'_> {
     type Node = u64;
@@ -447,9 +454,10 @@ impl Vm {
         width: u32,
         height: u32,
     ) -> Result<WindowSnapshot> {
-        let mode_line = self.redisplay_and_build_mode_line(root, slot, height)?;
+        let bands = self.redisplay_and_build_mode_line(root, slot, height)?;
         let window = self.slots[root].value;
         let band_face = self.mode_line_face_name(window)?;
+        let header_face = self.header_line_face_name(window)?;
         let w = self.window(window)?;
         if !w.live() {
             return Err("window deleted during snapshot".into());
@@ -564,6 +572,18 @@ impl Vm {
         } else {
             (utf8, face_runs, start_byte, point_byte)
         };
+        let slice = |band: mode_line::Band| {
+            let handle = |face: &str| names.iter().position(|n| n == face);
+            TextSlice {
+                face_runs: band.runs.into_iter()
+                    .filter_map(|(bytes, face)| Some(FaceRun { bytes, face: FaceHandle(handle(&face)? as u32) }))
+                    .collect(),
+                utf8: band.text,
+            }
+        };
+        let (mode_line, header_line) = (bands.mode_line.map(slice), bands.header_line.map(slice));
+        let face = |name: &str, what: &str| names.iter().position(|n| n == name).map(|i| FaceHandle(i as u32)).ok_or(format!("{what} face required"));
+        let (mode_line_face, header_line_face) = (face(&band_face, "mode-line")?, face(&header_face, "header-line")?);
         let mut snapshot = WindowSnapshot {
             id,
             width,
@@ -572,21 +592,10 @@ impl Vm {
             point_byte,
             buffer_version: self.display_state.version,
             text: TextSlice { utf8, face_runs },
-            mode_line: mode_line.map(|band| {
-                let handle = |face: &str| names.iter().position(|n| n == face);
-                TextSlice {
-                    face_runs: band.runs.into_iter()
-                        .filter_map(|(bytes, face)| Some(FaceRun { bytes, face: FaceHandle(handle(&face)? as u32) }))
-                        .collect(),
-                    utf8: band.text,
-                }
-            }),
-            mode_line_face: FaceHandle(
-                names
-                    .iter()
-                    .position(|n| *n == band_face)
-                    .ok_or("mode-line face required")? as u32,
-            ),
+            mode_line,
+            mode_line_face,
+            header_line,
+            header_line_face,
             vscroll_px: self.window(window)?.vscroll_px,
             faces,
         };
@@ -638,7 +647,7 @@ impl Vm {
     /// GNU `redisplay_window` order for one window: make its buffer current,
     /// keep point visible, then `display_mode_line` (`src/xdisp.c:28200`)
     /// with that window's own -- possibly buffer-local -- `mode-line-format`.
-    fn redisplay_and_build_mode_line(&mut self, root: usize, buffer_slot: usize, height: u32) -> Result<Option<mode_line::Band>> {
+    fn redisplay_and_build_mode_line(&mut self, root: usize, buffer_slot: usize, height: u32) -> Result<Bands> {
         let saved = self.slot("#:vm2-band-saved-current-buffer");
         self.slots[saved].value = self.slots[self.buffer_slot].value;
         self.slots[self.buffer_slot].value = self.slots[buffer_slot].value;
@@ -651,9 +660,9 @@ impl Vm {
         self.slots[saved].value = Value::UNBOUND;
         outcome
     }
-    fn redisplay_window_inner(&mut self, root: usize, buffer_slot: usize, height: u32) -> Result<Option<mode_line::Band>> {
+    fn redisplay_window_inner(&mut self, root: usize, buffer_slot: usize, height: u32) -> Result<Bands> {
         if self.window(self.slots[root].value)?.mini {
-            return self.redisplay_window_fontify(root, buffer_slot, height).map(|_| None);
+            return self.redisplay_window_fontify(root, buffer_slot, height).map(|_| Bands::default());
         }
         let format_slot = self.slot("mode-line-format");
         let value = self.variable_value(format_slot)?;
@@ -666,13 +675,18 @@ impl Vm {
         } else {
             Some(self.mode_line_form(value))
         };
-        let band_height = if format.is_some() { self.window_state.line } else { 0 };
+        // The header line window_wants_header_line gives the window, its
+        // parameter's or its buffer's format.
+        let window = self.slots[root].value;
+        let header = crate::window::Windows::new(self).header_line_format(window).map_err(crate::forwarded::fault_text)?;
+        let header = (header != Value::NIL).then(|| self.mode_line_form(header));
+        let band_height = self.window_state.line * (u32::from(format.is_some()) + u32::from(header.is_some()));
         let text_height = height.saturating_sub(band_height);
         self.redisplay_point_visibility(self.slots[root].value, text_height)?;
         if !self.redisplay_window_fontify(root, buffer_slot, text_height)? {
-            return Ok(None);
+            return Ok(Bands::default());
         }
-        let Some(format) = format else { return Ok(None) };
+        if format.is_none() && header.is_none() { return Ok(Bands::default()); }
         let state = self.mode_line_state(root, buffer_slot, text_height)?;
         // GNU redisplay_window installs a non-selected window's point before
         // display_mode_lines (xdisp.c:20620-20641), then restores buffer point
@@ -698,7 +712,11 @@ impl Vm {
         let saved = self.slot("#:vm2-band-saved-selected-window");
         self.slots[saved].value = real_selected;
         self.frame_mut(self.frame_value_peek())?.selected = self.slots[root].value;
-        let outcome = self.mode_line_band(&format, &state).map(Some);
+        // display_mode_lines builds the header line before the mode line.
+        let outcome = (|| Ok(Bands {
+            header_line: header.as_ref().map(|form| self.mode_line_band(form, &state)).transpose()?,
+            mode_line: format.as_ref().map(|form| self.mode_line_band(form, &state)).transpose()?,
+        }))();
         self.frame_mut(self.frame_value_peek())?.selected = self.slots[saved].value;
         self.slots[saved].value = Value::UNBOUND;
         // Resolve the traced buffer again after collecting :eval, restoring
@@ -857,6 +875,19 @@ impl Vm {
         let defined = self.display_state.theme.face_names().any(|n| n == wanted);
         Ok(if defined { wanted } else { "mode-line" }.to_owned())
     }
+    /// CURRENT_HEADER_LINE_ACTIVE_FACE_ID (dispextern.h): `header-line-active'
+    /// or `-inactive' as the mode line chooses, else the `header-line' they
+    /// inherit, else the mode line's face.
+    fn header_line_face_name(&mut self, window: Value) -> Result<String> {
+        let selected = window == self.selected_window_value()?;
+        let slot = self.slot("mode-line-in-non-selected-windows");
+        let distinguish = self.variable_value(slot)? != Value::NIL;
+        let wanted = if selected || !distinguish { "header-line-active" } else { "header-line-inactive" };
+        let defined = |name: &str| self.display_state.theme.face_names().any(|n| n == name);
+        if defined(wanted) { return Ok(wanted.to_owned()); }
+        if defined("header-line") { return Ok("header-line".to_owned()); }
+        self.mode_line_face_name(window)
+    }
     /// The face table a snapshot publishes: `default' first, then the
     /// theme's other faces.
     fn display_faces(&self) -> Result<(Vec<String>, Vec<Face>)> {
@@ -943,19 +974,23 @@ impl Vm {
         let measured = self.host_layout(&input)?;
         Ok((measured.glyphs[0].0, measured.face_heights[0]))
     }
-    /// The height the host gives WINDOW's mode line: GNU's
-    /// CURRENT_MODE_LINE_HEIGHT (dispextern.h), the last displayed band's,
-    /// else an estimate from the window's mode-line face.
-    pub(crate) fn host_mode_line_height(&mut self, window: Value) -> Result<u32> {
+    /// The height the host gives WINDOW's mode line, or with HEADER its
+    /// header line: GNU's CURRENT_MODE_LINE_HEIGHT and
+    /// CURRENT_HEADER_LINE_HEIGHT (dispextern.h), the last displayed band's,
+    /// else an estimate from the band's face.
+    pub(crate) fn host_band_height(&mut self, window: Value, header: bool) -> Result<u32> {
         let id = self.window(window)?.id;
-        let shown = self.display_state.previous.get(&id).and_then(|snapshot| snapshot.mode_line.as_ref().map(|band| (snapshot, band)));
+        let shown = self.display_state.previous.get(&id).and_then(|snapshot| {
+            let (band, face) = if header { (&snapshot.header_line, snapshot.header_line_face) } else { (&snapshot.mode_line, snapshot.mode_line_face) };
+            band.as_ref().map(|band| (snapshot, band, face))
+        });
         let (faces, runs) = match shown {
-            Some((snapshot, band)) => (snapshot.faces.clone(), std::iter::once(snapshot.mode_line_face.0 as usize)
+            Some((snapshot, band, face)) => (snapshot.faces.clone(), std::iter::once(face.0 as usize)
                 .chain(band.face_runs.iter().map(|run| run.face.0 as usize)).collect::<Vec<_>>()),
             None => {
                 let (names, faces) = self.display_faces()?;
-                let band = self.mode_line_face_name(window)?;
-                let index = names.iter().position(|n| *n == band).ok_or("mode-line face required")?;
+                let band = if header { self.header_line_face_name(window)? } else { self.mode_line_face_name(window)? };
+                let index = names.iter().position(|n| *n == band).ok_or("band face required")?;
                 (faces, vec![index])
             }
         };

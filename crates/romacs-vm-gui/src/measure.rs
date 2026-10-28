@@ -185,6 +185,30 @@ mod tests {
         h.eval("(widen)");
     }
 
+    /// A header line paints above the text, and the measures count from
+    /// the window's top as GNU's do (window_top_y): the text starts below
+    /// the band, whose height the body loses.
+    #[test]
+    fn a_header_line_paints_above_the_text_and_shrinks_the_body() {
+        let mut h = hosted();
+        h.eval(r#"(progn (erase-buffer) (dotimes (i 40) (insert (format "line %d\n" i)))
+                         (setq header-line-format "Header") (goto-char 1) (set-window-start nil 1))"#);
+        let update = h.eval("(window-end nil t)");
+        let paint = h.paint();
+        let header: String = paint.glyphs.iter().filter(|g| g.5 == GlyphRowRole::HeaderLine).map(|g| g.0).collect();
+        assert_eq!(header, "Header");
+        let band = paint.glyphs.iter().find(|g| g.5 == GlyphRowRole::HeaderLine).map(|g| (g.2, g.4)).unwrap();
+        let first = paint.glyphs.iter().find(|g| g.5 == GlyphRowRole::Text).unwrap();
+        assert_eq!((band.0, first.0, first.2), (0.0, 'l', band.1), "the text starts below the band");
+        let mode_y = paint.glyphs.iter().find(|g| g.5 == GlyphRowRole::ModeLine).map(|g| g.2).unwrap();
+        let body = (mode_y - band.1) as i64;
+        assert_eq!(h.eval("(list (window-header-line-height) (window-body-height nil t))"), format!("({} {body})", band.1 as i64));
+        assert_eq!(h.eval("(pos-visible-in-window-p 1 nil t)"), format!("(0 {})", band.1 as i64));
+        assert_eq!(h.eval("(nth 2 (posn-at-point 1))"), format!("(0 . {})", band.1 as i64));
+        assert_eq!(update, h.eval("(window-end)"));
+        h.eval("(setq header-line-format nil)");
+    }
+
     /// What the host does not lay out as GNU displays it refuses; its
     /// plain twin answers.
     #[test]

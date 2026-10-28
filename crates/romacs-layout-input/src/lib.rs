@@ -120,6 +120,9 @@ pub struct WindowSnapshot {
     pub text: TextSlice,
     pub mode_line: Option<TextSlice>,
     pub mode_line_face: FaceHandle,
+    /// The header line above the text, painted in HEADER_LINE_FACE.
+    pub header_line: Option<TextSlice>,
+    pub header_line_face: FaceHandle,
     pub vscroll_px: u32,
     /// FaceHandle indexes this owned table; entry zero is the default face.
     pub faces: Vec<Face>,

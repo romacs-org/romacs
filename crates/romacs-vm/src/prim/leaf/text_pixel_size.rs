@@ -154,7 +154,8 @@ impl Leaf<'_> {
         let Some(v) = self.hosted_pos_visible(w, charpos, top, caller)? else { return Ok(Value::NIL) };
         let area = self.windows().text_area(w, caller)?;
         let buffer = area.buffer;
-        let p = self.with_buffer(buffer, |leaf| leaf.hosted_posn(&area, top, v.x, v.y))?;
+        // posn-at-x-y's Y counts from the window's top, above its header line.
+        let p = self.with_buffer(buffer, |leaf| leaf.hosted_posn(&area, top, v.x, v.y - area.header_line))?;
         let int = |n: i64| Value::integer(n).map_err(Fault::Error);
         let (x, y, zero, pos) = (int(v.x)?, int(v.y)?, int(0)?, int(p.pos)?);
         let xy = self.cons(x, y);
@@ -192,7 +193,9 @@ impl Leaf<'_> {
             motion::move_in_line(src, &cx, &mut rest, -1, -1, Op::default())?;
             let height = if rest.max_h > 0 { rest.max_h } else { src.default_height };
             let bottom = it.current_y + height;
-            Ok(Some(Visible { x: it.current_x, y: it.current_y, rtop: 0, rbot: (bottom - last_y).max(0),
+            // Y counts from the window's top: the text starts below the
+            // header line (window_top_y).
+            Ok(Some(Visible { x: it.current_x, y: area.header_line + it.current_y, rtop: 0, rbot: (bottom - last_y).max(0),
                 rowh: bottom.min(last_y) - it.current_y, vpos: it.vpos }))
         })
     }
@@ -323,10 +326,12 @@ impl Leaf<'_> {
     }
 
     /// The tab, header and mode lines MODE-LINES asks for. VM2 draws no
-    /// tab or header line (DIVERGENCES.md VM2-WIN3).
+    /// tab line (DIVERGENCES.md VM2-WIN3).
     fn mode_line_heights(&mut self, area: &TextArea, mode_lines: Value) -> std::result::Result<i64, Fault> {
-        let mode_line = self.intern("mode-line");
-        Ok(if mode_lines == Value::TRUE || mode_lines == mode_line { area.mode_line } else { 0 })
+        let (mode_line, header_line) = (self.intern("mode-line"), self.intern("header-line"));
+        let all = mode_lines == Value::TRUE;
+        Ok(if all || mode_lines == mode_line { area.mode_line } else { 0 }
+            + if all || mode_lines == header_line { area.header_line } else { 0 })
     }
 }
 

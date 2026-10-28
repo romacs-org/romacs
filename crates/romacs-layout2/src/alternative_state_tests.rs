@@ -26,7 +26,7 @@ fn alternative_snapshot_skipped_round_trip_reaches_retained_resolver() {
                     face_runs: vec![],
                 },
                 mode_line: None,
-                mode_line_face: FaceHandle(0),
+                mode_line_face: FaceHandle(0), header_line: None, header_line_face: FaceHandle(0),
                 vscroll_px: 0,
                 faces: vec![Face {
                     foreground: [255; 3],

@@ -68,7 +68,7 @@ fn window_mode_line_height(cx; optional window: Value) {
 
 defsubr! { name = "window-header-line-height", gnu = "window.c:1224", effect = Reads,
 fn window_header_line_height(cx; optional window: Value) {
-    cx.windows().live_zero(window)
+    cx.windows().window_header_line_height(window)
 }}
 
 defsubr! { name = "window-tab-line-height", gnu = "window.c:1233", effect = Reads,

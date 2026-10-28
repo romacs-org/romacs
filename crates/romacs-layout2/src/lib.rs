@@ -10,14 +10,14 @@ use romacs_display_protocol::{
     PresentationId, PresentedFramePlacement, Rect,
 };
 use romacs_font::{FontRequest, FontResolver, FontsetPolicy, publish_face_text};
-use romacs_layout_input::{TextSlice, WindowSnapshot, FrameSnapshot, Face, MeasureInput, Measured};
+use romacs_layout_input::{TextSlice, WindowSnapshot, FrameSnapshot, Face, FaceHandle, MeasureInput, Measured};
 
 /// Resolve the actual default monospace geometry before window sizing.
 pub fn frame_metrics(face: &Face) -> Result<(u32, u32), String> {
     let snapshot = WindowSnapshot {
         id: 1, width: 1, height: 1, start_byte: 0, point_byte: 0, buffer_version: 0,
         text: TextSlice { utf8: String::new(), face_runs: vec![] }, mode_line: None,
-        mode_line_face: romacs_layout_input::FaceHandle(0), vscroll_px: 0, faces: vec![face.clone()],
+        mode_line_face: romacs_layout_input::FaceHandle(0), header_line: None, header_line_face: romacs_layout_input::FaceHandle(0), vscroll_px: 0, faces: vec![face.clone()],
     };
     let frame = layout(&snapshot, 1)?;
     Ok((frame.char_height.ceil() as u32, frame.char_width.ceil() as u32))
@@ -160,31 +160,35 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
         return Ok(snapshot.start_byte);
     }
     validate_runs(&snapshot.text, snapshot.faces.len())?;
-    if let Some(band) = &snapshot.mode_line {
+    let bands = [(&snapshot.header_line, snapshot.header_line_face), (&snapshot.mode_line, snapshot.mode_line_face)];
+    for (band, face) in bands {
+        let Some(band) = band else { continue };
         validate_runs(band, snapshot.faces.len())?;
-        if snapshot.mode_line_face.0 as usize >= snapshot.faces.len()
-            || band.utf8.chars().any(char::is_control)
-        {
+        if face.0 as usize >= snapshot.faces.len() || band.utf8.chars().any(char::is_control) {
             return Err("invalid mode-line face or control character".into());
         }
     }
     let face_base = u32::try_from(frame.faces.len()).map_err(|e| e.to_string())?;
     let mut slices = vec![(&snapshot.text, 0)];
-    if let Some(band) = &snapshot.mode_line { slices.push((band, snapshot.mode_line_face.0 as usize)); }
+    slices.extend(bands.iter().filter_map(|(band, face)| Some(((*band).as_ref()?, face.0 as usize))));
     let face_text = face_text(snapshot.faces.len(), &slices);
     let metrics = realize_faces(&snapshot.faces, &face_text, frame, resolver, face_base)?;
     if face_base == 0 { frame.char_height = metrics[0].1; frame.char_width = metrics[0].2; }
-    let band_height = snapshot.mode_line.as_ref().map_or(0.0, |band| {
-        std::iter::once(snapshot.mode_line_face.0 as usize)
+    // A band is as tall as its tallest face.
+    let band_height = |(band, face): (&Option<TextSlice>, FaceHandle)| band.as_ref().map_or(0.0, |band| {
+        std::iter::once(face.0 as usize)
             .chain(band.face_runs.iter().map(|run| run.face.0 as usize))
             .map(|index| metrics[index].1)
             .fold(0.0_f32, f32::max)
     });
-    let body_height = (snapshot.height as f32 - band_height).max(0.0);
+    let (header_height, mode_height) = (band_height(bands[0]), band_height(bands[1]));
+    let body_height = (snapshot.height as f32 - header_height - mode_height).max(0.0);
+    // The text area starts below the header line.
+    let top = oy + header_height;
     frame.set_draw_context(
         DisplayWindowId::new(i64::try_from(snapshot.id).map_err(|e| e.to_string())?),
         GlyphRowRole::Text,
-        Some(Rect::new(ox, oy, snapshot.width as f32, body_height)),
+        Some(Rect::new(ox, top, snapshot.width as f32, body_height)),
     );
     let mut x = 0.0;
     let mut y = -(snapshot.vscroll_px as f32);
@@ -213,7 +217,7 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
         row_height = row_height.max(height);
         let advance = advance(frame, id, ch, cell);
         if body_height > 0.0 && y < body_height && y + height > 0.0 && x < snapshot.width as f32 {
-            frame.add_char(ch, ox + x, oy + y, advance, height, ascent, false);
+            frame.add_char(ch, ox + x, top + y, advance, height, ascent, false);
             *frame
                 .glyphs
                 .last_mut()
@@ -229,7 +233,7 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
     if let (Some((active, color)), Some((x, y, width, height, ascent))) = (cursor, point_rect) {
         // No cursor may bleed into the mode line or another window.
         if x >= 0.0 && x < snapshot.width as f32 && y >= 0.0 && y + height <= body_height {
-            frame.add_cursor(DisplayWindowId::new(snapshot.id as i64), ox + x, oy + y,
+            frame.add_cursor(DisplayWindowId::new(snapshot.id as i64), ox + x, top + y,
                 width.min(snapshot.width as f32 - x), height,
                 if active { romacs_display_protocol::CursorStyle::FilledBox } else { romacs_display_protocol::CursorStyle::Hollow }, color);
             let published = frame.window_cursors.last_mut().unwrap();
@@ -237,46 +241,57 @@ fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuffer, resolv
             published.ascent = ascent;
         }
     }
+    // Each band's faces are the next table after the window's, so the
+    // next window's faces start after them.
+    let mut copy = 0;
+    if let Some(band) = &snapshot.header_line {
+        copy += 1;
+        let bounds = Rect::new(ox, oy, snapshot.width as f32, header_height);
+        paint_band(frame, snapshot, band, snapshot.header_line_face, bounds, GlyphRowRole::HeaderLine, (face_base, copy), &metrics)?;
+    }
     if let Some(band) = &snapshot.mode_line {
-        let default = snapshot.mode_line_face.0 as usize;
-        let bounds = Rect::new(ox, oy + body_height, snapshot.width as f32, snapshot.height as f32 - body_height);
-        let background = color(snapshot.faces[default].background);
-        frame.add_background(bounds.x, bounds.y, bounds.width, bounds.height, background);
-        frame.set_draw_context(
-            DisplayWindowId::new(i64::try_from(snapshot.id).map_err(|e| e.to_string())?),
-            GlyphRowRole::ModeLine,
-            Some(bounds),
-        );
-        let offset = u32::try_from(snapshot.faces.len()).map_err(|e| e.to_string())?;
-        for index in 0..snapshot.faces.len() {
-            let source = FaceId::new(face_base + index as u32);
-            let target = FaceId::new(face_base.checked_add(offset).and_then(|v| v.checked_add(index as u32)).ok_or("too many faces")?);
-            let mut face = frame.faces[&source].clone();
-            face.id = target;
-            face.background = background;
-            frame.faces.insert(target, face);
-            if let Some(chars) = frame.char_fonts.get(&source).cloned() {
-                frame.char_fonts.insert(target, chars);
-            }
-        }
-        let mut x = 0.0;
-        for (byte, ch) in band.utf8.char_indices() {
-            let index = face_at(band, byte, default);
-            let id = FaceId::new(face_base + offset + index as u32);
-            let (ascent, height, cell) = metrics[index];
-            let advance = advance(frame, id, ch, cell);
-            if x < snapshot.width as f32 {
-                frame.add_char(ch, ox + x, bounds.y, advance, height, ascent, false);
-                *frame
-                    .glyphs
-                    .last_mut()
-                    .and_then(|g| g.face_id_mut())
-                    .ok_or("missing mode-line face")? = id;
-            }
-            x += advance;
-        }
+        copy += 1;
+        let bounds = Rect::new(ox, top + body_height, snapshot.width as f32, snapshot.height as f32 - header_height - body_height);
+        paint_band(frame, snapshot, band, snapshot.mode_line_face, bounds, GlyphRowRole::ModeLine, (face_base, copy), &metrics)?;
     }
     Ok(end_byte)
+}
+
+/// Paint BAND, a header or mode line, in BOUNDS: its FACE's background,
+/// then its characters in copies of the window's faces on that background,
+/// published from FACE_BASE plus COPY face tables on.
+#[allow(clippy::too_many_arguments)]
+fn paint_band(frame: &mut FrameGlyphBuffer, snapshot: &WindowSnapshot, band: &TextSlice, face: FaceHandle, bounds: Rect,
+              role: GlyphRowRole, (face_base, copy): (u32, u32), metrics: &[(f32, f32, f32)]) -> Result<(), String> {
+    let default = face.0 as usize;
+    let background = color(snapshot.faces[default].background);
+    frame.add_background(bounds.x, bounds.y, bounds.width, bounds.height, background);
+    frame.set_draw_context(DisplayWindowId::new(i64::try_from(snapshot.id).map_err(|e| e.to_string())?), role, Some(bounds));
+    let offset = u32::try_from(snapshot.faces.len()).map_err(|e| e.to_string())?.checked_mul(copy).ok_or("too many faces")?;
+    for index in 0..snapshot.faces.len() {
+        let source = FaceId::new(face_base + index as u32);
+        let target = FaceId::new(face_base.checked_add(offset).and_then(|v| v.checked_add(index as u32)).ok_or("too many faces")?);
+        let mut copied = frame.faces[&source].clone();
+        copied.id = target;
+        copied.background = background;
+        frame.faces.insert(target, copied);
+        if let Some(chars) = frame.char_fonts.get(&source).cloned() {
+            frame.char_fonts.insert(target, chars);
+        }
+    }
+    let mut x = 0.0;
+    for (byte, ch) in band.utf8.char_indices() {
+        let index = face_at(band, byte, default);
+        let id = FaceId::new(face_base + offset + index as u32);
+        let (ascent, height, cell) = metrics[index];
+        let advance = advance(frame, id, ch, cell);
+        if x < snapshot.width as f32 {
+            frame.add_char(ch, bounds.x + x, bounds.y, advance, height, ascent, false);
+            *frame.glyphs.last_mut().and_then(|g| g.face_id_mut()).ok_or("missing mode-line face")? = id;
+        }
+        x += advance;
+    }
+    Ok(())
 }
 
 /// The face table index painting SLICE's character at BYTE.

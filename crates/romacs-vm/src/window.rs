@@ -1254,6 +1254,7 @@ pub(crate) struct TextArea {
     pub full_width: bool,
     pub hscroll: i64,
     pub mode_line: i64,
+    pub header_line: i64,
     pub column: i64,
     pub line: i64,
     /// A host has laid the frame out and measures for it (VM2-WTPS1):
@@ -1405,7 +1406,7 @@ impl<'a> Windows<'a> {
         self.vm.window_mut(w).map_err(internal)?.dedicated = flag;
         Ok(flag)
     }
-    /// Decorations VM2 does not draw: header/tab lines, scroll bars and
+    /// Decorations VM2 does not draw: tab lines, scroll bars and
     /// dividers are 0 pixels (window.c:1224-1269 on a live window).
     pub(crate) fn live_zero(&mut self, window: Value) -> Out {
         self.live(window)?;
@@ -1435,12 +1436,41 @@ impl<'a> Windows<'a> {
             && x.height > line;
         Self::int(if wants { i64::from(line) } else { 0 })
     }
+    /// The header line window_wants_header_line (window.c:6067) gives W, a
+    /// live window: its `header-line-format' parameter, else its buffer's
+    /// `header-line-format', unless W is a minibuffer window, the parameter
+    /// is `none', or W is no taller than its mode line and one canonical
+    /// line.  nil when W wants none.
+    pub(crate) fn header_line_format(&mut self, w: Value) -> std::result::Result<Value, Fault> {
+        let mode_line = self.window_mode_line_height(w)?.integer_value().unwrap_or(0) != 0;
+        let (key, none, slot) = (self.vm.intern("header-line-format"), self.vm.intern("none"), self.vm.slot("header-line-format"));
+        let line = self.vm.window_state.line;
+        let x = self.get(w)?;
+        let (mini, height, buffer) = (x.mini, x.height, x.buffer);
+        let parameter = x.parameters.iter().find(|(k, _)| *k == key).map_or(Value::NIL, |(_, v)| *v);
+        let format = if parameter != Value::NIL { parameter } else { self.vm.value_in_buffer(slot, buffer).map_err(internal)? };
+        let tall = height > if mode_line { 2 * line } else { line };
+        Ok(if mini || parameter == none || format == Value::UNBOUND || !tall { Value::NIL } else { format })
+    }
+    /// WINDOW_HEADER_LINE_HEIGHT (window.h): one canonical line, or once a
+    /// host lays the frame out, the height it gives the header line.
+    pub(crate) fn window_header_line_height(&mut self, window: Value) -> Out {
+        let w = self.live(window)?;
+        if self.header_line_format(w)? == Value::NIL { return Self::int(0); }
+        let height = if self.vm.display_state.hosted && self.vm.has_layout_host() {
+            self.vm.host_band_height(w, true).map_err(internal)?
+        } else {
+            self.vm.window_state.line
+        };
+        Self::int(i64::from(height))
+    }
     /// window_body_width / window_body_height (window.c): WINDOW's text
     /// area in canonical characters (PIXELWISE nil, or `remap' with no face
     /// remapping) or pixels. The width loses the margins and, on a frame
     /// that is not a window system's, the column of the vertical bar a
     /// window left of another has; the height loses the mode line. VM2 has
-    /// no fringes, scroll bars, dividers, header or tab lines.
+    /// no fringes, scroll bars, dividers or tab lines; the height also loses
+    /// the header line.
     /// window_pixel_left / window_pixel_top: the window's frame-relative
     /// pixel edge.
     /// The refusal for a question about what a host has laid out, when no
@@ -1519,15 +1549,16 @@ impl<'a> Windows<'a> {
         if hosted && !self.vm.has_layout_host() { return Err(Self::displayed_window(caller)); }
         let mut mode_line = self.window_mode_line_height(w)?.integer_value().unwrap_or(0);
         if hosted && mode_line != 0 {
-            mode_line = i64::from(self.vm.host_mode_line_height(w).map_err(internal)?);
+            mode_line = i64::from(self.vm.host_band_height(w, false).map_err(internal)?);
         }
+        let header_line = self.window_header_line_height(w)?.integer_value().unwrap_or(0);
         let (column, line) = (i64::from(self.vm.window_state.column), i64::from(self.vm.window_state.line));
         let root = self.vm.window_root_peek(ROOT);
         let (root_x, root_width) = self.vm.window(root).map_or((0, 0), |r| (i64::from(r.x), i64::from(r.width)));
         let x = self.get(w)?;
         let (left, width) = (i64::from(x.x), i64::from(x.width));
         let body_width = (width - i64::from(x.left_margin + x.right_margin) * column).max(0);
-        let body_height = (i64::from(x.height) - mode_line).max(0);
+        let body_height = (i64::from(x.height) - mode_line - header_line).max(0);
         Ok(TextArea {
             window: w,
             buffer: x.buffer,
@@ -1538,6 +1569,7 @@ impl<'a> Windows<'a> {
             full_width: left == root_x && width == root_width,
             hscroll: x.hscroll,
             mode_line,
+            header_line,
             column,
             line,
             hosted,
@@ -1580,7 +1612,8 @@ impl<'a> Windows<'a> {
             if chars { px / column } else { px }
         } else {
             let mode_line = self.window_mode_line_height(window)?.integer_value().unwrap_or(0);
-            let px = i64::from(self.get(w)?.height) - mode_line;
+            let header_line = self.window_header_line_height(window)?.integer_value().unwrap_or(0);
+            let px = i64::from(self.get(w)?.height) - mode_line - header_line;
             if chars { px / line } else { px }
         };
         Self::int(size.max(0))

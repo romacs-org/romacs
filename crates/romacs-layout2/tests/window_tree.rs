@@ -50,7 +50,7 @@ fn invalid_window_placement_is_rejected_not_drawn() {
         romacs_layout_input::WindowSnapshot {
             id, width: w, height: h, start_byte: 0, point_byte: 0, buffer_version: 0,
             text: romacs_layout_input::TextSlice { utf8: String::new(), face_runs: vec![] },
-            mode_line: None, mode_line_face: romacs_layout_input::FaceHandle(0),
+            mode_line: None, mode_line_face: romacs_layout_input::FaceHandle(0), header_line: None, header_line_face: romacs_layout_input::FaceHandle(0),
             vscroll_px: 0, faces: vec![face.clone()],
         }
     }
