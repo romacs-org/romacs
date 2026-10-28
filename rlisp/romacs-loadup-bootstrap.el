@@ -151,17 +151,24 @@
 (load "emacs-lisp/rmc.el" nil t t)
 (load "leim/leim-list.el" nil t t)
 
-;; startup.el command-line (startup.el:1479): variables whose standard value
-;; depends on the runtime (user-mail-address and friends) get it once the
-;; preloaded files are in.  Romacs does not run command-line in this
-;; bootstrap, so it takes this one step itself.
-(let ((user-emacs-directory-warning nil))
-  (when (listp custom-delayed-init-variables)
-    (mapc #'custom-reevaluate-setting (reverse custom-delayed-init-variables))))
-(setq custom-delayed-init-variables t)
-;; startup.el command-line (startup.el:843): the initial frame's faces for
-;; its background mode and display type.
-(frame-set-background-mode (selected-frame))
+;; The startup steps of startup.el's `command-line' that a batch session
+;; depends on.  `romacs--startup-phase' marks their extent: a world build
+;; may read per-process host facts only inside it.
+(unwind-protect
+    (progn
+      (romacs--startup-phase t)
+      ;; startup.el command-line (startup.el:1479): variables whose standard
+      ;; value depends on the runtime (user-mail-address and friends) get it
+      ;; once the preloaded files are in.  Romacs does not run command-line
+      ;; in this bootstrap, so it takes this one step itself.
+      (let ((user-emacs-directory-warning nil))
+        (when (listp custom-delayed-init-variables)
+          (mapc #'custom-reevaluate-setting (reverse custom-delayed-init-variables))))
+      (setq custom-delayed-init-variables t)
+      ;; startup.el command-line (startup.el:843): the initial frame's faces
+      ;; for its background mode and display type.
+      (frame-set-background-mode (selected-frame)))
+  (romacs--startup-phase nil))
 
 (provide 'romacs-loadup-bootstrap)
 ;;; romacs-loadup-bootstrap.el ends here

@@ -26,9 +26,7 @@ impl Vm {
             })
             .collect::<Result<Vec<_>>>()?;
         let output = crate::host::command(&args[0])
-            .args(&args[1..])
-            .stdin(std::process::Stdio::null())
-            .output()
+            .and_then(|mut command| command.args(&args[1..]).stdin(std::process::Stdio::null()).output())
             .map_err(|e| e.to_string())?;
         if !output.status.success() {
             return Err(format!(

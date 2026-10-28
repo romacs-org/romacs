@@ -412,7 +412,12 @@ impl Vm {
                 counted = at + begin;
                 let step = self.loader.steps.len();
                 self.loader.steps.push(serde_json::json!({"file":path,"ordinal":ordinal,"byte":at+begin,"line":line,"source":form_source,"status":"entered"}));
+                let site = crate::host::enter_site(|| crate::host::Site {
+                    file: path.to_string_lossy().into_owned(), line,
+                    head: form_source.trim_start().lines().next().unwrap_or("").chars().take(80).collect(),
+                });
                 let evaluated = self.eval_load_toplevel(&form, exact, lazy, 0);
+                drop(site);
                 match evaluated {
                     Ok(v) => {
                         result = v;

@@ -1593,6 +1593,7 @@ mod leaf {
     mod random;
     mod width;
     mod coding_safe;
+    mod world;
 }
 pub(crate) use leaf::{Leaf, Kind, SyntaxOp, SyntaxOutcome, CallOutput};
 

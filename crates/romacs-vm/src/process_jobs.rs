@@ -203,14 +203,14 @@ fn run(request: Request, cancel: Arc<AtomicBool>) -> Output {
         return output;
     }
     let started = crate::host::monotonic();
-    let child = crate::host::command(&request.argv[0])
+    let child = crate::host::command(&request.argv[0]).and_then(|mut command| command
         .args(&request.argv[1..])
         .current_dir(&request.directory)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .process_group(0)
-        .spawn();
+        .spawn());
     let mut child = match child {
         Ok(child) => child,
         Err(error) => {
