@@ -235,3 +235,19 @@ fn off_mode_answers_the_host() {
     assert!(Duration::from_secs(lisp_now) + Duration::from_secs(5) >= now);
     assert_eq!(host::leave_build(), None);
 }
+
+#[test]
+fn confinement_fails_and_lists_a_read_outside_the_roots() {
+    let dir = scratch("confined");
+    let outside = write(&dir.join("outside/data.txt"), "x");
+    let file = write(&dir.join("roots/read.el"), &format!(
+        "(setq r (condition-case nil (with-temp-buffer (insert-file-contents {out}) 'read) (file-error 'failed)))\n", out = lisp(&outside)));
+    let mut roots = romacs_vm::world::sandbox::runtime_roots();
+    roots.push(dir.join("roots"));
+    romacs_vm::world::sandbox::confine(&roots, &[]).expect("Landlock");
+    assert_eq!(std::fs::read(&outside).map_err(|e| e.raw_os_error()), Err(Some(libc::EACCES)));
+    let (mut vm, trace) = build(&[file]);
+    assert_eq!(eval(&mut vm, "r"), "failed");
+    let confined: Vec<_> = items(&trace, "refusals", "confined").iter().map(|r| r["path"].as_str().unwrap().to_owned()).collect();
+    assert_eq!(confined, [outside.to_string_lossy()], "{trace}");
+}

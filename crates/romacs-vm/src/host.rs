@@ -42,6 +42,7 @@ pub enum Mode {
 thread_local! {
     static MODE: Cell<Mode> = const { Cell::new(Mode::Off) };
     static BUILD: RefCell<Option<Build>> = const { RefCell::new(None) };
+    static CONFINED: Cell<bool> = const { Cell::new(false) };
 }
 
 pub fn mode() -> Mode {
@@ -241,18 +242,26 @@ pub(crate) fn enter_site(site: impl FnOnce() -> Site) -> SiteGuard {
     SiteGuard(with_build(|b| std::mem::replace(&mut b.site, Some(Rc::new(site())))))
 }
 
+/// This thread is confined (`world::sandbox`): a read it is refused fails
+/// with EACCES, which the build lists as a refusal.
+pub(crate) fn note_confined() {
+    CONFINED.with(|c| c.set(true));
+}
+
+/// A read of PATH that failed with ERROR, listed when confinement refused it.
+fn confined(path: &Path, error: &io::Error) {
+    if error.raw_os_error() == Some(libc::EACCES) && CONFINED.with(Cell::get) {
+        refuse("confined", json!({"path": bytes(path)}));
+    }
+}
+
 /// Record a K fact: KIND with FIELDS and the current site.
-fn record(kind: &str, fields: Json) {
+pub(crate) fn record(kind: &str, fields: Json) {
     with_build(|b| {
         let mut item = json!({"kind": kind, "site": b.site()});
         item.as_object_mut().unwrap().extend(fields.as_object().cloned().unwrap_or_default());
         b.push(false, item);
     });
-}
-
-/// Record a startup input (root 6) with its content digest, FIELDS.
-pub(crate) fn record_input(fields: Json) {
-    record("input", fields);
 }
 
 /// List a refusal: KIND with FIELDS and the current site.
@@ -306,7 +315,10 @@ fn sha256(data: &[u8]) -> String {
 fn file_read(path: &Path, result: &io::Result<impl AsRef<[u8]>>) {
     let result = match result {
         Ok(data) => json!({"len": data.as_ref().len(), "sha256": sha256(data.as_ref())}),
-        Err(e) => errno(e),
+        Err(e) => {
+            confined(path, e);
+            errno(e)
+        }
     };
     record("file-read", json!({"path": bytes(path), "result": result}));
 }
@@ -453,7 +465,10 @@ pub fn open_input(path: impl AsRef<Path>, flags: i32) -> io::Result<Input> {
         // Only a regular file's content is a fact; a FIFO's read would block.
         Ok(file) if file.metadata().is_ok_and(|m| !m.is_file()) => probed("open", path, json!("special")),
         Ok(_) => file_read(path, &std::fs::read(path)),
-        Err(e) => record("file-read", json!({"path": bytes(path), "result": errno(e)})),
+        Err(e) => {
+            confined(path, e);
+            record("file-read", json!({"path": bytes(path), "result": errno(e)}));
+        }
     }
     result.map(|file| Input(file, Some(path.to_owned())))
 }
@@ -541,6 +556,7 @@ pub fn read_dir(path: impl AsRef<Path>) -> io::Result<ReadDir> {
     match result {
         Ok(entries) => Ok(ReadDir(entries, Some(Listing { path, names: Vec::new(), end: None }))),
         Err(e) => {
+            confined(Path::new(&path), &e);
             record("dir-list", json!({"path": path, "open": errno(&e)}));
             Err(e)
         }

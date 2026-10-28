@@ -3,6 +3,7 @@ use std::fs; // expect: std::fs use-host
 fn planted(p: &Path, dir: &Path, file: &File) {
     std::fs::write(p, b""); // expect: std::fs
     let saved = vm.dynamic[0].1; // expect: dynamic:saved
+    vm.slot("user-mail-address"); // expect: delayed-variable
     for entry in &vm.dynamic {} // expect: dynamic:saved
     File::open(p); // expect: File::open
     std::fs::File::create(p); // expect: File::create

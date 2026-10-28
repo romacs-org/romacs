@@ -24,6 +24,8 @@ use std::io::Write;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::PathBuf;
 
+mod world;
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum HarnessKind {
     Mini,
@@ -47,13 +49,18 @@ struct Args {
     /// result then carries `caught`: the should-errors absent machinery
     /// satisfied (run.py refuses to count a pass without it).
     audit: Option<PathBuf>,
+    /// `--world-trace OUT`: write the recipe's world-build trace to OUT.
+    world_trace: Option<PathBuf>,
+    /// Set in the confined child that `--world-trace` runs.
+    world_child: bool,
 }
 
 fn usage() -> ! {
     eprintln!(
         "usage: romacs-gnu-ert --harness FILE --plan PLAN.json [--load-path DIR]... \
          [--preload FILE]... [--skip-test NAME]... [--probe EXPR]... \
-         [--harness-kind mini|real] [--ert-adapter none|romacs-batch] [--reporter FILE] [--audit FILE]"
+         [--harness-kind mini|real] [--ert-adapter none|romacs-batch] [--reporter FILE] [--audit FILE] \
+         [--world-trace OUT.json]"
     );
     std::process::exit(2)
 }
@@ -62,6 +69,7 @@ fn parse() -> Args {
     let mut it = std::env::args().skip(1);
     let (mut load_path, mut preload, mut skip, mut probe) = (vec![], vec![], vec![], vec![]);
     let (mut harness, mut plan, mut reporter, mut audit) = (None, None, None, None);
+    let (mut world_trace, mut world_child) = (None, false);
     let mut kind = HarnessKind::Mini;
     let mut measurement_regime = false;
     let mut ert_bootstrap = false;
@@ -90,6 +98,8 @@ fn parse() -> Args {
             }
             "--skip-test" => skip.push(value),
             "--probe" => probe.push(value),
+            "--world-trace" => world_trace = Some(PathBuf::from(value)),
+            "--world-trace-child" => world_child = true,
             _ => usage(),
         }
     }
@@ -101,6 +111,8 @@ fn parse() -> Args {
         || (kind == HarnessKind::Real && (!skip.is_empty() || !probe.is_empty()))
         || (kind == HarnessKind::Mini && reporter.is_some())
         || (kind == HarnessKind::Real && audit.is_some())
+        || (world_trace.is_some() && kind != HarnessKind::Real)
+        || (world_child && world_trace.is_none())
     {
         usage();
     }
@@ -118,6 +130,8 @@ fn parse() -> Args {
         skip,
         probe,
         audit,
+        world_trace,
+        world_child,
     }
 }
 
@@ -301,6 +315,10 @@ fn run_real(vm: &mut Vm, args: &Args, file: &str) -> ! {
 
 fn main() {
     let args = parse();
+    let world_out = args.world_trace.clone().filter(|_| args.world_child);
+    if let Some(out) = &args.world_trace && !args.world_child {
+        world::trace(out);
+    }
     if args.kind == HarnessKind::Real {
         if let Err(e) = native_output_to_stdout() {
             emit(json!({"event": "setup", "ok": false, "phase": "output", "error": e.to_string()}));
@@ -317,7 +335,12 @@ fn main() {
     let file = plan["file"].as_str().unwrap_or_else(|| usage()).to_owned();
     let forms = plan["forms"].as_array().cloned().unwrap_or_default();
 
+    if let Some(out) = &world_out {
+        let recipe = args.load_path.iter().chain(&args.preload).chain([&args.harness, &args.plan]).chain(&args.reporter);
+        world::begin(recipe.cloned().collect(), out);
+    }
     let mut vm = Vm::new();
+    vm.world_begin();
     if let Err((_, error)) = eval(&mut vm, "(setq noninteractive t)") {
         emit(json!({"event": "setup", "ok": false, "phase": "batch-mode", "error": error}));
         std::process::exit(3);
@@ -376,6 +399,9 @@ fn main() {
                 std::process::exit(4);
             }
         }
+    }
+    if let Some(out) = &world_out {
+        world::finish(&mut vm, out);
     }
     if let Some(audit) = &args.audit {
         match catch_unwind(AssertUnwindSafe(|| vm.load_file(audit).map(|_| ()))) {

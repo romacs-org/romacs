@@ -23,6 +23,8 @@
 //! runs every variable is wrapped so, to observe its reads. No path of an
 //! unfenced variable changes. Calls are observed through the backtrace's
 //! token counter (`Backtrace::observe`).
+pub mod sandbox;
+
 use crate::data::Object;
 use crate::forwarded::Fwd;
 use crate::{Value, VariableRedirect, Vm, host};
@@ -146,7 +148,10 @@ impl Vm {
         for slot in calls {
             self.observe_function(slot);
         }
-        for slot in std::mem::take(&mut self.fence_mut().delayed) {
+        let delayed = std::mem::take(&mut self.fence_mut().delayed);
+        let names: Vec<&str> = delayed.iter().map(|&slot| self.symbol_names[slot].as_str()).collect();
+        host::record("delayed", json!({"symbols": names}));
+        for slot in delayed {
             self.fence_variable(slot, Root::Delayed);
         }
         let inputs = self.fence_mut().inputs.clone();
@@ -159,7 +164,7 @@ impl Vm {
         for (&input, digest) in inputs.iter().zip(&digests) {
             let mut item = self.input_json(input);
             item["digest"] = json!(digest);
-            host::record_input(item);
+            host::record("input", item);
         }
         self.fence_mut().digests = digests;
     }
@@ -371,8 +376,9 @@ impl Vm {
     }
 
     /// SHA-256 of VALUE's content: the structure and bytes of the conses,
-    /// strings, vectors, records and hash tables it reaches, each once, and
-    /// the identity of every other object.
+    /// strings, vectors, records, hash tables, closures and cells it reaches,
+    /// each once, and the kind of every other object. Nothing depends on an
+    /// arena index, which a collection moves.
     fn content_digest(&self, value: Value) -> String {
         use sha2::Digest;
         let mut hasher = sha2::Sha256::new();
@@ -380,13 +386,23 @@ impl Vm {
         let mut stack = vec![value];
         while let Some(v) = stack.pop() {
             hasher.update(v.tag().to_le_bytes());
-            let fresh = seen.insert(v.0);
+            if matches!(v.tag(), 0 | 3 | 4 | 5) && !seen.insert(v.0) {
+                continue;
+            }
             match (v.tag(), self.object_if(v)) {
-                (3, _) if fresh => {
+                (3, _) => {
                     let (car, cdr) = self.cons_pair(v).expect("a cons");
                     stack.extend([cdr, car]);
                 }
-                (7, _) => {
+                (4, _) => {
+                    let closure = &self.closures[v.payload() as usize];
+                    hasher.update(closure.function.to_le_bytes());
+                    hasher.update([closure.captures.len(), closure.metadata.len()].map(usize::to_le_bytes).concat());
+                    stack.push(closure.document);
+                    stack.extend(closure.metadata.iter().chain(&closure.captures).rev());
+                }
+                (5, _) => stack.push(self.read_capture_cell(v.payload() as usize)),
+                (7, _) if v != Value::UNBOUND => {
                     let slot = v.payload() as usize - 1;
                     hasher.update(self.symbol_names[slot].as_bytes());
                     if self.names.get(&self.symbol_names[slot]) != Some(&slot) {
@@ -397,15 +413,16 @@ impl Vm {
                 (_, Some(Object::Bytes(bytes))) => hasher.update(bytes),
                 (_, Some(Object::Float(f))) => hasher.update(f.to_bits().to_le_bytes()),
                 (_, Some(Object::Bignum(n))) => hasher.update(n.to_signed_bytes_le()),
-                (_, Some(Object::Vector(items) | Object::Record(items))) if fresh => {
+                (_, Some(Object::Vector(items) | Object::Record(items))) => {
                     hasher.update(items.len().to_le_bytes());
                     stack.extend(items.iter().rev());
                 }
-                (_, Some(Object::HashTable(table))) if fresh => {
+                (_, Some(Object::HashTable(table))) => {
                     for (_, key, value) in table.entries() {
                         stack.extend([value, key]);
                     }
                 }
+                (_, Some(object)) => hasher.update(format!("{:?}", std::mem::discriminant(object))),
                 _ => hasher.update(v.0.to_le_bytes()),
             }
         }
