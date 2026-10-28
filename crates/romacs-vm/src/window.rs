@@ -1233,6 +1233,21 @@ impl Vm {
     }
 }
 
+/// A live window as the display iterator sees it, in columns but for
+/// the mode line's pixels and the frame's character size.
+pub(crate) struct TextArea {
+    pub window: Value,
+    pub buffer: Value,
+    pub columns: i64,
+    pub left_margin: i64,
+    pub right_margin: i64,
+    pub rightmost: bool,
+    pub full_width: bool,
+    pub hscroll: i64,
+    pub mode_line: i64,
+    pub column: i64,
+    pub line: i64,
+}
 /// The window surface `prims/window.rs` declares as primitives (GNU
 /// window.c, frame.c and minibuf.c's `active-minibuffer-window`). Reached only
 /// through `Leaf::windows`, so a body never holds `&mut Vm`; nothing here
@@ -1416,6 +1431,21 @@ impl<'a> Windows<'a> {
     /// sees nothing on the initial frame, batch's, which no host lays out. A
     /// displayed window would need display simulation (VM2-POSVIS1).
     pub(crate) fn pos_visible_in_window_p(&mut self, pos: Value, window: Value, _partially: Value) -> Out {
+        self.pos_visible(pos, window, "pos-visible-in-window-p")
+    }
+    /// keyboard.c:13054 Fposn_at_point: pos-visible-in-window-p with
+    /// PARTIALLY t, then posn-at-x-y at the coordinates it reports. The
+    /// initial frame shows nothing, so the answer there is nil.
+    pub(crate) fn posn_at_point(&mut self, pos: Value, window: Value) -> Out {
+        let window = if window == Value::NIL { self.vm.selected_window_value().map_err(internal)? } else { window };
+        self.pos_visible(pos, window, "posn-at-point")
+    }
+    /// The refusal for a question about what a host has laid out: its
+    /// published layout cannot answer it (VM2-POSVIS1).
+    fn displayed_window(caller: &str) -> Fault {
+        internal(format!("VM2 {caller} in a displayed window is unsupported"))
+    }
+    fn pos_visible(&mut self, pos: Value, window: Value, caller: &str) -> Out {
         let w = self.live(window)?;
         let posint = if pos == Value::TRUE {
             None
@@ -1452,7 +1482,33 @@ impl<'a> Windows<'a> {
         if posint.is_some_and(|p| p < top || p > zv) || top < begv || top > zv || !self.vm.display_state.hosted {
             return Ok(Value::NIL);
         }
-        Err(internal("VM2 pos-visible-in-window-p in a displayed window is unsupported".into()))
+        Err(Self::displayed_window(caller))
+    }
+    /// decode_live_window and what xdisp.c init_iterator reads of the
+    /// window. The terminal frame model holds until a host lays the frame
+    /// out; a host's layout cannot answer for it (VM2-WTPS1).
+    pub(crate) fn text_area(&mut self, window: Value, caller: &str) -> std::result::Result<TextArea, Fault> {
+        let w = self.live(window)?;
+        if self.vm.display_state.hosted { return Err(Self::displayed_window(caller)); }
+        let mode_line = self.window_mode_line_height(w)?.integer_value().unwrap_or(0);
+        let (column, line) = (i64::from(self.vm.window_state.column), i64::from(self.vm.window_state.line));
+        let root = self.vm.window_root_peek(ROOT);
+        let (root_x, root_width) = self.vm.window(root).map_or((0, 0), |r| (i64::from(r.x), i64::from(r.width)));
+        let x = self.get(w)?;
+        let (left, width) = (i64::from(x.x), i64::from(x.width));
+        Ok(TextArea {
+            window: w,
+            buffer: x.buffer,
+            columns: width / column,
+            left_margin: i64::from(x.left_margin),
+            right_margin: i64::from(x.right_margin),
+            rightmost: left + width >= root_x + root_width,
+            full_width: left == root_x && width == root_width,
+            hscroll: x.hscroll,
+            mode_line,
+            column,
+            line,
+        })
     }
     pub(crate) fn window_pixel_edge(&mut self, window: Value, top: bool) -> Out {
         let w = self.valid(window)?;
@@ -1542,6 +1598,14 @@ impl<'a> Windows<'a> {
     }
     pub(crate) fn check_live_frame(&mut self, frame: Value) -> std::result::Result<(), Fault> {
         self.live_frame(frame)
+    }
+    /// frame.c:4381 Fframe_native_width and :4401 Fframe_native_height:
+    /// the frame's size in the pixels its windows are measured in, as the
+    /// host or the batch runner set it (DIVERGENCES.md VM2-WIN5).
+    pub(crate) fn frame_native_size(&mut self, frame: Value, horizontal: bool) -> Out {
+        self.any_frame(frame)?;
+        let state = &self.vm.window_state;
+        Self::int(i64::from(if horizontal { state.width } else { state.height }))
     }
     /// FRAME_COLS and FRAME_LINES of the frame's text area.
     pub(crate) fn frame_text_size(&mut self) -> (i64, i64) {

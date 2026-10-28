@@ -1,40 +1,14 @@
 //! GNU xdisp.c invisible_prop and Finvisible_p.
 use super::*;
 
-// Match the whole value first; only then try each element of a property list.
-// Both passes use eq, and the first match wins, including its ellipsis policy.
-fn match_spec(cx: &Leaf<'_>, property: Value, mut spec: Value) -> Value {
-    for _ in 0..cx.list_limit() {
-        let Some((entry, tail)) = cx.pair(spec) else { break };
-        if property == entry { return Value::TRUE; }
-        if let Some((key, ellipsis)) = cx.pair(entry) {
-            if property == key {
-                return if ellipsis == Value::NIL { Value::TRUE } else { Value::integer(2).unwrap() };
-            }
-        }
-        spec = tail;
-    }
-    Value::NIL
-}
-
 defsubr! { name = "invisible-p", gnu = "xdisp.c:30344", effect = Reads,
 fn invisible_p(cx, pos: Value) {
     let property = cx.invisible_property(pos)?;
-    let symbol = cx.intern("buffer-invisibility-spec");
-    let spec = cx.variable_value(symbol)?.unwrap_or(Value::NIL);
-    if spec == Value::TRUE {
-        return Ok(if property == Value::NIL { Value::NIL } else { Value::TRUE });
-    }
-    let matched = match_spec(cx, property, spec);
-    if matched != Value::NIL { return Ok(matched); }
-    let mut rest = property;
-    for _ in 0..cx.list_limit() {
-        let Some((entry, tail)) = cx.pair(rest) else { break };
-        let matched = match_spec(cx, entry, spec);
-        if matched != Value::NIL { return Ok(matched); }
-        rest = tail;
-    }
-    Ok(Value::NIL)
+    Ok(match cx.invisible_kind(property)? {
+        0 => Value::NIL,
+        1 => Value::TRUE,
+        _ => Value::integer(2).unwrap(),
+    })
 }}
 
 #[cfg(test)]

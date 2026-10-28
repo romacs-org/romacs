@@ -190,7 +190,7 @@ impl Leaf<'_> {
         v.integer_value().ok_or(Fault::Wrong("fixnump", v))
     }
     /// buffer.c fix_position.
-    fn fix_position(&self, v: Value) -> std::result::Result<i64, Fault> {
+    pub(super) fn fix_position(&self, v: Value) -> std::result::Result<i64, Fault> {
         if let Some(n) = v.integer_value() { return Ok(n); }
         match self.marker_position(v) {
             Some(Some(n)) => return Ok(n),

@@ -350,3 +350,30 @@ defsubr! { name = "window-pixel-top", gnu = "window.c:1009", effect = Reads,
 fn window_pixel_top(cx; optional window: Value) {
     cx.windows().window_pixel_edge(window, true)
 }}
+
+// GNU's motion over the initial terminal frame's display, until a host lays
+// the frame out (DIVERGENCES.md VM2-WTPS1).
+defsubr! { name = "window-text-pixel-size", gnu = "xdisp.c:12078", effect = Reads,
+fn window_text_pixel_size(cx; optional window: Value, from: Value, to: Value, x_limit: Value, y_limit: Value, mode_lines: Value, ignore_line_at_end: Value) {
+    cx.window_text_pixel_size(window, crate::prim::TextSizeArgs { from, to, x_limit, y_limit, mode_lines, ignore_line_at_end })
+}}
+
+defsubr! { name = "buffer-text-pixel-size", gnu = "xdisp.c:12158", effect = Reads,
+fn buffer_text_pixel_size(cx; optional buffer_or_name: Value, window: Value, x_limit: Value, y_limit: Value, from: Value, to: Value) {
+    cx.buffer_text_pixel_size(buffer_or_name, window, x_limit, y_limit, from, to)
+}}
+
+defsubr! { name = "posn-at-point", gnu = "keyboard.c:13054", effect = Reads,
+fn posn_at_point(cx; optional pos: Value, window: Value) {
+    cx.windows().posn_at_point(pos, window)
+}}
+
+defsubr! { name = "frame-native-width", gnu = "frame.c:4381", effect = Reads,
+fn frame_native_width(cx; optional frame: Value) {
+    cx.windows().frame_native_size(frame, true)
+}}
+
+defsubr! { name = "frame-native-height", gnu = "frame.c:4401", effect = Reads,
+fn frame_native_height(cx; optional frame: Value) {
+    cx.windows().frame_native_size(frame, false)
+}}

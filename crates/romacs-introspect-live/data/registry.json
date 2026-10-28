@@ -8,14 +8,14 @@
   "provenance": {
     "generated_by": "romacs-introspect-live",
     "generated_on": "linux-x86_64",
-    "input_hash": "b415cbbd105acbac740bfb9e21423887020bd5cd4e9c55bf97681e870c9ee4ed",
+    "input_hash": "03ecb95745d5d73cad3d62028c52b2989449d3411c973d480d5a3780b75ced4b",
     "source_only_at_generation": [],
     "vm2_probe_panics": [],
-    "vm2_universe": 4219
+    "vm2_universe": 4255
   },
   "schema": 2,
   "vm2": {
-    "count": 969,
+    "count": 974,
     "entries": [
       "#:vm2-closure-document",
       "#:vm2-closure-metadata",
@@ -117,6 +117,7 @@
       "buffer-string",
       "buffer-substring",
       "buffer-substring-no-properties",
+      "buffer-text-pixel-size",
       "bufferp",
       "bury-buffer-internal",
       "byte-code-function-p",
@@ -325,6 +326,8 @@
       "frame-initial-p",
       "frame-list",
       "frame-live-p",
+      "frame-native-height",
+      "frame-native-width",
       "frame-or-buffer-changed-p",
       "frame-parameter",
       "frame-parameters",
@@ -584,6 +587,7 @@
       "pos-eol",
       "pos-visible-in-window-p",
       "position-bytes",
+      "posn-at-point",
       "preceding-char",
       "prefix-numeric-value",
       "previous-overlay-change",
@@ -973,6 +977,7 @@
       "window-start",
       "window-system",
       "window-tab-line-height",
+      "window-text-pixel-size",
       "window-top-child",
       "window-total-height",
       "window-total-width",

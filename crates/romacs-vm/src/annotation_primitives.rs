@@ -432,6 +432,38 @@ impl Vm {
         self.annotation_resolve(&raw, property)
     }
 
+    /// get_char_property_and_overlay (textprop.c) with a window as OBJECT,
+    /// as the display iterator asks: PROPERTY of the character at BYTE of
+    /// BUFFER from the highest overlay that applies to WINDOW (an overlay
+    /// whose `window' property is another window does not), else from the
+    /// text, together with that overlay or nil.
+    pub(crate) fn window_char_property(&self, buffer: Value, byte: usize, property: Value, window: Value) -> Result<(Value, Value)> {
+        let text = self.annotated(buffer)?;
+        let at = byte as u32;
+        let mut found = text.intervals.query_with_end(at, at, true, at == text.anchors.extent(), &text.anchors).0;
+        found.retain(|&overlay| self.overlay_applies_to(overlay, window));
+        found.sort_by_key(|&overlay| self.overlay_order_key(overlay));
+        for overlay in found.into_iter().rev() {
+            let value = self.overlay_property(overlay, property)?;
+            if value != Value::NIL { return Ok((value, overlay)); }
+        }
+        let raw = self.annotation_raw(buffer, text.char_of_byte(ByteOffset(byte))?.0 + 1)?;
+        Ok((self.annotation_resolve(&raw, property)?, Value::NIL))
+    }
+    /// The display ignores an overlay whose `window' property names
+    /// another window (xdisp.c load_overlay_strings).
+    pub(crate) fn overlay_applies_to(&self, overlay: Value, window: Value) -> bool {
+        let named = self.overlay_property_named(overlay, "window").unwrap_or(Value::NIL);
+        !matches!(self.object_if(named), Some(Object::Window(_))) || named == window
+    }
+    /// An overlay's start and end as character positions, if it is live.
+    pub(crate) fn overlay_positions(&self, overlay: Value) -> Result<Option<(i64, i64)>> {
+        let Some((start, end)) = self.overlay_range(overlay)? else { return Ok(None) };
+        let text = self.annotated(self.overlay(overlay)?.buffer)?;
+        let position = |byte: u32| text.char_of_byte(ByteOffset(byte as usize)).map(|c| c.0 as i64 + 1);
+        Ok(Some((position(start)?, position(end)?)))
+    }
+
     /// editfns.c Fget_pos_property: the PROPERTY a character inserted at
     /// POSITION would get, from the highest overlay that would cover it,
     /// else from the text property it would inherit (textprop.c
@@ -1218,6 +1250,13 @@ impl Vm {
         }
     }
 
+    /// The first byte after AT, at most END, where OBJECT's text properties
+    /// or, in a buffer, its overlays may change: compute_stop_pos's bound.
+    pub(crate) fn next_property_boundary(&self, object: Value, at: ByteOffset, end: ByteOffset) -> Result<ByteOffset> {
+        let text = self.property_next_text_boundary(object, at, end);
+        if !matches!(self.object_if(object), Some(Object::Buffer(_))) { return Ok(text); }
+        Ok(text.min(self.next_overlay_change_byte(object, at)?).min(end))
+    }
     fn property_next_text_boundary(
         &self,
         object: Value,
