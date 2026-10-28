@@ -771,7 +771,11 @@ unsafe fn call_suspended<T>(e: &mut Engine<'_>, r: *mut Value, call: impl FnOnce
     e.resume_code(roots);
     e.vm.end_nested_execution();
     e.code.resize_with(e.vm.functions.len(), Vec::new);
-    let r = unsafe { widen_registers(e, r, e.vm.register_width) };
+    // The stack is back in place; grow it only if the call widened the
+    // registers past what the current frames fit, as `frame_room` does.
+    let fits = (e.frames.len() + 3).max(MIN_FRAMES).checked_mul(e.vm.register_width)
+        .and_then(|n| n.checked_add(4096)).is_some_and(|n| n <= e.vm.stack.len());
+    let r = if fits { Some(r) } else { unsafe { widen_registers(e, r, e.vm.register_width) } };
     if let Some(r) = r { e.regs = r; }
     (out, r)
 }
