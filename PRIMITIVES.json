@@ -1,7 +1,7 @@
 {
  "provenance": {
   "generated_by": "tools/primitive_index.py",
-  "source_fingerprint": "d57090895bc77769a7bdf2241b5bf1efd5fc91e50df072c5557ada8bf1daa7c4",
+  "source_fingerprint": "f1c0ec2a67f4b14b9ca6b1985fa57163004ccf89c389a2dcbfd4f6a7c7ff18dd",
   "inputs": [
    "crates/romacs-vm/src/lib.rs",
    "crates/romacs-vm/src/prims",
@@ -11,8 +11,8 @@
  },
  "counts_note": "Source declarations only; absence is not evidence that a runtime primitive is absent.",
  "counts": {
-  "parsed_total": 998,
-  "parsed_vm2_only": 998
+  "parsed_total": 999,
+  "parsed_vm2_only": 999
  },
  "primitives": {
   "#:vm2-closure-document": {
@@ -2983,6 +2983,11 @@
    "variant": "Primitive::OverlayGet",
    "registered_at": "crates/romacs-vm/src/lib.rs:630"
   },
+  "overlay-lists": {
+   "name": "overlay-lists",
+   "implementation": "vm2",
+   "registered_at": "crates/romacs-vm/src/prims/overlay_recenter.rs:19"
+  },
   "overlay-properties": {
    "name": "overlay-properties",
    "implementation": "vm2",
@@ -2997,7 +3002,7 @@
   "overlay-recenter": {
    "name": "overlay-recenter",
    "implementation": "vm2",
-   "registered_at": "crates/romacs-vm/src/prims/overlay_recenter.rs:6"
+   "registered_at": "crates/romacs-vm/src/prims/overlay_recenter.rs:7"
   },
   "overlay-start": {
    "name": "overlay-start",
