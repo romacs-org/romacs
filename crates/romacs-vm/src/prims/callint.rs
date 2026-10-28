@@ -221,7 +221,8 @@ fn subr_intspec(subr: Value) -> Option<Option<&'static str>> {
         "delete-char" | "delete-backward-char" => "p\nP",
         "self-insert-command" => "(list (prefix-numeric-value current-prefix-arg) last-command-event)",
         "goto-char" => "(goto-char--read-natnum-interactive \"Go to char: \")",
-        "delete-region" | "narrow-to-region" => "r",
+        "delete-region" | "narrow-to-region" | "base64-encode-region" | "base64url-encode-region"
+        | "base64-decode-region" => "r",
         "widen" | "garbage-collect" | "recursive-edit" | "top-level" | "exit-recursive-edit" | "abort-recursive-edit" => "",
         "erase-buffer" => "*",
         "search-forward" => "MSearch: ",

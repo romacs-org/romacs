@@ -521,7 +521,7 @@ impl Vm {
     }
 
     /// make_buffer_string_both with properties: FROM..TO of BUFFER.
-    fn buffer_text(&mut self, buffer: Value, from: i64, to: i64) -> Faulty<Value> {
+    pub(crate) fn buffer_text(&mut self, buffer: Value, from: i64, to: i64) -> Faulty<Value> {
         let (a, b) = (self.change_byte(buffer, from)?, self.change_byte(buffer, to)?);
         let object = match self.object_if(buffer) {
             Some(Object::Buffer(t)) => {

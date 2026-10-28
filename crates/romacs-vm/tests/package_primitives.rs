@@ -3,7 +3,7 @@
 //! exists), frame-first-window, timer-idle-list, and the subrs in the
 //! special forms' function cells, print-gensym as gnosis's serializer
 //! binds it, `random' seeded as GNU seeds glibc's generator,
-//! overlay-properties and byte-to-string.
+//! overlay-properties, byte-to-string and the base64 region coders.
 use romacs_vm::Vm;
 
 /// One expression per line.
@@ -29,19 +29,46 @@ const CASES: &str = r###"
 (with-temp-buffer (insert "abcdef") (let ((o (make-overlay 1 3))) (list (overlay-properties o) (progn (overlay-put o 'face 'bold) (overlay-put o 'a 1) (overlay-put o 'face 'italic) (overlay-put o 'b nil) (overlay-properties o)) (let ((p (overlay-properties o))) (setcar (cdr p) 'zz) (overlay-get o 'b)) (eq (overlay-properties o) (overlay-properties o)) (progn (delete-overlay o) (overlay-properties o)))))
 (with-temp-buffer (insert "abc") (let ((o (make-overlay 1 2))) (overlay-put o 'evaporate t) (overlay-put o 'face 'bold) (list (overlay-properties o) (condition-case e (overlay-properties 1) (error e)) (condition-case e (overlay-properties nil) (error e)) (condition-case e (overlay-properties (current-buffer)) (error e)))))
 (list (byte-to-string 0) (byte-to-string 65) (byte-to-string 255) (multibyte-string-p (byte-to-string 200)) (string-bytes (byte-to-string 200)) (aref (byte-to-string 200) 0) (condition-case e (byte-to-string 256) (error e)) (condition-case e (byte-to-string -1) (error e)) (condition-case e (byte-to-string ?é) (error e)) (condition-case e (byte-to-string 1.0) (error e)) (condition-case e (byte-to-string (expt 2 70)) (error e)) (condition-case e (byte-to-string nil) (error e)) (concat "a" (byte-to-string 255)))
+(with-temp-buffer (set-buffer-multibyte nil) (insert "hello\377\0world") (list (base64-encode-region 1 (point-max)) (buffer-string) (point) (multibyte-string-p (buffer-string))))
+(with-temp-buffer (insert "abcdefgh") (goto-char 4) (let ((m (copy-marker 2)) (n (copy-marker 6)) (o (copy-marker 7 t)) (p (copy-marker 4))) (list (base64-encode-region 2 6) (buffer-string) (point) (marker-position m) (marker-position n) (marker-position o) (marker-position p))))
+(with-temp-buffer (insert "abcdefgh") (list (progn (goto-char 8) (base64-encode-region 6 2)) (point) (buffer-string) (progn (goto-char 1) (base64url-encode-region 1 3)) (point) (buffer-string) (base64url-encode-region 1 3 t) (buffer-string)))
+(with-temp-buffer (insert (make-string 100 ?x)) (list (base64-encode-region 1 101) (buffer-string) (progn (erase-buffer) (insert (make-string 100 ?y)) (base64-encode-region 1 101 t)) (buffer-string) (progn (erase-buffer) (insert (make-string 100 ?z)) (base64url-encode-region 1 101)) (buffer-string)))
+(with-temp-buffer (insert "aé") (list (condition-case e (base64-encode-region 1 3) (error e)) (buffer-string) (condition-case e (base64-encode-region 0 2) (error e)) (condition-case e (base64-encode-region 1 'x) (error e))))
+(with-temp-buffer (insert "xx" "aGVsbG8=" "yy") (goto-char 11) (let ((m (copy-marker 5))) (list (base64-decode-region 3 11) (buffer-string) (point) (marker-position m) (condition-case e (base64-decode-region 1 3) (error e)) (buffer-string) (progn (erase-buffer) (insert "a\nGV s!bG8") (condition-case e (base64-decode-region 1 (point-max)) (error e))) (buffer-string) (base64-decode-region 1 (point-max) nil t) (buffer-string))))
+(with-temp-buffer (insert "_-8") (list (condition-case e (base64-decode-region 1 4) (error e)) (buffer-string) (progn (erase-buffer) (insert "YWI") (base64-decode-region 1 4 t)) (buffer-string) (progn (erase-buffer) (insert "YWI") (condition-case e (base64-decode-region 1 4) (error e))) (buffer-string)))
+(with-temp-buffer (set-buffer-multibyte nil) (insert "/w==") (list (base64-decode-region 1 5) (append (buffer-string) nil) (multibyte-string-p (buffer-string))))
+(list (commandp 'base64-encode-region) (commandp 'base64url-encode-region) (commandp 'base64-decode-region) (interactive-form 'base64-decode-region))
+"###;
+
+/// Cases whose change hooks run Lisp, which needs the Lisp prelude.
+const PRELUDE_CASES: &str = r###"
+(with-temp-buffer (buffer-enable-undo) (insert "abc") (undo-boundary) (let ((log nil)) (set (make-local-variable 'before-change-functions) (list (lambda (b e) (setq log (cons (list 'before b e) log))))) (set (make-local-variable 'after-change-functions) (list (lambda (b e l) (setq log (cons (list 'after b e l) log))))) (list (base64-encode-region 1 4) (buffer-string) (reverse log) buffer-undo-list (progn (setq log nil) (base64-decode-region 1 5)) (reverse log) (buffer-string))))
 "###;
 
 #[test]
 fn package_primitives_match_pinned_gnu() {
+    matches_gnu(CASES, Vm::new);
+}
+
+#[test]
+fn package_primitives_with_prelude_match_pinned_gnu() {
+    matches_gnu(PRELUDE_CASES, || {
+        let mut vm = Vm::new();
+        vm.install_lisp_prelude().unwrap();
+        vm
+    });
+}
+
+fn matches_gnu(cases: &str, vm: fn() -> Vm) {
     let binary = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
     let mut failures = Vec::new();
-    for expression in CASES.lines().filter(|line| !line.is_empty()) {
+    for expression in cases.lines().filter(|line| !line.is_empty()) {
         // As character codes, as tests/json.rs compares.
         let source = format!("(append (prin1-to-string (condition-case e {expression} (error (list 'signal e)))) nil)");
         let output = std::process::Command::new(&binary).args(["-Q", "--batch", "--eval", &format!("(prin1 {source})")]).output().unwrap();
         assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
         let expected = String::from_utf8(output.stdout).unwrap();
-        let actual = Vm::new().eval_source(&source).and_then(|v| v.display());
+        let actual = vm().eval_source(&source).and_then(|v| v.display());
         if actual.as_deref() != Ok(expected.as_str()) {
             let text = |codes: &str| codes.trim_matches(|c| c == '(' || c == ')').split_whitespace()
                 .filter_map(|n| n.parse::<u32>().ok().and_then(char::from_u32)).collect::<String>();
@@ -49,4 +76,13 @@ fn package_primitives_match_pinned_gnu() {
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// A VM2 multibyte buffer holds Unicode text, so the raw bytes GNU decodes
+/// into one are refused before the buffer changes (VM2-BASE64-REGION1).
+#[test]
+fn base64_decode_region_refuses_raw_bytes_in_a_multibyte_buffer() {
+    let source = "(with-temp-buffer (insert \"x_-8\") (goto-char 2) (list (condition-case e (base64-decode-region 2 5 t) (error e)) (buffer-string) (point) buffer-undo-list))";
+    let actual = Vm::new().eval_source(source).and_then(|v| v.display()).unwrap();
+    assert_eq!(actual, "((error \"VM2 base64-decode-region of raw bytes into a multibyte buffer is unsupported\") \"x_-8\" 2 t)");
 }

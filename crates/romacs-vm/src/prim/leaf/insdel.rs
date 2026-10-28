@@ -69,6 +69,11 @@ impl Leaf<'_> {
         }
         Ok((a, b))
     }
+    /// FROM..TO of the current buffer as a string, with its properties.
+    pub(crate) fn region_text(&mut self, from: i64, to: i64) -> std::result::Result<Value, Fault> {
+        let buffer = self.current_buffer()?;
+        self.vm.buffer_text(buffer, from, to)
+    }
     /// Fwiden for erase-buffer.
     pub(crate) fn widen_current(&mut self) -> std::result::Result<(), Fault> {
         let index = self.vm.buffer_index().map_err(Fault::Error)?;

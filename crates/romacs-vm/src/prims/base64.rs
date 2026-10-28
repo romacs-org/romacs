@@ -1,4 +1,5 @@
-//! GNU fns.c base64 string coding (RFC 4648, with the URL variant).
+//! GNU fns.c base64 coding of strings and buffer regions (RFC 4648, with
+//! the URL variant).
 use super::*;
 
 /// MIME_LINE_LENGTH: base64-encode-string breaks lines at 76 characters.
@@ -111,4 +112,73 @@ fn base64_decode_string(cx, string: Value; optional base64url: Value, ignore_inv
     let decoded = decode(&bytes, base64url != Value::NIL, ignore_invalid != Value::NIL)
         .ok_or_else(|| Fault::Error("Invalid base64 data".into()))?;
     Ok(cx.make_string(decoded, false))
+}}
+
+// The region coders replace the text as fns.c does: the result is inserted
+// at BEG and the old text deleted after it, each an ordinary change with its
+// hooks (insertion first keeps the markers at BEG), then point is restored.
+// Registers between the steps: [BEG, END, OLD-POINT, LENGTH].
+
+fn fixnum(n: i64) -> Value { Value::integer(n).expect("buffer position") }
+fn position(v: Value) -> i64 { v.integer_value().expect("saved buffer position") }
+
+/// Insert TEXT, the coded region BEG..END, at BEG, then delete the old text.
+fn replace_region(cx: &mut Leaf<'_>, from: i64, to: i64, text: Value, length: i64) -> Next {
+    let saved = vec![fixnum(from), fixnum(to), fixnum(cx.point_char()?), fixnum(length)];
+    cx.goto_char_position(from)?;
+    let insert = crate::prim::subr_named("insert").expect("insert subr");
+    Ok(Step::Call { f: insert, args: vec![text], then: inserted, saved })
+}
+
+fn inserted(_: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
+    let (from, to, length) = (position(saved[0]), position(saved[1]), position(saved[3]));
+    let delete = crate::prim::subr_named("delete-region").expect("delete-region subr");
+    Ok(Step::Call { f: delete, args: vec![fixnum(from + length), fixnum(to + length)], then: deleted, saved: saved.to_vec() })
+}
+
+/// Point outside the region is restored exactly, inside it goes to BEG.
+fn deleted(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
+    let (from, to, old, length) = (position(saved[0]), position(saved[1]), position(saved[2]), position(saved[3]));
+    let point = if old >= to { old + length - (to - from) } else if old > from { from } else { old };
+    let (_, begv, zv) = cx.point_extent()?;
+    cx.goto_char_position(point.clamp(begv, zv))?;
+    Ok(Step::Done(saved[3]))
+}
+
+fn encode_region(cx: &mut Leaf<'_>, beg: Value, end: Value, line_break: bool, pad: bool, url: bool) -> Next {
+    let (from, to) = cx.validate_region(beg, end)?;
+    let text = cx.region_text(from, to)?;
+    let encoded = encode(&octets(cx, text)?, line_break, pad, url);
+    let length = encoded.len() as i64;
+    let text = cx.make_string(encoded, false);
+    replace_region(cx, from, to, text, length)
+}
+
+defsubr! { name = "base64-encode-region", gnu = "fns.c:4081", effect = Global,
+fn base64_encode_region(cx, beg: Value, end: Value; optional no_line_break: Value) -> Step {
+    encode_region(cx, beg, end, no_line_break == Value::NIL, true, false)
+}}
+
+defsubr! { name = "base64url-encode-region", gnu = "fns.c:4099", effect = Global,
+fn base64url_encode_region(cx, beg: Value, end: Value; optional no_pad: Value) -> Step {
+    encode_region(cx, beg, end, false, no_pad == Value::NIL, true)
+}}
+
+// The decoded octets go in as a unibyte string. GNU puts each octet above
+// 127 into a multibyte buffer as a raw-byte character, which a VM2
+// multibyte buffer cannot hold: that is refused before anything changes
+// (DIVERGENCES VM2-BASE64-REGION1).
+defsubr! { name = "base64-decode-region", gnu = "fns.c:4334", effect = Global,
+fn base64_decode_region(cx, beg: Value, end: Value; optional base64url: Value, ignore_invalid: Value) -> Step {
+    let (from, to) = cx.validate_region(beg, end)?;
+    let text = cx.region_text(from, to)?;
+    let bytes = cx.string_view(text)?.bytes().to_vec();
+    let decoded = decode(&bytes, base64url != Value::NIL, ignore_invalid != Value::NIL)
+        .ok_or_else(|| Fault::Error("Invalid base64 data".into()))?;
+    if cx.casing_multibyte()? && !decoded.is_ascii() {
+        return Err(Fault::Error("VM2 base64-decode-region of raw bytes into a multibyte buffer is unsupported".into()));
+    }
+    let length = decoded.len() as i64;
+    let text = cx.make_string(decoded, false);
+    replace_region(cx, from, to, text, length)
 }}
