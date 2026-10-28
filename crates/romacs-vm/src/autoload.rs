@@ -138,8 +138,7 @@ impl Vm {
         self.slots[pending].value = fundef;
         let loaded = self.load_with_autoload_queue(file, ignore_errors != Value::NIL, true);
         let fundef = self.slots[pending].value;
-        self.unbind(self.dynamic.len() - mark);
-        let loaded = loaded?;
+        let loaded = self.unbind_after(self.dynamic.len() - mark, loaded)?;
         if funname == Value::NIL || ignore_errors != Value::NIL {
             return Ok(Value::NIL);
         }
@@ -174,8 +173,7 @@ impl Vm {
         if result.is_err() {
             self.un_autoload(queue);
         }
-        self.unbind(self.dynamic.len() - mark);
-        let path = result?;
+        let path = self.unbind_after(self.dynamic.len() - mark, result)?;
         restored.map_err(|_| "set-match-data failed restoring an autoload's match data")?;
         Ok(path)
     }

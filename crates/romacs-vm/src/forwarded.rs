@@ -221,7 +221,6 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "load-dangerous-libraries", gnu: "lread.c:5739", kind: Kind::Bool(false) },
     CVariable { name: "load-path-filter-function", gnu: "lread.c:5808", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "load-read-function", gnu: "lread.c:5697", kind: Kind::Lisp(Init::Symbol("read")) },
-    CVariable { name: "load-true-file-name", gnu: "lread.c:5680", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "lread--unescaped-character-literals", gnu: "lread.c:5775", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "make-cursor-line-fully-visible", gnu: "xdisp.c:38931", kind: Kind::Lisp(Init::True) },
     CVariable { name: "make-pointer-invisible", gnu: "frame.c:7496", kind: Kind::Lisp(Init::True) },
@@ -516,6 +515,11 @@ pub(crate) static C_VARIABLES: &[CVariable] = &[
     // after-load callbacks (DIVERGENCES.md VM2-LOADHIST1).
     CVariable { name: "after-load-alist", gnu: "lread.c:5637", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "current-load-list", gnu: "lread.c:5693", kind: Kind::Lisp(Init::Nil) },
+    // `load' binds these as a `let' does, so their watchers see GNU's
+    // forwarded restore: `set', then `unlet'.
+    CVariable { name: "load-file-name", gnu: "lread.c:5672", kind: Kind::Lisp(Init::Nil) },
+    CVariable { name: "load-true-file-name", gnu: "lread.c:5680", kind: Kind::Lisp(Init::Nil) },
+    CVariable { name: "load-in-progress", gnu: "lread.c:5633", kind: Kind::Bool(false) },
     // Backtrace collection/printing reads these native defaults. Source-history
     // merging remains VM2-LOADHIST1; eval-buffer/eval-region are unsupported.
     CVariable { name: "load-history", gnu: "lread.c:5652", kind: Kind::Lisp(Init::Nil) },

@@ -1340,7 +1340,8 @@ fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Va
         }
         break;
     }
-    engine.vm.unbind(engine.vm.dynamic.len() - mark);
+    // A normal return has already unbound through return_unbind.
+    engine.vm.unwind(engine.vm.dynamic.len() - mark);
     engine.vm.signal_handlers.truncate(handler_mark);
     engine.vm.backtrace.leave(backtrace_mark);
     // Only entered frames can have written values. Clear that prefix, not all

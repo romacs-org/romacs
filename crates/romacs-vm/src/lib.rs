@@ -2470,11 +2470,30 @@ impl Vm {
     /// Unwinding pops every binding; one whose restore signals keeps its
     /// value, as GNU's popped entry does. That signal is dropped and the
     /// escape already in flight kept (see `unbind_one`).
-    fn unbind(&mut self, n: usize) {
+    fn unwind(&mut self, n: usize) {
         for _ in 0..n {
             let pending = (self.propagated_escape.take(), std::mem::take(&mut self.propagated_escape_hooked), self.propagated_eval_depth.take());
             let _ = self.unbind_one();
             (self.propagated_escape, self.propagated_escape_hooked, self.propagated_eval_depth) = pending;
+        }
+    }
+    /// GNU `unbind_to` on normal completion: a restore that signals
+    /// propagates, and the bindings under it unwind with that escape.
+    fn unbind(&mut self, n: usize) -> Result<()> {
+        for left in (0..n).rev() {
+            if let Err(error) = self.unbind_one() {
+                self.unwind(left);
+                return Err(error);
+            }
+        }
+        Ok(())
+    }
+    /// Leave a region that finished with RESULT, popping its N bindings:
+    /// unbind on normal completion, unwind under an escape.
+    fn unbind_after<T>(&mut self, n: usize, result: Result<T>) -> Result<T> {
+        match result {
+            Ok(value) => self.unbind(n).map(|()| value),
+            Err(error) => { self.unwind(n); Err(error) }
         }
     }
     /// GNU `unbind_to` for the innermost binding: pop it, then notify its

@@ -7,7 +7,8 @@
 //! localized and forwarded bindings (`set' for a default binding, two
 //! notifications for a global forwarded one), one handler-bind call per
 //! watcher signal on every write path, a watcher removed by the one before
-//! it, and defvar, defconst and the toplevel-value setters.
+//! it, and defvar, defconst and the toplevel-value setters. Last, the
+//! variables `load' binds, and an unlet watcher's signal after a load.
 use romacs_vm::Vm;
 
 /// One expression per line. LOG is a watcher recording its arguments, with
@@ -38,29 +39,61 @@ const CASES: &str = r###"
 
 const LOG: &str = "(lambda (s n o w) (setq log (cons (list s n o (if (bufferp w) (buffer-name w) w) (if (boundp s) (symbol-value s) 'void)) log)))";
 
+/// Cases that load FILE, whose source is the first element. GNU's load
+/// binds (lread.c Fload, mule.el load-with-code-conversion, readevalloop)
+/// and restores each variable as a `let' does, keeps load-in-progress bound
+/// over the after-load forms, and propagates an unlet watcher's signal from
+/// a load that otherwise succeeded, leaving that binding installed; through
+/// `require', the failed load's feature is undone.
+const LOAD_CASES: &[(&str, &str)] = &[
+    (";;; -*- lexical-binding: t -*-\n(setq wv-in (list load-file-name load-true-file-name load-in-progress current-load-list))\n",
+     "(progn (setq log nil) (setq wv-outer current-load-list) (fset 'wv-log (lambda (s n o w) (setq log (cons (list s o (cond ((equal n FILE) 'file) ((equal n (list FILE)) '(file)) ((and (eq s 'current-load-list) (eq n wv-outer)) 'outer) (t n)) w) log)))) (dolist (v '(load-file-name load-true-file-name load-in-progress current-load-list)) (add-variable-watcher v 'wv-log)) (fset 'do-after-load-evaluation (lambda (f) (setq wv-after (list (equal f FILE) load-in-progress load-file-name)))) (list (load FILE nil t) (nreverse log) (equal wv-in (list FILE FILE t (list FILE))) wv-after load-file-name load-true-file-name load-in-progress (eq current-load-list wv-outer)))"),
+    (";;; -*- lexical-binding: t -*-\n(setq wv-z 1)\n",
+     "(progn (fset 'wv-cll (lambda (s n o w) (if (eq o 'unlet) (error \"No unlet\")))) (add-variable-watcher 'current-load-list 'wv-cll) (list (condition-case e (load FILE nil t) (error e)) (progn (remove-variable-watcher 'current-load-list 'wv-cll) current-load-list) load-file-name load-true-file-name load-in-progress wv-z))"),
+    (";;; -*- lexical-binding: t -*-\n(provide 'wv-feature)\n",
+     "(progn (fset 'wv-cll (lambda (s n o w) (if (eq o 'unlet) (error \"No unlet\")))) (add-variable-watcher 'current-load-list 'wv-cll) (list (condition-case e (require 'wv-feature FILE) (error e)) (progn (remove-variable-watcher 'current-load-list 'wv-cll) (featurep 'wv-feature)) load-file-name load-in-progress))"),
+];
+
+/// EXPRESSION's printed value from pinned GNU and from Romacs, as a failure
+/// report when they differ.
+fn compare(binary: &str, expression: &str) -> Option<String> {
+    // As character codes, as tests/json.rs compares.
+    let source = format!("(append (prin1-to-string (condition-case e {expression} (error (list 'signal e)))) nil)");
+    let output = std::process::Command::new(binary).args(["-Q", "--batch", "--eval", &format!("(prin1 {source})")]).output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let expected = String::from_utf8(output.stdout).unwrap();
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    // Collect at every safepoint, so a watcher that ran while collection
+    // was inhibited is followed by collections that would expose an
+    // unforwarded register.
+    vm.set_collection_floor(1);
+    let actual = vm.eval_source(&source).and_then(|v| v.display());
+    (actual.as_deref() != Ok(expected.as_str())).then(|| {
+        let text = |codes: &str| codes.trim_matches(|c| c == '(' || c == ')').split_whitespace()
+            .filter_map(|n| n.parse::<u32>().ok().and_then(char::from_u32)).collect::<String>();
+        format!("{expression}\n  GNU    {}\n  Romacs {:?}", text(&expected), actual.as_deref().map(text))
+    })
+}
+
 #[test]
 fn lisp_watchers_match_pinned_gnu() {
     let binary = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
+    let failures: Vec<_> = CASES.lines().filter(|line| !line.is_empty())
+        .filter_map(|expression| compare(&binary, &expression.replace("LOG", LOG))).collect();
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn load_bindings_match_pinned_gnu() {
+    let binary = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
     let mut failures = Vec::new();
-    for expression in CASES.lines().filter(|line| !line.is_empty()) {
-        let expression = expression.replace("LOG", LOG);
-        // As character codes, as tests/json.rs compares.
-        let source = format!("(append (prin1-to-string (condition-case e {expression} (error (list 'signal e)))) nil)");
-        let output = std::process::Command::new(&binary).args(["-Q", "--batch", "--eval", &format!("(prin1 {source})")]).output().unwrap();
-        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
-        let expected = String::from_utf8(output.stdout).unwrap();
-        let mut vm = Vm::new();
-        vm.install_lisp_prelude().unwrap();
-        // Collect at every safepoint, so a watcher that ran while collection
-        // was inhibited is followed by collections that would expose an
-        // unforwarded register.
-        vm.set_collection_floor(1);
-        let actual = vm.eval_source(&source).and_then(|v| v.display());
-        if actual.as_deref() != Ok(expected.as_str()) {
-            let text = |codes: &str| codes.trim_matches(|c| c == '(' || c == ')').split_whitespace()
-                .filter_map(|n| n.parse::<u32>().ok().and_then(char::from_u32)).collect::<String>();
-            failures.push(format!("{expression}\n  GNU    {}\n  Romacs {:?}", text(&expected), actual.as_deref().map(text)));
-        }
+    for (i, (contents, expression)) in LOAD_CASES.iter().enumerate() {
+        let file = std::env::temp_dir().join(format!("romacs-watchers-{}-{i}.el", std::process::id()));
+        std::fs::write(&file, contents).unwrap();
+        let name = format!("{:?}", file.to_str().unwrap());
+        failures.extend(compare(&binary, &expression.replace("FILE", &name)));
+        std::fs::remove_file(&file).unwrap();
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
